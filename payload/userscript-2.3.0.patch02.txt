@@ -1,0 +1,144 @@
+
+// NovelAI Media Library v2.3.0 thumbnail-capture refinement
+(() => {
+  'use strict';
+  const API = 'http://127.0.0.1:8765';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV230ThumbPatch === '1') return;
+  document.documentElement.dataset.naiMediaV230ThumbPatch = '1';
+
+  function gmRequest({ method = 'GET', path, data = null, headers = {}, responseType = 'text', timeout = 300000 }) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method,
+        url: `${API}${path}`,
+        data,
+        headers: { Origin: 'https://novelai.net', ...headers },
+        responseType,
+        timeout,
+        onload: res => {
+          if (res.status >= 200 && res.status < 300) {
+            if (responseType === 'blob') return resolve(res.response);
+            const text = res.responseText || '';
+            if (!text) return resolve(null);
+            try { resolve(JSON.parse(text)); } catch (_) { resolve(text); }
+            return;
+          }
+          let message = `Request failed (${res.status})`;
+          try { message = JSON.parse(res.responseText || '{}').error || message; } catch (_) {}
+          reject(new Error(message));
+        },
+        onerror: () => reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+        ontimeout: () => reject(new Error('The local media request timed out.')),
+      });
+    });
+  }
+
+  function waitFor(video, event, timeout = 30000) {
+    return new Promise((resolve, reject) => {
+      let timer;
+      const cleanup = () => {
+        clearTimeout(timer);
+        video.removeEventListener(event, done);
+        video.removeEventListener('error', failed);
+      };
+      const done = () => { cleanup(); resolve(); };
+      const failed = () => { cleanup(); reject(new Error('Could not load the video frame for thumbnail capture.')); };
+      timer = setTimeout(() => { cleanup(); reject(new Error(`Timed out waiting for video ${event}.`)); }, timeout);
+      video.addEventListener(event, done, { once: true });
+      video.addEventListener('error', failed, { once: true });
+    });
+  }
+
+  async function capture(mediaId, seconds) {
+    const sourceBlob = await gmRequest({ path: `/api/media/${mediaId}/original`, responseType: 'blob' });
+    const url = URL.createObjectURL(sourceBlob);
+    const video = document.createElement('video');
+    video.preload = 'auto';
+    video.muted = true;
+    video.playsInline = true;
+    video.src = url;
+    try {
+      if (video.readyState < 1) await waitFor(video, 'loadedmetadata');
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      const target = duration > 0 ? Math.min(Math.max(0, seconds), Math.max(0, duration - 0.01)) : Math.max(0, seconds);
+      if (Math.abs(video.currentTime - target) > 0.001) {
+        video.currentTime = target;
+        await waitFor(video, 'seeked');
+      } else if (video.readyState < 2) {
+        await waitFor(video, 'loadeddata');
+      }
+      const maxSide = 960;
+      const scale = Math.min(1, maxSide / Math.max(video.videoWidth || 1, video.videoHeight || 1));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Could not capture this video frame.');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return await new Promise((resolve, reject) => {
+        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not create thumbnail image.')), 'image/jpeg', 0.9);
+      });
+    } finally {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  let visibleThumbUrl = null;
+  window.addEventListener('beforeunload', () => { if (visibleThumbUrl) URL.revokeObjectURL(visibleThumbUrl); }, { once: true });
+
+  document.addEventListener('click', async event => {
+    const path = event.composedPath?.() || [];
+    const button = path.find(node => node?.id === 'setThumbBtn');
+    if (!button || !path.includes(host)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const video = root.querySelector('.stage.slot-active video') || root.querySelector('.stage:not(.hidden) video');
+    if (!video) return;
+    const source = String(video.currentSrc || video.src || '');
+    const sourceMatch = source.match(/\/api\/media\/([0-9a-f]+)\/original(?:$|[?#])/i);
+    const mediaId = sourceMatch?.[1] || root.querySelector('.tile.active')?.dataset?.id || null;
+    if (!mediaId) {
+      alert('Could not determine which video is active. Select the video thumbnail again, then retry.');
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = 'Saving thumbnail…';
+    try {
+      const seconds = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+      const frameBlob = await capture(mediaId, seconds);
+      await gmRequest({
+        method: 'POST',
+        path: `/api/media/${mediaId}/thumbnail?seconds=${encodeURIComponent(seconds)}`,
+        headers: { 'Content-Type': 'image/jpeg' },
+        data: frameBlob,
+      });
+
+      const tileImage = root.querySelector(`.tile[data-id="${mediaId}"] img[data-mid]`);
+      if (tileImage) {
+        const thumbBlob = await gmRequest({ path: `/api/media/${mediaId}/thumb`, responseType: 'blob' });
+        if (visibleThumbUrl) URL.revokeObjectURL(visibleThumbUrl);
+        visibleThumbUrl = URL.createObjectURL(thumbBlob);
+        tileImage.src = visibleThumbUrl;
+      }
+      button.textContent = 'Thumbnail saved';
+    } catch (err) {
+      alert(err?.message || String(err));
+      button.textContent = 'Set thumbnail to current frame';
+    } finally {
+      setTimeout(() => {
+        if (button.isConnected) {
+          button.disabled = false;
+          if (button.textContent === 'Thumbnail saved') button.textContent = 'Set thumbnail to current frame';
+        }
+      }, 700);
+    }
+  }, true);
+})();
