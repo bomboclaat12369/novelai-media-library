@@ -11,6 +11,7 @@ import urllib.request
 from pathlib import Path
 
 APP_NAME = "NovelAI Media Library"
+LAUNCHER_VERSION = "1.0.0"
 MANIFEST_URL = "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/manifest.json"
 CHECK_INTERVAL_SECONDS = 60
 DOWNLOAD_TIMEOUT_SECONDS = 15
@@ -31,6 +32,42 @@ def fetch_manifest() -> dict:
     if not isinstance(data, dict) or int(data.get("schema", 0)) < 2:
         raise ValueError("Invalid update manifest")
     return data
+
+
+def version_tuple(value: str) -> tuple[int, ...]:
+    out = []
+    for token in str(value or "").split("."):
+        try:
+            out.append(int(token))
+        except ValueError:
+            digits = "".join(ch for ch in token if ch.isdigit())
+            out.append(int(digits or 0))
+    return tuple(out or [0])
+
+
+def maybe_update_launcher(manifest: dict) -> bool:
+    """Replace this stable launcher if a newer launcher is published."""
+    wanted = str(manifest.get("launcher_version") or "").strip()
+    url = str(manifest.get("launcher_url") or "").strip()
+    expected = str(manifest.get("launcher_sha256") or "").strip().lower()
+    if not wanted or not url or not expected:
+        return False
+    if version_tuple(wanted) <= version_tuple(LAUNCHER_VERSION):
+        return False
+    payload = fetch_text(url).encode("utf-8")
+    if hashlib.sha256(payload).hexdigest().lower() != expected:
+        raise ValueError("Downloaded launcher failed SHA-256 verification")
+    if b"NovelAI Media Library" not in payload or b"LAUNCHER_VERSION" not in payload:
+        raise ValueError("Downloaded launcher did not look valid")
+    target = Path(__file__).resolve()
+    temp = target.with_suffix(target.suffix + ".new")
+    temp.write_bytes(payload)
+    os.replace(temp, target)
+    return True
+
+
+def restart_launcher() -> None:
+    subprocess.Popen([sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]], close_fds=True)
 
 
 def runtime_dir() -> Path:
@@ -98,6 +135,9 @@ def main() -> None:
     try:
         try:
             manifest = fetch_manifest()
+            if maybe_update_launcher(manifest):
+                restart_launcher()
+                return
             runtime, current_version = ensure_runtime(manifest)
         except Exception as online_error:
             runtime = runtime_dir() / "companion-runtime.pyw"
@@ -116,6 +156,14 @@ def main() -> None:
                 next_check = now + CHECK_INTERVAL_SECONDS
                 try:
                     manifest = fetch_manifest()
+                    if maybe_update_launcher(manifest):
+                        child.terminate()
+                        try:
+                            child.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            child.kill(); child.wait(timeout=3)
+                        restart_launcher()
+                        return
                     wanted = str(manifest.get("runtime_version") or "").strip()
                     if wanted and wanted != current_version:
                         runtime = download_runtime(manifest)
