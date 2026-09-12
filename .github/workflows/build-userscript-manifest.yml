@@ -1,0 +1,48 @@
+name: Build userscript manifest
+
+on:
+  push:
+    paths:
+      - release-userscript.json
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Update manifest checksum and userscript release
+        run: |
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+
+          release = json.loads(Path('release-userscript.json').read_text(encoding='utf-8'))
+          parts = release['parts']
+          data = b''.join(Path(p).read_bytes() for p in parts)
+          manifest_path = Path('manifest.json')
+          manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+          raw = 'https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/'
+          manifest['userscript_payload_version'] = str(release['version'])
+          manifest['userscript_parts'] = [raw + p for p in parts]
+          manifest['userscript_sha256'] = hashlib.sha256(data).hexdigest()
+          manifest_path.write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+          PY
+      - name: Commit manifest
+        run: |
+          if git diff --quiet -- manifest.json; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "Publish userscript $(python -c \"import json; print(json.load(open('release-userscript.json'))['version'])\")"
+          git push
