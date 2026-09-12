@@ -1,0 +1,254 @@
+
+// NovelAI Media Library v2.3.1 UI fixes
+(() => {
+  'use strict';
+
+  const API = 'http://127.0.0.1:8765';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV231Patch === '1') return;
+  document.documentElement.dataset.naiMediaV231Patch = '1';
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v231-patch';
+  style.textContent = `
+    :host { --nai-right-edge: 73.5vw !important; }
+
+    /* Saved video thumbnails should be visible instead of being covered by the generic VIDEO tile. */
+    .tile:has(> img[data-mid]) .videoMark {
+      background: transparent !important;
+      pointer-events: none !important;
+    }
+
+    .naiSplitLightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483950;
+      background: rgba(0,0,0,.96);
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      padding: 18px 24px;
+    }
+    .naiSplitLightbox.single { grid-template-columns: minmax(0, 1fr); }
+    .naiSplitLightboxSlot {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background: #05060d;
+    }
+    .naiSplitLightboxSlot img,
+    .naiSplitLightboxSlot video {
+      width: 100%;
+      height: 100%;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    .naiSplitLightboxClose {
+      position: fixed;
+      top: 12px;
+      right: 14px;
+      z-index: 2147483960;
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: rgba(22,24,47,.88);
+      font-size: 24px;
+    }
+  `;
+  root.appendChild(style);
+
+  function gmBlob(path, timeout = 300000) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: `${API}${path}`,
+        headers: { Origin: 'https://novelai.net' },
+        responseType: 'blob',
+        timeout,
+        onload: res => res.status >= 200 && res.status < 300
+          ? resolve(res.response)
+          : reject(new Error(`Request failed (${res.status})`)),
+        onerror: () => reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+        ontimeout: () => reject(new Error('The local media request timed out.')),
+      });
+    });
+  }
+
+  const thumbUrls = new Map();
+  function replaceThumbUrl(mediaId, url) {
+    const old = thumbUrls.get(mediaId);
+    if (old && old !== url) URL.revokeObjectURL(old);
+    thumbUrls.set(mediaId, url);
+  }
+  window.addEventListener('beforeunload', () => {
+    for (const url of thumbUrls.values()) URL.revokeObjectURL(url);
+    thumbUrls.clear();
+  }, { once: true });
+
+  function activeVideoAndId() {
+    const video = root.querySelector('.stage.slot-active video') || root.querySelector('.stage:not(.hidden) video');
+    if (!video) return { video: null, mediaId: null };
+    const source = String(video.currentSrc || video.src || '');
+    const match = source.match(/\/api\/media\/([0-9a-f]+)\/original(?:$|[?#])/i);
+    const mediaId = match?.[1] || root.querySelector('.tile.active')?.dataset?.id || null;
+    return { video, mediaId };
+  }
+
+  async function installVisibleThumbnail(mediaId) {
+    if (!mediaId) return false;
+    try {
+      const blob = await gmBlob(`/api/media/${mediaId}/thumb`);
+      if (!blob || !blob.size) return false;
+      const url = URL.createObjectURL(blob);
+      replaceThumbUrl(mediaId, url);
+
+      const tile = root.querySelector(`.tile[data-id="${mediaId}"]`);
+      if (!tile) return true;
+      let img = tile.querySelector('img[data-mid]');
+      if (!img) {
+        img = document.createElement('img');
+        img.loading = 'lazy';
+        img.dataset.mid = mediaId;
+        tile.insertBefore(img, tile.firstChild);
+      }
+      img.src = url;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /* patch02 saves the thumbnail. This earlier window-capture listener remembers the active
+     video, then refreshes that tile as soon as the companion's thumbnail endpoint is ready. */
+  window.addEventListener('click', event => {
+    const path = event.composedPath?.() || [];
+    const button = path.find(node => node?.id === 'setThumbBtn');
+    if (!button || !path.includes(host)) return;
+    const { mediaId } = activeVideoAndId();
+    if (!mediaId) return;
+
+    let attempts = 0;
+    const refreshSavedThumb = async () => {
+      attempts += 1;
+      const ok = await installVisibleThumbnail(mediaId);
+      if (!ok && attempts < 10) setTimeout(refreshSavedThumb, 350);
+    };
+    setTimeout(refreshSavedThumb, 250);
+  }, true);
+
+  function closeSplitLightbox() {
+    const lightRoot = root.querySelector('#lightRoot');
+    if (!lightRoot) return;
+    for (const fullVideo of lightRoot.querySelectorAll('video[data-nai-split-full]')) {
+      const origin = fullVideo._naiOriginVideo;
+      const wasPlaying = fullVideo._naiOriginWasPlaying;
+      if (origin?.isConnected) {
+        try { origin.currentTime = fullVideo.currentTime; } catch (_) {}
+        if (wasPlaying) origin.play().catch(() => {});
+      }
+      fullVideo.pause();
+    }
+    lightRoot.innerHTML = '';
+  }
+
+  function addFullscreenMedia(slot, source) {
+    if (source.tagName === 'IMG') {
+      const img = document.createElement('img');
+      img.src = source.currentSrc || source.src;
+      img.alt = source.alt || '';
+      slot.appendChild(img);
+      return;
+    }
+
+    if (source.tagName === 'VIDEO') {
+      const video = document.createElement('video');
+      const sourceUrl = source.currentSrc || source.src;
+      const targetTime = Number.isFinite(source.currentTime) ? source.currentTime : 0;
+      const wasPlaying = !source.paused;
+
+      video.dataset.naiSplitFull = '1';
+      video.controls = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.volume = source.volume;
+      video.muted = source.muted;
+      video._naiOriginVideo = source;
+      video._naiOriginWasPlaying = wasPlaying;
+      video.src = sourceUrl;
+
+      source.pause();
+      video.addEventListener('loadedmetadata', () => {
+        try { video.currentTime = targetTime; } catch (_) {}
+        if (wasPlaying) video.play().catch(() => {});
+      }, { once: true });
+      slot.appendChild(video);
+    }
+  }
+
+  function openSplitLightbox() {
+    const stages = root.querySelector('#stages');
+    if (!stages?.classList.contains('split')) return false;
+
+    const sources = [...stages.querySelectorAll('.stage:not(.hidden)')]
+      .map(stage => stage.querySelector('img, video'))
+      .filter(Boolean);
+    if (!sources.length) return false;
+
+    const lightRoot = root.querySelector('#lightRoot');
+    if (!lightRoot) return false;
+    lightRoot.innerHTML = '';
+
+    const box = document.createElement('div');
+    box.className = `naiSplitLightbox${sources.length === 1 ? ' single' : ''}`;
+    for (const source of sources.slice(0, 2)) {
+      const slot = document.createElement('div');
+      slot.className = 'naiSplitLightboxSlot';
+      addFullscreenMedia(slot, source);
+      box.appendChild(slot);
+    }
+
+    const close = document.createElement('button');
+    close.className = 'naiSplitLightboxClose';
+    close.type = 'button';
+    close.textContent = '×';
+    close.title = 'Close';
+    close.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeSplitLightbox();
+    });
+    box.appendChild(close);
+    box.addEventListener('click', event => {
+      if (event.target === box) closeSplitLightbox();
+    });
+    lightRoot.appendChild(box);
+    return true;
+  }
+
+  root.addEventListener('click', event => {
+    const stages = root.querySelector('#stages');
+    if (!stages?.classList.contains('split')) return;
+
+    const fullButton = event.target.closest?.('#fullBtn');
+    const clickedStageImage = event.target.closest?.('.stage img');
+    if (!fullButton && !clickedStageImage) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    openSplitLightbox();
+  }, true);
+
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    if (root.querySelector('.naiSplitLightbox')) closeSplitLightbox();
+  }, true);
+})();
