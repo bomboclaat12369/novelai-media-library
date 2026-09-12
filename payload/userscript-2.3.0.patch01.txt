@@ -1,0 +1,174 @@
+
+// NovelAI Media Library hotfix layer v2.3.0
+(() => {
+  'use strict';
+
+  const API = 'http://127.0.0.1:8765';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || root.getElementById('nai-media-v230-patch')) return;
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v230-patch';
+  style.textContent = `
+    .viewer { position:relative !important; }
+    .stages.split { position:absolute !important; inset:0 !important; gap:2px !important; z-index:1 !important; }
+    .stages.split .stage { flex:1 1 50% !important; min-height:0 !important; }
+    .stages.split ~ .viewerNav {
+      position:absolute !important; left:50% !important; bottom:6px !important;
+      transform:translateX(-50%) !important; z-index:4 !important;
+      padding:4px 6px !important; border-radius:10px !important;
+      background:rgba(11,13,29,.78) !important; backdrop-filter:blur(4px) !important;
+    }
+    .stages.split ~ .badgeRow,
+    .stages.split ~ .viewerMeta { display:none !important; }
+    .stages.split ~ .videoTools.visible {
+      position:absolute !important; left:5px !important; right:5px !important; bottom:50px !important;
+      z-index:4 !important; padding:6px !important; border-radius:9px !important;
+      background:rgba(11,13,29,.82) !important; backdrop-filter:blur(4px) !important;
+    }
+  `;
+  root.appendChild(style);
+
+  function gmRequest({ method = 'GET', path, data = null, headers = {}, responseType = 'text', timeout = 300000 }) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method,
+        url: `${API}${path}`,
+        data,
+        headers: { Origin: 'https://novelai.net', ...headers },
+        responseType,
+        timeout,
+        onload: res => {
+          if (res.status >= 200 && res.status < 300) {
+            if (responseType === 'blob') return resolve(res.response);
+            const text = res.responseText || '';
+            if (!text) return resolve(null);
+            try { resolve(JSON.parse(text)); } catch (_) { resolve(text); }
+            return;
+          }
+          let message = `Request failed (${res.status})`;
+          try { message = JSON.parse(res.responseText || '{}').error || message; } catch (_) {}
+          reject(new Error(message));
+        },
+        onerror: () => reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+        ontimeout: () => reject(new Error('The local media request timed out.')),
+      });
+    });
+  }
+
+  function activeVideo() {
+    return root.querySelector('.stage.slot-active video') || root.querySelector('.stage:not(.hidden) video');
+  }
+
+  function activeMediaId() {
+    return root.querySelector('.tile.active')?.dataset?.id || null;
+  }
+
+  function waitForVideoEvent(video, event, timeout = 30000) {
+    return new Promise((resolve, reject) => {
+      let timer;
+      const cleanup = () => {
+        clearTimeout(timer);
+        video.removeEventListener(event, done);
+        video.removeEventListener('error', failed);
+      };
+      const done = () => { cleanup(); resolve(); };
+      const failed = () => { cleanup(); reject(new Error('Could not load the video frame for thumbnail capture.')); };
+      timer = setTimeout(() => { cleanup(); reject(new Error(`Timed out waiting for video ${event}.`)); }, timeout);
+      video.addEventListener(event, done, { once: true });
+      video.addEventListener('error', failed, { once: true });
+    });
+  }
+
+  async function captureFrameFromBlob(mediaId, seconds) {
+    const sourceBlob = await gmRequest({ path: `/api/media/${mediaId}/original`, responseType: 'blob' });
+    const sourceUrl = URL.createObjectURL(sourceBlob);
+    const video = document.createElement('video');
+    video.preload = 'auto';
+    video.muted = true;
+    video.playsInline = true;
+    video.src = sourceUrl;
+    try {
+      if (video.readyState < 1) await waitForVideoEvent(video, 'loadedmetadata');
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      const target = duration > 0
+        ? Math.min(Math.max(0, seconds), Math.max(0, duration - 0.01))
+        : Math.max(0, seconds);
+      if (Math.abs(video.currentTime - target) > 0.001) {
+        video.currentTime = target;
+        await waitForVideoEvent(video, 'seeked');
+      } else if (video.readyState < 2) {
+        await waitForVideoEvent(video, 'loadeddata');
+      }
+      if (!video.videoWidth || !video.videoHeight) throw new Error('Video frame is not ready yet.');
+      const maxSide = 960;
+      const scale = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Could not capture this video frame.');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return await new Promise((resolve, reject) => {
+        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not create thumbnail image.')), 'image/jpeg', 0.9);
+      });
+    } finally {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      URL.revokeObjectURL(sourceUrl);
+    }
+  }
+
+  root.addEventListener('click', async event => {
+    const thumbButton = event.target.closest?.('#setThumbBtn');
+    if (thumbButton) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const video = activeVideo();
+      const mediaId = activeMediaId();
+      if (!video || !mediaId) return;
+      thumbButton.disabled = true;
+      thumbButton.textContent = 'Saving thumbnail…';
+      try {
+        const seconds = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+        const frameBlob = await captureFrameFromBlob(mediaId, seconds);
+        await gmRequest({
+          method: 'POST',
+          path: `/api/media/${mediaId}/thumbnail?seconds=${encodeURIComponent(seconds)}`,
+          headers: { 'Content-Type': 'image/jpeg' },
+          data: frameBlob,
+        });
+        // Clear the old thumb object URL so the existing UI reloads the newly saved frame.
+        const activeTile = root.querySelector(`.tile[data-id="${mediaId}"] img[data-mid]`);
+        if (activeTile) activeTile.removeAttribute('src');
+        thumbButton.textContent = 'Thumbnail saved';
+        const refresh = root.querySelector('#refreshBtn');
+        if (refresh) refresh.click();
+      } catch (err) {
+        alert(err?.message || String(err));
+        thumbButton.textContent = 'Set thumbnail to current frame';
+      } finally {
+        setTimeout(() => {
+          if (thumbButton.isConnected) {
+            thumbButton.disabled = false;
+            if (thumbButton.textContent === 'Thumbnail saved') thumbButton.textContent = 'Set thumbnail to current frame';
+          }
+        }, 700);
+      }
+      return;
+    }
+
+    const seekButton = event.target.closest?.('[data-seek-marker]');
+    if (seekButton) {
+      const video = activeVideo();
+      if (!video) return;
+      const wasPaused = video.paused;
+      if (wasPaused) {
+        // Let the existing handler perform the exact saved seek, then restore the prior paused state.
+        setTimeout(() => { if (video.isConnected) video.pause(); }, 0);
+      }
+    }
+  }, true);
+})();
