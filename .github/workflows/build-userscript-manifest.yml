@@ -44,5 +44,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add manifest.json
-          git commit -m "Publish userscript $(python -c \"import json; print(json.load(open('release-userscript.json'))['version'])\")"
+          git commit -m "Publish userscript manifest"
           git push
