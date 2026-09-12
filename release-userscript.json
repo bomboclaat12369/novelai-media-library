@@ -3,5 +3,6 @@
   "parts": [
     "payload/userscript-2.2.0.part01.txt",
     "payload/userscript-2.3.0.patch01.txt"
-  ]
+  ],
+  "release_build": 2
 }
