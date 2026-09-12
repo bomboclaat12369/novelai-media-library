@@ -3,12 +3,11 @@
   "launcher_version": "1.0.0",
   "launcher_url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/companion.pyw",
   "launcher_sha256": "39538ee93f2469bf761291cbdaabf678d8e0234e7de19a285954a85c622ee998",
-  "userscript_payload_version": "2.3.1",
+  "userscript_payload_version": "2.3.0",
   "userscript_parts": [
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.2.0.part01.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.3.0.patch01.txt",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.3.0.patch02.txt",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.3.1.patch03.txt"
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.3.0.patch02.txt"
   ],
   "runtime_version": "2.2.0",
   "runtime_encoding": "base64",
@@ -24,5 +23,5 @@
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.2.0.rem04.b64",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.2.0.rem05.b64"
   ],
-  "userscript_sha256": "137500893e3383c63683c8e13354533a8e456dd9759fa8213f31e62373907f45"
+  "userscript_sha256": "1c7680f07b341bf614b1ab65f43ed9c263c270f0abb48fd12685a28b22be93f0"
 }
