@@ -1,30 +1,47 @@
 # NovelAI Media Library
 
-A local image/video library overlay for `novelai.net`, consisting of a Tampermonkey userscript and a small local Python companion.
+Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
 ## Automatic updates
 
-As of **v2.2.0**, both runtime pieces are designed to update without copying/pasting future releases:
+Starting with the v2.2 bootstrap, normal future updates require no copying or pasting.
 
-- **Tampermonkey userscript:** `novelai-media.user.js` contains `@updateURL` and `@downloadURL` metadata pointing at this repository. Tampermonkey's normal userscript updater installs newer versions when the `@version` increases.
-- **Local companion:** `companion.pyw` checks `manifest.json` on startup. The userscript also asks a v2.2+ running companion to check for updates. If a newer verified companion is published, it replaces itself and restarts automatically.
-- **Integrity:** companion updates are verified against the SHA-256 stored in `manifest.json` before replacement.
+- `novelai-media.user.js` is a small permanent Tampermonkey loader. It checks `manifest.json`, downloads the current UI payload from this repository, caches it locally, and runs it on NovelAI.
+- `companion.pyw` is a small permanent launcher. It downloads the current verified Python runtime into a local `.runtime` folder, starts it, checks GitHub about once per minute, and automatically restarts the runtime when a new version is published.
+- The launcher can also update **itself** from `manifest.json`, so future launcher changes do not require another manual replacement.
+- Python runtime updates are SHA-256 verified before being installed.
+- If GitHub is temporarily unavailable, both sides keep using their previously cached working version.
 
-The user's actual library (`library.json`, media, thumbnails and backups) remains local and is **not** stored in this repository.
+Your actual media library is not stored here. `library.json`, media files, thumbnails, and backups remain under your local `Documents\NovelAI Media Library` folder.
 
-## One-time bootstrap from v2.1 or earlier
+## One-time bootstrap for an existing installation
 
-Older companions cannot retroactively self-update, so there is one final bootstrap step. You can either update the two runtime files manually once, or download/run `bootstrap-auto-update.bat` and select your existing NovelAI Media Library program folder.
+If you are coming from v2.1 or earlier, run `bootstrap-auto-update.bat` once:
 
-The bootstrap updates only the program file `companion.pyw`; it does not touch the media library or `library.json`. It also opens the stable `.user.js` URL so Tampermonkey can install the self-updating script once.
+1. Download and run `bootstrap-auto-update.bat`.
+2. Select the existing NovelAI Media Library **program folder** — the folder that contains `companion.pyw` and `run.bat`.
+3. The bootstrap replaces only the old program launcher, starts it, and opens the permanent Tampermonkey loader.
+4. Approve Tampermonkey's Install/Update page once.
+
+After that one transition, future UI, runtime, and launcher releases are pulled automatically from this repository.
+
+The bootstrap does **not** modify or delete your media, categories, favorites, timestamps, thumbnails, or `library.json`.
 
 ## Fresh install
 
-1. Put `companion.pyw`, `requirements.txt`, `setup.bat`, and `run.bat` together in one folder.
+1. Download `companion.pyw`, `requirements.txt`, `setup.bat`, and `run.bat` into one folder.
 2. Run `setup.bat` once.
-3. Run `run.bat` whenever using the NovelAI media viewer.
-4. Install `novelai-media.user.js` in Tampermonkey.
+3. Run `run.bat` whenever you use the NovelAI media viewer.
+4. Install `novelai-media.user.js` in Tampermonkey once.
 
-## Publishing future changes
+## Release layout
 
-For a userscript change, increment its `@version` before publishing. For a companion change, increment `APP_VERSION`, publish `companion.pyw`, then update `manifest.json` **last** with the new version and SHA-256. Publishing the manifest last prevents clients from seeing a manifest that points at a not-yet-published companion.
+- `novelai-media.user.js` — stable Tampermonkey loader
+- `companion.pyw` — stable/self-updating local launcher
+- `manifest.json` — currently published versions and payload locations
+- `payload/` — versioned UI/runtime payloads
+- `setup.bat`, `run.bat`, `requirements.txt` — local Python setup/launch files
+
+## Publishing updates
+
+Payload files are published first and `manifest.json` is updated **last**. This prevents installed clients from seeing a release before all of its files are available. Runtime and launcher hashes in the manifest must match the exact published files.
