@@ -1,0 +1,374 @@
+
+// NovelAI Media Library v2.3.7: slot-select clicks + 3rd fullscreen pane/browser
+(() => {
+  'use strict';
+
+  const API = 'http://127.0.0.1:8765';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV237 === '1') return;
+  document.documentElement.dataset.naiMediaV237 = '1';
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v237-style';
+  style.textContent = `
+    /* In split mode, clicking an image selects its slot instead of opening fullscreen.
+       The transparent overlay makes the click target a normal stage child rather than the img,
+       so the older split-fullscreen image-click handler does not fire. */
+    .naiSlotClickOverlay {
+      position:absolute !important;
+      inset:0 !important;
+      z-index:3 !important;
+      display:none !important;
+      cursor:pointer !important;
+      background:transparent !important;
+    }
+    .stages.split .stage:has(> img) > .naiSlotClickOverlay { display:block !important; }
+    .stages.split .stage:has(> video) > .naiSlotClickOverlay { display:none !important; }
+
+    .naiTripleFullscreen {
+      position:fixed !important;
+      inset:0 !important;
+      z-index:2147483970 !important;
+      background:rgba(0,0,0,.97) !important;
+      display:grid !important;
+      grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+      gap:7px !important;
+      padding:12px !important;
+    }
+    .naiTriplePane {
+      position:relative !important;
+      min-width:0 !important;
+      min-height:0 !important;
+      overflow:hidden !important;
+      display:flex !important;
+      align-items:center !important;
+      justify-content:center !important;
+      background:#05060d !important;
+      border:1px solid rgba(255,255,255,.06) !important;
+    }
+    .naiTriplePane > img,
+    .naiTriplePane > video,
+    .naiThirdMedia > img,
+    .naiThirdMedia > video {
+      width:100% !important;
+      height:100% !important;
+      max-width:100% !important;
+      max-height:100% !important;
+      object-fit:contain !important;
+      display:block !important;
+    }
+    .naiThirdPane {
+      align-items:stretch !important;
+      justify-content:stretch !important;
+    }
+    .right.naiTripleBrowserPanel {
+      position:relative !important;
+      inset:auto !important;
+      left:auto !important;
+      right:auto !important;
+      top:auto !important;
+      bottom:auto !important;
+      width:100% !important;
+      height:100% !important;
+      max-width:none !important;
+      min-width:0 !important;
+      z-index:1 !important;
+      border-left:0 !important;
+    }
+    .naiThirdMedia {
+      position:absolute !important;
+      inset:0 !important;
+      display:flex !important;
+      align-items:center !important;
+      justify-content:center !important;
+      background:#05060d !important;
+    }
+    .naiThirdMedia[hidden] { display:none !important; }
+    .naiThirdChange {
+      position:absolute !important;
+      top:10px !important;
+      left:10px !important;
+      z-index:4 !important;
+      padding:7px 10px !important;
+      border-radius:8px !important;
+      background:rgba(22,24,47,.90) !important;
+      backdrop-filter:blur(4px) !important;
+    }
+    .naiTripleClose {
+      position:fixed !important;
+      top:12px !important;
+      right:14px !important;
+      z-index:2147483980 !important;
+      width:40px !important;
+      height:40px !important;
+      padding:0 !important;
+      display:grid !important;
+      place-items:center !important;
+      border-radius:50% !important;
+      background:rgba(22,24,47,.90) !important;
+      font-size:24px !important;
+    }
+    @media (max-width:1200px) {
+      .naiTripleFullscreen { gap:4px !important; padding:6px !important; }
+    }
+  `;
+  root.appendChild(style);
+
+  for (const stageId of ['stage1', 'stage2']) {
+    const stage = root.getElementById(stageId);
+    if (stage && !stage.querySelector('.naiSlotClickOverlay')) {
+      const overlay = document.createElement('div');
+      overlay.className = 'naiSlotClickOverlay';
+      overlay.title = 'Select this slot';
+      stage.appendChild(overlay);
+    }
+  }
+
+  function gmRequest(path) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method:'GET',
+        url:`${API}${path}`,
+        headers:{ Origin:'https://novelai.net' },
+        timeout:60000,
+        onload:res => {
+          if (res.status < 200 || res.status >= 300) {
+            reject(new Error(`Request failed (${res.status})`));
+            return;
+          }
+          try { resolve(JSON.parse(res.responseText || '{}')); }
+          catch (_) { reject(new Error('Invalid library response.')); }
+        },
+        onerror:() => reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+        ontimeout:() => reject(new Error('The local media request timed out.')),
+      });
+    });
+  }
+
+  function mediaUrl(id) {
+    return `${API}/api/media/${encodeURIComponent(id)}/original`;
+  }
+
+  function copyViewerMedia(source) {
+    if (!source) return null;
+    if (source.tagName === 'IMG') {
+      const img = document.createElement('img');
+      img.src = source.currentSrc || source.src;
+      img.alt = source.alt || '';
+      return img;
+    }
+    if (source.tagName === 'VIDEO') {
+      const video = document.createElement('video');
+      const startTime = Number.isFinite(source.currentTime) ? source.currentTime : 0;
+      const wasPlaying = !source.paused;
+      video.dataset.naiTripleFull = '1';
+      video.controls = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.volume = Number.isFinite(source.volume) ? source.volume : 0.08;
+      video.muted = source.muted;
+      video._naiOriginalVideo = source;
+      video.src = source.currentSrc || source.src;
+      source.pause();
+      video.addEventListener('loadedmetadata', () => {
+        try {
+          const end = Number.isFinite(video.duration) && video.duration > 0
+            ? Math.max(0, video.duration - 0.05)
+            : startTime;
+          video.currentTime = Math.min(startTime, end);
+        } catch (_) {}
+        if (wasPlaying) video.play().catch(() => {});
+      }, { once:true });
+      return video;
+    }
+    return null;
+  }
+
+  let fullscreenState = null;
+  let lastThirdMediaId = null;
+
+  function restoreRightPanel() {
+    const s = fullscreenState;
+    if (!s?.rightPanel || !s.originalParent) return;
+    s.rightPanel.classList.remove('naiTripleBrowserPanel');
+    s.rightPanel.style.removeProperty('display');
+    if (s.originalNext && s.originalNext.parentNode === s.originalParent) {
+      s.originalParent.insertBefore(s.rightPanel, s.originalNext);
+    } else {
+      s.originalParent.appendChild(s.rightPanel);
+    }
+  }
+
+  function closeTripleFullscreen() {
+    const s = fullscreenState;
+    if (!s) return;
+
+    s.box.querySelectorAll('video[data-nai-triple-full]').forEach(fullVideo => {
+      const original = fullVideo._naiOriginalVideo;
+      if (original?.isConnected) {
+        try { original.currentTime = fullVideo.currentTime; } catch (_) {}
+        if (!fullVideo.paused) original.play().catch(() => {});
+        else original.pause();
+      }
+      try { fullVideo.pause(); } catch (_) {}
+    });
+    s.thirdMedia?.querySelectorAll('video').forEach(v => { try { v.pause(); } catch (_) {} });
+
+    restoreRightPanel();
+    s.box.remove();
+    fullscreenState = null;
+  }
+
+  function showThirdBrowser() {
+    const s = fullscreenState;
+    if (!s) return;
+    s.thirdMedia.querySelectorAll('video').forEach(v => { try { v.pause(); } catch (_) {} });
+    s.thirdMedia.hidden = true;
+    s.rightPanel.style.removeProperty('display');
+  }
+
+  async function showThirdMedia(mediaId) {
+    const s = fullscreenState;
+    if (!s || !mediaId) return;
+    try {
+      const library = await gmRequest('/api/library');
+      const media = Array.isArray(library?.media) ? library.media.find(m => m.id === mediaId) : null;
+      if (!media) throw new Error('Could not find that media item.');
+
+      lastThirdMediaId = mediaId;
+      s.thirdMedia.innerHTML = '';
+
+      const change = document.createElement('button');
+      change.type = 'button';
+      change.className = 'naiThirdChange';
+      change.textContent = 'Choose different';
+      change.title = 'Return to thumbnails';
+      change.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        showThirdBrowser();
+      });
+      s.thirdMedia.appendChild(change);
+
+      if (media.media_type === 'video') {
+        const video = document.createElement('video');
+        video.controls = true;
+        video.loop = true;
+        video.playsInline = true;
+        video.volume = 0.08;
+        video.src = mediaUrl(mediaId);
+        s.thirdMedia.appendChild(video);
+      } else {
+        const img = document.createElement('img');
+        img.src = mediaUrl(mediaId);
+        img.alt = media.original_name || '';
+        s.thirdMedia.appendChild(img);
+      }
+
+      s.rightPanel.style.display = 'none';
+      s.thirdMedia.hidden = false;
+    } catch (err) {
+      alert(err?.message || String(err));
+    }
+  }
+
+  function openTripleFullscreen() {
+    if (fullscreenState) return true;
+    const stages = root.getElementById('stages');
+    if (!stages?.classList.contains('split')) return false;
+
+    const source1 = root.getElementById('stage1')?.querySelector('img,video');
+    const source2 = root.getElementById('stage2')?.querySelector('img,video');
+    if (!source1 && !source2) return false;
+
+    const lightRoot = root.getElementById('lightRoot');
+    const rightPanel = root.querySelector('.panel.right');
+    if (!lightRoot || !rightPanel) return false;
+
+    const originalParent = rightPanel.parentNode;
+    const originalNext = rightPanel.nextSibling;
+
+    const box = document.createElement('div');
+    box.className = 'naiTripleFullscreen';
+
+    for (const source of [source1, source2]) {
+      const pane = document.createElement('div');
+      pane.className = 'naiTriplePane';
+      if (source) {
+        const copy = copyViewerMedia(source);
+        if (copy) pane.appendChild(copy);
+      }
+      box.appendChild(pane);
+    }
+
+    const thirdPane = document.createElement('div');
+    thirdPane.className = 'naiTriplePane naiThirdPane';
+    box.appendChild(thirdPane);
+
+    rightPanel.classList.add('naiTripleBrowserPanel');
+    thirdPane.appendChild(rightPanel);
+
+    const thirdMedia = document.createElement('div');
+    thirdMedia.className = 'naiThirdMedia';
+    thirdMedia.hidden = true;
+    thirdPane.appendChild(thirdMedia);
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'naiTripleClose';
+    close.textContent = '×';
+    close.title = 'Close fullscreen';
+    close.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeTripleFullscreen();
+    });
+    box.appendChild(close);
+
+    fullscreenState = {
+      box,
+      rightPanel,
+      originalParent,
+      originalNext,
+      thirdPane,
+      thirdMedia,
+    };
+
+    lightRoot.appendChild(box);
+
+    if (lastThirdMediaId) showThirdMedia(lastThirdMediaId);
+    return true;
+  }
+
+  // While the real right-side browser is temporarily living in the third fullscreen pane,
+  // clicking one of its thumbnails selects the third pane only. Category/search/character
+  // controls remain the normal live controls because this is the actual panel, not a clone.
+  root.addEventListener('click', event => {
+    const s = fullscreenState;
+    if (!s || !s.rightPanel.contains(event.target)) return;
+    const tile = event.target.closest?.('.tile[data-id]');
+    if (!tile) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    showThirdMedia(tile.dataset.id);
+  }, true);
+
+  // Window capture runs before the older split fullscreen handler in the shadow root.
+  // Only the explicit fullscreen button opens fullscreen now.
+  window.addEventListener('click', event => {
+    const path = event.composedPath?.() || [];
+    const fullButton = path.find(node => node?.id === 'fullBtn');
+    if (!fullButton || !path.includes(host)) return;
+    const stages = root.getElementById('stages');
+    if (!stages?.classList.contains('split')) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    openTripleFullscreen();
+  }, true);
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && fullscreenState) closeTripleFullscreen();
+  }, true);
+})();
