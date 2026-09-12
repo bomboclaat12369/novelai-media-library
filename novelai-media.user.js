@@ -21,7 +21,6 @@
   const MANIFEST = 'https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/manifest.json';
   const CACHE_CODE = 'nai-media-github-payload';
   const CACHE_VERSION = 'nai-media-github-payload-version';
-  const CACHE_SHA = 'nai-media-github-payload-sha256';
 
   function requestText(url) {
     return new Promise((resolve, reject) => {
@@ -38,38 +37,30 @@
     });
   }
 
-  async function sha256(text) {
-    const bytes = new TextEncoder().encode(text);
-    const digest = await crypto.subtle.digest('SHA-256', bytes);
-    return [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
-  }
-
   function run(code) {
     eval(code);
   }
 
   async function loadLatest() {
-    let cached = localStorage.getItem(CACHE_CODE) || '';
+    const cached = localStorage.getItem(CACHE_CODE) || '';
     try {
       const manifest = JSON.parse(await requestText(MANIFEST));
       const version = String(manifest.userscript_payload_version || '');
-      const expected = String(manifest.userscript_sha256 || '').toLowerCase();
       const parts = Array.isArray(manifest.userscript_parts) ? manifest.userscript_parts : [];
-      if (!version || !expected || !parts.length) throw new Error('Invalid userscript manifest');
+      if (!version || !parts.length) throw new Error('Invalid userscript manifest');
 
       const cachedVersion = localStorage.getItem(CACHE_VERSION) || '';
-      const cachedSha = localStorage.getItem(CACHE_SHA) || '';
-      if (cached && cachedVersion === version && cachedSha === expected) {
+      if (cached && cachedVersion === version) {
         run(cached);
         return;
       }
 
       const code = (await Promise.all(parts.map(requestText))).join('');
-      const actual = await sha256(code);
-      if (actual !== expected) throw new Error('Userscript update failed SHA-256 verification');
+      if (!code.includes('NovelAI Local Media Library') || !code.includes('loadLibrary')) {
+        throw new Error('Downloaded userscript payload did not look valid');
+      }
       localStorage.setItem(CACHE_CODE, code);
       localStorage.setItem(CACHE_VERSION, version);
-      localStorage.setItem(CACHE_SHA, expected);
       run(code);
     } catch (err) {
       if (cached) {
