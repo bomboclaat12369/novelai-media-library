@@ -1,0 +1,119 @@
+// NovelAI Media Library v2.3.9: fullscreen dead-space close + visible slot selectors
+(() => {
+  'use strict';
+
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV239 === '1') return;
+  document.documentElement.dataset.naiMediaV239 = '1';
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v239-style';
+  style.textContent = `
+    /* Make the media element itself occupy only its rendered aspect-ratio area.
+       The remaining black area belongs to the pane and can therefore close fullscreen. */
+    .naiTriplePane > img,
+    .naiTriplePane > video,
+    .naiThirdMedia > img,
+    .naiThirdMedia > video {
+      width:auto !important;
+      height:auto !important;
+      max-width:100% !important;
+      max-height:100% !important;
+      object-fit:contain !important;
+      flex:0 1 auto !important;
+    }
+
+    /* v2.3.8 created slot buttons in the lower nav, but its display:none rule kept them hidden.
+       v2.3.9 replaces them with explicit buttons in the top Selected media header. */
+    .naiSlotSelectBtnV239 {
+      display:none;
+      min-width:48px;
+      padding:6px 8px !important;
+      font-size:11px !important;
+    }
+    .naiSlotSelectBtnV239.active {
+      background:#6155d9 !important;
+      border-color:#7268e5 !important;
+    }
+  `;
+  root.appendChild(style);
+
+  // Remove the hidden v2.3.8 selectors so there is only one obvious pair.
+  root.querySelectorAll('.naiSlotSelectBtn').forEach(el => el.remove());
+
+  const stages = root.getElementById('stages');
+  const splitBtn = root.getElementById('splitBtn');
+  const fullBtn = root.getElementById('fullBtn');
+  const header = splitBtn?.parentElement || null;
+  const slotButtons = [];
+
+  function refreshSlotButtons() {
+    const split = !!stages?.classList.contains('split');
+    slotButtons.forEach((button, i) => {
+      button.style.display = split ? 'inline-flex' : 'none';
+      button.classList.toggle(
+        'active',
+        !!root.getElementById(`stage${i + 1}`)?.classList.contains('slot-active')
+      );
+    });
+  }
+
+  if (header && splitBtn && !root.getElementById('naiSlotSelectV239_1')) {
+    for (let i = 0; i < 2; i++) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.id = `naiSlotSelectV239_${i + 1}`;
+      button.className = 'naiSlotSelectBtnV239';
+      button.textContent = `Slot ${i + 1}`;
+      button.title = `Select slot ${i + 1} for the next thumbnail you click`;
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!stages?.classList.contains('split')) return;
+        const stage = root.getElementById(`stage${i + 1}`);
+        if (!stage) return;
+        // The base script already owns slot selection. A click on the stage background
+        // invokes that existing code without opening fullscreen.
+        stage.dispatchEvent(new MouseEvent('click', {
+          bubbles:true,
+          composed:true,
+          cancelable:true,
+          view:window,
+        }));
+        setTimeout(refreshSlotButtons, 0);
+      });
+      slotButtons.push(button);
+    }
+
+    header.insertBefore(slotButtons[0], splitBtn);
+    header.insertBefore(slotButtons[1], splitBtn);
+    refreshSlotButtons();
+
+    splitBtn.addEventListener('click', () => setTimeout(refreshSlotButtons, 0));
+    stages?.addEventListener('click', () => setTimeout(refreshSlotButtons, 0), true);
+  }
+
+  function closeFullscreenFromBackground(event) {
+    const box = root.querySelector('.naiTripleFullscreen');
+    if (!box || !box.contains(event.target)) return;
+
+    // Never interpret clicks on controls or on the live thumbnail browser as background clicks.
+    if (event.target.closest?.('button, select, input, textarea, .right.naiTripleBrowserPanel')) return;
+
+    // Media elements now shrink to their visible image/video rectangle. A click on the pane,
+    // third-media backdrop, grid gap, or outer fullscreen backdrop is therefore dead space.
+    const isDeadSpace =
+      event.target === box ||
+      event.target.classList?.contains('naiTriplePane') ||
+      event.target.classList?.contains('naiThirdMedia');
+
+    if (!isDeadSpace) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    root.querySelector('.naiTripleClose')?.click();
+  }
+
+  root.addEventListener('click', closeFullscreenFromBackground, true);
+})();
