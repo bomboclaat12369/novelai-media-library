@@ -1,0 +1,49 @@
+name: Apply userscript v2.7.2
+
+on:
+  push:
+    paths:
+      - tools/apply-userscript-v2.7.2.py
+      - .github/workflows/apply-userscript-v2.7.2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Write userscript patch
+        run: python tools/apply-userscript-v2.7.2.py
+      - name: Validate patch syntax
+        run: |
+          cp payload/userscript-2.7.2.patch01.txt /tmp/userscript-2.7.2.js
+          node --check /tmp/userscript-2.7.2.js
+      - name: Validate complete userscript syntax
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          release = json.loads(Path('release-userscript.json').read_text(encoding='utf-8'))
+          parts = [p for p in release['parts'] if p != 'payload/userscript-2.7.1.patch01.txt']
+          parts.append('payload/userscript-2.7.2.patch01.txt')
+          Path('/tmp/complete-userscript.js').write_bytes(b''.join(Path(p).read_bytes() for p in parts))
+          PY
+          node --check /tmp/complete-userscript.js
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add payload/userscript-2.7.2.patch01.txt
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Fix local import transport and cancellation"
+          git push
