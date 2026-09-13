@@ -1,0 +1,20 @@
+name: Validate userscript v2.5.3
+
+on:
+  push:
+    paths:
+      - payload/userscript-2.5.3.patch01.txt
+      - .github/workflows/validate-userscript-v2.5.3.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate patch syntax
+        run: |
+          cp payload/userscript-2.5.3.patch01.txt /tmp/userscript-2.5.3.patch01.js
+          node --check /tmp/userscript-2.5.3.patch01.js
