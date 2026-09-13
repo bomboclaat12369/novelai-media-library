@@ -1,0 +1,264 @@
+// NovelAI Media Library v2.5.2: crop images directly from Rapid Review
+(() => {
+  'use strict';
+
+  const API = 'http://127.0.0.1:8765';
+  const UI_STATE_KEY = 'nai-media-v1-ui';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV252 === '1') return;
+  document.documentElement.dataset.naiMediaV252 = '1';
+
+  const modalRoot = root.getElementById('modalRoot');
+  const charSelect = root.getElementById('characterSelect');
+  const catWrap = root.getElementById('categories');
+  const stages = root.getElementById('stages');
+  const cropBtn = root.getElementById('naiCropBtn');
+  if (!modalRoot || !charSelect || !catWrap || !stages || !cropBtn) return;
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v252-style';
+  style.textContent = `
+    #naiReviewCropBtn {
+      margin-left:6px !important;
+      white-space:nowrap !important;
+    }
+    #naiReviewCropBtn.hasCrop {
+      background:#4c467f !important;
+      border-color:#8179d8 !important;
+    }
+  `;
+  root.appendChild(style);
+
+  function gmJson(path) {
+    return new Promise((resolve, reject) => GM_xmlhttpRequest({
+      method:'GET',
+      url:`${API}${path}`,
+      headers:{Origin:'https://novelai.net'},
+      timeout:120000,
+      onload:r => {
+        if (r.status >= 200 && r.status < 300) {
+          try { resolve(JSON.parse(r.responseText || '{}')); }
+          catch (_) { resolve(null); }
+        } else {
+          let message = `Request failed (${r.status})`;
+          try { message = JSON.parse(r.responseText || '{}').error || message; } catch (_) {}
+          reject(new Error(message));
+        }
+      },
+      onerror:()=>reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+      ontimeout:()=>reject(new Error('The local media request timed out.')),
+    }));
+  }
+
+  function uiState() {
+    try { return JSON.parse(localStorage.getItem(UI_STATE_KEY) || '{}') || {}; }
+    catch (_) { return {}; }
+  }
+
+  async function sha256Blob(blob) {
+    const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+    return [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function resolveReviewMedia(stage) {
+    const existingId = stage.dataset.naiReviewMediaId;
+    if (existingId) {
+      const lib = await gmJson('/api/library');
+      return (lib?.media || []).find(m => m.id === existingId) || null;
+    }
+
+    const img = stage.querySelector('img');
+    if (!img) return null;
+    const src = img.currentSrc || img.src;
+    if (!src) return null;
+
+    const response = await fetch(src);
+    if (!response.ok) throw new Error('Could not read the Rapid Review image.');
+    const sha = await sha256Blob(await response.blob());
+    const lib = await gmJson('/api/library');
+    const characterId = charSelect.value || '';
+    const media = (lib?.media || []).find(m =>
+      m?.media_type === 'image' &&
+      m?.sha256 === sha &&
+      (!characterId || m.character_id === characterId)
+    ) || null;
+
+    if (media?.id) stage.dataset.naiReviewMediaId = media.id;
+    return media;
+  }
+
+  function setCropButtonState(button, media) {
+    if (!button || !media) return;
+    const cropped = Number(media.crop_top || 0) > 0 || Number(media.crop_bottom || 0) > 0;
+    button.classList.toggle('hasCrop', cropped);
+    button.textContent = cropped ? 'Crop image ✓' : 'Crop image';
+    button.title = cropped ? 'Adjust the saved crop for this image' : 'Crop the top or bottom of this image';
+  }
+
+  function baseCategoryButtons() {
+    return [...catWrap.querySelectorAll('.cat:not(.naiSetsCat)')];
+  }
+
+  function waitForMainCropReady(mediaId) {
+    return new Promise((resolve, reject) => {
+      let done = false;
+      let timeout = 0;
+      const observer = new MutationObserver(check);
+
+      function cleanup() {
+        if (done) return;
+        done = true;
+        clearTimeout(timeout);
+        observer.disconnect();
+      }
+
+      function check() {
+        const state = uiState();
+        const activeSlot = state.activeSlot === 1 ? 1 : 0;
+        const ids = Array.isArray(state.slotMediaIds) ? state.slotMediaIds : [];
+        const selected = ids[activeSlot] || state.selectedMediaId || null;
+        if (selected === mediaId && !cropBtn.disabled) {
+          cleanup();
+          resolve();
+        }
+      }
+
+      observer.observe(stages, {childList:true, subtree:true, attributes:true});
+      observer.observe(cropBtn, {attributes:true, attributeFilter:['disabled','class']});
+      timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error('The image did not become ready for cropping.'));
+      }, 15000);
+      check();
+    });
+  }
+
+  async function selectReviewedImageInMainViewer(mediaId) {
+    let tile = root.querySelector(`.tile[data-id="${mediaId}"]`);
+    if (!tile) {
+      const allButton = baseCategoryButtons()[0];
+      if (allButton) {
+        allButton.click();
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        tile = root.querySelector(`.tile[data-id="${mediaId}"]`);
+      }
+    }
+    if (!tile) throw new Error('Could not place this Rapid Review image in the main viewer for cropping.');
+    tile.click();
+    await waitForMainCropReady(mediaId);
+  }
+
+  function watchCropEditorClose(stage, button, mediaId) {
+    let sawEditor = false;
+    const observer = new MutationObserver(async () => {
+      const open = !!root.querySelector('.naiCropWrap');
+      if (open) {
+        sawEditor = true;
+        return;
+      }
+      if (!sawEditor) return;
+      observer.disconnect();
+      try {
+        const lib = await gmJson('/api/library');
+        const media = (lib?.media || []).find(m => m.id === mediaId) || null;
+        if (media && button.isConnected && stage.isConnected) setCropButtonState(button, media);
+      } catch (_) {}
+    });
+    observer.observe(root, {childList:true});
+    setTimeout(() => observer.disconnect(), 120000);
+  }
+
+  async function openReviewCrop(stage, button) {
+    if (button.disabled) return;
+    const oldText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Opening crop…';
+    try {
+      const media = await resolveReviewMedia(stage);
+      if (!media?.id) throw new Error('Could not identify this Rapid Review image.');
+      if (media.media_type !== 'image') return;
+
+      await selectReviewedImageInMainViewer(media.id);
+      watchCropEditorClose(stage, button, media.id);
+      cropBtn.click();
+    } catch (err) {
+      alert(err?.message || String(err));
+    } finally {
+      if (button.isConnected) {
+        button.disabled = false;
+        if (button.textContent === 'Opening crop…') button.textContent = oldText || 'Crop image';
+      }
+    }
+  }
+
+  let decorateQueued = false;
+  function scheduleDecorate() {
+    if (decorateQueued) return;
+    decorateQueued = true;
+    requestAnimationFrame(() => {
+      decorateQueued = false;
+      decorateReview();
+    });
+  }
+
+  function decorateReview() {
+    const stage = modalRoot.querySelector('#reviewStage');
+    const side = modalRoot.querySelector('.reviewSide');
+    if (!stage || !side) return;
+
+    const video = stage.querySelector('video');
+    let button = side.querySelector('#naiReviewCropBtn');
+    if (video) {
+      button?.remove();
+      return;
+    }
+
+    if (!button) {
+      button = document.createElement('button');
+      button.type = 'button';
+      button.id = 'naiReviewCropBtn';
+      button.textContent = 'Crop image';
+      const addCategory = side.querySelector('#reviewAddCat');
+      if (addCategory) addCategory.insertAdjacentElement('afterend', button);
+      else side.insertBefore(button, side.firstChild);
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        openReviewCrop(stage, button);
+      });
+    }
+
+    const img = stage.querySelector('img');
+    button.disabled = !img;
+    if (!img) return;
+
+    const src = img.currentSrc || img.src || '';
+    if (!src || stage.dataset.naiReviewResolveSrc === src) return;
+    stage.dataset.naiReviewResolveSrc = src;
+    resolveReviewMedia(stage).then(media => {
+      if (media && button.isConnected && stage.isConnected) setCropButtonState(button, media);
+    }).catch(() => {});
+  }
+
+  // Rapid Review rebuilds its modal for each item. This observer only decorates that
+  // modal and does not mutate any observed node repeatedly once the button exists.
+  new MutationObserver(scheduleDecorate).observe(modalRoot, {childList:true, subtree:true});
+  scheduleDecorate();
+
+  // While the crop editor is above Rapid Review, keep Rapid Review's 1-9/arrow/Enter
+  // shortcuts from changing categories or advancing behind the editor.
+  window.addEventListener('keydown', event => {
+    if (!modalRoot.querySelector('#reviewStage') || !root.querySelector('.naiCropWrap')) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      root.querySelector('.naiCropCancel')?.click();
+      return;
+    }
+    if ((event.key >= '1' && event.key <= '9') || event.key === 'Enter' || event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+})();
