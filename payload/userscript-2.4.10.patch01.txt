@@ -1,0 +1,119 @@
+// NovelAI Media Library v2.4.10: hard-center normal viewer video button labels
+(() => {
+  'use strict';
+
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV2410 === '1') return;
+  document.documentElement.dataset.naiMediaV2410 = '1';
+
+  const videoTools = root.getElementById('videoTools');
+  if (!videoTools) return;
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v2410-style';
+  style.textContent = `
+    /* Normal viewer only. Put an explicit label at the exact geometric center
+       of each button so inherited button/pseudo-element metrics cannot shift it. */
+    #videoTools.naiVideoSideRail #setThumbBtn,
+    #videoTools.naiVideoSideRail [data-seek-marker],
+    #videoTools.naiVideoSideRail [data-set-marker] {
+      position:relative !important;
+      box-sizing:border-box !important;
+      padding:0 !important;
+      text-indent:0 !important;
+      overflow:hidden !important;
+      color:transparent !important;
+      text-shadow:none !important;
+    }
+
+    #videoTools.naiVideoSideRail #setThumbBtn::before,
+    #videoTools.naiVideoSideRail #setThumbBtn::after,
+    #videoTools.naiVideoSideRail [data-seek-marker]::before,
+    #videoTools.naiVideoSideRail [data-seek-marker]::after,
+    #videoTools.naiVideoSideRail [data-set-marker]::before,
+    #videoTools.naiVideoSideRail [data-set-marker]::after {
+      content:none !important;
+      display:none !important;
+    }
+
+    #videoTools.naiVideoSideRail .naiV2410Label {
+      position:absolute !important;
+      left:50% !important;
+      top:50% !important;
+      transform:translate(-50%, -50%) !important;
+      margin:0 !important;
+      padding:0 !important;
+      width:max-content !important;
+      max-width:calc(100% - 2px) !important;
+      height:auto !important;
+      color:#fff !important;
+      font:700 9px/1 system-ui !important;
+      text-align:center !important;
+      white-space:nowrap !important;
+      pointer-events:none !important;
+    }
+
+    #videoTools.naiVideoSideRail [data-set-marker] .naiV2410Label {
+      font-size:11px !important;
+    }
+
+    #videoTools.naiVideoSideRail [data-seek-marker]:disabled .naiV2410Label {
+      opacity:.72 !important;
+    }
+  `;
+  root.appendChild(style);
+
+  let applying = false;
+
+  function ensureLabel(button, text) {
+    if (!button) return;
+    let label = button.querySelector(':scope > .naiV2410Label');
+    const hasOnlyLabel = label && button.childNodes.length === 1;
+    if (!hasOnlyLabel) {
+      button.textContent = '';
+      label = document.createElement('span');
+      label.className = 'naiV2410Label';
+      button.appendChild(label);
+    }
+    if (label.textContent !== text) label.textContent = text;
+  }
+
+  function normalize() {
+    if (applying || !videoTools.classList.contains('naiVideoSideRail')) return;
+    applying = true;
+    try {
+      ensureLabel(videoTools.querySelector('#setThumbBtn'), 'Thumb');
+
+      videoTools.querySelectorAll('[data-seek-marker]').forEach(button => {
+        let text = '—';
+        if (!button.disabled) {
+          text = button.dataset.naiV244Time || button.dataset.naiV245Time || '';
+          if (!text) {
+            const currentLabel = button.querySelector(':scope > .naiV2410Label');
+            text = currentLabel?.textContent || String(button.textContent || '').trim() || '—';
+          }
+        }
+        ensureLabel(button, text);
+      });
+
+      videoTools.querySelectorAll('[data-set-marker]').forEach(button => ensureLabel(button, '+'));
+    } finally {
+      applying = false;
+    }
+  }
+
+  const observer = new MutationObserver(() => {
+    if (applying) return;
+    queueMicrotask(normalize);
+  });
+  observer.observe(videoTools, {
+    childList:true,
+    subtree:true,
+    attributes:true,
+    attributeFilter:['class','disabled','data-nai-v244-time','data-nai-v245-time'],
+  });
+
+  root.addEventListener('click', () => setTimeout(normalize, 0));
+  [0,50,160].forEach(ms => setTimeout(normalize, ms));
+})();
