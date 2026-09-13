@@ -1,0 +1,101 @@
+// NovelAI Media Library v2.4.7: restore v2.4.5 sizing + true button text centering
+(() => {
+  'use strict';
+
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV247 === '1') return;
+  document.documentElement.dataset.naiMediaV247 = '1';
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v247-style';
+  style.textContent = `
+    /* Keep the v2.4.5 dimensions. Only fix visual centering. */
+    .stage > #videoTools.naiVideoSideRail {
+      box-sizing:border-box !important;
+      width:64px !important;
+      padding:4px !important;
+      gap:3px !important;
+      right:4px !important;
+    }
+    .stage > #videoTools.naiVideoSideRail .videoToolRow {
+      grid-template-columns:40px 12px !important;
+      gap:2px !important;
+    }
+    .stage > #videoTools.naiVideoSideRail .videoToolRow:first-child {
+      display:block !important;
+    }
+    .stage > #videoTools.naiVideoSideRail #setThumbBtn {
+      width:54px !important;
+      min-width:54px !important;
+      max-width:54px !important;
+      margin-left:auto !important;
+      margin-right:auto !important;
+      padding-left:0 !important;
+      padding-right:0 !important;
+    }
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker] {
+      width:40px !important;
+      min-width:40px !important;
+      max-width:40px !important;
+      padding-left:0 !important;
+      padding-right:0 !important;
+    }
+    .stage > #videoTools.naiVideoSideRail [data-set-marker] {
+      width:12px !important;
+      min-width:12px !important;
+      max-width:12px !important;
+      padding-left:0 !important;
+      padding-right:0 !important;
+    }
+
+    .stage > #videoTools.naiVideoSideRail button,
+    .naiFullscreenMarkerRail button {
+      box-sizing:border-box !important;
+      display:flex !important;
+      align-items:center !important;
+      justify-content:center !important;
+      text-align:center !important;
+      text-indent:0 !important;
+    }
+    .stage > #videoTools.naiVideoSideRail #setThumbBtn::after,
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker]::after,
+    .stage > #videoTools.naiVideoSideRail [data-set-marker]::after,
+    .naiFullscreenMarkerRow > button:first-child::after {
+      display:block !important;
+      width:100% !important;
+      margin:0 !important;
+      padding:0 !important;
+      text-align:center !important;
+      line-height:1 !important;
+      transform:none !important;
+    }
+
+    .naiFullscreenMarkerRail {
+      box-sizing:border-box !important;
+      width:60px !important;
+      padding:4px !important;
+      gap:3px !important;
+      right:4px !important;
+    }
+    .naiFullscreenMarkerRow {
+      grid-template-columns:36px 12px !important;
+      gap:2px !important;
+    }
+    .naiFullscreenMarkerRow > button:first-child {
+      width:36px !important;
+      min-width:36px !important;
+      max-width:36px !important;
+      padding-left:0 !important;
+      padding-right:0 !important;
+    }
+    .naiFullscreenMarkerRail .naiFsSet {
+      width:12px !important;
+      min-width:12px !important;
+      max-width:12px !important;
+      padding-left:0 !important;
+      padding-right:0 !important;
+    }
+  `;
+  root.appendChild(style);
+})();
