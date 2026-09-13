@@ -1,0 +1,36 @@
+name: Build userscript v2.4.1 patch
+
+on:
+  push:
+    paths:
+      - tools/build-userscript-v2.4.1.py
+      - .github/workflows/build-userscript-v2.4.1.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Build v2.4.1 patch
+        run: python tools/build-userscript-v2.4.1.py
+      - name: Basic syntax check
+        run: |
+          node --check payload/userscript-2.4.1.patch01.txt
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add payload/userscript-2.4.1.patch01.txt
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Build userscript v2.4.1 patch"
+          git push
