@@ -1,0 +1,26 @@
+{
+  "version": "2.6.6",
+  "parts": [
+    "payload/userscript-2.2.0.part01.txt",
+    "payload/userscript-2.3.0.patch01.txt",
+    "payload/userscript-2.3.0.patch02.txt",
+    "payload/userscript-2.3.5.patch01.txt",
+    "payload/userscript-2.3.6.patch01.txt",
+    "payload/userscript-2.3.8.patch01.txt",
+    "payload/userscript-2.3.9.patch01.txt",
+    "payload/userscript-2.3.10.patch01.txt",
+    "payload/userscript-2.4.1.patch01.txt",
+    "payload/userscript-2.4.3.patch01.txt",
+    "payload/userscript-2.4.4.patch01.txt",
+    "payload/userscript-2.4.5.patch01.txt",
+    "payload/userscript-2.4.7.patch01.txt",
+    "payload/userscript-2.4.10.patch01.txt",
+    "payload/userscript-2.5.0.patch01.txt",
+    "payload/userscript-2.5.1.patch01.txt",
+    "payload/userscript-2.5.2.patch01.txt",
+    "payload/userscript-2.5.3.patch01.txt",
+    "payload/userscript-2.5.4.patch01.txt",
+    "payload/userscript-2.5.5.patch01.txt"
+  ],
+  "release_build": 40
+}
