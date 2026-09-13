@@ -31,7 +31,7 @@ except Exception:
 HOST = "127.0.0.1"
 PORT = 8765
 APP_NAME = "NovelAI Media Library"
-API_VERSION = 3
+API_VERSION = 4
 
 
 def now_iso() -> str:
@@ -108,6 +108,12 @@ class LibraryStore:
                     changed = True
                 if "categories" not in m or not isinstance(m.get("categories"), list):
                     m["categories"] = []
+                    changed = True
+                if "crop_top" not in m:
+                    m["crop_top"] = 0.0
+                    changed = True
+                if "crop_bottom" not in m:
+                    m["crop_bottom"] = 0.0
                     changed = True
                 if m.get("media_type") == "video":
                     if m.get("categories"):
@@ -393,6 +399,8 @@ class LibraryStore:
                 "content_type": content_type,
                 "categories": categories,
                 "favorite": False,
+                "crop_top": 0.0,
+                "crop_bottom": 0.0,
                 "sha256": sha,
                 "source": source,
                 "video_markers": video_markers,
@@ -487,6 +495,33 @@ class LibraryStore:
             if not m:
                 raise KeyError("Media not found")
             m["favorite"] = bool(favorite)
+            self.save()
+            return m
+
+    def set_crop(self, media_id: str, top: Any = 0.0, bottom: Any = 0.0) -> dict[str, Any]:
+        with self.lock:
+            m = self.media_item(media_id)
+            if not m:
+                raise KeyError("Media not found")
+            if m.get("media_type") != "image":
+                raise ValueError("Only images can be cropped")
+            try:
+                top = float(top or 0.0)
+            except Exception:
+                top = 0.0
+            try:
+                bottom = float(bottom or 0.0)
+            except Exception:
+                bottom = 0.0
+            top = max(0.0, min(0.89, top))
+            bottom = max(0.0, min(0.89, bottom))
+            total = top + bottom
+            if total > 0.90:
+                scale = 0.90 / total
+                top *= scale
+                bottom *= scale
+            m["crop_top"] = round(top, 6)
+            m["crop_bottom"] = round(bottom, 6)
             self.save()
             return m
 
@@ -860,6 +895,12 @@ class MediaHandler(BaseHTTPRequestHandler):
             if match:
                 body = self._read_json()
                 item = self.store.set_favorite(match.group(1), bool(body.get("favorite")))
+                self._send_json(200, item)
+                return
+            match = re.fullmatch(r"/api/media/([0-9a-f]+)/crop", path)
+            if match:
+                body = self._read_json()
+                item = self.store.set_crop(match.group(1), body.get("top", 0.0), body.get("bottom", 0.0))
                 self._send_json(200, item)
                 return
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/thumbnail", path)
