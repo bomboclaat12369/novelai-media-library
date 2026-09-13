@@ -31,7 +31,7 @@ except Exception:
 HOST = "127.0.0.1"
 PORT = 8765
 APP_NAME = "NovelAI Media Library"
-API_VERSION = 8
+API_VERSION = 5
 
 
 def now_iso() -> str:
@@ -70,14 +70,12 @@ class LibraryStore:
         self.root = root
         self.media_dir = root / "media"
         self.thumb_dir = root / "thumbnails"
-        self.crop_dir = root / "cropped"
         self.backup_dir = root / "backups"
         self.db_path = root / "library.json"
         self.lock = threading.RLock()
         self.root.mkdir(parents=True, exist_ok=True)
         self.media_dir.mkdir(parents=True, exist_ok=True)
         self.thumb_dir.mkdir(parents=True, exist_ok=True)
-        self.crop_dir.mkdir(parents=True, exist_ok=True)
         self.backup_dir.mkdir(parents=True, exist_ok=True)
         self.data = self._load()
 
@@ -101,16 +99,13 @@ class LibraryStore:
                 data = json.load(f)
             if not isinstance(data, dict):
                 raise ValueError("library.json is not a JSON object")
-            changed = False
-            if data.get("version") != API_VERSION:
-                data["version"] = API_VERSION
-                changed = True
+            data.setdefault("version", API_VERSION)
             data.setdefault("characters", [])
             data.setdefault("media", [])
             data.setdefault("sets", [])
             if not isinstance(data.get("sets"), list):
                 data["sets"] = []
-                changed = True
+            changed = False
             for m in data.get("media", []):
                 if "favorite" not in m:
                     m["favorite"] = False
@@ -124,37 +119,6 @@ class LibraryStore:
                 if "crop_bottom" not in m:
                     m["crop_bottom"] = 0.0
                     changed = True
-                if "cropped_rel" not in m:
-                    m["cropped_rel"] = None
-                    changed = True
-
-                # display_rel is the single file normal viewing should use. The
-                # untouched import remains stored_rel and is reserved for crop
-                # editing/reset. Existing libraries migrate automatically.
-                stored_rel = m.get("stored_rel")
-                desired_display = stored_rel
-                if m.get("media_type") == "image":
-                    try:
-                        crop_top = float(m.get("crop_top") or 0.0)
-                    except Exception:
-                        crop_top = 0.0
-                    try:
-                        crop_bottom = float(m.get("crop_bottom") or 0.0)
-                    except Exception:
-                        crop_bottom = 0.0
-                    crop_rel = m.get("cropped_rel")
-                    if (crop_top > 0.0 or crop_bottom > 0.0) and crop_rel:
-                        try:
-                            crop_path = (self.root / str(crop_rel)).resolve()
-                            root_path = self.root.resolve()
-                            if (root_path in crop_path.parents or crop_path == root_path) and crop_path.exists():
-                                desired_display = crop_rel
-                        except Exception:
-                            pass
-                if m.get("display_rel") != desired_display:
-                    m["display_rel"] = desired_display
-                    changed = True
-
                 if m.get("media_type") == "video":
                     if m.get("categories"):
                         m["categories"] = []
@@ -437,7 +401,6 @@ class LibraryStore:
                 "character_id": character_id,
                 "original_name": original_name,
                 "stored_rel": destination.relative_to(self.root).as_posix(),
-                "display_rel": destination.relative_to(self.root).as_posix(),
                 "thumb_rel": thumb_rel,
                 "media_type": media_type,
                 "content_type": content_type,
@@ -445,7 +408,6 @@ class LibraryStore:
                 "favorite": False,
                 "crop_top": 0.0,
                 "crop_bottom": 0.0,
-                "cropped_rel": None,
                 "sha256": sha,
                 "source": source,
                 "video_markers": video_markers,
@@ -651,69 +613,6 @@ class LibraryStore:
             self.save()
             return m
 
-    def _remove_cropped_derivative(self, m: dict[str, Any]) -> None:
-        rel = m.get("cropped_rel")
-        if rel:
-            try:
-                (self.root / str(rel)).unlink(missing_ok=True)
-            except Exception:
-                pass
-        m["cropped_rel"] = None
-        m["display_rel"] = m.get("stored_rel")
-
-    def _make_cropped_derivative(self, m: dict[str, Any]) -> Path:
-        if Image is None:
-            raise RuntimeError("Pillow is required to create persistent cropped images")
-        if m.get("media_type") != "image":
-            raise ValueError("Only images can be cropped")
-        original = (self.root / str(m.get("stored_rel", ""))).resolve()
-        root_resolved = self.root.resolve()
-        if root_resolved not in original.parents and original != root_resolved:
-            raise ValueError("Invalid media path")
-        if not original.exists():
-            raise FileNotFoundError("Original media file is missing")
-
-        top = max(0.0, min(0.89, float(m.get("crop_top") or 0.0)))
-        bottom = max(0.0, min(0.89, float(m.get("crop_bottom") or 0.0)))
-        if top + bottom <= 0:
-            self._remove_cropped_derivative(m)
-            return original
-
-        owner = self.character(str(m.get("character_id", "")))
-        folder = self.crop_dir / safe_component(owner.get("name", "Character") if owner else "Character", "Character")
-        folder.mkdir(parents=True, exist_ok=True)
-        out = folder / f'{m["id"]}.png'
-        temp = out.with_suffix('.png.tmp')
-
-        with Image.open(original) as source:
-            im = ImageOps.exif_transpose(source) if ImageOps is not None else source.copy()
-            try:
-                im.seek(0)
-            except Exception:
-                pass
-            width, height = im.size
-            y1 = max(0, min(height - 1, round(height * top)))
-            y2 = max(y1 + 1, min(height, round(height * (1.0 - bottom))))
-            cropped = im.crop((0, y1, width, y2))
-            if cropped.mode == "CMYK":
-                cropped = cropped.convert("RGB")
-            elif cropped.mode not in ("1", "L", "LA", "P", "RGB", "RGBA", "I", "I;16"):
-                cropped = cropped.convert("RGBA" if "A" in cropped.mode else "RGB")
-            cropped.save(temp, "PNG", optimize=True)
-            try:
-                cropped.close()
-            except Exception:
-                pass
-            if im is not source:
-                try:
-                    im.close()
-                except Exception:
-                    pass
-        os.replace(temp, out)
-        m["cropped_rel"] = out.relative_to(self.root).as_posix()
-        m["display_rel"] = m["cropped_rel"]
-        return out
-
     def set_crop(self, media_id: str, top: Any = 0.0, bottom: Any = 0.0) -> dict[str, Any]:
         with self.lock:
             m = self.media_item(media_id)
@@ -736,31 +635,10 @@ class LibraryStore:
                 scale = 0.90 / total
                 top *= scale
                 bottom *= scale
-
-            old_top = m.get("crop_top", 0.0)
-            old_bottom = m.get("crop_bottom", 0.0)
-            old_rel = m.get("cropped_rel")
-            old_display_rel = m.get("display_rel")
             m["crop_top"] = round(top, 6)
             m["crop_bottom"] = round(bottom, 6)
-            try:
-                if m["crop_top"] or m["crop_bottom"]:
-                    display_path = self._make_cropped_derivative(m)
-                else:
-                    self._remove_cropped_derivative(m)
-                    display_path = (self.root / str(m.get("stored_rel", ""))).resolve()
-                owner = self.character(str(m.get("character_id", "")))
-                thumb_rel = self._make_thumbnail(display_path, media_id, owner.get("name", "Character") if owner else "Character")
-                if thumb_rel:
-                    m["thumb_rel"] = thumb_rel
-                self.save()
-                return m
-            except Exception:
-                m["crop_top"] = old_top
-                m["crop_bottom"] = old_bottom
-                m["cropped_rel"] = old_rel
-                m["display_rel"] = old_display_rel
-                raise
+            self.save()
+            return m
 
     def set_video_meta(self, media_id: str, thumb_seconds: float | None = None, markers: list[Any] | None = None) -> dict[str, Any]:
         with self.lock:
@@ -832,7 +710,7 @@ class LibraryStore:
             m = self.media_item(media_id)
             if not m:
                 raise KeyError("Media not found")
-            for key in ("stored_rel", "thumb_rel", "cropped_rel"):
+            for key in ("stored_rel", "thumb_rel"):
                 rel = m.get(key)
                 if rel:
                     try:
@@ -853,73 +731,22 @@ class LibraryStore:
             self.data["sets"] = kept_sets
             self.save()
 
-    def media_path(self, media_id: str, thumb: bool = False, source: bool = False) -> tuple[Path, str]:
+    def media_path(self, media_id: str, thumb: bool = False) -> tuple[Path, str]:
         with self.lock:
             m = self.media_item(media_id)
             if not m:
                 raise KeyError("Media not found")
-
-            if thumb:
-                rel = m.get("thumb_rel") or m.get("stored_rel")
-                path = (self.root / str(rel or "")).resolve()
-                if self.root.resolve() not in path.parents and path != self.root.resolve():
-                    raise ValueError("Invalid media path")
-                if not path.exists():
-                    raise FileNotFoundError("Media file is missing")
-                if m.get("thumb_rel"):
-                    return path, mimetypes.guess_type(path.name)[0] or "image/webp"
-                return path, m.get("content_type") or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-
-            # /source always means the untouched imported file. Normal viewing has
-            # exactly one source of truth: display_rel. Saving a crop changes
-            # display_rel to the persistent cropped PNG; resetting changes it back to
-            # stored_rel. The crop metadata below is only a self-healing guard for old
-            # libraries or a manually deleted derivative.
-            if source or m.get("media_type") != "image":
+            rel = m.get("thumb_rel") if thumb else m.get("stored_rel")
+            if thumb and not rel:
                 rel = m.get("stored_rel")
-                using_crop = False
-            else:
-                rel = m.get("display_rel") or m.get("stored_rel")
-                try:
-                    top = float(m.get("crop_top") or 0.0)
-                except Exception:
-                    top = 0.0
-                try:
-                    bottom = float(m.get("crop_bottom") or 0.0)
-                except Exception:
-                    bottom = 0.0
-                has_crop = top > 0.0 or bottom > 0.0
-                using_crop = False
-                if has_crop:
-                    crop_rel = m.get("cropped_rel")
-                    crop_path = (self.root / str(crop_rel or "")).resolve() if crop_rel else None
-                    if not crop_rel or crop_path is None or not crop_path.exists():
-                        self._make_cropped_derivative(m)
-                        self.save()
-                        crop_rel = m.get("cropped_rel")
-                    if not crop_rel:
-                        raise FileNotFoundError("Cropped media file is missing")
-                    if m.get("display_rel") != crop_rel:
-                        m["display_rel"] = crop_rel
-                        self.save()
-                    rel = crop_rel
-                    using_crop = True
-                else:
-                    original_rel = m.get("stored_rel")
-                    if m.get("display_rel") != original_rel:
-                        m["display_rel"] = original_rel
-                        self.save()
-                    rel = original_rel
-
-            path = (self.root / str(rel or "")).resolve()
+            path = (self.root / rel).resolve()
             if self.root.resolve() not in path.parents and path != self.root.resolve():
                 raise ValueError("Invalid media path")
             if not path.exists():
                 raise FileNotFoundError("Media file is missing")
-            if using_crop:
-                return path, "image/png"
+            if thumb and m.get("thumb_rel"):
+                return path, mimetypes.guess_type(path.name)[0] or "image/webp"
             return path, m.get("content_type") or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-
 
 
 class MediaHandler(BaseHTTPRequestHandler):
@@ -1064,7 +891,7 @@ class MediaHandler(BaseHTTPRequestHandler):
         self.send_header("Accept-Ranges", "bytes")
         if partial:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        self.send_header("Cache-Control", "private, max-age=3600" if content_type.startswith("video/") else "no-store")
+        self.send_header("Cache-Control", "private, max-age=86400")
         self.end_headers()
 
         if self.command == "HEAD" or length <= 0:
@@ -1086,7 +913,7 @@ class MediaHandler(BaseHTTPRequestHandler):
     def do_HEAD(self) -> None:
         try:
             path = urllib.parse.urlparse(self.path).path
-            match = re.fullmatch(r"/api/media/([0-9a-f]+)/(thumb|original|source)", path)
+            match = re.fullmatch(r"/api/media/([0-9a-f]+)/(?:(thumb)|(original))", path)
             if not match:
                 self.send_response(404)
                 self._cors()
@@ -1094,8 +921,8 @@ class MediaHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             media_id = match.group(1)
-            kind = match.group(2)
-            file_path, content_type = self.store.media_path(media_id, thumb=(kind == "thumb"), source=(kind == "source"))
+            thumb = bool(match.group(2))
+            file_path, content_type = self.store.media_path(media_id, thumb=thumb)
             self._send_file_with_range(file_path, content_type)
         except Exception:
             self.send_response(500)
@@ -1121,11 +948,11 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/library":
                 self._send_json(200, self.store.public_library())
                 return
-            match = re.fullmatch(r"/api/media/([0-9a-f]+)/(thumb|original|source)", path)
+            match = re.fullmatch(r"/api/media/([0-9a-f]+)/(?:(thumb)|(original))", path)
             if match:
                 media_id = match.group(1)
-                kind = match.group(2)
-                file_path, content_type = self.store.media_path(media_id, thumb=(kind == "thumb"), source=(kind == "source"))
+                thumb = bool(match.group(2))
+                file_path, content_type = self.store.media_path(media_id, thumb=thumb)
                 self._send_file_with_range(file_path, content_type)
                 return
             self._send_json(404, {"error": "Not found"})
