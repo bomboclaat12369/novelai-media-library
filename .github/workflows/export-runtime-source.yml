@@ -1,0 +1,47 @@
+name: Export runtime source
+
+on:
+  push:
+    paths:
+      - .github/workflows/export-runtime-source.yml
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Decode current runtime
+        run: |
+          python - <<'PY'
+          import base64, json
+          from pathlib import Path
+          from urllib.parse import urlparse
+
+          manifest = json.loads(Path('manifest.json').read_text(encoding='utf-8'))
+          encoded = ''
+          for url in manifest['runtime_parts']:
+              name = Path(urlparse(url).path).name
+              encoded += Path('payload', name).read_text(encoding='utf-8').strip()
+          source = base64.b64decode(encoded, validate=True)
+          out = Path('runtime-src/companion-runtime.pyw')
+          out.parent.mkdir(parents=True, exist_ok=True)
+          out.write_bytes(source)
+          PY
+      - name: Commit decoded source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add runtime-src/companion-runtime.pyw
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Export current companion runtime source"
+          git push
