@@ -31,7 +31,7 @@ except Exception:
 HOST = "127.0.0.1"
 PORT = 8765
 APP_NAME = "NovelAI Media Library"
-API_VERSION = 7
+API_VERSION = 8
 
 
 def now_iso() -> str:
@@ -127,6 +127,34 @@ class LibraryStore:
                 if "cropped_rel" not in m:
                     m["cropped_rel"] = None
                     changed = True
+
+                # display_rel is the single file normal viewing should use. The
+                # untouched import remains stored_rel and is reserved for crop
+                # editing/reset. Existing libraries migrate automatically.
+                stored_rel = m.get("stored_rel")
+                desired_display = stored_rel
+                if m.get("media_type") == "image":
+                    try:
+                        crop_top = float(m.get("crop_top") or 0.0)
+                    except Exception:
+                        crop_top = 0.0
+                    try:
+                        crop_bottom = float(m.get("crop_bottom") or 0.0)
+                    except Exception:
+                        crop_bottom = 0.0
+                    crop_rel = m.get("cropped_rel")
+                    if (crop_top > 0.0 or crop_bottom > 0.0) and crop_rel:
+                        try:
+                            crop_path = (self.root / str(crop_rel)).resolve()
+                            root_path = self.root.resolve()
+                            if (root_path in crop_path.parents or crop_path == root_path) and crop_path.exists():
+                                desired_display = crop_rel
+                        except Exception:
+                            pass
+                if m.get("display_rel") != desired_display:
+                    m["display_rel"] = desired_display
+                    changed = True
+
                 if m.get("media_type") == "video":
                     if m.get("categories"):
                         m["categories"] = []
@@ -409,6 +437,7 @@ class LibraryStore:
                 "character_id": character_id,
                 "original_name": original_name,
                 "stored_rel": destination.relative_to(self.root).as_posix(),
+                "display_rel": destination.relative_to(self.root).as_posix(),
                 "thumb_rel": thumb_rel,
                 "media_type": media_type,
                 "content_type": content_type,
@@ -630,6 +659,7 @@ class LibraryStore:
             except Exception:
                 pass
         m["cropped_rel"] = None
+        m["display_rel"] = m.get("stored_rel")
 
     def _make_cropped_derivative(self, m: dict[str, Any]) -> Path:
         if Image is None:
@@ -681,6 +711,7 @@ class LibraryStore:
                     pass
         os.replace(temp, out)
         m["cropped_rel"] = out.relative_to(self.root).as_posix()
+        m["display_rel"] = m["cropped_rel"]
         return out
 
     def set_crop(self, media_id: str, top: Any = 0.0, bottom: Any = 0.0) -> dict[str, Any]:
@@ -709,6 +740,7 @@ class LibraryStore:
             old_top = m.get("crop_top", 0.0)
             old_bottom = m.get("crop_bottom", 0.0)
             old_rel = m.get("cropped_rel")
+            old_display_rel = m.get("display_rel")
             m["crop_top"] = round(top, 6)
             m["crop_bottom"] = round(bottom, 6)
             try:
@@ -727,6 +759,7 @@ class LibraryStore:
                 m["crop_top"] = old_top
                 m["crop_bottom"] = old_bottom
                 m["cropped_rel"] = old_rel
+                m["display_rel"] = old_display_rel
                 raise
 
     def set_video_meta(self, media_id: str, thumb_seconds: float | None = None, markers: list[Any] | None = None) -> dict[str, Any]:
@@ -837,13 +870,16 @@ class LibraryStore:
                     return path, mimetypes.guess_type(path.name)[0] or "image/webp"
                 return path, m.get("content_type") or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
-            # /source is always the exact untouched imported file. Videos also always
-            # use their original file. Normal image display, however, must prefer the
-            # persistent cropped derivative whenever crop metadata is present.
+            # /source always means the untouched imported file. Normal viewing has
+            # exactly one source of truth: display_rel. Saving a crop changes
+            # display_rel to the persistent cropped PNG; resetting changes it back to
+            # stored_rel. The crop metadata below is only a self-healing guard for old
+            # libraries or a manually deleted derivative.
             if source or m.get("media_type") != "image":
                 rel = m.get("stored_rel")
                 using_crop = False
             else:
+                rel = m.get("display_rel") or m.get("stored_rel")
                 try:
                     top = float(m.get("crop_top") or 0.0)
                 except Exception:
@@ -855,17 +891,25 @@ class LibraryStore:
                 has_crop = top > 0.0 or bottom > 0.0
                 using_crop = False
                 if has_crop:
-                    rel = m.get("cropped_rel")
-                    candidate = (self.root / str(rel or "")).resolve() if rel else None
-                    if not rel or candidate is None or not candidate.exists():
+                    crop_rel = m.get("cropped_rel")
+                    crop_path = (self.root / str(crop_rel or "")).resolve() if crop_rel else None
+                    if not crop_rel or crop_path is None or not crop_path.exists():
                         self._make_cropped_derivative(m)
                         self.save()
-                        rel = m.get("cropped_rel")
-                    if not rel:
+                        crop_rel = m.get("cropped_rel")
+                    if not crop_rel:
                         raise FileNotFoundError("Cropped media file is missing")
+                    if m.get("display_rel") != crop_rel:
+                        m["display_rel"] = crop_rel
+                        self.save()
+                    rel = crop_rel
                     using_crop = True
                 else:
-                    rel = m.get("stored_rel")
+                    original_rel = m.get("stored_rel")
+                    if m.get("display_rel") != original_rel:
+                        m["display_rel"] = original_rel
+                        self.save()
+                    rel = original_rel
 
             path = (self.root / str(rel or "")).resolve()
             if self.root.resolve() not in path.parents and path != self.root.resolve():
