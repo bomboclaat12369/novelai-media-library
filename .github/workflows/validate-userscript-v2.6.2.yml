@@ -1,0 +1,17 @@
+name: Validate userscript v2.6.2
+
+on:
+  push:
+    paths:
+      - payload/userscript-2.6.2.patch01.txt
+      - .github/workflows/validate-userscript-v2.6.2.yml
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate syntax
+        run: |
+          cp payload/userscript-2.6.2.patch01.txt /tmp/userscript-v2.6.2.js
+          node --check /tmp/userscript-v2.6.2.js
