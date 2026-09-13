@@ -1,0 +1,316 @@
+// NovelAI Media Library v2.4.1: on-disk crop persistence + split selector restore
+(() => {
+  'use strict';
+
+  const API = 'http://127.0.0.1:8765';
+  const UI_STATE_KEY = 'nai-media-v1-ui';
+  const CROP_KEY = 'nai-media-crops-v1';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV241 === '1') return;
+  document.documentElement.dataset.naiMediaV241 = '1';
+
+  const stages = root.getElementById('stages');
+  const stageEls = [root.getElementById('stage1'), root.getElementById('stage2')];
+  const splitBtn = root.getElementById('splitBtn');
+  const fullBtn = root.getElementById('fullBtn');
+  if (!stages || !stageEls[0] || !splitBtn || !fullBtn) return;
+
+  const crops = new Map();
+  const cropUrls = new Map();
+  let editor = null;
+  let serverCropReady = false;
+
+  function normalize(v) {
+    let top = Number(v?.top || 0), bottom = Number(v?.bottom || 0);
+    if (!Number.isFinite(top)) top = 0;
+    if (!Number.isFinite(bottom)) bottom = 0;
+    top = Math.max(0, Math.min(.89, top));
+    bottom = Math.max(0, Math.min(.89, bottom));
+    if (top + bottom > .90) {
+      const s = .90 / (top + bottom);
+      top *= s; bottom *= s;
+    }
+    return { top, bottom };
+  }
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(CROP_KEY) || '{}');
+    for (const [id, value] of Object.entries(saved || {})) {
+      const c = normalize(value);
+      if (c.top || c.bottom) crops.set(id, c);
+    }
+  } catch (_) {}
+
+  function persist() {
+    const out = {};
+    for (const [id, c] of crops) out[id] = c;
+    localStorage.setItem(CROP_KEY, JSON.stringify(out));
+  }
+
+  function apiJson({method='GET', path, data=null}) {
+    return new Promise((resolve, reject) => GM_xmlhttpRequest({
+      method,
+      url:`${API}${path}`,
+      data:data == null ? null : JSON.stringify(data),
+      headers:{Origin:'https://novelai.net', ...(data == null ? {} : {'Content-Type':'application/json'})},
+      timeout:120000,
+      onload:r=>{
+        let parsed=null;
+        try { parsed = r.responseText ? JSON.parse(r.responseText) : null; } catch (_) {}
+        if (r.status >= 200 && r.status < 300) resolve(parsed);
+        else reject(new Error(parsed?.error || `Request failed (${r.status})`));
+      },
+      onerror:()=>reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+      ontimeout:()=>reject(new Error('The local media request timed out.')),
+    }));
+  }
+
+  async function syncCropsFromServer() {
+    try {
+      const health = await apiJson({path:'/api/health'});
+      if (Number(health?.version || 0) < 4) return false;
+      const lib = await apiJson({path:'/api/library'});
+      const localBefore = new Map(crops);
+      const next = new Map();
+      for (const m of (lib?.media || [])) {
+        if (m?.media_type !== 'image' || !m?.id) continue;
+        let remote = normalize({top:m.crop_top, bottom:m.crop_bottom});
+        const local = normalize(localBefore.get(m.id));
+        // v2.4.0 stored crops only in browser storage. Migrate those once when
+        // the v4 companion becomes available, but keep library.json authoritative afterward.
+        if (!remote.top && !remote.bottom && (local.top || local.bottom)) {
+          try {
+            const updated = await apiJson({method:'POST', path:`/api/media/${encodeURIComponent(m.id)}/crop`, data:local});
+            remote = normalize({top:updated?.crop_top, bottom:updated?.crop_bottom});
+          } catch (_) {}
+        }
+        if (remote.top || remote.bottom) next.set(m.id, remote);
+      }
+      crops.clear();
+      for (const [id,c] of next) crops.set(id,c);
+      persist(); // browser copy is now only a cache/fallback; library.json is source of truth.
+      serverCropReady = true;
+      applyStages(true);
+      refreshButton();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function syncSplitSlotButtons() {
+    const split = stages.classList.contains('split');
+    root.querySelectorAll('.naiSlotSelectBtnV239').forEach(button => {
+      button.style.display = split ? 'inline-flex' : 'none';
+    });
+  }
+
+  // Persisted split mode is restored by the base script without clicking Split.
+  // Watch only the stages class, so the Slot 1/Slot 2 buttons are correct immediately after refresh.
+  new MutationObserver(syncSplitSlotButtons).observe(stages, {attributes:true, attributeFilter:['class']});
+  [0,40,120,300,700].forEach(ms => setTimeout(syncSplitSlotButtons, ms));
+
+  function uiState() {
+    try { return JSON.parse(localStorage.getItem(UI_STATE_KEY) || '{}') || {}; }
+    catch (_) { return {}; }
+  }
+
+  function activeSlot() { return stageEls[1]?.classList.contains('slot-active') ? 1 : 0; }
+
+  function slotId(slot) {
+    const state = uiState();
+    const ids = Array.isArray(state.slotMediaIds) ? state.slotMediaIds : [];
+    return ids[slot] || (slot === activeSlot() ? state.selectedMediaId : null) || null;
+  }
+
+  const style = document.createElement('style');
+  style.textContent = `
+    #naiCropBtn{min-width:48px;padding:6px 8px!important;font-size:11px!important}
+    #naiCropBtn:disabled{opacity:.4;cursor:default}
+    #naiCropBtn.hasCrop{background:#4c467f!important;border-color:#8179d8!important}
+    .naiCropWrap{position:fixed;inset:0;z-index:2147484100;background:rgba(2,3,8,.9);display:flex;align-items:center;justify-content:center;padding:20px}
+    .naiCropModal{width:min(1050px,96vw);max-height:94vh;background:#171a36;border:1px solid rgba(255,255,255,.14);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+    .naiCropHead,.naiCropFoot{display:flex;align-items:center;gap:8px;padding:11px 13px}.naiCropHead{border-bottom:1px solid rgba(255,255,255,.09)}.naiCropFoot{border-top:1px solid rgba(255,255,255,.09)}
+    .naiCropTitle{font:700 14px system-ui;flex:1}.naiCropHint{font:11px system-ui;color:#a8abc4}.naiCropReadout{font:12px system-ui;color:#d0d2e5;flex:1}
+    .naiCropBody{flex:1;min-height:0;overflow:auto;padding:12px;display:flex;align-items:center;justify-content:center;background:#080a17}
+    .naiCropBox{position:relative;display:inline-block;line-height:0;max-width:100%;user-select:none;touch-action:none}
+    .naiCropBox>img{display:block;width:auto;height:auto;max-width:min(900px,90vw);max-height:72vh;object-fit:contain;pointer-events:none}
+    .naiCropMask{position:absolute;left:0;right:0;background:rgba(0,0,0,.68);pointer-events:none}.naiCropMask.top{top:0}.naiCropMask.bottom{bottom:0}
+    .naiCropHandle{position:absolute;left:0;right:0;height:14px;transform:translateY(-7px);z-index:3;cursor:ns-resize;touch-action:none}
+    .naiCropHandle:before{content:'';position:absolute;left:0;right:0;top:6px;height:2px;background:#8c83ff;box-shadow:0 0 8px #8c83ff}
+    .naiCropHandle:after{content:'↕';position:absolute;left:50%;top:-5px;transform:translateX(-50%);width:30px;height:24px;border-radius:6px;background:#6155d9;color:white;display:grid;place-items:center;font:700 14px system-ui}
+  `;
+  root.appendChild(style);
+
+  const cropBtn = document.createElement('button');
+  cropBtn.type = 'button';
+  cropBtn.id = 'naiCropBtn';
+  cropBtn.textContent = 'Crop';
+  splitBtn.parentElement.insertBefore(cropBtn, fullBtn);
+
+  function refreshButton() {
+    const slot = activeSlot();
+    const id = slotId(slot);
+    const isImage = !!stageEls[slot]?.querySelector('img');
+    cropBtn.disabled = !id || !isImage;
+    cropBtn.classList.toggle('hasCrop', !!id && crops.has(id));
+    cropBtn.textContent = id && crops.has(id) ? 'Crop ✓' : 'Crop';
+  }
+
+  function getBlob(url) {
+    return new Promise((resolve, reject) => GM_xmlhttpRequest({
+      method:'GET', url, responseType:'blob', timeout:120000,
+      headers:{Origin:'https://novelai.net'},
+      onload:r => r.status >= 200 && r.status < 300 ? resolve(r.response) : reject(new Error(`Image request failed (${r.status})`)),
+      onerror:() => reject(new Error('Could not load this image.')),
+      ontimeout:() => reject(new Error('Image request timed out.')),
+    }));
+  }
+
+  function revoke(id) {
+    const x = cropUrls.get(id);
+    if (x?.url) URL.revokeObjectURL(x.url);
+    cropUrls.delete(id);
+  }
+
+  async function croppedUrl(id) {
+    const c = normalize(crops.get(id));
+    if (!c.top && !c.bottom) return null;
+    const key = `${c.top.toFixed(6)}:${c.bottom.toFixed(6)}`;
+    const cached = cropUrls.get(id);
+    if (cached?.key === key) return cached.url;
+    revoke(id);
+
+    const blob = await getBlob(`${API}/api/media/${encodeURIComponent(id)}/original`);
+    const bitmap = await createImageBitmap(blob);
+    try {
+      const y1 = Math.max(0, Math.min(bitmap.height - 1, Math.round(bitmap.height * c.top)));
+      const y2 = Math.max(y1 + 1, Math.min(bitmap.height, Math.round(bitmap.height * (1 - c.bottom))));
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width; canvas.height = y2 - y1;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Could not create crop canvas.');
+      ctx.drawImage(bitmap, 0, y1, bitmap.width, y2-y1, 0, 0, bitmap.width, y2-y1);
+      const type = blob.type === 'image/png' ? 'image/png' : (blob.type === 'image/webp' ? 'image/webp' : 'image/jpeg');
+      const out = await new Promise((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error('Crop failed.')), type, type === 'image/png' ? undefined : .96));
+      const url = URL.createObjectURL(out);
+      cropUrls.set(id, {key,url});
+      return url;
+    } finally { bitmap.close(); }
+  }
+
+  async function apply(img, id, force=false) {
+    if (!img || !id || !img.isConnected) return;
+    const c = normalize(crops.get(id));
+    const key = `${id}:${c.top.toFixed(6)}:${c.bottom.toFixed(6)}`;
+    if (!force && img.dataset.naiCropKey === key) return;
+    if (!c.top && !c.bottom) {
+      if (img.dataset.naiCropOriginal && img.src !== img.dataset.naiCropOriginal) img.src = img.dataset.naiCropOriginal;
+      delete img.dataset.naiCropKey; delete img.dataset.naiCropOriginal;
+      return;
+    }
+    if (!img.dataset.naiCropOriginal) img.dataset.naiCropOriginal = img.currentSrc || img.src;
+    try {
+      const url = await croppedUrl(id);
+      if (img.isConnected && url) { img.src = url; img.dataset.naiCropKey = key; }
+    } catch (e) { console.warn('[NovelAI Media] crop render failed', e); }
+  }
+
+  function applyStage(slot, force=false) {
+    const id = slotId(slot), img = stageEls[slot]?.querySelector('img');
+    if (id && img) apply(img,id,force);
+  }
+  function applyStages(force=false) { applyStage(0,force); if (stages.classList.contains('split')) applyStage(1,force); }
+
+  stageEls.forEach((stage, slot) => {
+    if (!stage) return;
+    new MutationObserver(() => { applyStage(slot); refreshButton(); }).observe(stage,{childList:true});
+  });
+
+  function schedule() { [0,80,250,700].forEach(ms => setTimeout(() => {applyStages();refreshButton();},ms)); }
+  root.addEventListener('click', e => {
+    const t=e.target;
+    if (t.closest?.('.tile[data-id]') || ['prevBtn','nextBtn','randomBtn','splitBtn','naiSlotSelectV239_1','naiSlotSelectV239_2'].includes(t.id)) schedule();
+  });
+
+  // Crop the optional third fullscreen image after its thumbnail is chosen.
+  window.addEventListener('click', e => {
+    if (!root.querySelector('.naiTripleFullscreen')) return;
+    const path=e.composedPath?.()||[];
+    const tile=path.find(n => n?.classList?.contains?.('tile') && n?.dataset?.id);
+    if (!tile) return;
+    [100,300,650].forEach(ms => setTimeout(() => {
+      const img=root.querySelector('.naiThirdMedia:not([hidden]) img');
+      if (img) apply(img,tile.dataset.id);
+    },ms));
+  },true);
+
+  function closeEditor() {
+    if (!editor) return;
+    URL.revokeObjectURL(editor.url);
+    editor.wrap.remove(); editor=null;
+  }
+
+  function paintEditor() {
+    if (!editor) return;
+    const tp=editor.top*100,bp=editor.bottom*100;
+    editor.topMask.style.height=`${tp}%`; editor.bottomMask.style.height=`${bp}%`;
+    editor.topHandle.style.top=`${tp}%`; editor.bottomHandle.style.top=`${100-bp}%`;
+    editor.readout.textContent=`Top ${tp.toFixed(1)}% · Bottom ${bp.toFixed(1)}% · Keep ${(100-tp-bp).toFixed(1)}%`;
+  }
+
+  function dragEdge(edge,y) {
+    if (!editor) return;
+    const r=editor.box.getBoundingClientRect(); if (!r.height) return;
+    const p=Math.max(0,Math.min(1,(y-r.top)/r.height));
+    if (edge==='top') editor.top=Math.max(0,Math.min(p,.90-editor.bottom));
+    else editor.bottom=Math.max(0,Math.min(1-p,.90-editor.top));
+    paintEditor();
+  }
+
+  async function openEditor() {
+    if (editor) return;
+    const slot=activeSlot(),id=slotId(slot);
+    if (!id || !stageEls[slot]?.querySelector('img')) return;
+    let blob; try { blob=await getBlob(`${API}/api/media/${encodeURIComponent(id)}/original`); } catch(e){alert(e.message);return;}
+    const url=URL.createObjectURL(blob), c=normalize(crops.get(id));
+    const wrap=document.createElement('div'); wrap.className='naiCropWrap';
+    wrap.innerHTML=`<div class="naiCropModal"><div class="naiCropHead"><div class="naiCropTitle">Crop image</div><div class="naiCropHint">Drag the purple lines. The original file is never changed.</div><button class="naiCropClose">×</button></div><div class="naiCropBody"><div class="naiCropBox"><img><div class="naiCropMask top"></div><div class="naiCropMask bottom"></div><div class="naiCropHandle top"></div><div class="naiCropHandle bottom"></div></div></div><div class="naiCropFoot"><div class="naiCropReadout"></div><button class="naiCropReset">Reset</button><button class="naiCropCancel">Cancel</button><button class="primary naiCropSave">Save Crop</button></div></div>`;
+    root.appendChild(wrap);
+    const box=wrap.querySelector('.naiCropBox'); box.querySelector('img').src=url;
+    editor={id,url,wrap,box,top:c.top,bottom:c.bottom,drag:null,topMask:box.querySelector('.naiCropMask.top'),bottomMask:box.querySelector('.naiCropMask.bottom'),topHandle:box.querySelector('.naiCropHandle.top'),bottomHandle:box.querySelector('.naiCropHandle.bottom'),readout:wrap.querySelector('.naiCropReadout')};
+    paintEditor();
+
+    const down=(edge,e)=>{e.preventDefault();editor.drag=edge;dragEdge(edge,e.clientY)};
+    editor.topHandle.addEventListener('pointerdown',e=>down('top',e)); editor.bottomHandle.addEventListener('pointerdown',e=>down('bottom',e));
+    const move=e=>{if(editor?.drag){e.preventDefault();dragEdge(editor.drag,e.clientY)}}; const up=()=>{if(editor)editor.drag=null};
+    window.addEventListener('pointermove',move,true); window.addEventListener('pointerup',up,true);
+    const done=()=>{window.removeEventListener('pointermove',move,true);window.removeEventListener('pointerup',up,true);closeEditor()};
+    wrap.querySelector('.naiCropClose').onclick=done; wrap.querySelector('.naiCropCancel').onclick=done; wrap.addEventListener('click',e=>{if(e.target===wrap)done()});
+    wrap.querySelector('.naiCropReset').onclick=()=>{editor.top=0;editor.bottom=0;paintEditor()};
+    const saveBtn=wrap.querySelector('.naiCropSave');
+    saveBtn.onclick=async()=>{
+      const c=normalize({top:editor.top,bottom:editor.bottom});
+      saveBtn.disabled=true;
+      try {
+        if (!serverCropReady) await syncCropsFromServer();
+        if (!serverCropReady) throw new Error('The companion crop-storage update is still installing. Wait about a minute, then refresh NovelAI and try again.');
+        const updated=await apiJson({method:'POST',path:`/api/media/${encodeURIComponent(id)}/crop`,data:c});
+        const saved=normalize({top:updated?.crop_top,bottom:updated?.crop_bottom});
+        if (!saved.top&&!saved.bottom) crops.delete(id); else crops.set(id,saved);
+        persist(); revoke(id); done(); applyStages(true); refreshButton();
+      } catch(e) {
+        alert(e?.message || 'Could not save this crop.');
+        saveBtn.disabled=false;
+      }
+    };
+  }
+
+  cropBtn.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();openEditor()});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&editor){e.preventDefault();closeEditor()}},true);
+
+  syncSplitSlotButtons();
+  syncCropsFromServer();
+  schedule(); refreshButton();
+})();
