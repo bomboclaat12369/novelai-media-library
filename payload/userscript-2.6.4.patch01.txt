@@ -1,0 +1,188 @@
+// NovelAI Media Library v2.6.4: force persistent cropped display asset in viewer
+(() => {
+  'use strict';
+
+  const API = 'http://127.0.0.1:8765';
+  const KEY = 'nai-media-v1-ui';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaCropDisplay264 === '1') return;
+  document.documentElement.dataset.naiMediaCropDisplay264 = '1';
+
+  const stages = [root.getElementById('stage1'), root.getElementById('stage2')];
+  if (!stages[0] || !stages[1]) return;
+
+  function gmRequest({ path, responseType = 'text', timeout = 300000 }) {
+    return new Promise((resolve, reject) => GM_xmlhttpRequest({
+      method: 'GET',
+      url: `${API}${path}`,
+      headers: { Origin: 'https://novelai.net' },
+      responseType,
+      timeout,
+      onload: res => {
+        if (res.status >= 200 && res.status < 300) {
+          if (responseType === 'blob') return resolve(res.response);
+          try { return resolve(JSON.parse(res.responseText || '{}')); }
+          catch (_) { return resolve(res.responseText || ''); }
+        }
+        let message = `Request failed (${res.status})`;
+        try { message = JSON.parse(res.responseText || '{}').error || message; } catch (_) {}
+        reject(new Error(message));
+      },
+      onerror: () => reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+      ontimeout: () => reject(new Error('The local media request timed out.')),
+    }));
+  }
+
+  function uiState() {
+    try { return JSON.parse(localStorage.getItem(KEY) || '{}') || {}; }
+    catch (_) { return {}; }
+  }
+
+  function activeSlot() {
+    return stages[1].classList.contains('slot-active') ? 1 : 0;
+  }
+
+  function slotId(slot) {
+    const state = uiState();
+    const ids = Array.isArray(state.slotMediaIds) ? state.slotMediaIds : [];
+    return ids[slot] || (slot === activeSlot() ? state.selectedMediaId : null) || null;
+  }
+
+  let library = null;
+  let libraryPromise = null;
+  async function refreshLibrary() {
+    if (libraryPromise) return libraryPromise;
+    libraryPromise = gmRequest({ path: `/api/library?display264=${Date.now()}` })
+      .then(value => {
+        library = value || { media: [] };
+        return library;
+      })
+      .finally(() => { libraryPromise = null; });
+    return libraryPromise;
+  }
+
+  function mediaMeta(id) {
+    return (library?.media || []).find(item => item.id === id) || null;
+  }
+
+  function cropKey(item) {
+    if (!item || item.media_type !== 'image') return null;
+    const top = Number(item.crop_top || 0);
+    const bottom = Number(item.crop_bottom || 0);
+    if (!(top > 0 || bottom > 0)) return null;
+    return `${item.id}:${top.toFixed(6)}:${bottom.toFixed(6)}:${item.cropped_rel || item.display_rel || ''}`;
+  }
+
+  const displayCache = new Map();
+  function rememberDisplay(id, key, blob) {
+    const previous = displayCache.get(id);
+    if (previous?.url && previous.key !== key) URL.revokeObjectURL(previous.url);
+    if (previous?.key === key && previous.url) return previous.url;
+    const url = URL.createObjectURL(blob);
+    displayCache.set(id, { key, url });
+    return url;
+  }
+
+  const pending = new WeakMap();
+  async function enforceStage(slot) {
+    const stage = stages[slot];
+    const img = stage.querySelector('img');
+    const id = slotId(slot);
+    if (!img || !id) return;
+
+    // Prevent the base viewer's fixed /original URL from painting while we determine
+    // whether this item has a persistent cropped display asset.
+    img.style.visibility = 'hidden';
+
+    if (!library) {
+      try { await refreshLibrary(); }
+      catch (_) {
+        if (img.isConnected) img.style.visibility = '';
+        return;
+      }
+    }
+
+    let item = mediaMeta(id);
+    if (!item) {
+      try { await refreshLibrary(); item = mediaMeta(id); } catch (_) {}
+    }
+    const key = cropKey(item);
+    if (!key) {
+      if (img.isConnected && slotId(slot) === id) img.style.visibility = '';
+      return;
+    }
+
+    if (img.dataset.naiCropDisplay264 === key) {
+      img.style.visibility = '';
+      return;
+    }
+
+    const cached = displayCache.get(id);
+    if (cached?.key === key && cached.url) {
+      img.src = cached.url;
+      img.dataset.naiCropDisplay264 = key;
+      try { await img.decode(); } catch (_) {}
+      if (img.isConnected && slotId(slot) === id) img.style.visibility = '';
+      return;
+    }
+
+    const token = {};
+    pending.set(img, token);
+    try {
+      // The query string is intentionally tied to the saved crop. This bypasses any
+      // stale response cached under the base viewer's constant /original URL, while
+      // the companion still serves the already-saved cropped file (no canvas crop).
+      const version = encodeURIComponent(`${Number(item.crop_top || 0).toFixed(6)}-${Number(item.crop_bottom || 0).toFixed(6)}-${item.cropped_rel || item.display_rel || 'crop'}`);
+      const blob = await gmRequest({
+        path: `/api/media/${encodeURIComponent(id)}/original?display=${version}`,
+        responseType: 'blob',
+      });
+      if (pending.get(img) !== token || !img.isConnected || slotId(slot) !== id) return;
+      const url = rememberDisplay(id, key, blob);
+      img.src = url;
+      img.dataset.naiCropDisplay264 = key;
+      try { await img.decode(); } catch (_) {}
+      if (pending.get(img) === token && img.isConnected && slotId(slot) === id) img.style.visibility = '';
+    } catch (_) {
+      if (pending.get(img) === token && img.isConnected && slotId(slot) === id) img.style.visibility = '';
+    }
+  }
+
+  function schedule(slot) {
+    queueMicrotask(() => enforceStage(slot));
+  }
+
+  stages.forEach((stage, slot) => {
+    new MutationObserver(() => schedule(slot)).observe(stage, { childList: true });
+  });
+
+  // Keep metadata current after a crop is saved/reset. The crop modal's save is
+  // asynchronous, so use a few one-shot refreshes rather than polling.
+  root.addEventListener('click', event => {
+    const target = event.target;
+    if (!target?.closest) return;
+    if (target.closest('.naiCropSaveV260') || target.closest('.naiCropResetV260')) {
+      [120, 350, 800].forEach(delay => setTimeout(async () => {
+        try {
+          library = null;
+          await refreshLibrary();
+          schedule(0);
+          schedule(1);
+        } catch (_) {}
+      }, delay));
+    }
+  }, true);
+
+  // Prime the metadata before the first image click in normal use.
+  refreshLibrary().catch(() => {});
+  schedule(0);
+  schedule(1);
+
+  window.addEventListener('pagehide', () => {
+    for (const value of displayCache.values()) {
+      if (value?.url) URL.revokeObjectURL(value.url);
+    }
+    displayCache.clear();
+  }, { once: true });
+})();
