@@ -1,0 +1,498 @@
+// NovelAI Media Library v2.6.0: persistent cropped files + unified crop editor
+(() => {
+  'use strict';
+
+  const API = 'http://127.0.0.1:8765';
+  const UI_STATE_KEY = 'nai-media-v1-ui';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV260 === '1') return;
+  document.documentElement.dataset.naiMediaV260 = '1';
+
+  const stages = root.getElementById('stages');
+  const stageEls = [root.getElementById('stage1'), root.getElementById('stage2')];
+  const splitBtn = root.getElementById('splitBtn');
+  const fullBtn = root.getElementById('fullBtn');
+  const modalRoot = root.getElementById('modalRoot');
+  const charSelect = root.getElementById('characterSelect');
+  if (!stages || !stageEls[0] || !stageEls[1] || !splitBtn || !fullBtn || !modalRoot || !charSelect) return;
+
+  function uiState() {
+    try { return JSON.parse(localStorage.getItem(UI_STATE_KEY) || '{}') || {}; }
+    catch (_) { return {}; }
+  }
+
+  function saveUiState(value) {
+    try { localStorage.setItem(UI_STATE_KEY, JSON.stringify(value || {})); } catch (_) {}
+  }
+
+  function resetPersistedViewerState() {
+    const state = uiState();
+    const hadViewer = !!(
+      state.splitView || state.activeSlot === 1 || state.selectedMediaId ||
+      (Array.isArray(state.slotMediaIds) && state.slotMediaIds.some(Boolean))
+    );
+    state.splitView = false;
+    state.activeSlot = 0;
+    state.selectedMediaId = null;
+    state.slotMediaIds = [null, null];
+    saveUiState(state);
+    return hadViewer;
+  }
+
+  const hadRestoredViewer = resetPersistedViewerState();
+  window.addEventListener('beforeunload', resetPersistedViewerState, {capture:true});
+  window.addEventListener('pagehide', resetPersistedViewerState, {capture:true});
+  if (hadRestoredViewer) {
+    setTimeout(() => location.reload(), 0);
+    return;
+  }
+
+  function syncSplitSlotButtons() {
+    const split = stages.classList.contains('split');
+    root.querySelectorAll('.naiSlotSelectBtnV239').forEach(button => {
+      button.style.display = split ? 'inline-flex' : 'none';
+    });
+  }
+  new MutationObserver(syncSplitSlotButtons).observe(stages, {attributes:true, attributeFilter:['class']});
+  [0, 40, 120, 300, 700].forEach(ms => setTimeout(syncSplitSlotButtons, ms));
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v260-style';
+  style.textContent = `
+    #naiCropBtnV260{min-width:48px;padding:6px 8px!important;font-size:11px!important}
+    #naiCropBtnV260:disabled{opacity:.4;cursor:default}
+    #naiCropBtnV260.hasCrop{background:#4c467f!important;border-color:#8179d8!important}
+    #naiReviewCropBtnV260{margin-left:6px!important;white-space:nowrap!important}
+    #naiReviewCropBtnV260.hasCrop{background:#4c467f!important;border-color:#8179d8!important}
+    .naiCropWrapV260{position:fixed;inset:0;z-index:2147484100;background:rgba(2,3,8,.9);display:flex;align-items:center;justify-content:center;padding:20px}
+    .naiCropModalV260{width:min(1050px,96vw);max-height:94vh;background:#171a36;border:1px solid rgba(255,255,255,.14);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+    .naiCropHeadV260,.naiCropFootV260{display:flex;align-items:center;gap:8px;padding:11px 13px}
+    .naiCropHeadV260{border-bottom:1px solid rgba(255,255,255,.09)}
+    .naiCropFootV260{border-top:1px solid rgba(255,255,255,.09)}
+    .naiCropTitleV260{font:700 14px system-ui;flex:1}.naiCropHintV260{font:11px system-ui;color:#a8abc4}.naiCropReadoutV260{font:12px system-ui;color:#d0d2e5;flex:1}
+    .naiCropBodyV260{flex:1;min-height:0;overflow:auto;padding:12px;display:flex;align-items:center;justify-content:center;background:#080a17}
+    .naiCropBoxV260{position:relative;display:inline-block;line-height:0;max-width:100%;user-select:none;touch-action:none}
+    .naiCropBoxV260>img{display:block;width:auto;height:auto;max-width:min(900px,90vw);max-height:72vh;object-fit:contain;pointer-events:none}
+    .naiCropMaskV260{position:absolute;left:0;right:0;background:rgba(0,0,0,.68);pointer-events:none}.naiCropMaskV260.top{top:0}.naiCropMaskV260.bottom{bottom:0}
+    .naiCropHandleV260{position:absolute;left:0;right:0;height:14px;transform:translateY(-7px);z-index:3;cursor:ns-resize;touch-action:none}
+    .naiCropHandleV260:before{content:'';position:absolute;left:0;right:0;top:6px;height:2px;background:#8c83ff;box-shadow:0 0 8px #8c83ff}
+    .naiCropHandleV260:after{content:'↕';position:absolute;left:50%;top:-5px;transform:translateX(-50%);width:30px;height:24px;border-radius:6px;background:#6155d9;color:white;display:grid;place-items:center;font:700 14px system-ui}
+  `;
+  root.appendChild(style);
+
+  const cropBtn = document.createElement('button');
+  cropBtn.type = 'button';
+  cropBtn.id = 'naiCropBtnV260';
+  cropBtn.textContent = 'Crop';
+  splitBtn.parentElement.insertBefore(cropBtn, fullBtn);
+
+  function gmRequest({method='GET', path, data=null, headers={}, responseType='text', timeout=120000}) {
+    return new Promise((resolve, reject) => GM_xmlhttpRequest({
+      method,
+      url:`${API}${path}`,
+      data,
+      headers:{Origin:'https://novelai.net', ...headers},
+      responseType,
+      timeout,
+      onload:res => {
+        if (res.status >= 200 && res.status < 300) {
+          if (responseType === 'blob') return resolve(res.response);
+          const text = res.responseText || '';
+          if (!text) return resolve(null);
+          try { return resolve(JSON.parse(text)); } catch (_) { return resolve(text); }
+        }
+        let message = `Request failed (${res.status})`;
+        try { message = JSON.parse(res.responseText || '{}').error || message; } catch (_) {}
+        reject(new Error(message));
+      },
+      onerror:()=>reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+      ontimeout:()=>reject(new Error('The local media request timed out.')),
+    }));
+  }
+
+  function normalizeCrop(value) {
+    let top = Number(value?.top ?? value?.crop_top ?? 0);
+    let bottom = Number(value?.bottom ?? value?.crop_bottom ?? 0);
+    if (!Number.isFinite(top)) top = 0;
+    if (!Number.isFinite(bottom)) bottom = 0;
+    top = Math.max(0, Math.min(.89, top));
+    bottom = Math.max(0, Math.min(.89, bottom));
+    if (top + bottom > .90) {
+      const scale = .90 / (top + bottom);
+      top *= scale;
+      bottom *= scale;
+    }
+    return {top, bottom};
+  }
+
+  let libraryCache = null;
+  async function library(force=false) {
+    if (!libraryCache || force) libraryCache = await gmRequest({path:'/api/library'});
+    return libraryCache || {media:[]};
+  }
+
+  async function mediaMeta(id, force=false) {
+    if (!id) return null;
+    const lib = await library(force);
+    return (lib?.media || []).find(m => m.id === id) || null;
+  }
+
+  function activeSlot() {
+    return stageEls[1].classList.contains('slot-active') ? 1 : 0;
+  }
+
+  function slotId(slot) {
+    const state = uiState();
+    const ids = Array.isArray(state.slotMediaIds) ? state.slotMediaIds : [];
+    return ids[slot] || (slot === activeSlot() ? state.selectedMediaId : null) || null;
+  }
+
+  let cropButtonToken = 0;
+  async function refreshCropButton() {
+    const token = ++cropButtonToken;
+    const slot = activeSlot();
+    const id = slotId(slot);
+    const isImage = !!stageEls[slot]?.querySelector('img');
+    if (!id || !isImage) {
+      cropBtn.disabled = true;
+      cropBtn.classList.remove('hasCrop');
+      cropBtn.textContent = 'Crop';
+      return;
+    }
+    cropBtn.disabled = false;
+    try {
+      const media = await mediaMeta(id);
+      if (token !== cropButtonToken || id !== slotId(activeSlot())) return;
+      const crop = normalizeCrop(media);
+      const has = crop.top > 0 || crop.bottom > 0;
+      cropBtn.classList.toggle('hasCrop', has);
+      cropBtn.textContent = has ? 'Crop ✓' : 'Crop';
+    } catch (_) {}
+  }
+
+  function scheduleRefreshButton() {
+    [0, 60, 180, 500].forEach(ms => setTimeout(refreshCropButton, ms));
+  }
+  stageEls.forEach(stage => new MutationObserver(scheduleRefreshButton).observe(stage, {childList:true}));
+  root.addEventListener('click', event => {
+    const t = event.target;
+    if (t.closest?.('.tile[data-id]') || ['prevBtn','nextBtn','randomBtn','splitBtn','naiSlotSelectV239_1','naiSlotSelectV239_2'].includes(t.id)) {
+      scheduleRefreshButton();
+    }
+  });
+  scheduleRefreshButton();
+
+  let editor = null;
+
+  function paintEditor() {
+    if (!editor) return;
+    const tp = editor.top * 100;
+    const bp = editor.bottom * 100;
+    editor.topMask.style.height = `${tp}%`;
+    editor.bottomMask.style.height = `${bp}%`;
+    editor.topHandle.style.top = `${tp}%`;
+    editor.bottomHandle.style.top = `${100 - bp}%`;
+    editor.readout.textContent = `Top ${tp.toFixed(1)}% · Bottom ${bp.toFixed(1)}% · Keep ${(100 - tp - bp).toFixed(1)}%`;
+  }
+
+  function dragEditor(edge, clientY) {
+    if (!editor) return;
+    const rect = editor.box.getBoundingClientRect();
+    if (!rect.height) return;
+    const p = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    if (edge === 'top') editor.top = Math.max(0, Math.min(p, .90 - editor.bottom));
+    else editor.bottom = Math.max(0, Math.min(1 - p, .90 - editor.top));
+    paintEditor();
+  }
+
+  function directDisplayUrl(id) {
+    return `${API}/api/media/${encodeURIComponent(id)}/original?crop=${Date.now()}`;
+  }
+
+  async function replaceStageImage(slot, id) {
+    const img = stageEls[slot]?.querySelector('img');
+    if (!img || slotId(slot) !== id) return;
+    try {
+      const blob = await gmRequest({path:`/api/media/${encodeURIComponent(id)}/original?crop=${Date.now()}`, responseType:'blob', timeout:300000});
+      const url = URL.createObjectURL(blob);
+      const old = img._naiV260DisplayUrl;
+      img._naiV260DisplayUrl = url;
+      img.src = url;
+      if (old) URL.revokeObjectURL(old);
+    } catch (_) {
+      img.src = directDisplayUrl(id);
+    }
+  }
+
+  async function refreshDisplayedMedia(id) {
+    libraryCache = null;
+    const currentSlot = activeSlot();
+    if (slotId(currentSlot) === id) {
+      const tile = root.querySelector(`.tile[data-id="${CSS.escape(id)}"]`);
+      if (tile) {
+        tile.click();
+        setTimeout(refreshCropButton, 120);
+      } else {
+        await replaceStageImage(currentSlot, id);
+      }
+    }
+    for (let slot = 0; slot < 2; slot++) {
+      if (slot === currentSlot) continue;
+      if (slotId(slot) === id) await replaceStageImage(slot, id);
+    }
+    scheduleRefreshButton();
+  }
+
+  async function openCropEditor(mediaId, {onSaved=null, onClosed=null}={}) {
+    if (editor || !mediaId) return;
+    try {
+      const health = await gmRequest({path:'/api/health'});
+      if (Number(health?.version || 0) < 6) {
+        throw new Error('The companion crop-file update is still installing. Wait about a minute, then restart the companion if needed and refresh NovelAI.');
+      }
+      const [media, blob] = await Promise.all([
+        mediaMeta(mediaId, true),
+        gmRequest({path:`/api/media/${encodeURIComponent(mediaId)}/source`, responseType:'blob', timeout:300000}),
+      ]);
+      if (!media || media.media_type !== 'image') throw new Error('Could not load this image for cropping.');
+      const c = normalizeCrop(media);
+      const url = URL.createObjectURL(blob);
+      const wrap = document.createElement('div');
+      wrap.className = 'naiCropWrapV260';
+      wrap.innerHTML = `<div class="naiCropModalV260"><div class="naiCropHeadV260"><div class="naiCropTitleV260">Crop image</div><div class="naiCropHintV260">Drag the purple lines. The original file is never changed.</div><button class="naiCropCloseV260">×</button></div><div class="naiCropBodyV260"><div class="naiCropBoxV260"><img><div class="naiCropMaskV260 top"></div><div class="naiCropMaskV260 bottom"></div><div class="naiCropHandleV260 top"></div><div class="naiCropHandleV260 bottom"></div></div></div><div class="naiCropFootV260"><div class="naiCropReadoutV260"></div><button class="naiCropResetV260">Reset</button><button class="naiCropCancelV260">Cancel</button><button class="primary naiCropSaveV260">Save Crop</button></div></div>`;
+      root.appendChild(wrap);
+      const box = wrap.querySelector('.naiCropBoxV260');
+      box.querySelector('img').src = url;
+
+      const move = event => {
+        if (!editor?.drag) return;
+        event.preventDefault();
+        dragEditor(editor.drag, event.clientY);
+      };
+      const up = () => { if (editor) editor.drag = null; };
+
+      editor = {
+        mediaId, media, url, wrap, box, top:c.top, bottom:c.bottom, drag:null,
+        topMask:box.querySelector('.naiCropMaskV260.top'),
+        bottomMask:box.querySelector('.naiCropMaskV260.bottom'),
+        topHandle:box.querySelector('.naiCropHandleV260.top'),
+        bottomHandle:box.querySelector('.naiCropHandleV260.bottom'),
+        readout:wrap.querySelector('.naiCropReadoutV260'),
+        move, up, onSaved, onClosed,
+      };
+      paintEditor();
+
+      const close = saved => {
+        if (!editor) return;
+        const current = editor;
+        editor = null;
+        window.removeEventListener('pointermove', current.move, true);
+        window.removeEventListener('pointerup', current.up, true);
+        URL.revokeObjectURL(current.url);
+        current.wrap.remove();
+        try { current.onClosed?.(saved); } catch (_) {}
+      };
+
+      const down = edge => event => {
+        event.preventDefault();
+        if (!editor) return;
+        editor.drag = edge;
+        dragEditor(edge, event.clientY);
+      };
+      editor.topHandle.addEventListener('pointerdown', down('top'));
+      editor.bottomHandle.addEventListener('pointerdown', down('bottom'));
+      window.addEventListener('pointermove', move, true);
+      window.addEventListener('pointerup', up, true);
+
+      wrap.querySelector('.naiCropCloseV260').addEventListener('click', () => close(false));
+      wrap.querySelector('.naiCropCancelV260').addEventListener('click', () => close(false));
+      wrap.addEventListener('click', event => { if (event.target === wrap) close(false); });
+      wrap.querySelector('.naiCropResetV260').addEventListener('click', () => {
+        if (!editor) return;
+        editor.top = 0;
+        editor.bottom = 0;
+        paintEditor();
+      });
+      const saveBtn = wrap.querySelector('.naiCropSaveV260');
+      saveBtn.addEventListener('click', async () => {
+        if (!editor) return;
+        const current = editor;
+        const crop = normalizeCrop({top:current.top, bottom:current.bottom});
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+        try {
+          const updated = await gmRequest({
+            method:'POST',
+            path:`/api/media/${encodeURIComponent(current.mediaId)}/crop`,
+            headers:{'Content-Type':'application/json'},
+            data:JSON.stringify(crop),
+            timeout:300000,
+          });
+          libraryCache = null;
+          await refreshDisplayedMedia(current.mediaId);
+          try { await current.onSaved?.(updated); } catch (_) {}
+          close(true);
+        } catch (err) {
+          alert(err?.message || 'Could not save this crop.');
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save Crop';
+        }
+      });
+    } catch (err) {
+      alert(err?.message || String(err));
+    }
+  }
+
+  cropBtn.addEventListener('click', async event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const slot = activeSlot();
+    const id = slotId(slot);
+    if (!id || !stageEls[slot]?.querySelector('img')) return;
+    await openCropEditor(id);
+  });
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && editor) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      editor.wrap.querySelector('.naiCropCancelV260')?.click();
+    }
+  }, true);
+
+  async function sha256Blob(blob) {
+    const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+    return [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function resolveReviewMedia(stage) {
+    const existing = stage.dataset.naiReviewMediaId;
+    if (existing) {
+      const item = await mediaMeta(existing, true);
+      if (item) return item;
+    }
+    const img = stage.querySelector('img');
+    if (!img) return null;
+    const src = img.currentSrc || img.src;
+    if (!src) return null;
+    const response = await fetch(src);
+    if (!response.ok) throw new Error('Could not read the Rapid Review image.');
+    const sha = await sha256Blob(await response.blob());
+    const characterId = charSelect.value || '';
+    const lib = await library(true);
+    const item = (lib?.media || []).find(m => m.media_type === 'image' && m.sha256 === sha && (!characterId || m.character_id === characterId)) || null;
+    if (item?.id) stage.dataset.naiReviewMediaId = item.id;
+    return item;
+  }
+
+  function setReviewButtonState(button, media) {
+    if (!button || !media) return;
+    const c = normalizeCrop(media);
+    const has = c.top > 0 || c.bottom > 0;
+    button.classList.toggle('hasCrop', has);
+    button.textContent = has ? 'Crop image ✓' : 'Crop image';
+  }
+
+  const reviewPreviewUrls = new Set();
+  async function refreshReviewPreview(stage, mediaId, button, updated=null) {
+    if (!stage?.isConnected) return;
+    try {
+      const media = updated || await mediaMeta(mediaId, true);
+      if (button?.isConnected && media) setReviewButtonState(button, media);
+      const img = stage.querySelector('img');
+      if (!img) return;
+      const blob = await gmRequest({path:`/api/media/${encodeURIComponent(mediaId)}/original?crop=${Date.now()}`, responseType:'blob', timeout:300000});
+      const url = URL.createObjectURL(blob);
+      reviewPreviewUrls.add(url);
+      const old = stage._naiV260ReviewUrl;
+      if (old) {
+        URL.revokeObjectURL(old);
+        reviewPreviewUrls.delete(old);
+      }
+      stage._naiV260ReviewUrl = url;
+      img.src = url;
+      stage.dataset.naiReviewMediaId = mediaId;
+    } catch (err) {
+      console.warn('[NovelAI Media] Could not refresh Rapid Review crop preview', err);
+    }
+  }
+
+  let decorateQueued = false;
+  function decorateReview() {
+    const stage = modalRoot.querySelector('#reviewStage');
+    const side = modalRoot.querySelector('.reviewSide');
+    if (!stage || !side) return;
+    let button = side.querySelector('#naiReviewCropBtnV260');
+    if (stage.querySelector('video')) {
+      button?.remove();
+      return;
+    }
+    if (!button) {
+      button = document.createElement('button');
+      button.type = 'button';
+      button.id = 'naiReviewCropBtnV260';
+      button.textContent = 'Crop image';
+      const addCategory = side.querySelector('#reviewAddCat');
+      if (addCategory) addCategory.insertAdjacentElement('afterend', button);
+      else side.insertBefore(button, side.firstChild);
+      button.addEventListener('click', async event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (button.disabled) return;
+        button.disabled = true;
+        const oldText = button.textContent;
+        button.textContent = 'Opening crop…';
+        try {
+          const media = await resolveReviewMedia(stage);
+          if (!media?.id) throw new Error('Could not identify this Rapid Review image.');
+          stage.dataset.naiReviewMediaId = media.id;
+          await openCropEditor(media.id, {
+            onSaved: updated => refreshReviewPreview(stage, media.id, button, updated),
+            onClosed: () => { if (button.isConnected) button.disabled = false; },
+          });
+        } catch (err) {
+          alert(err?.message || String(err));
+          button.disabled = false;
+          button.textContent = oldText || 'Crop image';
+        }
+      });
+    }
+    const img = stage.querySelector('img');
+    button.disabled = !img || !!editor;
+    if (!img) return;
+    if (stage.dataset.naiReviewMediaId) {
+      mediaMeta(stage.dataset.naiReviewMediaId, true).then(media => {
+        if (media && button.isConnected) setReviewButtonState(button, media);
+      }).catch(() => {});
+      return;
+    }
+    resolveReviewMedia(stage).then(media => {
+      if (media && button.isConnected && stage.isConnected) setReviewButtonState(button, media);
+    }).catch(() => {});
+  }
+
+  function scheduleDecorate() {
+    if (decorateQueued) return;
+    decorateQueued = true;
+    requestAnimationFrame(() => {
+      decorateQueued = false;
+      decorateReview();
+    });
+  }
+  new MutationObserver(scheduleDecorate).observe(modalRoot, {childList:true, subtree:true});
+  scheduleDecorate();
+
+  window.addEventListener('keydown', event => {
+    if (!editor || !modalRoot.querySelector('#reviewStage')) return;
+    if ((event.key >= '1' && event.key <= '9') || event.key === 'Enter' || event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+
+  window.addEventListener('pagehide', () => {
+    for (const url of reviewPreviewUrls) URL.revokeObjectURL(url);
+    reviewPreviewUrls.clear();
+  }, {once:true});
+})();
