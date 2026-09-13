@@ -1,0 +1,151 @@
+// NovelAI Media Library v2.6.5: instant direct persistent crop display
+(() => {
+  'use strict';
+
+  const API = 'http://127.0.0.1:8765';
+  const KEY = 'nai-media-v1-ui';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaCropDisplay265 === '1') return;
+  document.documentElement.dataset.naiMediaCropDisplay265 = '1';
+
+  const stages = [root.getElementById('stage1'), root.getElementById('stage2')];
+  if (!stages[0] || !stages[1]) return;
+
+  function gmJson(path) {
+    return new Promise((resolve, reject) => GM_xmlhttpRequest({
+      method: 'GET',
+      url: `${API}${path}`,
+      headers: { Origin: 'https://novelai.net' },
+      responseType: 'text',
+      timeout: 30000,
+      onload: res => {
+        if (res.status >= 200 && res.status < 300) {
+          try { resolve(JSON.parse(res.responseText || '{}')); }
+          catch (_) { resolve({}); }
+          return;
+        }
+        reject(new Error(`Request failed (${res.status})`));
+      },
+      onerror: () => reject(new Error('Could not connect to the local media program.')),
+      ontimeout: () => reject(new Error('Local media request timed out.')),
+    }));
+  }
+
+  function uiState() {
+    try { return JSON.parse(localStorage.getItem(KEY) || '{}') || {}; }
+    catch (_) { return {}; }
+  }
+
+  function activeSlot() {
+    return stages[1].classList.contains('slot-active') ? 1 : 0;
+  }
+
+  function slotId(slot) {
+    const state = uiState();
+    const ids = Array.isArray(state.slotMediaIds) ? state.slotMediaIds : [];
+    return ids[slot] || (slot === activeSlot() ? state.selectedMediaId : null) || null;
+  }
+
+  let library = null;
+  let libraryPromise = null;
+  async function refreshLibrary() {
+    if (libraryPromise) return libraryPromise;
+    libraryPromise = gmJson(`/api/library?display265=${Date.now()}`)
+      .then(value => {
+        library = value || { media: [] };
+        return library;
+      })
+      .finally(() => { libraryPromise = null; });
+    return libraryPromise;
+  }
+
+  function mediaMeta(id) {
+    return (library?.media || []).find(item => item.id === id) || null;
+  }
+
+  function cropVersion(item) {
+    if (!item || item.media_type !== 'image') return null;
+    const top = Number(item.crop_top || 0);
+    const bottom = Number(item.crop_bottom || 0);
+    if (!(top > 0 || bottom > 0)) return null;
+    return `${item.id}:${top.toFixed(6)}:${bottom.toFixed(6)}:${item.display_rel || item.cropped_rel || 'crop'}`;
+  }
+
+  function directDisplayUrl(id, version) {
+    return `${API}/api/media/${encodeURIComponent(id)}/original?display=${encodeURIComponent(version)}`;
+  }
+
+  const stageTokens = [0, 0];
+  async function enforceStage(slot) {
+    const token = ++stageTokens[slot];
+    const stage = stages[slot];
+    const img = stage.querySelector('img');
+    const id = slotId(slot);
+    if (!img || !id) return;
+
+    if (!library) {
+      try { await refreshLibrary(); }
+      catch (_) { return; }
+    }
+    if (token !== stageTokens[slot] || !img.isConnected || slotId(slot) !== id) return;
+
+    let item = mediaMeta(id);
+    if (!item) {
+      try { await refreshLibrary(); item = mediaMeta(id); } catch (_) {}
+    }
+    const version = cropVersion(item);
+    if (!version) {
+      img.style.visibility = '';
+      return;
+    }
+
+    if (img.dataset.naiCropDisplay265 === version) {
+      img.style.visibility = '';
+      return;
+    }
+
+    // Assign the persistent cropped asset directly to <img>. This avoids waiting
+    // for a complete GM_xmlhttpRequest Blob plus an explicit decode before the image
+    // can appear; Chromium can stream/decode the saved crop immediately instead.
+    img.style.visibility = 'hidden';
+    const url = directDisplayUrl(id, version);
+    const reveal = () => {
+      if (token !== stageTokens[slot] || !img.isConnected || slotId(slot) !== id) return;
+      img.style.visibility = '';
+    };
+    img.addEventListener('load', reveal, { once: true });
+    img.addEventListener('error', reveal, { once: true });
+    img.dataset.naiCropDisplay265 = version;
+    img.decoding = 'async';
+    img.loading = 'eager';
+    img.src = url;
+  }
+
+  function schedule(slot) {
+    queueMicrotask(() => enforceStage(slot));
+  }
+
+  stages.forEach((stage, slot) => {
+    new MutationObserver(() => schedule(slot)).observe(stage, { childList: true });
+  });
+
+  root.addEventListener('click', event => {
+    const target = event.target;
+    if (!target?.closest) return;
+    if (target.closest('.naiCropSaveV260') || target.closest('.naiCropResetV260')) {
+      [80, 220, 500].forEach(delay => setTimeout(async () => {
+        try {
+          library = null;
+          await refreshLibrary();
+          schedule(0);
+          schedule(1);
+        } catch (_) {}
+      }, delay));
+    }
+  }, true);
+
+  refreshLibrary().catch(() => {});
+  schedule(0);
+  schedule(1);
+})();
