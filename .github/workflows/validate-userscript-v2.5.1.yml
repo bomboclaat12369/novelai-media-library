@@ -15,4 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate patch syntax
-        run: node --check payload/userscript-2.5.1.patch01.txt
+        run: |
+          cp payload/userscript-2.5.1.patch01.txt /tmp/userscript-2.5.1.js
+          node --check /tmp/userscript-2.5.1.js
