@@ -1,0 +1,46 @@
+name: Apply userscript v2.7.1
+
+on:
+  push:
+    paths:
+      - tools/write-userscript-v2.7.1.py
+      - .github/workflows/apply-userscript-v2.7.1.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Write userscript patch
+        run: python tools/write-userscript-v2.7.1.py
+      - name: Validate patch syntax
+        run: |
+          cp payload/userscript-2.7.1.patch01.txt /tmp/v271.js
+          node --check /tmp/v271.js
+      - name: Validate complete userscript syntax
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          release=json.loads(Path('release-userscript.json').read_text())
+          parts=[p for p in release['parts'] if p != 'payload/userscript-2.7.0.patch01.txt']
+          data=b''.join(Path(p).read_bytes() for p in parts) + Path('payload/userscript-2.7.1.patch01.txt').read_bytes()
+          Path('/tmp/full-v271.js').write_bytes(data)
+          PY
+          node --check /tmp/full-v271.js
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add payload/userscript-2.7.1.patch01.txt
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Add userscript v2.7.1 review workflow"
+          git push
