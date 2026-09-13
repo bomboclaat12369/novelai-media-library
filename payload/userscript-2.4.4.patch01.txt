@@ -1,0 +1,236 @@
+// NovelAI Media Library v2.4.4: readable, top-aligned video side rails
+(() => {
+  'use strict';
+
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV244 === '1') return;
+  document.documentElement.dataset.naiMediaV244 = '1';
+
+  const stages = root.getElementById('stages');
+  const stageEls = [root.getElementById('stage1'), root.getElementById('stage2')];
+  const videoTools = root.getElementById('videoTools');
+  const lightRoot = root.getElementById('lightRoot');
+  if (!stages || !stageEls[0] || !videoTools || !lightRoot) return;
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v244-style';
+  style.textContent = `
+    /* Normal single/split controls: still vertical, but wide enough to show the
+       saved timestamp directly. Position variables are aligned to the video edge. */
+    .stage > #videoTools.naiVideoSideRail {
+      width:94px !important;
+      padding:6px !important;
+      gap:4px !important;
+      left:var(--nai-v244-left,4px) !important;
+      top:var(--nai-v244-top,4px) !important;
+    }
+    .stage > #videoTools.naiVideoSideRail .videoToolRow {
+      grid-template-columns:60px 18px !important;
+      gap:4px !important;
+    }
+    .stage > #videoTools.naiVideoSideRail .videoToolRow:first-child {
+      display:block !important;
+    }
+    .stage > #videoTools.naiVideoSideRail button {
+      height:24px !important;
+      line-height:22px !important;
+      border-radius:5px !important;
+    }
+    .stage > #videoTools.naiVideoSideRail #setThumbBtn {
+      width:80px !important;
+      height:24px !important;
+      font-size:0 !important;
+    }
+    .stage > #videoTools.naiVideoSideRail #setThumbBtn::after {
+      content:'Set thumb' !important;
+      font:700 9px/1 system-ui !important;
+    }
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker] {
+      width:60px !important;
+      padding:0 3px !important;
+      font-size:0 !important;
+      overflow:hidden !important;
+      text-overflow:ellipsis !important;
+    }
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker]::before {
+      font:700 9px/1 system-ui !important;
+    }
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker="0"]::before { content:'T1  '; }
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker="1"]::before { content:'T2  '; }
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker="2"]::before { content:'T3  '; }
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker]::after {
+      content:attr(data-nai-v244-time) !important;
+      font:600 9px/1 system-ui !important;
+    }
+    .stage > #videoTools.naiVideoSideRail [data-set-marker] {
+      width:18px !important;
+      font-size:0 !important;
+    }
+    .stage > #videoTools.naiVideoSideRail [data-set-marker]::after {
+      content:'+' !important;
+      font:700 12px/1 system-ui !important;
+    }
+
+    /* Fullscreen has the same readable vertical marker layout, but intentionally
+       keeps no thumbnail control. */
+    .naiFullscreenMarkerRail {
+      width:92px !important;
+      padding:6px !important;
+      gap:4px !important;
+      left:var(--nai-v244-left,4px) !important;
+      top:var(--nai-v244-top,4px) !important;
+    }
+    .naiFullscreenMarkerRow {
+      grid-template-columns:58px 18px !important;
+      gap:4px !important;
+    }
+    .naiFullscreenMarkerRail button {
+      height:24px !important;
+      border-radius:5px !important;
+    }
+    .naiFullscreenMarkerRow > button:first-child {
+      width:58px !important;
+      padding:0 3px !important;
+      font-size:0 !important;
+      overflow:hidden !important;
+      text-overflow:ellipsis !important;
+    }
+    .naiFullscreenMarkerRow > button:first-child::after {
+      content:attr(data-nai-v244-label) !important;
+      font:700 9px/1 system-ui !important;
+    }
+    .naiFullscreenMarkerRail .naiFsSet {
+      width:18px !important;
+      font-size:12px !important;
+    }
+  `;
+  root.appendChild(style);
+
+  function activeSlot() {
+    return stageEls[1]?.classList.contains('slot-active') ? 1 : 0;
+  }
+
+  function visibleVideoRect(video, container) {
+    const cw = Math.max(1, container.clientWidth || 1);
+    const ch = Math.max(1, container.clientHeight || 1);
+    const vw = Number(video?.videoWidth || 0);
+    const vh = Number(video?.videoHeight || 0);
+    if (!vw || !vh) return {left:0, top:0, width:cw, height:ch};
+    const scale = Math.min(cw / vw, ch / vh);
+    const width = vw * scale;
+    const height = vh * scale;
+    return {left:(cw - width) / 2, top:(ch - height) / 2, width, height};
+  }
+
+  function annotateNormalTimes() {
+    videoTools.querySelectorAll('[data-seek-marker]').forEach(button => {
+      const raw = String(button.textContent || '').trim();
+      button.dataset.naiV244Time = button.disabled ? '—' : (raw || '—');
+    });
+  }
+
+  function annotateFullscreenTimes() {
+    root.querySelectorAll('.naiFullscreenMarkerRow').forEach((row, idx) => {
+      const seek = row.querySelector('button:not(.naiFsSet)');
+      if (!seek) return;
+      let time = '—';
+      if (!seek.disabled) {
+        const match = String(seek.title || '').match(/\(([^)]+)\)/);
+        if (match?.[1]) time = match[1];
+      }
+      seek.dataset.naiV244Label = `T${idx + 1}  ${time}`;
+    });
+  }
+
+  function positionNormalRail() {
+    if (!videoTools.classList.contains('naiVideoSideRail')) return;
+    const stage = stageEls[activeSlot()];
+    const video = stage?.querySelector('video');
+    if (!stage || !video || videoTools.parentNode !== stage) return;
+
+    const r = visibleVideoRect(video, stage);
+    const toolW = Math.max(88, videoTools.offsetWidth || 94);
+    const toolH = Math.max(24, videoTools.offsetHeight || 112);
+    const leftSpace = Math.max(0, r.left);
+    const rightSpace = Math.max(0, stage.clientWidth - (r.left + r.width));
+
+    let x;
+    if (rightSpace >= toolW + 8) {
+      x = r.left + r.width + 8;
+    } else if (leftSpace >= toolW + 8) {
+      x = r.left - toolW - 8;
+    } else {
+      x = rightSpace >= leftSpace ? stage.clientWidth - toolW - 4 : 4;
+    }
+
+    // Align the rail to the top edge of the visible video instead of floating at mid-height.
+    const y = r.top + 4;
+    const maxX = Math.max(4, stage.clientWidth - toolW - 4);
+    const maxY = Math.max(4, stage.clientHeight - toolH - 4);
+    videoTools.style.setProperty('--nai-v244-left', `${Math.max(4, Math.min(maxX, x))}px`);
+    videoTools.style.setProperty('--nai-v244-top', `${Math.max(4, Math.min(maxY, y))}px`);
+  }
+
+  function positionFullscreenRails() {
+    root.querySelectorAll('.naiFullscreenMarkerRail').forEach(rail => {
+      const container = rail.parentElement;
+      const video = container?.querySelector(':scope > video');
+      if (!container || !video) return;
+
+      const cr = container.getBoundingClientRect();
+      const vr = video.getBoundingClientRect();
+      const toolW = Math.max(86, rail.offsetWidth || 92);
+      const toolH = Math.max(24, rail.offsetHeight || 92);
+      const leftSpace = Math.max(0, vr.left - cr.left);
+      const rightSpace = Math.max(0, cr.right - vr.right);
+
+      let x;
+      if (rightSpace >= toolW + 8) {
+        x = (vr.right - cr.left) + 8;
+      } else if (leftSpace >= toolW + 8) {
+        x = (vr.left - cr.left) - toolW - 8;
+      } else {
+        x = rightSpace >= leftSpace ? cr.width - toolW - 4 : 4;
+      }
+
+      // Same visual anchor as normal view: rail top follows the video's top edge.
+      const y = (vr.top - cr.top) + 4;
+      const maxX = Math.max(4, cr.width - toolW - 4);
+      const maxY = Math.max(4, cr.height - toolH - 4);
+      rail.style.setProperty('--nai-v244-left', `${Math.max(4, Math.min(maxX, x))}px`);
+      rail.style.setProperty('--nai-v244-top', `${Math.max(4, Math.min(maxY, y))}px`);
+    });
+  }
+
+  let queued = false;
+  function queueRefresh() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      annotateNormalTimes();
+      annotateFullscreenTimes();
+      positionNormalRail();
+      positionFullscreenRails();
+    });
+  }
+
+  new MutationObserver(queueRefresh).observe(videoTools, {childList:true, subtree:true, attributes:true, attributeFilter:['class']});
+  new MutationObserver(queueRefresh).observe(lightRoot, {childList:true, subtree:true});
+  stageEls.forEach(stage => {
+    if (!stage) return;
+    new MutationObserver(queueRefresh).observe(stage, {attributes:true, attributeFilter:['class']});
+    stage.addEventListener('loadedmetadata', queueRefresh, true);
+  });
+  lightRoot.addEventListener('loadedmetadata', queueRefresh, true);
+  root.addEventListener('click', () => setTimeout(queueRefresh, 0));
+  window.addEventListener('resize', queueRefresh, {passive:true});
+
+  if ('ResizeObserver' in window) {
+    const ro = new ResizeObserver(queueRefresh);
+    stageEls.forEach(stage => stage && ro.observe(stage));
+  }
+
+  [0,80,220].forEach(ms => setTimeout(queueRefresh, ms));
+})();
