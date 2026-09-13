@@ -1,5 +1,5 @@
 {
-  "version": "2.6.1",
+  "version": "2.6.2",
   "parts": [
     "payload/userscript-2.2.0.part01.txt",
     "payload/userscript-2.3.0.patch01.txt",
@@ -18,8 +18,7 @@
     "payload/userscript-2.5.1.patch01.txt",
     "payload/userscript-2.5.5.patch01.txt",
     "payload/userscript-2.6.0.patch01.txt",
-    "payload/userscript-2.6.1.patch01.txt",
-    "payload/userscript-2.6.1.patch02.txt"
+    "payload/userscript-2.6.2.patch01.txt"
   ],
-  "release_build": 36
+  "release_build": 37
 }
