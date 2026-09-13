@@ -1,0 +1,91 @@
+// NovelAI Media Library v2.4.9: robust centering for normal single/split video controls
+(() => {
+  'use strict';
+
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV249 === '1') return;
+  document.documentElement.dataset.naiMediaV249 = '1';
+
+  const videoTools = root.getElementById('videoTools');
+  if (!videoTools) return;
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v249-style';
+  style.textContent = `
+    /* Earlier normal-view patches render labels through pseudo-elements. Those
+       rules are more specific than the later centering overrides. For the normal
+       single/split viewer, stop using pseudo-elements entirely and center the
+       button's real text instead. Fullscreen is intentionally untouched. */
+    .panel.left .stage > #videoTools.naiVideoSideRail #setThumbBtn,
+    .panel.left .stage > #videoTools.naiVideoSideRail [data-seek-marker],
+    .panel.left .stage > #videoTools.naiVideoSideRail [data-set-marker] {
+      display:flex !important;
+      align-items:center !important;
+      justify-content:center !important;
+      box-sizing:border-box !important;
+      padding:0 !important;
+      text-align:center !important;
+      text-indent:0 !important;
+      white-space:nowrap !important;
+    }
+
+    .panel.left .stage > #videoTools.naiVideoSideRail #setThumbBtn,
+    .panel.left .stage > #videoTools.naiVideoSideRail [data-seek-marker] {
+      font:700 9px/1 system-ui !important;
+    }
+
+    .panel.left .stage > #videoTools.naiVideoSideRail [data-set-marker] {
+      font:700 11px/1 system-ui !important;
+    }
+
+    .panel.left .stage > #videoTools.naiVideoSideRail #setThumbBtn::before,
+    .panel.left .stage > #videoTools.naiVideoSideRail #setThumbBtn::after,
+    .panel.left .stage > #videoTools.naiVideoSideRail [data-seek-marker]::before,
+    .panel.left .stage > #videoTools.naiVideoSideRail [data-seek-marker]::after,
+    .panel.left .stage > #videoTools.naiVideoSideRail [data-set-marker]::before,
+    .panel.left .stage > #videoTools.naiVideoSideRail [data-set-marker]::after {
+      content:none !important;
+      display:none !important;
+    }
+  `;
+  root.appendChild(style);
+
+  let normalizing = false;
+
+  function normalizeNormalButtons() {
+    if (normalizing || !videoTools.classList.contains('naiVideoSideRail')) return;
+    normalizing = true;
+    try {
+      const thumb = videoTools.querySelector('#setThumbBtn');
+      if (thumb && thumb.textContent !== 'Thumb') thumb.textContent = 'Thumb';
+
+      videoTools.querySelectorAll('[data-seek-marker]').forEach(button => {
+        const desired = button.disabled
+          ? '—'
+          : (button.dataset.naiV244Time || String(button.textContent || '').trim() || '—');
+        if (button.textContent !== desired) button.textContent = desired;
+      });
+
+      videoTools.querySelectorAll('[data-set-marker]').forEach(button => {
+        if (button.textContent !== '+') button.textContent = '+';
+      });
+    } finally {
+      normalizing = false;
+    }
+  }
+
+  const observer = new MutationObserver(() => {
+    if (normalizing) return;
+    queueMicrotask(normalizeNormalButtons);
+  });
+  observer.observe(videoTools, {
+    childList:true,
+    subtree:true,
+    attributes:true,
+    attributeFilter:['class','disabled','data-nai-v244-time'],
+  });
+
+  root.addEventListener('click', () => setTimeout(normalizeNormalButtons, 0));
+  [0,60,180].forEach(ms => setTimeout(normalizeNormalButtons, ms));
+})();
