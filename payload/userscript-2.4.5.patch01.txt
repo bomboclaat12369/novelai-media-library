@@ -1,0 +1,120 @@
+// NovelAI Media Library v2.4.5: slimmer timestamp-only rails, pinned to panel right edge
+(() => {
+  'use strict';
+
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV245 === '1') return;
+  document.documentElement.dataset.naiMediaV245 = '1';
+
+  const lightRoot = root.getElementById('lightRoot');
+  if (!lightRoot) return;
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v245-style';
+  style.textContent = `
+    /* Normal single/split video rail: show only the saved time (or dash),
+       keep the controls vertical, and pin the rail to the right edge of the stage. */
+    .stage > #videoTools.naiVideoSideRail {
+      box-sizing:border-box !important;
+      width:64px !important;
+      padding:4px !important;
+      gap:3px !important;
+      left:auto !important;
+      right:4px !important;
+    }
+    .stage > #videoTools.naiVideoSideRail .videoToolRow {
+      grid-template-columns:40px 12px !important;
+      gap:2px !important;
+    }
+    .stage > #videoTools.naiVideoSideRail button {
+      height:22px !important;
+      line-height:20px !important;
+      border-radius:4px !important;
+    }
+    .stage > #videoTools.naiVideoSideRail #setThumbBtn {
+      width:54px !important;
+      height:22px !important;
+    }
+    .stage > #videoTools.naiVideoSideRail #setThumbBtn::after {
+      content:'Thumb' !important;
+      font:700 9px/1 system-ui !important;
+    }
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker] {
+      width:40px !important;
+      padding:0 2px !important;
+    }
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker]::before {
+      content:'' !important;
+      display:none !important;
+    }
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker]::after {
+      content:attr(data-nai-v244-time) !important;
+      font:700 9px/1 system-ui !important;
+    }
+    .stage > #videoTools.naiVideoSideRail [data-set-marker] {
+      width:12px !important;
+    }
+
+    /* Fullscreen: timestamp only, no thumbnail button, and hug the right edge
+       of each fullscreen pane rather than following the edge of the video. */
+    .naiFullscreenMarkerRail {
+      box-sizing:border-box !important;
+      width:60px !important;
+      padding:4px !important;
+      gap:3px !important;
+      left:auto !important;
+      right:4px !important;
+    }
+    .naiFullscreenMarkerRow {
+      grid-template-columns:36px 12px !important;
+      gap:2px !important;
+    }
+    .naiFullscreenMarkerRail button {
+      height:22px !important;
+      border-radius:4px !important;
+    }
+    .naiFullscreenMarkerRow > button:first-child {
+      width:36px !important;
+      padding:0 2px !important;
+    }
+    .naiFullscreenMarkerRow > button:first-child::after {
+      content:attr(data-nai-v245-time) !important;
+      font:700 9px/1 system-ui !important;
+    }
+    .naiFullscreenMarkerRail .naiFsSet {
+      width:12px !important;
+      font-size:11px !important;
+    }
+  `;
+  root.appendChild(style);
+
+  function annotateFullscreenTimes() {
+    root.querySelectorAll('.naiFullscreenMarkerRow').forEach(row => {
+      const seek = row.querySelector('button:not(.naiFsSet)');
+      if (!seek) return;
+      let time = '—';
+      if (!seek.disabled) {
+        const match = String(seek.title || '').match(/\(([^)]+)\)/);
+        if (match?.[1]) time = match[1];
+      }
+      seek.dataset.naiV245Time = time;
+    });
+  }
+
+  let queued = false;
+  function queueAnnotate() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      annotateFullscreenTimes();
+    });
+  }
+
+  // Fullscreen rails are rebuilt only when fullscreen media/markers change.
+  // Watch only that subtree and only for child additions/removals.
+  new MutationObserver(queueAnnotate).observe(lightRoot, { childList:true, subtree:true });
+  root.addEventListener('click', () => setTimeout(queueAnnotate, 0));
+  [0,80,220].forEach(ms => setTimeout(queueAnnotate, ms));
+})();
