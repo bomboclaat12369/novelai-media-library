@@ -1,0 +1,53 @@
+// NovelAI Media Library v2.4.8: force true centering on normal video controls
+(() => {
+  'use strict';
+
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV248 === '1') return;
+  document.documentElement.dataset.naiMediaV248 = '1';
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v248-style';
+  style.textContent = `
+    /* v2.4.7 centered the fullscreen rail correctly, but the normal viewer's
+       labels are generated with pseudo-elements and could still inherit old
+       alignment from the base videoTools rules. Target videoTools directly
+       (not through its stage parent) and center the generated label over the
+       complete button box. Keep all v2.4.5 dimensions unchanged. */
+    #videoTools.naiVideoSideRail #setThumbBtn,
+    #videoTools.naiVideoSideRail [data-seek-marker],
+    #videoTools.naiVideoSideRail [data-set-marker] {
+      position:relative !important;
+      box-sizing:border-box !important;
+      padding:0 !important;
+      text-align:center !important;
+      text-indent:0 !important;
+      overflow:hidden !important;
+    }
+
+    #videoTools.naiVideoSideRail #setThumbBtn::after,
+    #videoTools.naiVideoSideRail [data-seek-marker]::after,
+    #videoTools.naiVideoSideRail [data-set-marker]::after {
+      position:absolute !important;
+      inset:0 !important;
+      width:auto !important;
+      height:auto !important;
+      margin:0 !important;
+      padding:0 !important;
+      display:flex !important;
+      align-items:center !important;
+      justify-content:center !important;
+      text-align:center !important;
+      line-height:1 !important;
+      transform:none !important;
+      pointer-events:none !important;
+    }
+
+    #videoTools.naiVideoSideRail [data-seek-marker]::before {
+      content:'' !important;
+      display:none !important;
+    }
+  `;
+  root.appendChild(style);
+})();
