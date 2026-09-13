@@ -23,7 +23,8 @@ jobs:
         run: python tools/build-userscript-v2.4.1.py
       - name: Basic syntax check
         run: |
-          node --check payload/userscript-2.4.1.patch01.txt
+          cp payload/userscript-2.4.1.patch01.txt /tmp/userscript-v2.4.1.js
+          node --check /tmp/userscript-v2.4.1.js
       - name: Commit patch
         run: |
           git config user.name "github-actions[bot]"
