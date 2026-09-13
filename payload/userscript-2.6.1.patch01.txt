@@ -1,0 +1,95 @@
+// NovelAI Media Library v2.6.1: reliable cropped image rendering
+(() => {
+  'use strict';
+  const API='http://127.0.0.1:8765', KEY='nai-media-v1-ui';
+  const host=document.getElementById('nai-media-host'), root=host?.shadowRoot;
+  if(!root||document.documentElement.dataset.naiMediaCrop261==='1') return;
+  document.documentElement.dataset.naiMediaCrop261='1';
+  const stages=root.getElementById('stages'), slots=[root.getElementById('stage1'),root.getElementById('stage2')];
+  const modalRoot=root.getElementById('modalRoot');
+  if(!stages||!slots[0]||!slots[1]) return;
+
+  const style=document.createElement('style');
+  style.textContent='.naiCrop261Loading{visibility:hidden!important}';
+  root.appendChild(style);
+
+  const request=({path,responseType='text'})=>new Promise((resolve,reject)=>GM_xmlhttpRequest({
+    method:'GET',url:`${API}${path}`,headers:{Origin:'https://novelai.net'},responseType,timeout:300000,
+    onload:r=>{if(r.status>=200&&r.status<300){if(responseType==='blob')return resolve(r.response);try{return resolve(JSON.parse(r.responseText||'{}'))}catch(_){return resolve(r.responseText)}}reject(new Error(`Request failed (${r.status})`))},
+    onerror:()=>reject(new Error('Could not connect to the local media program.')),ontimeout:()=>reject(new Error('Media request timed out.'))
+  }));
+  const state=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'{}')||{}}catch(_){return{}}};
+  const active=()=>slots[1].classList.contains('slot-active')?1:0;
+  const slotId=i=>{const s=state(), ids=Array.isArray(s.slotMediaIds)?s.slotMediaIds:[];return ids[i]||(i===active()?s.selectedMediaId:null)||null};
+  const crop=m=>{let t=Number(m?.crop_top||0),b=Number(m?.crop_bottom||0);if(!Number.isFinite(t))t=0;if(!Number.isFinite(b))b=0;t=Math.max(0,Math.min(.89,t));b=Math.max(0,Math.min(.89,b));if(t+b>.9){const k=.9/(t+b);t*=k;b*=k}return{t,b}};
+
+  let lib=null, libPromise=null;
+  async function library(force=false){
+    if(force){lib=null;libPromise=null}
+    if(lib)return lib;
+    if(!libPromise)libPromise=request({path:'/api/library'}).then(x=>(lib=x||{media:[]})).finally(()=>libPromise=null);
+    return libPromise;
+  }
+  async function meta(id,force=false){const l=await library(force);return(l?.media||[]).find(m=>m.id===id)||null}
+
+  const cache=new Map(), tokens=[0,0];
+  function revoke(id){const x=cache.get(id);if(x?.url)URL.revokeObjectURL(x.url);cache.delete(id)}
+  async function cropUrl(id,c){
+    const key=`${c.t.toFixed(6)}:${c.b.toFixed(6)}`, old=cache.get(id);
+    if(old?.key===key)return old.url;
+    revoke(id);
+    const blob=await request({path:`/api/media/${encodeURIComponent(id)}/source`,responseType:'blob'});
+    let bitmap;
+    try{bitmap=await createImageBitmap(blob,{imageOrientation:'from-image'})}catch(_){bitmap=await createImageBitmap(blob)}
+    try{
+      const y1=Math.max(0,Math.min(bitmap.height-1,Math.round(bitmap.height*c.t)));
+      const y2=Math.max(y1+1,Math.min(bitmap.height,Math.round(bitmap.height*(1-c.b))));
+      const canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=y2-y1;
+      const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Crop canvas failed.');
+      ctx.drawImage(bitmap,0,y1,bitmap.width,y2-y1,0,0,bitmap.width,y2-y1);
+      const out=await new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error('Crop failed.')),'image/png'));
+      const url=URL.createObjectURL(out);cache.set(id,{key,url});return url;
+    }finally{bitmap.close?.()}
+  }
+
+  async function apply(i,force=false){
+    const img=slots[i]?.querySelector('img'), id=slotId(i), token=++tokens[i];
+    if(!img||!id)return;
+    try{
+      const m=await meta(id,force);if(token!==tokens[i]||!img.isConnected||slotId(i)!==id)return;
+      const c=crop(m), has=c.t||c.b;
+      if(!has){img.classList.remove('naiCrop261Loading');delete img.dataset.naiCrop261;return}
+      const key=`${id}:${c.t.toFixed(6)}:${c.b.toFixed(6)}`, cached=cache.get(id);
+      if(img.dataset.naiCrop261===key&&cached?.url&&img.src===cached.url){img.classList.remove('naiCrop261Loading');return}
+      img.classList.add('naiCrop261Loading');
+      const url=await cropUrl(id,c);if(token!==tokens[i]||!img.isConnected||slotId(i)!==id)return;
+      img.dataset.naiCrop261=key;if(img.src!==url)img.src=url;img.classList.remove('naiCrop261Loading');
+    }catch(e){img.classList.remove('naiCrop261Loading');console.warn('[NovelAI Media] crop render failed',e)}
+  }
+  const schedule=(i,force=false)=>[0,50,160].forEach(ms=>setTimeout(()=>apply(i,force),ms));
+
+  slots.forEach((slot,i)=>new MutationObserver(ms=>{
+    if(!ms.some(m=>m.type==='childList'||(m.type==='attributes'&&m.target?.tagName==='IMG')))return;
+    const id=slotId(i), img=slot.querySelector('img'), known=id?(lib?.media||[]).find(m=>m.id===id):null, c=crop(known);
+    if(img&&(c.t||c.b))img.classList.add('naiCrop261Loading');
+    schedule(i,false);
+  }).observe(slot,{childList:true,subtree:true,attributes:true,attributeFilter:['src']}));
+
+  root.addEventListener('click',e=>{
+    const t=e.target;
+    if(t?.closest?.('.tile[data-id]')||['prevBtn','nextBtn','randomBtn','splitBtn','naiSlotSelectV239_1','naiSlotSelectV239_2'].includes(t?.id)){schedule(0);schedule(1)}
+    if(t?.closest?.('.naiCropSaveV260')){
+      lib=null;libPromise=null;[slotId(0),slotId(1)].filter(Boolean).forEach(revoke);
+      [250,650,1200].forEach(ms=>setTimeout(()=>{lib=null;libPromise=null;schedule(0,true);schedule(1,true)},ms));
+    }
+  },true);
+
+  if(modalRoot)new MutationObserver(()=>setTimeout(async()=>{
+    const stage=modalRoot.querySelector('#reviewStage'), img=stage?.querySelector('img'), id=stage?.dataset?.naiReviewMediaId;
+    if(!stage||!img||!id)return;
+    try{const c=crop(await meta(id));if(!c.t&&!c.b)return;img.src=await cropUrl(id,c)}catch(_){}
+  },0)).observe(modalRoot,{childList:true,subtree:true});
+
+  library().then(()=>{schedule(0);schedule(1)}).catch(()=>{});
+  window.addEventListener('pagehide',()=>{for(const x of cache.values())if(x?.url)URL.revokeObjectURL(x.url);cache.clear()},{once:true});
+})();
