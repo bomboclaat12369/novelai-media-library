@@ -1,0 +1,93 @@
+// NovelAI Media Library v2.4.6: tighter centered video control buttons
+(() => {
+  'use strict';
+
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV246 === '1') return;
+  document.documentElement.dataset.naiMediaV246 = '1';
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v246-style';
+  style.textContent = `
+    /* Keep the rail only as wide as the useful labels require. The main buttons
+       are all the same compact width (roughly the width needed for "Thumb"),
+       with their text centered. */
+    .stage > #videoTools.naiVideoSideRail {
+      width:60px !important;
+      padding:3px !important;
+      gap:3px !important;
+      right:3px !important;
+    }
+    .stage > #videoTools.naiVideoSideRail .videoToolRow {
+      grid-template-columns:42px 10px !important;
+      gap:2px !important;
+      justify-content:center !important;
+    }
+    .stage > #videoTools.naiVideoSideRail .videoToolRow:first-child {
+      display:flex !important;
+      justify-content:center !important;
+      align-items:center !important;
+    }
+    .stage > #videoTools.naiVideoSideRail button {
+      text-align:center !important;
+      justify-content:center !important;
+      align-items:center !important;
+    }
+    .stage > #videoTools.naiVideoSideRail #setThumbBtn {
+      width:42px !important;
+      min-width:42px !important;
+      max-width:42px !important;
+      padding:0 !important;
+      margin:0 auto !important;
+    }
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker] {
+      width:42px !important;
+      min-width:42px !important;
+      max-width:42px !important;
+      padding:0 !important;
+      text-align:center !important;
+    }
+    .stage > #videoTools.naiVideoSideRail [data-set-marker] {
+      width:10px !important;
+      min-width:10px !important;
+      max-width:10px !important;
+      padding:0 !important;
+      text-align:center !important;
+    }
+
+    /* Fullscreen stays pinned to the right edge of the pane, but uses the same
+       narrow timestamp width and a tiny + button. */
+    .naiFullscreenMarkerRail {
+      width:60px !important;
+      padding:3px !important;
+      gap:3px !important;
+      right:3px !important;
+    }
+    .naiFullscreenMarkerRow {
+      grid-template-columns:42px 10px !important;
+      gap:2px !important;
+      justify-content:center !important;
+    }
+    .naiFullscreenMarkerRail button {
+      text-align:center !important;
+      justify-content:center !important;
+      align-items:center !important;
+    }
+    .naiFullscreenMarkerRow > button:first-child {
+      width:42px !important;
+      min-width:42px !important;
+      max-width:42px !important;
+      padding:0 !important;
+      text-align:center !important;
+    }
+    .naiFullscreenMarkerRail .naiFsSet {
+      width:10px !important;
+      min-width:10px !important;
+      max-width:10px !important;
+      padding:0 !important;
+      text-align:center !important;
+    }
+  `;
+  root.appendChild(style);
+})();
