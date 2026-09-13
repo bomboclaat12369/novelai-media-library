@@ -31,7 +31,7 @@ except Exception:
 HOST = "127.0.0.1"
 PORT = 8765
 APP_NAME = "NovelAI Media Library"
-API_VERSION = 6
+API_VERSION = 7
 
 
 def now_iso() -> str:
@@ -101,13 +101,16 @@ class LibraryStore:
                 data = json.load(f)
             if not isinstance(data, dict):
                 raise ValueError("library.json is not a JSON object")
-            data.setdefault("version", API_VERSION)
+            changed = False
+            if data.get("version") != API_VERSION:
+                data["version"] = API_VERSION
+                changed = True
             data.setdefault("characters", [])
             data.setdefault("media", [])
             data.setdefault("sets", [])
             if not isinstance(data.get("sets"), list):
                 data["sets"] = []
-            changed = False
+                changed = True
             for m in data.get("media", []):
                 if "favorite" not in m:
                     m["favorite"] = False
@@ -823,31 +826,56 @@ class LibraryStore:
             if not m:
                 raise KeyError("Media not found")
 
-            using_crop = False
             if thumb:
                 rel = m.get("thumb_rel") or m.get("stored_rel")
-            elif source or m.get("media_type") != "image":
+                path = (self.root / str(rel or "")).resolve()
+                if self.root.resolve() not in path.parents and path != self.root.resolve():
+                    raise ValueError("Invalid media path")
+                if not path.exists():
+                    raise FileNotFoundError("Media file is missing")
+                if m.get("thumb_rel"):
+                    return path, mimetypes.guess_type(path.name)[0] or "image/webp"
+                return path, m.get("content_type") or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+
+            # /source is always the exact untouched imported file. Videos also always
+            # use their original file. Normal image display, however, must prefer the
+            # persistent cropped derivative whenever crop metadata is present.
+            if source or m.get("media_type") != "image":
                 rel = m.get("stored_rel")
+                using_crop = False
             else:
-                cropped = bool(float(m.get("crop_top") or 0.0) or float(m.get("crop_bottom") or 0.0))
-                rel = m.get("cropped_rel") if cropped else m.get("stored_rel")
-                candidate = (self.root / str(rel or "")).resolve() if rel else None
-                if cropped and (not rel or candidate is None or not candidate.exists()):
-                    candidate = self._make_cropped_derivative(m)
-                    self.save()
+                try:
+                    top = float(m.get("crop_top") or 0.0)
+                except Exception:
+                    top = 0.0
+                try:
+                    bottom = float(m.get("crop_bottom") or 0.0)
+                except Exception:
+                    bottom = 0.0
+                has_crop = top > 0.0 or bottom > 0.0
+                using_crop = False
+                if has_crop:
                     rel = m.get("cropped_rel")
-                using_crop = bool(cropped and rel == m.get("cropped_rel"))
+                    candidate = (self.root / str(rel or "")).resolve() if rel else None
+                    if not rel or candidate is None or not candidate.exists():
+                        self._make_cropped_derivative(m)
+                        self.save()
+                        rel = m.get("cropped_rel")
+                    if not rel:
+                        raise FileNotFoundError("Cropped media file is missing")
+                    using_crop = True
+                else:
+                    rel = m.get("stored_rel")
 
             path = (self.root / str(rel or "")).resolve()
             if self.root.resolve() not in path.parents and path != self.root.resolve():
                 raise ValueError("Invalid media path")
             if not path.exists():
                 raise FileNotFoundError("Media file is missing")
-            if thumb and m.get("thumb_rel"):
-                return path, mimetypes.guess_type(path.name)[0] or "image/webp"
             if using_crop:
                 return path, "image/png"
             return path, m.get("content_type") or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+
 
 
 class MediaHandler(BaseHTTPRequestHandler):
