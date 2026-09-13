@@ -1,0 +1,98 @@
+// NovelAI Media Library v2.5.5: clear NovelAI's native drag-upload overlay after our imports
+(() => {
+  'use strict';
+
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV255 === '1') return;
+  document.documentElement.dataset.naiMediaV255 = '1';
+
+  const modalRoot = root.getElementById('modalRoot');
+  if (!modalRoot) return;
+
+  function dispatchDragCleanup(target, type) {
+    if (!target?.dispatchEvent) return;
+    let event;
+    try {
+      event = new DragEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+      });
+    } catch (_) {
+      event = new Event(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+      });
+    }
+    try { target.dispatchEvent(event); } catch (_) {}
+  }
+
+  function clearNovelAiNativeUploadState() {
+    // NovelAI has its own page-wide drag/drop UI. A drag that ends inside our
+    // Shadow DOM can leave NovelAI's upload indicator active because NovelAI
+    // sees the initial drag-enter but not our stopped drop event. Send only the
+    // normal drag-exit events NovelAI expects; do not click the page or remove
+    // arbitrary DOM nodes.
+    const targets = [document.body, document.documentElement, document, window].filter(Boolean);
+    for (const target of targets) {
+      dispatchDragCleanup(target, 'dragleave');
+      dispatchDragCleanup(target, 'dragend');
+    }
+  }
+
+  function pulseCleanup() {
+    clearNovelAiNativeUploadState();
+    [40, 120, 300].forEach(ms => setTimeout(clearNovelAiNativeUploadState, ms));
+  }
+
+  // The real drop still reaches our own drop zone. We only clean NovelAI's
+  // separate background drag state after the drop has been processed.
+  window.addEventListener('drop', event => {
+    const path = event.composedPath?.() || [];
+    if (!path.includes(host)) return;
+    const dropZone = path.find(node => node?.id === 'fileDropZone');
+    if (!dropZone) return;
+    setTimeout(pulseCleanup, 0);
+  }, true);
+
+  window.addEventListener('dragend', event => {
+    const path = event.composedPath?.() || [];
+    if (path.includes(host) || modalRoot.querySelector('#fileDropZone')) {
+      setTimeout(pulseCleanup, 0);
+    }
+  }, true);
+
+  let hadImport = !!modalRoot.querySelector('#fileDropZone');
+  let hadReview = !!modalRoot.querySelector('#reviewStage');
+  let queued = false;
+
+  function checkModalTransition() {
+    queued = false;
+    const hasImport = !!modalRoot.querySelector('#fileDropZone');
+    const hasReview = !!modalRoot.querySelector('#reviewStage');
+
+    // Clear when the Add Media modal closes/switches into Rapid Review and
+    // again when Rapid Review itself finishes. This also fixes an already
+    // activated native indicator without synthesizing a page click.
+    if ((hadImport && !hasImport) || (hadReview && !hasReview)) pulseCleanup();
+
+    hadImport = hasImport;
+    hadReview = hasReview;
+  }
+
+  new MutationObserver(() => {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(checkModalTransition);
+  }).observe(modalRoot, {childList:true, subtree:true});
+
+  // Also clean up after the import action is started, which covers file-picker
+  // imports as well as drag/drop imports.
+  root.addEventListener('click', event => {
+    const target = event.target?.closest?.('#importDirect, #importReview, #importCancelBtn');
+    if (!target) return;
+    setTimeout(pulseCleanup, 0);
+  }, true);
+})();
