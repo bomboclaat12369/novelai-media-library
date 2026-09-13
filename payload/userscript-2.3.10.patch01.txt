@@ -1,0 +1,96 @@
+// NovelAI Media Library v2.3.10: reliable split-slot selection
+(() => {
+  'use strict';
+
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV2310 === '1') return;
+  document.documentElement.dataset.naiMediaV2310 = '1';
+
+  const stages = root.getElementById('stages');
+  if (!stages) return;
+
+  let requestedSlot = null;
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v2310-style';
+  style.textContent = `
+    .naiSlotSelectBtnV239.naiRequestedSlot {
+      background:#6155d9 !important;
+      border-color:#8d84ff !important;
+      box-shadow:0 0 0 1px rgba(141,132,255,.35) inset !important;
+    }
+  `;
+  root.appendChild(style);
+
+  function stageFor(slot) {
+    return root.getElementById(`stage${slot + 1}`);
+  }
+
+  function syncButtonVisuals() {
+    const buttons = [
+      root.getElementById('naiSlotSelectV239_1'),
+      root.getElementById('naiSlotSelectV239_2'),
+    ];
+    buttons.forEach((button, i) => {
+      if (!button) return;
+      const stageActive = !!stageFor(i)?.classList.contains('slot-active');
+      button.classList.toggle('active', requestedSlot === null ? stageActive : requestedSlot === i);
+      button.classList.toggle('naiRequestedSlot', requestedSlot === i);
+    });
+  }
+
+  function activateBaseSlot(slot) {
+    if (slot !== 0 && slot !== 1) return false;
+    if (!stages.classList.contains('split')) return false;
+    const stage = stageFor(slot);
+    if (!stage) return false;
+
+    // This deliberately targets the stage itself (not its image), so the base script's
+    // existing stage click handler selects the slot without invoking image fullscreen.
+    stage.click();
+    return stage.classList.contains('slot-active');
+  }
+
+  function chooseSlot(slot) {
+    requestedSlot = slot;
+    activateBaseSlot(slot);
+    syncButtonVisuals();
+  }
+
+  // Replace the v2.3.9 button behavior with a capture-phase handler. Capture lets us
+  // handle the click before the older button listener and makes the selection deterministic.
+  root.addEventListener('click', event => {
+    const button = event.target.closest?.('.naiSlotSelectBtnV239');
+    if (!button) return;
+    const slot = button.id.endsWith('_2') ? 1 : 0;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    chooseSlot(slot);
+  }, true);
+
+  // Safety net: just before a library thumbnail is handled by the base script, re-activate
+  // the requested slot. This ensures the next thumbnail always goes to the button the user
+  // selected, even if another UI action changed the base script's active slot in between.
+  root.addEventListener('click', event => {
+    if (requestedSlot === null || !stages.classList.contains('split')) return;
+    const tile = event.target.closest?.('.tile[data-id]');
+    if (!tile) return;
+    activateBaseSlot(requestedSlot);
+  }, true);
+
+  // Once the base script visibly activates a stage, keep the header buttons in sync.
+  stages.addEventListener('click', () => {
+    setTimeout(() => {
+      const active = [0, 1].find(i => stageFor(i)?.classList.contains('slot-active'));
+      if (active !== undefined && requestedSlot === null) syncButtonVisuals();
+    }, 0);
+  });
+
+  root.getElementById('splitBtn')?.addEventListener('click', () => {
+    requestedSlot = null;
+    setTimeout(syncButtonVisuals, 0);
+  });
+
+  syncButtonVisuals();
+})();
