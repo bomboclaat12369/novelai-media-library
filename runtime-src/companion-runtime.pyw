@@ -277,6 +277,13 @@ class LibraryStore:
         out = folder / f"{media_id}.webp"
         try:
             with Image.open(original) as im:
+                # JPEG can decode directly at a reduced resolution, avoiding a full-size
+                # decode for thumbnails of very large source images.
+                try:
+                    if str(getattr(im, "format", "")).upper() == "JPEG":
+                        im.draft("RGB", (840, 840))
+                except Exception:
+                    pass
                 if ImageOps is not None:
                     im = ImageOps.exif_transpose(im)
                 try:
