@@ -26,18 +26,18 @@
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.6.2.patch01.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.7.7.patch01.txt"
   ],
-  "runtime_version": "2.7.6",
+  "runtime_version": "2.7.7",
   "runtime_encoding": "base64",
-  "runtime_sha256": "115dcc346d475eae40c0e36f6a6e1c278278955c051789b1a2c1fefc109b6286",
+  "runtime_sha256": "0b1c41d1ed2fe45122f9f6530c2dcf07b26fc87f4d90ffed7dcf333a98ecd212",
   "runtime_parts": [
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.6.part01.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.6.part02.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.6.part03.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.6.part04.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.6.part05.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.6.part06.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.6.part07.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.6.part08.b64"
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.7.part01.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.7.part02.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.7.part03.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.7.part04.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.7.part05.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.7.part06.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.7.part07.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.7.part08.b64"
   ],
   "userscript_sha256": "ae22816bc4c017f6ae5e9406f91bec323b4dd89b7de09028fba951a4b67533da"
 }
