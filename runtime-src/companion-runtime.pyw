@@ -31,7 +31,7 @@ except Exception:
 HOST = "127.0.0.1"
 PORT = 8765
 APP_NAME = "NovelAI Media Library"
-API_VERSION = 5
+API_VERSION = 6
 
 
 def now_iso() -> str:
@@ -110,6 +110,9 @@ class LibraryStore:
             for m in data.get("media", []):
                 if "favorite" not in m:
                     m["favorite"] = False
+                    changed = True
+                if "in_review" not in m:
+                    m["in_review"] = False
                     changed = True
                 if "categories" not in m or not isinstance(m.get("categories"), list):
                     m["categories"] = []
@@ -728,6 +731,17 @@ class LibraryStore:
             self.save()
             return m
 
+    def set_review(self, media_id: str, in_review: bool) -> dict[str, Any]:
+        with self.lock:
+            m = self.media_item(media_id)
+            if not m:
+                raise KeyError("Media not found")
+            if m.get("media_type") != "image":
+                raise ValueError("Only images can be placed in Review")
+            m["in_review"] = bool(in_review)
+            self.save()
+            return m
+
     def set_crop(self, media_id: str, top: Any = 0.0, bottom: Any = 0.0) -> dict[str, Any]:
         with self.lock:
             m = self.media_item(media_id)
@@ -1185,6 +1199,12 @@ class MediaHandler(BaseHTTPRequestHandler):
             if match:
                 body = self._read_json()
                 item = self.store.set_favorite(match.group(1), bool(body.get("favorite")))
+                self._send_json(200, item)
+                return
+            match = re.fullmatch(r"/api/media/([0-9a-f]+)/review", path)
+            if match:
+                body = self._read_json()
+                item = self.store.set_review(match.group(1), bool(body.get("in_review")))
                 self._send_json(200, item)
                 return
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/crop", path)
