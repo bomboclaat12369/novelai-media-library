@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NovelAI Local Media Library
 // @namespace    local.novelai.media.library
-// @version      2.2.1
+// @version      2.2.2
 // @description  NovelAI media library loader with automatic GitHub updates.
 // @updateURL    https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/novelai-media.user.js
 // @downloadURL  https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/novelai-media.user.js
@@ -21,6 +21,7 @@
   const MANIFEST = 'https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/manifest.json';
   const CACHE_CODE = 'nai-media-github-payload';
   const CACHE_VERSION = 'nai-media-github-payload-version';
+  document.documentElement.dataset.naiMediaLoaderVersion = '2.2.2';
 
   function requestText(url) {
     return new Promise((resolve, reject) => {
@@ -61,9 +62,6 @@
     const cached = localStorage.getItem(CACHE_CODE) || '';
     const cachedVersion = localStorage.getItem(CACHE_VERSION) || '';
 
-    // Fast path: a cached payload is the currently-installed app, so start it immediately.
-    // The GitHub update check runs in the background and, if newer code exists, stores it
-    // for the next page load. A slow githubusercontent request can no longer delay the UI.
     if (cached) {
       run(cached);
       fetchLatest(cachedVersion).catch(err => {
@@ -72,7 +70,6 @@
       return;
     }
 
-    // First install has no cache, so it must download once before anything can run.
     try {
       const latest = await fetchLatest('');
       if (!latest.code) throw new Error('No userscript payload was downloaded');
