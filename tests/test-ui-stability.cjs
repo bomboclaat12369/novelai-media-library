@@ -197,14 +197,18 @@ test('the active drag cleanup layer does not synthesize page-wide drag events', 
   assert.equal(release.parts.includes('payload/userscript-2.8.4.drag-safety.txt'), true);
 });
 
-test('the 2.8.5 UI patch resets viewer state and exposes bulk image editing', () => {
+test('the UI patches reset viewer state and expose bulk image editing', () => {
   const reset = read('payload/userscript-2.8.5.reset-state.txt');
   assert.match(reset, /saved\.selectedMediaId = null/);
   assert.match(reset, /saved\.slotMediaIds = \[null, null\]/);
   assert.match(reset, /saved\.splitView = false/);
-  const ui = read('payload/userscript-2.8.5.ui-updates.txt');
+  const ui = read('payload/userscript-2.8.6.ui-updates.txt');
   assert.match(ui, /openBulkEditModal/);
   assert.match(ui, /Delete selected images/);
   assert.match(ui, /All \$\{count\} images in this Rapid Review queue are shown/);
   assert.doesNotMatch(ui, /Permanently delete/);
+  const review = read('payload/userscript-2.8.6.review-core.txt');
+  assert.doesNotMatch(review, /\? Review/);
+  assert.match(review, /setTextIfChanged\(review, `Review /);
+  assert.doesNotMatch(ui, /cleanReviewLabels|labelCleanupQueued|observe\(catWrap/);
 });
