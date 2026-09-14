@@ -1,0 +1,37 @@
+name: Validate userscript v2.8.1
+
+on:
+  push:
+    paths:
+      - payload/userscript-2.8.1.patch01.txt
+      - .github/workflows/validate-userscript-v2.8.1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Validate patch syntax
+        run: |
+          cp payload/userscript-2.8.1.patch01.txt /tmp/userscript-v2.8.1.js
+          node --check /tmp/userscript-v2.8.1.js
+      - name: Validate assembled candidate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          cfg=json.loads(Path('release-userscript.json').read_text())
+          parts=list(cfg['parts']) + ['payload/userscript-2.8.1.patch01.txt']
+          Path('/tmp/complete-v2.8.1.js').write_text('\n'.join(Path(p).read_text(encoding='utf-8') for p in parts), encoding='utf-8')
+          PY
+          node --check /tmp/complete-v2.8.1.js
