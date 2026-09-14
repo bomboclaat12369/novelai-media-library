@@ -207,8 +207,82 @@ test('the UI patches reset viewer state and expose bulk image editing', () => {
   assert.match(ui, /Delete selected images/);
   assert.match(ui, /All \$\{count\} images in this Rapid Review queue are shown/);
   assert.doesNotMatch(ui, /Permanently delete/);
-  const review = read('payload/userscript-2.8.6.review-core.txt');
+  const release = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-userscript.json'));
+  const review = read(release.parts.find(p => p.endsWith('.review-core.txt')));
   assert.doesNotMatch(review, /\? Review/);
   assert.match(review, /setTextIfChanged\(review, `Review /);
   assert.doesNotMatch(ui, /cleanReviewLabels|labelCleanupQueued|observe\(catWrap/);
+});
+
+// Exercise the production queue functions, including the DOM attachment guard.
+function reviewQueueFixture() {
+  const release = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-userscript.json'));
+  const source = read(release.parts.find(p => p.endsWith('.review-core.txt')));
+  class Element {
+    constructor(tag) { this.tagName = tag; this.children = []; this.listeners = {}; }
+    get isConnected() { return this.connected === true || !!this.parent?.isConnected; }
+    appendChild(child) { child.parent = this; this.children.push(child); return child; }
+    addEventListener(type, callback) { this.listeners[type] = callback; }
+  }
+  const strip = new Element('div'); strip.connected = true;
+  const media = Array.from({length:10}, (_, i) => ({
+    id:`image ${i}`, media_type:i === 2 ? 'video' : 'image', categories:[], in_review:true,
+  }));
+  const session = {ids:media.map(m => m.id), index:0, saved:new Set(), carry:false};
+  const requests = [];
+  const context = vm.createContext({
+    API:'http://127.0.0.1:8765', reviewSession:session,
+    document:{createElement:tag => new Element(tag)},
+    modalRoot:{
+      querySelector:selector => selector === '#naiQueueStrip270' ? strip : {checked:true},
+      querySelectorAll:() => [],
+    },
+    mediaById:id => media.find(m => m.id === id),
+    gmRequest:async options => { requests.push(options); return JSON.parse(options.data); },
+    alert:message => { throw new Error(message); },
+  });
+  const start = source.indexOf('  async function loadQueueThumb(');
+  const end = source.indexOf('  async function renderReviewQueue()', start);
+  assert.ok(start >= 0 && end > start);
+  vm.runInContext(source.slice(start, end) + `
+    async function renderReviewQueue() {
+      for (const child of strip.children) child.parent = null;
+      strip.children = [];
+      await renderQueueStrip();
+    }
+    this.render = renderQueueStrip;
+  `, Object.assign(context, {strip}));
+  return {strip, media, session, requests, render:context.render};
+}
+
+test('queue image previews get thumbnail URLs on first render and after navigation', async () => {
+  const f = reviewQueueFixture();
+  await f.render();
+  assert.equal(f.strip.children.length, 6);
+  function checkPreviews() {
+    for (const card of f.strip.children) {
+      const index = Number(card.title.split('.')[0]) - 1;
+      const img = card.children.find(child => child.tagName === 'img');
+      if (f.media[index].media_type === 'video') { assert.equal(img, undefined); continue; }
+      assert.equal(img.isConnected, true);
+      assert.equal(img.src, `http://127.0.0.1:8765/api/media/${encodeURIComponent(f.media[index].id)}/thumb`);
+    }
+  }
+  checkPreviews();
+  await f.strip.children[4].listeners.click();
+  assert.equal(f.session.index, 4);
+  checkPreviews();
+});
+
+test('jumping saves the departed item; the saved check does not mean promoted from Review', async () => {
+  const f = reviewQueueFixture();
+  await f.render();
+  await f.strip.children[1].listeners.click();
+  assert.deepEqual([...f.session.saved], ['image 0']);
+  assert.equal(f.requests.length, 2);
+  assert.match(f.requests[1].path, /\/review$/);
+  assert.equal(f.media[0].in_review, true);
+  assert.match(f.strip.children[0].className, / saved/);
+  assert.doesNotMatch(f.strip.children[1].className, / saved/);
+  assert.match(f.strip.children[1].className, / current/);
 });
