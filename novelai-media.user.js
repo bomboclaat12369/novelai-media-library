@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NovelAI Local Media Library
 // @namespace    local.novelai.media.library
-// @version      2.2.0
+// @version      2.2.1
 // @description  NovelAI media library loader with automatic GitHub updates.
 // @updateURL    https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/novelai-media.user.js
 // @downloadURL  https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/novelai-media.user.js
@@ -41,35 +41,45 @@
     eval(code);
   }
 
+  async function fetchLatest(cachedVersion = '') {
+    const manifest = JSON.parse(await requestText(MANIFEST));
+    const version = String(manifest.userscript_payload_version || '');
+    const parts = Array.isArray(manifest.userscript_parts) ? manifest.userscript_parts : [];
+    if (!version || !parts.length) throw new Error('Invalid userscript manifest');
+    if (cachedVersion === version) return { version, code: null };
+
+    const code = (await Promise.all(parts.map(requestText))).join('');
+    if (!code.includes('NovelAI Local Media Library') || !code.includes('loadLibrary')) {
+      throw new Error('Downloaded userscript payload did not look valid');
+    }
+    localStorage.setItem(CACHE_CODE, code);
+    localStorage.setItem(CACHE_VERSION, version);
+    return { version, code };
+  }
+
   async function loadLatest() {
     const cached = localStorage.getItem(CACHE_CODE) || '';
+    const cachedVersion = localStorage.getItem(CACHE_VERSION) || '';
+
+    // Fast path: a cached payload is the currently-installed app, so start it immediately.
+    // The GitHub update check runs in the background and, if newer code exists, stores it
+    // for the next page load. A slow githubusercontent request can no longer delay the UI.
+    if (cached) {
+      run(cached);
+      fetchLatest(cachedVersion).catch(err => {
+        console.warn('NovelAI Media Library background update check failed; keeping cached version.', err);
+      });
+      return;
+    }
+
+    // First install has no cache, so it must download once before anything can run.
     try {
-      const manifest = JSON.parse(await requestText(MANIFEST));
-      const version = String(manifest.userscript_payload_version || '');
-      const parts = Array.isArray(manifest.userscript_parts) ? manifest.userscript_parts : [];
-      if (!version || !parts.length) throw new Error('Invalid userscript manifest');
-
-      const cachedVersion = localStorage.getItem(CACHE_VERSION) || '';
-      if (cached && cachedVersion === version) {
-        run(cached);
-        return;
-      }
-
-      const code = (await Promise.all(parts.map(requestText))).join('');
-      if (!code.includes('NovelAI Local Media Library') || !code.includes('loadLibrary')) {
-        throw new Error('Downloaded userscript payload did not look valid');
-      }
-      localStorage.setItem(CACHE_CODE, code);
-      localStorage.setItem(CACHE_VERSION, version);
-      run(code);
+      const latest = await fetchLatest('');
+      if (!latest.code) throw new Error('No userscript payload was downloaded');
+      run(latest.code);
     } catch (err) {
-      if (cached) {
-        console.warn('NovelAI Media Library update check failed; using cached version.', err);
-        run(cached);
-      } else {
-        console.error('NovelAI Media Library could not load.', err);
-        alert(`NovelAI Media Library could not load.\n\n${err.message || err}`);
-      }
+      console.error('NovelAI Media Library could not load.', err);
+      alert(`NovelAI Media Library could not load.\n\n${err.message || err}`);
     }
   }
 
