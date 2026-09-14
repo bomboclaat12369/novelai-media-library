@@ -31,7 +31,7 @@ except Exception:
 HOST = "127.0.0.1"
 PORT = 8765
 APP_NAME = "NovelAI Media Library"
-API_VERSION = 7
+API_VERSION = 8
 
 
 def now_iso() -> str:
@@ -963,6 +963,20 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/library":
                 self._send_json(200, self.store.public_library())
                 return
+            match = re.fullmatch(r"/api/import/status/([A-Za-z0-9_-]{8,128})", path)
+            if match:
+                token = match.group(1)
+                now = time.time()
+                with self.server.import_jobs_lock:  # type: ignore[attr-defined]
+                    jobs = self.server.import_jobs  # type: ignore[attr-defined]
+                    stale = [key for key, value in jobs.items() if now - float(value.get("updated_at", now)) > 1800]
+                    for key in stale:
+                        jobs.pop(key, None)
+                    job = jobs.get(token)
+                    payload = dict(job) if job else {"state": "unknown"}
+                payload.pop("updated_at", None)
+                self._send_json(200, payload)
+                return
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/(?:(thumb)|(original))", path)
             if match:
                 media_id = match.group(1)
@@ -1039,6 +1053,9 @@ class MediaHandler(BaseHTTPRequestHandler):
                 query = urllib.parse.parse_qs(parsed.query)
                 character_id = str((query.get("character_id") or [""])[0])
                 filename = str((query.get("filename") or [""])[0])
+                token = str((query.get("token") or [""])[0]).strip()
+                if token and not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", token):
+                    raise ValueError("Invalid import token")
                 categories_text = str((query.get("categories") or ["[]"])[0])
                 try:
                     categories = json.loads(categories_text)
@@ -1060,6 +1077,13 @@ class MediaHandler(BaseHTTPRequestHandler):
                 if length <= 0 or length > max_bytes:
                     raise ValueError("Uploaded file is empty or larger than 2 GB")
 
+                if token:
+                    with self.server.import_jobs_lock:  # type: ignore[attr-defined]
+                        self.server.import_jobs[token] = {  # type: ignore[attr-defined]
+                            "state": "uploading",
+                            "updated_at": time.time(),
+                        }
+
                 temp_dir = self.store.root / ".incoming"
                 temp_dir.mkdir(parents=True, exist_ok=True)
                 temp = temp_dir / f"{uuid.uuid4().hex}.part"
@@ -1072,6 +1096,76 @@ class MediaHandler(BaseHTTPRequestHandler):
                                 raise ValueError("Upload ended before the complete file was received")
                             out.write(chunk)
                             remaining -= len(chunk)
+                except Exception as exc:
+                    try:
+                        temp.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    if token:
+                        with self.server.import_jobs_lock:  # type: ignore[attr-defined]
+                            self.server.import_jobs[token] = {  # type: ignore[attr-defined]
+                                "state": "error",
+                                "error": str(exc),
+                                "updated_at": time.time(),
+                            }
+                    raise
+
+                if token:
+                    server = self.server
+                    store = self.store
+                    categories_copy = list(categories)
+                    source_copy = {"kind": "local", "original_name": filename}
+
+                    def finish_import_job() -> None:
+                        try:
+                            item, duplicate = store._register_file(
+                                temp,
+                                filename,
+                                character_id,
+                                categories_copy,
+                                source_copy,
+                                content_type,
+                            )
+                            result = {
+                                "state": "done",
+                                "item": item,
+                                "duplicate": duplicate,
+                                "updated_at": time.time(),
+                            }
+                        except Exception as exc:
+                            try:
+                                temp.unlink(missing_ok=True)
+                            except Exception:
+                                pass
+                            result = {
+                                "state": "error",
+                                "error": str(exc),
+                                "updated_at": time.time(),
+                            }
+                        with server.import_jobs_lock:  # type: ignore[attr-defined]
+                            server.import_jobs[token] = result  # type: ignore[attr-defined]
+
+                    with self.server.import_jobs_lock:  # type: ignore[attr-defined]
+                        self.server.import_jobs[token] = {  # type: ignore[attr-defined]
+                            "state": "processing",
+                            "updated_at": time.time(),
+                        }
+                    threading.Thread(target=finish_import_job, name=f"nai-import-{token[:12]}", daemon=True).start()
+
+                    body = json_bytes({"accepted": True, "token": token})
+                    self.send_response(202)
+                    self._cors()
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(body)
+                    self.wfile.flush()
+                    self.close_connection = True
+                    return
+
+                try:
                     item, duplicate = self.store._register_file(
                         temp,
                         filename,
@@ -1184,6 +1278,8 @@ class MediaHTTPServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], store: LibraryStore):
         super().__init__(address, MediaHandler)
         self.store = store
+        self.import_jobs: dict[str, dict[str, Any]] = {}
+        self.import_jobs_lock = threading.RLock()
 
 
 def open_folder(path: Path) -> None:
