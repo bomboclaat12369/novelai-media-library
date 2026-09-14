@@ -1,7 +1,8 @@
 {
-  "version": "2.8.4",
+  "version": "2.8.5",
   "parts": [
     "payload/userscript-2.8.3.transport-start.txt",
+    "payload/userscript-2.8.5.reset-state.txt",
     "payload/userscript-2.8.4.part01.txt",
     "payload/userscript-2.3.0.patch01.txt",
     "payload/userscript-2.3.0.patch02.txt",
@@ -22,7 +23,8 @@
     "payload/userscript-2.8.4.drag-safety.txt",
     "payload/userscript-2.6.2.patch01.txt",
     "payload/userscript-2.7.7.patch01.txt",
+    "payload/userscript-2.8.5.ui-updates.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 57
+  "release_build": 58
 }
