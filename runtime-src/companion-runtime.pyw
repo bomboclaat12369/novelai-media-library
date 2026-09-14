@@ -73,6 +73,7 @@ class LibraryStore:
         self.backup_dir = root / "backups"
         self.db_path = root / "library.json"
         self.lock = threading.RLock()
+        self.last_import_debug: dict[str, Any] = {}
         self.root.mkdir(parents=True, exist_ok=True)
         self.media_dir.mkdir(parents=True, exist_ok=True)
         self.thumb_dir.mkdir(parents=True, exist_ok=True)
@@ -480,6 +481,73 @@ class LibraryStore:
         with temp.open("wb") as f:
             f.write(payload)
         return self._register_file(temp, original_name, character_id, categories, source, content_type)
+
+    def import_bytes_profiled(
+        self,
+        payload: bytes,
+        original_name: str,
+        character_id: str,
+        categories: list[str],
+        source: dict[str, Any],
+        content_type: str | None,
+    ) -> tuple[dict[str, Any], bool, dict[str, float]]:
+        timing: dict[str, float] = {}
+        backend_started = time.perf_counter()
+        temp_dir = self.root / ".incoming"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp = temp_dir / f"{uuid.uuid4().hex}.part"
+
+        phase = time.perf_counter()
+        with temp.open("wb") as f:
+            f.write(payload)
+            f.flush()
+        timing["temp_write"] = round((time.perf_counter() - phase) * 1000, 1)
+
+        phase = time.perf_counter()
+        item, duplicate = self._register_file(temp, original_name, character_id, categories, source, content_type)
+        timing["register"] = round((time.perf_counter() - phase) * 1000, 1)
+        timing["backend_total"] = round((time.perf_counter() - backend_started) * 1000, 1)
+        return item, duplicate, timing
+
+    def performance_probe(self) -> dict[str, Any]:
+        # Small explicit local-disk probe used only by the diagnostics endpoint. It does not
+        # alter library.json or any media. This helps distinguish loopback/Tampermonkey delay
+        # from Windows Defender/OneDrive/disk latency in the managed library directory.
+        incoming = self.root / ".incoming"
+        incoming.mkdir(parents=True, exist_ok=True)
+        probe = incoming / f"diag-{uuid.uuid4().hex}.tmp"
+        payload = b"\0" * (2 * 1024 * 1024)
+        result: dict[str, Any] = {
+            "library_root": str(self.root),
+            "root_mentions_onedrive": "onedrive" in str(self.root).casefold(),
+            "media_count": len(self.data.get("media", [])),
+            "library_json_bytes": self.db_path.stat().st_size if self.db_path.exists() else 0,
+            "probe_bytes": len(payload),
+        }
+        try:
+            phase = time.perf_counter()
+            with probe.open("wb") as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())
+            result["write_fsync_ms"] = round((time.perf_counter() - phase) * 1000, 1)
+
+            phase = time.perf_counter()
+            h = hashlib.sha256()
+            with probe.open("rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    h.update(chunk)
+            result["read_hash_ms"] = round((time.perf_counter() - phase) * 1000, 1)
+
+            phase = time.perf_counter()
+            probe.unlink(missing_ok=True)
+            result["delete_ms"] = round((time.perf_counter() - phase) * 1000, 1)
+        finally:
+            try:
+                probe.unlink(missing_ok=True)
+            except Exception:
+                pass
+        return result
 
     def import_url(self, url: str, character_id: str, categories: list[str]) -> tuple[dict[str, Any], bool]:
         parsed = urllib.parse.urlparse(url)
@@ -992,6 +1060,13 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/health":
                 self._send_json(200, {"ok": True, "version": API_VERSION, "library_root": str(self.store.root)})
                 return
+            if path == "/api/diagnostics/last-import":
+                payload = dict(self.store.last_import_debug) if self.store.last_import_debug else {"state": "none"}
+                self._send_json(200, payload)
+                return
+            if path == "/api/diagnostics/performance":
+                self._send_json(200, self.store.performance_probe())
+                return
             if path == "/api/library":
                 self._send_json(200, self.store.public_library())
                 return
@@ -1058,8 +1133,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     content_type = guessed or content_type
                 if not (content_type or "").startswith(("image/", "video/")):
                     raise ValueError("Only image and video files are supported")
-                register_started = time.perf_counter()
-                item, duplicate = self.store.import_bytes(
+                item, duplicate, backend_timing = self.store.import_bytes_profiled(
                     payload,
                     filename,
                     character_id,
@@ -1067,15 +1141,25 @@ class MediaHandler(BaseHTTPRequestHandler):
                     {"kind": "local", "original_name": filename},
                     content_type,
                 )
-                register_done = time.perf_counter()
+                finished = time.perf_counter()
+                debug_timing = {
+                    "multipart": round((multipart_done - import_started) * 1000, 1),
+                    **backend_timing,
+                    "server_total": round((finished - import_started) * 1000, 1),
+                }
+                self.store.last_import_debug = {
+                    "state": "done",
+                    "recorded_at_epoch_ms": int(time.time() * 1000),
+                    "filename": filename,
+                    "file_bytes": len(payload),
+                    "duplicate": bool(duplicate),
+                    "debug_timing_ms": debug_timing,
+                    "library_root": str(self.store.root),
+                }
                 self._send_json(200, {
                     "item": item,
                     "duplicate": duplicate,
-                    "debug_timing_ms": {
-                        "multipart": round((multipart_done - import_started) * 1000, 1),
-                        "register": round((register_done - register_started) * 1000, 1),
-                        "total": round((register_done - import_started) * 1000, 1),
-                    },
+                    "debug_timing_ms": debug_timing,
                 })
                 return
             if path == "/api/import/url":
