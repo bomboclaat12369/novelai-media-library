@@ -191,7 +191,8 @@ test('the active drag cleanup layer does not synthesize page-wide drag events', 
   const source = read('payload/userscript-2.8.4.drag-safety.txt');
   assert.doesNotMatch(source, /dispatchEvent|DragEvent|dragleave|dragend/);
   assert.match(source, /naiMediaV284DragSafety/);
-  const candidate = JSON.parse(read('candidate-userscript-2.8.4.json'));
-  assert.equal(candidate.parts.includes('payload/userscript-2.5.5.patch01.txt'), false);
-  assert.equal(candidate.parts.includes('payload/userscript-2.8.4.drag-safety.txt'), true);
+  const releasePath = process.env.NAI_RELEASE_CONFIG || 'release-userscript.json';
+  const release = JSON.parse(read(releasePath));
+  assert.equal(release.parts.includes('payload/userscript-2.5.5.patch01.txt'), false);
+  assert.equal(release.parts.includes('payload/userscript-2.8.4.drag-safety.txt'), true);
 });
