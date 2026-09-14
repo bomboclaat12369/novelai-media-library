@@ -1,0 +1,15 @@
+// NovelAI Media Library v2.8.5: start each page with an empty single viewer
+(() => {
+  'use strict';
+  const key = 'nai-media-v1-ui';
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || '{}') || {};
+    // Keep the user's character, category, and visibility preferences. The viewer
+    // itself is intentionally reset on every page load.
+    saved.selectedMediaId = null;
+    saved.slotMediaIds = [null, null];
+    saved.activeSlot = 0;
+    saved.splitView = false;
+    localStorage.setItem(key, JSON.stringify(saved));
+  } catch (_) {}
+})();
