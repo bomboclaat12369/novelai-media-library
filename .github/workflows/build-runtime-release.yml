@@ -47,6 +47,8 @@ jobs:
           PY
       - name: Validate runtime syntax
         run: python -m py_compile runtime-src/companion-runtime.pyw
+      - name: Validate import and Review stability
+        run: python -m unittest discover -s tests -p 'test_runtime_*.py' -v
       - name: Commit runtime release
         run: |
           git config user.name "github-actions[bot]"

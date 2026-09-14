@@ -1,0 +1,114 @@
+// NovelAI Media Library v2.8.3: bound companion traffic across all payload layers.
+// The wrapper is local to this assembled payload; it never patches NovelAI's globals.
+((nativeCompanionRequest) => {
+  'use strict';
+
+  function createCompanionTransport(nativeRequest) {
+    const pending = [];
+    const sharedReads = new Map();
+    const MAX_ACTIVE = 4;
+    const MAX_THUMBNAILS = 2;
+    let active = 0;
+    let activeThumbnails = 0;
+    let generation = 0;
+    let pumpQueued = false;
+
+    function notify(subscriber, event, response) {
+      if (!subscriber.live) return;
+      const callback = subscriber.options[event] || (event === 'onabort' ? subscriber.options.onerror : null);
+      try { callback?.(response); }
+      catch (error) { console.error('[NovelAI Media] request callback failed', error); }
+    }
+
+    function schedulePump() {
+      if (pumpQueued) return;
+      pumpQueued = true;
+      queueMicrotask(pump);
+    }
+
+    function finish(job, event, response) {
+      if (job.done) return;
+      job.done = true;
+      if (job.key && sharedReads.get(job.key) === job) sharedReads.delete(job.key);
+      if (job.started) {
+        active--;
+        if (job.thumbnail) activeThumbnails--;
+      } else {
+        const index = pending.indexOf(job);
+        if (index >= 0) pending.splice(index, 1);
+      }
+      if (!job.thumbnail && job.started && performance.now() - job.created > 2000) {
+        console.info(`[NovelAI Media timing] ${job.method} ${job.path}: queue ${Math.round(job.startedAt - job.created)} ms, request ${Math.round(performance.now() - job.startedAt)} ms (${event})`);
+      }
+      for (const subscriber of job.subscribers) {
+        notify(subscriber, event, response);
+        notify(subscriber, 'onloadend', response);
+        subscriber.live = false;
+      }
+      schedulePump();
+    }
+
+    function pump() {
+      pumpQueued = false;
+      while (active < MAX_ACTIVE) {
+        // Foreground saves/imports and original images bypass queued thumbnails.
+        let index = pending.findIndex(job => !job.thumbnail);
+        if (index < 0 && activeThumbnails < MAX_THUMBNAILS) index = pending.findIndex(job => job.thumbnail);
+        if (index < 0) return;
+        const job = pending.splice(index, 1)[0];
+        job.started = true;
+        job.startedAt = performance.now();
+        active++;
+        if (job.thumbnail) activeThumbnails++;
+        const options = {...job.options};
+        for (const event of ['onload', 'onerror', 'ontimeout', 'onabort']) options[event] = response => finish(job, event, response);
+        options.onloadend = () => {};
+        for (const event of ['onprogress', 'onloadstart', 'onreadystatechange']) {
+          options[event] = response => job.subscribers.forEach(subscriber => notify(subscriber, event, response));
+        }
+        try { job.handle = nativeRequest(options); }
+        catch (error) { finish(job, 'onerror', {status:0, error:String(error)}); }
+      }
+    }
+
+    return function request(options) {
+      let url;
+      try { url = new URL(options.url); } catch (_) { return nativeRequest(options); }
+      if (!['127.0.0.1', 'localhost'].includes(url.hostname) || url.port !== '8765' || !url.pathname.startsWith('/api/')) {
+        return nativeRequest(options);
+      }
+      const method = String(options.method || 'GET').toUpperCase();
+      if (method !== 'GET' && method !== 'HEAD') {
+        // A read requested after a write must not reuse a pre-write snapshot.
+        generation++;
+        sharedReads.clear();
+      }
+      const thumbnail = method === 'GET' && /\/thumb$/.test(url.pathname);
+      const shareable = method === 'GET' && (url.pathname === '/api/library' || thumbnail);
+      const key = shareable ? JSON.stringify([generation, url.href, options.responseType || 'text', options.timeout || 0, options.headers || {}]) : null;
+      let job = key ? sharedReads.get(key) : null;
+      const subscriber = {options, live:true};
+      if (job) job.subscribers.push(subscriber);
+      else {
+        job = {options, method, path:url.pathname, thumbnail, key, subscribers:[subscriber], created:performance.now(), started:false, done:false, handle:null};
+        if (key) sharedReads.set(key, job);
+        pending.push(job);
+        schedulePump();
+      }
+      return {
+        abort() {
+          if (!subscriber.live || job.done) return;
+          notify(subscriber, 'onabort', {status:0, error:'Request aborted'});
+          notify(subscriber, 'onloadend', {status:0});
+          subscriber.live = false;
+          if (!job.subscribers.some(item => item.live)) {
+            finish(job, 'onabort', {status:0});
+            try { job.handle?.abort?.(); } catch (_) {}
+          }
+        },
+      };
+    };
+  }
+
+  const GM_xmlhttpRequest = createCompanionTransport(nativeCompanionRequest);
+

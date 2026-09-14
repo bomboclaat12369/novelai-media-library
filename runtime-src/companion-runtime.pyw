@@ -5,6 +5,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import queue
 import re
 import shutil
 import subprocess
@@ -74,6 +75,8 @@ class LibraryStore:
         self.db_path = root / "library.json"
         self.lock = threading.RLock()
         self.last_import_debug: dict[str, Any] = {}
+        self._thumbnail_queue = queue.Queue()
+        self._thumbnail_worker = None
         self.root.mkdir(parents=True, exist_ok=True)
         self.media_dir.mkdir(parents=True, exist_ok=True)
         self.thumb_dir.mkdir(parents=True, exist_ok=True)
@@ -311,39 +314,51 @@ class LibraryStore:
             return None
 
     def _queue_image_thumbnail(self, original: Path, media_id: str, character_name: str) -> None:
-        # Thumbnail generation is deliberately off the import critical path. Large JPEG/PNG
-        # decode + resize can take seconds on some machines; the original media is already
-        # safely stored by this point, so Rapid Review should not wait for a 420px thumbnail.
-        def worker() -> None:
-            # Give the request thread a chance to serialize/flush the successful import first.
-            time.sleep(0.10)
-            thumb_rel = self._make_thumbnail(original, media_id, character_name)
-            if not thumb_rel:
-                return
-            with self.lock:
-                item = self.media_item(media_id)
-                if not item:
-                    try:
-                        (self.root / thumb_rel).unlink(missing_ok=True)
-                    except Exception:
-                        pass
-                    return
-                # Do not resurrect/attach a thumbnail to a replaced media record.
-                try:
-                    expected = original.resolve()
-                    current = (self.root / str(item.get("stored_rel") or "")).resolve()
-                    if current != expected:
-                        return
-                except Exception:
-                    return
-                item["thumb_rel"] = thumb_rel
-                self.save()
+        # One daemon processes the queue. A batch must not start dozens of simultaneous
+        # full-size image decoders and compete with imports, Review, and the browser.
+        # Enqueue only: saving the original remains the entire import critical path.
+        with self.lock:
+            self._thumbnail_queue.put((original, media_id, character_name))
+            if self._thumbnail_worker is None or not self._thumbnail_worker.is_alive():
+                self._thumbnail_worker = threading.Thread(
+                    target=self._run_thumbnail_queue,
+                    name="nai-thumbnails",
+                    daemon=True,
+                )
+                self._thumbnail_worker.start()
 
-        threading.Thread(
-            target=worker,
-            name=f"nai-thumb-{media_id[:8]}",
-            daemon=True,
-        ).start()
+    def _run_thumbnail_queue(self) -> None:
+        while True:
+            job = self._thumbnail_queue.get()
+            try:
+                if job is None:
+                    return
+                original, media_id, character_name = job
+                # Skip items deleted/replaced while waiting, before decoding anything.
+                with self.lock:
+                    item = self.media_item(media_id)
+                    if not item or (self.root / str(item.get("stored_rel") or "")).resolve() != original.resolve():
+                        continue
+                # Let the successful import response flush before background work starts.
+                time.sleep(0.10)
+                thumb_rel = self._make_thumbnail(original, media_id, character_name)
+                if not thumb_rel:
+                    continue
+                with self.lock:
+                    item = self.media_item(media_id)
+                    if not item or (self.root / str(item.get("stored_rel") or "")).resolve() != original.resolve():
+                        (self.root / thumb_rel).unlink(missing_ok=True)
+                        continue
+                    item["thumb_rel"] = thumb_rel
+                    self.save()
+            except Exception:
+                # A bad image or failed thumbnail save must not stop the remaining queue.
+                try:
+                    traceback.print_exc()
+                except Exception:
+                    pass
+            finally:
+                self._thumbnail_queue.task_done()
 
     def _make_video_thumbnail(self, original: Path, media_id: str, character_name: str, seconds: float = 0.0) -> str | None:
         folder = self.thumb_dir / safe_component(character_name, "Character")
@@ -718,7 +733,10 @@ class LibraryStore:
             m = self.media_item(media_id)
             if not m:
                 raise KeyError("Media not found")
-            m["categories"] = self._validate_categories(m["character_id"], categories)
+            categories = self._validate_categories(m["character_id"], categories)
+            if m.get("categories") == categories:
+                return m
+            m["categories"] = categories
             self.save()
             return m
 
@@ -727,6 +745,8 @@ class LibraryStore:
             m = self.media_item(media_id)
             if not m:
                 raise KeyError("Media not found")
+            if bool(m.get("favorite")) == bool(favorite):
+                return m
             m["favorite"] = bool(favorite)
             self.save()
             return m
@@ -738,6 +758,8 @@ class LibraryStore:
                 raise KeyError("Media not found")
             if m.get("media_type") != "image":
                 raise ValueError("Only images can be placed in Review")
+            if bool(m.get("in_review")) == bool(in_review):
+                return m
             m["in_review"] = bool(in_review)
             self.save()
             return m
@@ -1268,6 +1290,9 @@ class MediaHandler(BaseHTTPRequestHandler):
 class MediaHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    # Older Python versions default to five pending connections. UI metadata, media,
+    # and thumbnail bursts must not overflow that backlog and wait for TCP retries.
+    request_queue_size = 128
 
     def __init__(self, address: tuple[str, int], store: LibraryStore):
         super().__init__(address, MediaHandler)
