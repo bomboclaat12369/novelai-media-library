@@ -1,0 +1,7 @@
+// NovelAI Media Library v2.8.4: disable page-wide synthetic drag cleanup
+(() => {
+  'use strict';
+  const host = document.getElementById('nai-media-host');
+  if (!host?.shadowRoot || document.documentElement.dataset.naiMediaV284DragSafety === '1') return;
+  document.documentElement.dataset.naiMediaV284DragSafety = '1';
+})();

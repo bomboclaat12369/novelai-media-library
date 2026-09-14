@@ -1,8 +1,8 @@
 {
-  "version": "2.8.3",
+  "version": "2.8.4",
   "parts": [
     "payload/userscript-2.8.3.transport-start.txt",
-    "payload/userscript-2.2.0.part01.txt",
+    "payload/userscript-2.8.4.part01.txt",
     "payload/userscript-2.3.0.patch01.txt",
     "payload/userscript-2.3.0.patch02.txt",
     "payload/userscript-2.3.5.patch01.txt",
@@ -19,10 +19,10 @@
     "payload/userscript-2.5.0.patch01.txt",
     "payload/userscript-2.5.1.patch01.txt",
     "payload/userscript-2.5.4.patch01.txt",
-    "payload/userscript-2.5.5.patch01.txt",
+    "payload/userscript-2.8.4.drag-safety.txt",
     "payload/userscript-2.6.2.patch01.txt",
     "payload/userscript-2.7.7.patch01.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 55
+  "release_build": 56
 }
