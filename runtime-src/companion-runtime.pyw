@@ -306,6 +306,41 @@ class LibraryStore:
                 pass
             return None
 
+    def _queue_image_thumbnail(self, original: Path, media_id: str, character_name: str) -> None:
+        # Thumbnail generation is deliberately off the import critical path. Large JPEG/PNG
+        # decode + resize can take seconds on some machines; the original media is already
+        # safely stored by this point, so Rapid Review should not wait for a 420px thumbnail.
+        def worker() -> None:
+            # Give the request thread a chance to serialize/flush the successful import first.
+            time.sleep(0.10)
+            thumb_rel = self._make_thumbnail(original, media_id, character_name)
+            if not thumb_rel:
+                return
+            with self.lock:
+                item = self.media_item(media_id)
+                if not item:
+                    try:
+                        (self.root / thumb_rel).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    return
+                # Do not resurrect/attach a thumbnail to a replaced media record.
+                try:
+                    expected = original.resolve()
+                    current = (self.root / str(item.get("stored_rel") or "")).resolve()
+                    if current != expected:
+                        return
+                except Exception:
+                    return
+                item["thumb_rel"] = thumb_rel
+                self.save()
+
+        threading.Thread(
+            target=worker,
+            name=f"nai-thumb-{media_id[:8]}",
+            daemon=True,
+        ).start()
+
     def _make_video_thumbnail(self, original: Path, media_id: str, character_name: str, seconds: float = 0.0) -> str | None:
         folder = self.thumb_dir / safe_component(character_name, "Character")
         folder.mkdir(parents=True, exist_ok=True)
@@ -395,16 +430,15 @@ class LibraryStore:
             destination = char_folder / stored_name
             shutil.move(str(temp_path), destination)
 
+            # Import completion must not wait for image decoding/resizing. The media endpoint
+            # already falls back to the original while thumb_rel is empty, and a background
+            # worker fills in the thumbnail shortly after the successful import response.
             thumb_rel = None
             video_markers = [None, None, None]
             video_thumb_seconds = None
-            if media_type == "image":
-                thumb_rel = self._make_thumbnail(destination, media_id, c["name"])
-            else:
+            if media_type == "video":
                 # Video thumbnails are captured from the exact frame chosen in the browser.
-                # Avoid decoding the entire video during import so large videos import faster.
                 video_thumb_seconds = 0.0
-                thumb_rel = None
 
             item = {
                 "id": media_id,
@@ -416,6 +450,7 @@ class LibraryStore:
                 "content_type": content_type,
                 "categories": categories,
                 "favorite": False,
+                "in_review": False,
                 "crop_top": 0.0,
                 "crop_bottom": 0.0,
                 "sha256": sha,
@@ -426,6 +461,8 @@ class LibraryStore:
             }
             self.data["media"].append(item)
             self.save()
+            if media_type == "image":
+                self._queue_image_thumbnail(destination, media_id, c["name"])
             return item, False
 
     def import_bytes(
@@ -1005,7 +1042,9 @@ class MediaHandler(BaseHTTPRequestHandler):
                 self._send_json(200, item)
                 return
             if path == "/api/import/file":
+                import_started = time.perf_counter()
                 fields = self._read_multipart()
+                multipart_done = time.perf_counter()
                 character_id = self._field_text(fields, "character_id")
                 categories = json.loads(self._field_text(fields, "categories", "[]"))
                 files = fields.get("file", [])
@@ -1019,6 +1058,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     content_type = guessed or content_type
                 if not (content_type or "").startswith(("image/", "video/")):
                     raise ValueError("Only image and video files are supported")
+                register_started = time.perf_counter()
                 item, duplicate = self.store.import_bytes(
                     payload,
                     filename,
@@ -1027,7 +1067,16 @@ class MediaHandler(BaseHTTPRequestHandler):
                     {"kind": "local", "original_name": filename},
                     content_type,
                 )
-                self._send_json(200, {"item": item, "duplicate": duplicate})
+                register_done = time.perf_counter()
+                self._send_json(200, {
+                    "item": item,
+                    "duplicate": duplicate,
+                    "debug_timing_ms": {
+                        "multipart": round((multipart_done - import_started) * 1000, 1),
+                        "register": round((register_done - register_started) * 1000, 1),
+                        "total": round((register_done - import_started) * 1000, 1),
+                    },
+                })
                 return
             if path == "/api/import/url":
                 body = self._read_json()
