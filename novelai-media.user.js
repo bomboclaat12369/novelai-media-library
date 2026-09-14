@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NovelAI Local Media Library
 // @namespace    local.novelai.media.library
-// @version      2.2.2
+// @version      2.2.3
 // @description  NovelAI media library loader with automatic GitHub updates.
 // @updateURL    https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/novelai-media.user.js
 // @downloadURL  https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/novelai-media.user.js
@@ -18,10 +18,11 @@
 (() => {
   'use strict';
 
+  const LOADER_VERSION = '2.2.3';
   const MANIFEST = 'https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/manifest.json';
   const CACHE_CODE = 'nai-media-github-payload';
   const CACHE_VERSION = 'nai-media-github-payload-version';
-  document.documentElement.dataset.naiMediaLoaderVersion = '2.2.2';
+  document.documentElement.dataset.naiMediaLoaderVersion = LOADER_VERSION;
 
   function requestText(url) {
     return new Promise((resolve, reject) => {
@@ -38,7 +39,8 @@
     });
   }
 
-  function run(code) {
+  function run(code, version = '') {
+    if (version) document.documentElement.dataset.naiMediaPayloadVersion = version;
     eval(code);
   }
 
@@ -63,8 +65,15 @@
     const cachedVersion = localStorage.getItem(CACHE_VERSION) || '';
 
     if (cached) {
-      run(cached);
-      fetchLatest(cachedVersion).catch(err => {
+      // Critical startup path: run the last verified payload immediately. GitHub is checked
+      // only after the UI is already alive, so network latency can never delay panel startup.
+      run(cached, cachedVersion);
+      fetchLatest(cachedVersion).then(latest => {
+        if (latest?.version && latest.version !== cachedVersion) {
+          document.documentElement.dataset.naiMediaUpdateReady = latest.version;
+          console.info(`[NovelAI Media] payload ${latest.version} cached for the next page load.`);
+        }
+      }).catch(err => {
         console.warn('NovelAI Media Library background update check failed; keeping cached version.', err);
       });
       return;
@@ -73,7 +82,7 @@
     try {
       const latest = await fetchLatest('');
       if (!latest.code) throw new Error('No userscript payload was downloaded');
-      run(latest.code);
+      run(latest.code, latest.version);
     } catch (err) {
       console.error('NovelAI Media Library could not load.', err);
       alert(`NovelAI Media Library could not load.\n\n${err.message || err}`);
