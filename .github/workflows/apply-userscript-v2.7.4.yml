@@ -43,11 +43,11 @@ jobs:
           node --check /tmp/complete-userscript-v2.7.4.js
       - name: Commit patch
         run: |
-          if git diff --quiet -- payload/userscript-2.7.4.patch01.txt; then
+          git add payload/userscript-2.7.4.patch01.txt
+          if git diff --cached --quiet; then
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add payload/userscript-2.7.4.patch01.txt
           git commit -m "Fix import completion and isolate Add Media handlers"
           git push
