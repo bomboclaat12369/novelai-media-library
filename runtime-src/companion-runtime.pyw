@@ -283,10 +283,13 @@ class LibraryStore:
                     im.seek(0)
                 except Exception:
                     pass
-                im.thumbnail((420, 420), Image.Resampling.LANCZOS)
+                # Thumbnails are only 420px. High-effort LANCZOS + WebP method 5 can
+                # take many seconds on large phone/AI images and used to block imports.
+                # Use the fast thumbnail path; the untouched original is never changed.
+                im.thumbnail((420, 420), Image.Resampling.BILINEAR)
                 if im.mode not in ("RGB", "RGBA"):
                     im = im.convert("RGBA" if "transparency" in im.info else "RGB")
-                im.save(out, "WEBP", quality=82, method=5)
+                im.save(out, "WEBP", quality=82, method=1)
             return out.relative_to(self.root).as_posix()
         except Exception:
             try:
