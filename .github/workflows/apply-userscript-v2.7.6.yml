@@ -1,0 +1,53 @@
+name: Apply userscript v2.7.6
+
+on:
+  push:
+    paths:
+      - tools/write-userscript-v2.7.6.py
+      - .github/workflows/apply-userscript-v2.7.6.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Write userscript patch
+        run: python tools/write-userscript-v2.7.6.py
+      - name: Validate patch syntax
+        run: |
+          cp payload/userscript-2.7.6.patch01.txt /tmp/userscript-v2.7.6.js
+          node --check /tmp/userscript-v2.7.6.js
+      - name: Validate complete userscript syntax
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          cfg=json.loads(Path('release-userscript.json').read_text())
+          parts=list(cfg['parts'])
+          parts=[('payload/userscript-2.7.6.patch01.txt' if p=='payload/userscript-2.7.5.patch01.txt' else p) for p in parts]
+          out='\n'.join(Path(p).read_text(encoding='utf-8') for p in parts)
+          Path('/tmp/complete-userscript-v2.7.6.js').write_text(out,encoding='utf-8')
+          PY
+          node --check /tmp/complete-userscript-v2.7.6.js
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add payload/userscript-2.7.6.patch01.txt
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Remove Rapid Review localhost loading stalls"
+          git push
