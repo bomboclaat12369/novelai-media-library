@@ -1,0 +1,86 @@
+// NovelAI Media Library v2.8.0: instant Rapid Review preview while preserving stable import UI
+(() => {
+  'use strict';
+
+  const API = 'http://127.0.0.1:8765';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV280 === '1') return;
+  document.documentElement.dataset.naiMediaV280 = '1';
+
+  const modalRoot = root.getElementById('modalRoot');
+  const charSelect = root.getElementById('characterSelect');
+  if (!modalRoot || !charSelect) return;
+
+  function gmJson(path) {
+    return new Promise((resolve, reject) => GM_xmlhttpRequest({
+      method:'GET',
+      url:`${API}${path}`,
+      timeout:15000,
+      headers:{Origin:'https://novelai.net'},
+      onload:r => {
+        if (r.status >= 200 && r.status < 300) {
+          try { resolve(JSON.parse(r.responseText || '{}')); }
+          catch (_) { resolve(null); }
+        } else reject(new Error(`Request failed (${r.status})`));
+      },
+      onerror:()=>reject(new Error('Local media request failed')),
+      ontimeout:()=>reject(new Error('Local media request timed out')),
+    }));
+  }
+
+  let queued = false;
+  let library = null;
+  let libraryAt = 0;
+
+  async function currentLibrary() {
+    if (library && Date.now() - libraryAt < 1500) return library;
+    library = await gmJson('/api/library');
+    libraryAt = Date.now();
+    return library;
+  }
+
+  async function decorateReview() {
+    queued = false;
+    const stage = modalRoot.querySelector('#reviewStage');
+    if (!stage || stage.querySelector('video') || stage.dataset.naiInstantReview280 === '1') return;
+    const side = modalRoot.querySelector('.reviewSide');
+    if (!side) return;
+
+    const filename = [...side.querySelectorAll('.muted')].map(x => x.textContent?.trim() || '').filter(Boolean).pop() || '';
+    if (!filename) return;
+    stage.dataset.naiInstantReview280 = '1';
+
+    try {
+      const lib = await currentLibrary();
+      const candidates = (lib?.media || []).filter(m =>
+        m?.character_id === charSelect.value &&
+        m?.media_type === 'image' &&
+        m?.original_name === filename
+      );
+      candidates.sort((a,b) => String(b?.created_at || '').localeCompare(String(a?.created_at || '')));
+      const media = candidates[0];
+      if (!media?.id || !stage.isConnected) return;
+      stage.dataset.naiReviewMediaId = media.id;
+      if (!stage.querySelector('img')) {
+        const img = document.createElement('img');
+        img.alt = filename;
+        img.decoding = 'async';
+        img.src = `${API}/api/media/${encodeURIComponent(media.id)}/original`;
+        stage.innerHTML = '';
+        stage.appendChild(img);
+      }
+    } catch (_) {
+      delete stage.dataset.naiInstantReview280;
+    }
+  }
+
+  function schedule() {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(decorateReview);
+  }
+
+  new MutationObserver(schedule).observe(modalRoot, {childList:true, subtree:true});
+  schedule();
+})();
