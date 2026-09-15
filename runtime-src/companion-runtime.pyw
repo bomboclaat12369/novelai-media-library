@@ -211,6 +211,21 @@ class LibraryStore:
             self.save()
             return c
 
+    def delete_character(self, character_id: str) -> dict[str, Any]:
+        # Removing an accidental empty character must never delete media files.
+        # Check under the import lock too, so a concurrent import cannot be orphaned.
+        with self.lock:
+            if not self.character(character_id):
+                raise KeyError("Character not found")
+            if any(m.get("character_id") == character_id for m in self.data["media"]):
+                raise ValueError("This character contains images or videos. Remove or move them before deleting the character.")
+            if any(s.get("character_id") == character_id and s.get("media_ids") for s in self.data.get("sets", [])):
+                raise ValueError("This character contains set images.")
+            self.data["characters"] = [c for c in self.data["characters"] if c["id"] != character_id]
+            self.data["sets"] = [s for s in self.data.get("sets", []) if s.get("character_id") != character_id]
+            self.save()
+            return {"ok": True, "character_id": character_id}
+
     def add_category(self, character_id: str, name: str) -> dict[str, Any]:
         name = name.strip()
         if not name:
@@ -640,8 +655,6 @@ class LibraryStore:
                 raise ValueError("Sets currently support images only")
             seen.add(media_id)
             result.append(media_id)
-        if not result:
-            raise ValueError("A set must contain at least one image")
         return result
 
     def _detach_set_members(self, character_id: str, media_ids: list[str], except_set_id: str | None = None) -> None:
@@ -653,12 +666,10 @@ class LibraryStore:
                 continue
             old_members = list(item.get("media_ids", []))
             new_members = [mid for mid in old_members if mid not in member_ids]
-            if not new_members:
-                continue
             if new_members != old_members:
                 item["media_ids"] = new_members
                 if item.get("cover_media_id") not in new_members:
-                    item["cover_media_id"] = new_members[0]
+                    item["cover_media_id"] = new_members[0] if new_members else None
                 item["updated_at"] = now_iso()
             kept_sets.append(item)
         self.data["sets"] = kept_sets
@@ -677,7 +688,7 @@ class LibraryStore:
             self._detach_set_members(character_id, members)
             cover = str(cover_media_id or "")
             if cover not in members:
-                cover = members[0]
+                cover = members[0] if members else None
             stamp = now_iso()
             item = {
                 "id": uuid.uuid4().hex,
@@ -712,7 +723,7 @@ class LibraryStore:
             self._detach_set_members(character_id, members, except_set_id=set_id)
             cover = str(item.get("cover_media_id", "")) if cover_media_id is None else str(cover_media_id or "")
             if cover not in members:
-                cover = members[0]
+                cover = members[0] if members else None
             item["name"] = next_name
             item["media_ids"] = members
             item["cover_media_id"] = cover
@@ -873,11 +884,9 @@ class LibraryStore:
             kept_sets = []
             for item in self.data.get("sets", []):
                 members = [mid for mid in item.get("media_ids", []) if mid != media_id]
-                if not members:
-                    continue
                 item["media_ids"] = members
                 if item.get("cover_media_id") not in members:
-                    item["cover_media_id"] = members[0]
+                    item["cover_media_id"] = members[0] if members else None
                 item["updated_at"] = now_iso()
                 kept_sets.append(item)
             self.data["sets"] = kept_sets
@@ -1279,6 +1288,11 @@ class MediaHandler(BaseHTTPRequestHandler):
             return
         try:
             path = urllib.parse.urlparse(self.path).path
+            match = re.fullmatch(r"/api/characters/([0-9a-f]+)", path)
+            if match:
+                result = self.store.delete_character(match.group(1))
+                self._send_json(200, result)
+                return
             match = re.fullmatch(r"/api/categories/([0-9a-f]+)", path)
             if match:
                 result = self.store.delete_category(match.group(1))
