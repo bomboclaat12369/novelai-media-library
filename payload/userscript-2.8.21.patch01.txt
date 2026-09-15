@@ -1,0 +1,404 @@
+// NovelAI Media Library v2.8.21: honor explicit per-image All membership
+(() => {
+  'use strict';
+
+  const API = 'http://127.0.0.1:8765';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV2821 === '1') return;
+  document.documentElement.dataset.naiMediaV2821 = '1';
+
+  const grid = root.getElementById('grid');
+  const catWrap = root.getElementById('categories');
+  const charSelect = root.getElementById('characterSelect');
+  const modalRoot = root.getElementById('modalRoot');
+  const refreshBtn = root.getElementById('refreshBtn');
+  if (!grid || !catWrap || !charSelect || !modalRoot) return;
+
+  let library = null;
+  let lastOpenedSetId = null;
+  let managerEditingId = null;
+  let pendingUpload = null;
+  let enforcing = false;
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v251-style';
+  style.textContent = `
+    #naiSetUploadBtn,
+    #naiAddToOpenSetBtn {
+      white-space:nowrap;
+    }
+    #naiSetUploadBtn.busy,
+    #naiAddToOpenSetBtn.busy {
+      opacity:.72;
+      cursor:wait;
+    }
+  `;
+  root.appendChild(style);
+
+  function gmRequest({method='GET', path, data=null, headers={}, responseType='text', timeout=300000}) {
+    return new Promise((resolve, reject) => GM_xmlhttpRequest({
+      method,
+      url:`${API}${path}`,
+      data,
+      headers:{Origin:'https://novelai.net', ...headers},
+      responseType,
+      timeout,
+      onload:res => {
+        if (res.status >= 200 && res.status < 300) {
+          if (responseType === 'blob') return resolve(res.response);
+          const text = res.responseText || '';
+          if (!text) return resolve(null);
+          try { return resolve(JSON.parse(text)); } catch (_) { return resolve(text); }
+        }
+        let message = `Request failed (${res.status})`;
+        try { message = JSON.parse(res.responseText || '{}').error || message; } catch (_) {}
+        reject(new Error(message));
+      },
+      onerror:()=>reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+      ontimeout:()=>reject(new Error('The local media request timed out.')),
+    }));
+  }
+
+  async function refreshLibrary() {
+    library = await gmRequest({path:'/api/library'});
+    if (!Array.isArray(library?.sets)) library.sets = [];
+    return library;
+  }
+
+  // The base viewer is the authoritative snapshot after a category edit. Keep
+  // this legacy visibility layer in sync so it cannot remove a newly promoted
+  // All image using an older response.
+  root.naiSetVisibilityApplyLibrary281 = snapshot => {
+    if (!snapshot) return;
+    library = snapshot;
+    if (!Array.isArray(library.sets)) library.sets = [];
+    scheduleVisibility();
+  };
+
+  function currentCharacterId() {
+    return charSelect.value || '';
+  }
+
+  function setsForCharacter() {
+    const id = currentCharacterId();
+    return (library?.sets || []).filter(set => set.character_id === id);
+  }
+
+  function mediaMap() {
+    return new Map((library?.media || []).map(m => [m.id, m]));
+  }
+
+  function allButton() {
+    return [...catWrap.querySelectorAll('.cat:not(.naiSetsCat)')][0] || null;
+  }
+
+  function allIsActive() {
+    return !!allButton()?.classList.contains('active');
+  }
+
+  // Set-only images are hidden from All only when the runtime explicitly marks
+  // that individual image as excluded. A set member can therefore be promoted
+  // to All without requiring a custom category.
+  function enforceSetOnlyVisibility() {
+    if (enforcing || !library || !allIsActive()) return;
+    if (root.getElementById('naiSetsCat')?.classList.contains('active')) return;
+    if (grid.querySelector('.naiSetBreadcrumb')) return;
+
+    enforcing = true;
+    try {
+      const map = mediaMap();
+      const sets = setsForCharacter();
+      const memberIds = new Set(sets.flatMap(set => Array.isArray(set.media_ids) ? set.media_ids : []));
+
+      grid.querySelectorAll('.tile[data-id]').forEach(tile => {
+        const id = tile.dataset.id;
+        const item = map.get(id);
+        if (!item || !memberIds.has(id)) return;
+        if (item.in_all === false) tile.remove();
+      });
+
+      grid.querySelectorAll('.naiSetTile[data-set-id]').forEach(tile => {
+        const set = sets.find(s => s.id === tile.dataset.setId);
+        if (!set) return;
+        const hasPublishedMember = (set.media_ids || []).some(id => {
+          const item = map.get(id);
+          return !!item && item.in_all !== false;
+        });
+        if (!hasPublishedMember) tile.remove();
+      });
+
+      // Keep the All count consistent with what All actually contains. Ungrouped images
+      // still behave exactly as before; only uncategorized set members are excluded.
+      const visibleCount = (library.media || []).filter(item => {
+        if (item.character_id !== currentCharacterId() || item.media_type === 'video') return false;
+        if (!memberIds.has(item.id)) return true;
+        return item.in_all !== false;
+      }).length;
+      const button = allButton();
+      if (button) button.textContent = `All ${visibleCount}`;
+    } finally {
+      enforcing = false;
+    }
+  }
+
+  function scheduleVisibility() {
+    [0, 45, 140, 320].forEach(ms => setTimeout(enforceSetOnlyVisibility, ms));
+  }
+
+  async function uploadOne(file, characterId) {
+    const form = new FormData();
+    form.append('character_id', characterId);
+    form.append('categories', '[]');
+    form.append('file', file, file.name);
+    return await new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method:'POST',
+        url:`${API}/api/import/file`,
+        data:form,
+        timeout:300000,
+        headers:{Origin:'https://novelai.net'},
+        onload:res => {
+          if (res.status >= 200 && res.status < 300) {
+            try { resolve(JSON.parse(res.responseText || '{}')); }
+            catch (_) { resolve(null); }
+            return;
+          }
+          let message = `Request failed (${res.status})`;
+          try { message = JSON.parse(res.responseText || '{}').error || message; } catch (_) {}
+          reject(new Error(message));
+        },
+        onerror:()=>reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+        ontimeout:()=>reject(new Error('The local media request timed out.')),
+      });
+    });
+  }
+
+  function selectedManagerIds() {
+    return [...modalRoot.querySelectorAll('.naiSetPick.selected[data-media-id]')]
+      .map(card => card.dataset.mediaId)
+      .filter(Boolean);
+  }
+
+  function managerCoverId() {
+    return modalRoot.querySelector('.naiSetPick.cover[data-media-id]')?.dataset.mediaId || null;
+  }
+
+  function managerSetIdFromActiveButton() {
+    if (managerEditingId) return managerEditingId;
+    const active = modalRoot.querySelector('#naiExistingSets > button.active');
+    if (!active) return null;
+    const buttons = [...modalRoot.querySelectorAll('#naiExistingSets > button')];
+    const index = buttons.indexOf(active);
+    return setsForCharacter()[index]?.id || null;
+  }
+
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/*';
+  fileInput.multiple = true;
+  fileInput.style.display = 'none';
+  root.appendChild(fileInput);
+
+  function beginUpload(config) {
+    pendingUpload = config;
+    fileInput.value = '';
+    fileInput.click();
+  }
+
+  async function saveSet(setId, name, mediaIds, coverId) {
+    const payload = {
+      name,
+      media_ids:[...new Set(mediaIds)],
+      cover_media_id:coverId || mediaIds[0] || null,
+    };
+    const path = setId ? `/api/sets/${encodeURIComponent(setId)}` : '/api/sets';
+    if (!setId) payload.character_id = currentCharacterId();
+    return await gmRequest({
+      method:'POST',
+      path,
+      headers:{'Content-Type':'application/json'},
+      data:JSON.stringify(payload),
+    });
+  }
+
+  fileInput.addEventListener('change', async () => {
+    const files = [...(fileInput.files || [])].filter(file => String(file.type || '').startsWith('image/'));
+    const job = pendingUpload;
+    pendingUpload = null;
+    if (!job || !files.length) return;
+
+    const button = job.button;
+    const oldText = button?.textContent || '';
+    if (button) {
+      button.disabled = true;
+      button.classList.add('busy');
+    }
+
+    try {
+      await refreshLibrary();
+      const characterId = currentCharacterId();
+      if (!characterId) throw new Error('Choose a character first.');
+
+      let setId = job.setId || null;
+      let existing = setId ? (library.sets || []).find(s => s.id === setId) : null;
+      let name = String(job.name || existing?.name || '').trim();
+      if (!name) throw new Error('Enter a set name before adding images.');
+
+      let ids = Array.isArray(job.baseMediaIds)
+        ? [...new Set(job.baseMediaIds)]
+        : [...new Set(existing?.media_ids || [])];
+      let coverId = job.coverId || existing?.cover_media_id || ids[0] || null;
+      let added = 0;
+
+      for (let i = 0; i < files.length; i++) {
+        if (button) button.textContent = `Adding ${i + 1}/${files.length}`;
+        const result = await uploadOne(files[i], characterId);
+        const item = result?.item;
+        if (!item?.id || item.media_type !== 'image') continue;
+        if (!ids.includes(item.id)) ids.push(item.id);
+        if (!coverId) coverId = item.id;
+        added += 1;
+
+        // For a brand-new set, create it immediately after the first successful upload.
+        // That keeps imported files grouped instead of leaving them loose in All.
+        if (!setId) {
+          const created = await saveSet(null, name, ids, coverId);
+          setId = created?.id || null;
+          if (!setId) throw new Error('The set could not be created.');
+          lastOpenedSetId = setId;
+        } else {
+          await saveSet(setId, name, ids, coverId);
+        }
+      }
+
+      if (!setId) throw new Error('No images were added to the set.');
+      await refreshLibrary();
+      lastOpenedSetId = setId;
+
+      if (job.context === 'manager') {
+        modalRoot.querySelector('[data-close]')?.click();
+      }
+      refreshBtn?.click();
+      scheduleVisibility();
+
+      if (button?.isConnected) {
+        button.textContent = added === 1 ? 'Added 1' : `Added ${added}`;
+        setTimeout(() => {
+          if (button.isConnected) button.textContent = oldText;
+        }, 900);
+      }
+    } catch (err) {
+      alert(err?.message || String(err));
+      if (button?.isConnected) button.textContent = oldText;
+    } finally {
+      if (button?.isConnected) {
+        button.disabled = false;
+        button.classList.remove('busy');
+      }
+      fileInput.value = '';
+    }
+  });
+
+  function decorateOpenSet() {
+    const head = grid.querySelector('.naiSetBreadcrumb');
+    if (!head || head.querySelector('#naiAddToOpenSetBtn')) return;
+    if (!lastOpenedSetId) return;
+
+    const edit = head.querySelector('#naiSetEditBtn');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = 'naiAddToOpenSetBtn';
+    button.textContent = '+ Images';
+    button.title = 'Upload images directly into this set';
+    button.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      beginUpload({setId:lastOpenedSetId, context:'open', button});
+    });
+    head.insertBefore(button, edit || null);
+  }
+
+  function decorateManager() {
+    const top = modalRoot.querySelector('.naiSetEditorTop');
+    if (!top || top.querySelector('#naiSetUploadBtn')) return;
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = 'naiSetUploadBtn';
+    button.textContent = '+ Images';
+    button.title = 'Upload images directly into this set';
+    const deleteBtn = top.querySelector('#naiDeleteSetBtn');
+    top.insertBefore(button, deleteBtn || null);
+
+    button.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const name = String(modalRoot.querySelector('#naiSetNameInput')?.value || '').trim();
+      const setId = managerSetIdFromActiveButton();
+      if (!setId && !name) {
+        alert('Enter a set name first.');
+        return;
+      }
+      beginUpload({
+        setId,
+        name,
+        baseMediaIds:selectedManagerIds(),
+        coverId:managerCoverId(),
+        context:'manager',
+        button,
+      });
+    });
+  }
+
+  function scheduleDecorate() {
+    [0, 35, 120].forEach(ms => setTimeout(() => {
+      decorateOpenSet();
+      decorateManager();
+    }, ms));
+  }
+
+  // Capture set navigation so the add button always knows which set it belongs to.
+  root.addEventListener('click', event => {
+    const setTile = event.target.closest?.('.naiSetTile[data-set-id]');
+    if (setTile) lastOpenedSetId = setTile.dataset.setId || null;
+
+    if (event.target.closest?.('#naiManageSetsBtn')) managerEditingId = null;
+    if (event.target.closest?.('#naiSetEditBtn')) managerEditingId = lastOpenedSetId;
+    if (event.target.closest?.('#naiNewSetBtn')) managerEditingId = null;
+
+    const listButton = event.target.closest?.('#naiExistingSets > button');
+    if (listButton) {
+      const buttons = [...modalRoot.querySelectorAll('#naiExistingSets > button')];
+      const index = buttons.indexOf(listButton);
+      const set = setsForCharacter()[index];
+      managerEditingId = set?.id || null;
+    }
+
+    scheduleDecorate();
+    scheduleVisibility();
+  }, true);
+
+  root.addEventListener('change', () => {
+    scheduleDecorate();
+    scheduleVisibility();
+  });
+  root.addEventListener('input', () => scheduleVisibility());
+
+  // Refresh our metadata whenever the base viewer is explicitly refreshed or the
+  // character changes. No polling and no DOM-wide mutation observer are used.
+  refreshBtn?.addEventListener('click', () => {
+    setTimeout(() => refreshLibrary().then(scheduleVisibility).catch(() => {}), 80);
+    setTimeout(() => refreshLibrary().then(scheduleVisibility).catch(() => {}), 260);
+  });
+  charSelect.addEventListener('change', () => {
+    lastOpenedSetId = null;
+    managerEditingId = null;
+    setTimeout(() => refreshLibrary().then(scheduleVisibility).catch(() => {}), 0);
+  });
+
+  refreshLibrary().then(() => {
+    scheduleDecorate();
+    scheduleVisibility();
+  }).catch(() => {});
+})();
