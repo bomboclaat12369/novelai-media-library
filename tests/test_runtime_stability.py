@@ -50,6 +50,20 @@ class RuntimeStabilityTests(unittest.TestCase):
         self.assertEqual(len(responses), 1)
         return responses[0]
 
+    def post_multipart(self, path, filename, payload, content_type='image/png'):
+        handler = object.__new__(RUNTIME['MediaHandler'])
+        handler.server = SimpleNamespace(store=self.store)
+        handler.path = path
+        handler.headers = {'Origin':'https://novelai.net'}
+        handler._read_multipart = lambda: {
+            'file': [(filename, payload, content_type)],
+        }
+        responses = []
+        handler._send_json = lambda status, value: responses.append((status, value))
+        handler.do_POST()
+        self.assertEqual(len(responses), 1)
+        return responses[0]
+
     def test_empty_sets_create_update_reload_and_retain_empty_membership(self):
         status, empty = self.post('/api/sets', {'character_id': self.character['id'], 'name': 'Empty', 'media_ids': []})
         self.assertEqual(status, 200)
@@ -152,6 +166,53 @@ class RuntimeStabilityTests(unittest.TestCase):
             release.set()
             worker.join(timeout=3)
             self.assertFalse(worker.is_alive())
+
+    def test_replace_source_preserves_relationships_and_position(self):
+        category = self.store.add_category(self.character['id'], 'Dress')
+        with patch.object(self.store, '_queue_image_thumbnail'):
+            first = self.import_image(1)
+            second = self.import_image(2)
+        first['categories'] = [category['id']]
+        first['favorite'] = True
+        first['in_review'] = True
+        first['crop_top'] = 0.12
+        first['crop_bottom'] = 0.07
+        set_item = self.store.create_set(self.character['id'], 'Keep me', [first['id']], first['id'])
+        self.store.save()
+        old_path = self.store.root / first['stored_rel']
+        old_path.write_bytes(b'old-source')
+        with patch.object(self.store, '_queue_image_thumbnail') as queue:
+            status, replaced = self.post_multipart(
+                f"/api/media/{first['id']}/replace", 'higher-quality.png', b'new-source'
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(replaced['id'], first['id'])
+        self.assertEqual(self.store.data['media'][0]['id'], first['id'])
+        self.assertEqual(self.store.data['media'][1]['id'], second['id'])
+        self.assertEqual(replaced['categories'], [category['id']])
+        self.assertTrue(replaced['favorite'])
+        self.assertTrue(replaced['in_review'])
+        self.assertEqual(replaced['crop_top'], 0.12)
+        self.assertEqual(replaced['crop_bottom'], 0.07)
+        self.assertEqual(self.store.set_item(set_item['id'])['media_ids'], [first['id']])
+        self.assertEqual(self.store.set_item(set_item['id'])['cover_media_id'], first['id'])
+        self.assertEqual(replaced['original_name'], 'higher-quality.png')
+        self.assertEqual((self.store.root / replaced['stored_rel']).read_bytes(), b'new-source')
+        self.assertFalse(old_path.exists())
+        self.assertIsNone(replaced['thumb_rel'])
+        queue.assert_called_once()
+
+    def test_replace_source_rejects_duplicate_image_without_changing_original(self):
+        with patch.object(self.store, '_queue_image_thumbnail'):
+            first = self.import_image(1)
+            second = self.import_image(2)
+        original_path = self.store.root / first['stored_rel']
+        original_bytes = original_path.read_bytes()
+        second_bytes = (self.store.root / second['stored_rel']).read_bytes()
+        status, body = self.post_multipart(f"/api/media/{first['id']}/replace", 'duplicate.png', second_bytes)
+        self.assertEqual(status, 400)
+        self.assertIn('already in this character', body['error'])
+        self.assertEqual(original_path.read_bytes(), original_bytes)
 
     def test_deleted_queued_media_is_not_decoded_or_resurrected(self):
         entered = threading.Event()
