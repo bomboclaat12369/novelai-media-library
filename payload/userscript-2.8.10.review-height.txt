@@ -1,0 +1,14 @@
+// NovelAI Media Library v2.8.10: use the full available webpage height for Rapid Review
+(() => {
+  'use strict';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || root.getElementById('nai-media-v2810-height-style')) return;
+  const style = document.createElement('style');
+  style.id = 'nai-media-v2810-height-style';
+  style.textContent = `
+    [data-nai-review-v270].modalWrap { padding:0!important; }
+    [data-nai-review-v270]>.modal.large { height:100vh!important; max-height:none!important; }
+  `;
+  root.appendChild(style);
+})();
