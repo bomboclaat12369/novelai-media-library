@@ -641,6 +641,81 @@ class LibraryStore:
         finally:
             temp.unlink(missing_ok=True)
 
+    def replace_media_bytes(
+        self,
+        payload: bytes,
+        original_name: str,
+        media_id: str,
+        content_type: str | None,
+    ) -> dict[str, Any]:
+        """Replace one image's source while retaining its stable media record.
+
+        The media ID is intentionally preserved: categories, favorites, Review state,
+        crop settings, set membership, cover references, and array position all point
+        at that ID. Hashing happens before taking the library lock for the same reason
+        as normal imports: replacing a large source must not pause metadata requests.
+        """
+        temp_dir = self.root / ".incoming"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp = temp_dir / f"{uuid.uuid4().hex}.replace"
+        try:
+            with temp.open("wb") as f:
+                f.write(payload)
+                f.flush()
+            sha = self._hash_file(temp)
+            with self.lock:
+                item = self.media_item(media_id)
+                if not item:
+                    raise KeyError("Media not found")
+                if item.get("media_type") != "image":
+                    raise ValueError("Only images can have their source replaced")
+                owner = self.character(item.get("character_id", ""))
+                if not owner:
+                    raise KeyError("Character not found")
+                for other in self.data["media"]:
+                    if other.get("id") != media_id and other.get("character_id") == item.get("character_id") and other.get("sha256") == sha:
+                        raise ValueError("That source image is already in this character's library")
+
+                content_type = (content_type or "").split(";", 1)[0].strip().lower()
+                if not content_type.startswith("image/"):
+                    guessed, _ = mimetypes.guess_type(original_name)
+                    content_type = guessed or content_type
+                if not content_type.startswith("image/"):
+                    raise ValueError("Only image files are supported for source replacement")
+
+                safe_name = safe_component(Path(original_name).name, f"image-{media_id}")
+                if not Path(safe_name).suffix:
+                    safe_name += mimetypes.guess_extension(content_type) or ".img"
+                char_folder = self.media_dir / safe_component(owner["name"], "Character")
+                char_folder.mkdir(parents=True, exist_ok=True)
+                destination = char_folder / f"{media_id}_{safe_name}"
+                old_path = self.root / str(item.get("stored_rel") or "")
+                os.replace(temp, destination)
+                if old_path.resolve() != destination.resolve():
+                    old_path.unlink(missing_ok=True)
+
+                old_thumb = item.get("thumb_rel")
+                if old_thumb:
+                    (self.root / str(old_thumb)).unlink(missing_ok=True)
+                thumb_folder = self.thumb_dir / safe_component(owner["name"], "Character")
+                for candidate in thumb_folder.glob(f"{media_id}.*"):
+                    candidate.unlink(missing_ok=True)
+
+                # Update only source-derived fields. All user/library relationships stay
+                # on the same object, so its list position and set membership are stable.
+                item["original_name"] = safe_name
+                item["stored_rel"] = destination.relative_to(self.root).as_posix()
+                item["thumb_rel"] = None
+                item["content_type"] = content_type
+                item["sha256"] = sha
+                item["source"] = {"kind": "local", "original_name": safe_name}
+                self.save()
+                result = item
+            self._queue_image_thumbnail(destination, media_id, owner["name"])
+            return result
+        finally:
+            temp.unlink(missing_ok=True)
+
     def _validate_set_media(self, character_id: str, media_ids: list[Any]) -> list[str]:
         c = self.character(character_id)
         if not c:
@@ -1234,6 +1309,23 @@ class MediaHandler(BaseHTTPRequestHandler):
                     list(body.get("categories", [])) if isinstance(body.get("categories", []), list) else [],
                 )
                 self._send_json(200, {"item": item, "duplicate": duplicate})
+                return
+            match = re.fullmatch(r"/api/media/([0-9a-f]+)/replace", path)
+            if match:
+                fields = self._read_multipart()
+                files = fields.get("file", [])
+                if len(files) != 1:
+                    raise ValueError("Exactly one image must be selected")
+                filename, payload, content_type = files[0]
+                if not filename:
+                    raise ValueError("Replacement image has no filename")
+                if not (content_type or "").startswith("image/"):
+                    guessed, _ = mimetypes.guess_type(filename)
+                    content_type = guessed or content_type
+                if not (content_type or "").startswith("image/"):
+                    raise ValueError("Only image files are supported for source replacement")
+                item = self.store.replace_media_bytes(payload, filename, match.group(1), content_type)
+                self._send_json(200, item)
                 return
             if path == "/api/backup":
                 dst = self.store.manual_backup()
