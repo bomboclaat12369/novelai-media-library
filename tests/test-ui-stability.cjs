@@ -181,7 +181,8 @@ test('cached loader startup happens before any GitHub request', () => {
 });
 
 test('a second payload execution cannot create a second library host', () => {
-  const source = read('payload/userscript-2.8.4.part01.txt');
+  const config = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-userscript.json'));
+  const source = read(config.parts.find(p => /userscript-2\.8\..*\.part01\.txt$/.test(p)));
   assert.match(source, /const existingHost = document\.getElementById\('nai-media-host'\)/);
   assert.match(source, /naiMediaDuplicateSuppressed/);
   assert.match(source, /return;\n  }\n  document\.documentElement\.dataset\.naiMediaPayloadInstance/);
@@ -202,7 +203,8 @@ test('the UI patches reset viewer state and expose bulk image editing', () => {
   assert.match(reset, /saved\.selectedMediaId = null/);
   assert.match(reset, /saved\.slotMediaIds = \[null, null\]/);
   assert.match(reset, /saved\.splitView = false/);
-  const ui = read('payload/userscript-2.8.6.ui-updates.txt');
+  const config = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-userscript.json'));
+  const ui = read(config.parts.find(p => p.endsWith('.ui-updates.txt')));
   assert.match(ui, /openBulkEditModal/);
   assert.match(ui, /Delete selected images/);
   assert.match(ui, /All \$\{count\} images in this Rapid Review queue are shown/);
