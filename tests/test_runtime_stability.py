@@ -5,6 +5,7 @@ import runpy
 import tempfile
 import threading
 import unittest
+from email.message import Message
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -142,6 +143,70 @@ class RuntimeStabilityTests(unittest.TestCase):
 
     def test_server_accepts_bursts_without_legacy_five_connection_backlog(self):
         self.assertGreaterEqual(RUNTIME['MediaHTTPServer'].request_queue_size, 64)
+
+    def preview_response(self, content_type='image/png'):
+        response = io.BytesIO(b'preview-original-bytes')
+        response.headers = Message()
+        response.headers['Content-Type'] = content_type
+        response.headers['Content-Disposition'] = 'inline; filename="image 1.png"'
+        return response
+
+    def test_url_preview_does_not_register_media_and_always_removes_temporary_file(self):
+        before = self.store.db_path.read_bytes()
+        for fail_send in (False, True):
+            handler = object.__new__(RUNTIME['MediaHandler'])
+            handler.server = SimpleNamespace(store=self.store)
+            handler.path = '/api/preview/url'
+            handler.headers = {'Origin':'https://novelai.net'}
+            handler._read_json = lambda: {'url':'https://example.test/image.png'}
+            sent, errors = [], []
+            def send_file(path, content_type, preview_name=None):
+                sent.append((path.read_bytes(), content_type, preview_name))
+                if fail_send:
+                    raise ConnectionResetError('fixture disconnected')
+            handler._send_file_with_range = send_file
+            handler._send_json = lambda status, body: errors.append(status)
+            with patch('urllib.request.urlopen', return_value=self.preview_response()):
+                handler.do_POST()
+            self.assertEqual(sent, [(b'preview-original-bytes', 'image/png', 'image 1.png')])
+            self.assertEqual(errors, [500] if fail_send else [])
+            self.assertEqual(self.store.db_path.read_bytes(), before)
+            self.assertEqual(self.store.data['media'], [])
+            self.assertEqual(list((self.store.root / '.incoming').iterdir()), [])
+            self.assertIsNone(self.store._thumbnail_worker)
+
+    def test_url_preview_rejects_non_media_and_cleans_up(self):
+        with patch('urllib.request.urlopen', return_value=self.preview_response('text/html')):
+            with self.assertRaises(ValueError):
+                self.store.download_url_preview('https://example.test/page')
+        self.assertEqual(self.store.data['media'], [])
+        self.assertEqual(list((self.store.root / '.incoming').iterdir()), [])
+
+    def test_direct_url_import_still_registers_original_and_source(self):
+        with patch('urllib.request.urlopen', return_value=self.preview_response()), patch.object(self.store, '_queue_image_thumbnail') as queue:
+            item, duplicate = self.store.import_url('https://example.test/image.png', self.character['id'], [])
+        self.assertFalse(duplicate)
+        self.assertEqual(item['source'], {'kind':'url', 'url':'https://example.test/image.png'})
+        self.assertEqual((self.store.root / item['stored_rel']).read_bytes(), b'preview-original-bytes')
+        queue.assert_called_once()
+
+    def test_saving_downloaded_preview_retains_its_source_url(self):
+        handler = object.__new__(RUNTIME['MediaHandler'])
+        handler.server = SimpleNamespace(store=self.store)
+        handler.path = '/api/import/file'
+        handler.headers = {'Origin':'https://novelai.net'}
+        handler._read_multipart = lambda: {
+            'character_id':[(None, self.character['id'].encode(), None)],
+            'categories':[(None, b'[]', None)],
+            'source_url':[(None, b'https://example.test/original.png', None)],
+            'file':[('original.png', b'original-image-data', 'image/png')],
+        }
+        sent = []
+        handler._send_json = lambda status, data: sent.append((status, data))
+        with patch.object(self.store, '_queue_image_thumbnail'):
+            handler.do_POST()
+        self.assertEqual(sent[0][0], 200)
+        self.assertEqual(sent[0][1]['item']['source'], {'kind':'url', 'url':'https://example.test/original.png'})
 
 
 if __name__ == '__main__':
