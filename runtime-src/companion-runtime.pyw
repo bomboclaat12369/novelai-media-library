@@ -109,6 +109,11 @@ class LibraryStore:
             data.setdefault("sets", [])
             if not isinstance(data.get("sets"), list):
                 data["sets"] = []
+            set_member_ids = {
+                str(media_id)
+                for item in data.get("sets", [])
+                for media_id in (item.get("media_ids", []) if isinstance(item.get("media_ids", []), list) else [])
+            }
             changed = False
             for m in data.get("media", []):
                 if "favorite" not in m:
@@ -126,9 +131,18 @@ class LibraryStore:
                 if "crop_bottom" not in m:
                     m["crop_bottom"] = 0.0
                     changed = True
+                if "in_all" not in m:
+                    # Before this flag existed, set-only images were visible in All
+                    # only after receiving a custom category. Preserve that behavior
+                    # for existing libraries while making the choice explicit.
+                    m["in_all"] = False if m.get("media_type") == "video" else (False if m.get("id") in set_member_ids and not m.get("categories") else True)
+                    changed = True
                 if m.get("media_type") == "video":
                     if m.get("categories"):
                         m["categories"] = []
+                        changed = True
+                    if m.get("in_all"):
+                        m["in_all"] = False
                         changed = True
                     if not isinstance(m.get("video_markers"), list) or len(m.get("video_markers")) != 3:
                         markers = m.get("video_markers") if isinstance(m.get("video_markers"), list) else []
@@ -488,6 +502,7 @@ class LibraryStore:
                 "media_type": media_type,
                 "content_type": content_type,
                 "categories": categories,
+                "in_all": True,
                 "favorite": False,
                 "in_review": False,
                 "crop_top": 0.0,
@@ -709,6 +724,7 @@ class LibraryStore:
                 item["content_type"] = content_type
                 item["sha256"] = sha
                 item["source"] = {"kind": "local", "original_name": safe_name}
+                item["in_all"] = bool(item.get("in_all", True))
                 self.save()
                 result = item
             self._queue_image_thumbnail(destination, media_id, owner["name"])
@@ -766,6 +782,10 @@ class LibraryStore:
                     raise ValueError("A set with that name already exists for this character")
             members = self._validate_set_media(character_id, list(media_ids or []))
             self._detach_set_members(character_id, members)
+            for media_id in members:
+                media = self.media_item(media_id)
+                if media and media.get("media_type") == "image" and not media.get("categories"):
+                    media["in_all"] = False
             cover = str(cover_media_id or "")
             if cover not in members:
                 cover = members[0] if members else None
@@ -797,10 +817,15 @@ class LibraryStore:
                     continue
                 if other.get("character_id") == character_id and str(other.get("name", "")).casefold() == next_name.casefold():
                     raise ValueError("A set with that name already exists for this character")
-            members = list(item.get("media_ids", [])) if media_ids is None else self._validate_set_media(character_id, list(media_ids or []))
+            previous_members = list(item.get("media_ids", []))
+            members = previous_members if media_ids is None else self._validate_set_media(character_id, list(media_ids or []))
             if media_ids is None:
                 members = self._validate_set_media(character_id, members)
             self._detach_set_members(character_id, members, except_set_id=set_id)
+            for media_id in set(members) - set(previous_members):
+                media = self.media_item(media_id)
+                if media and media.get("media_type") == "image" and not media.get("categories"):
+                    media["in_all"] = False
             cover = str(item.get("cover_media_id", "")) if cover_media_id is None else str(cover_media_id or "")
             if cover not in members:
                 cover = members[0] if members else None
@@ -820,15 +845,23 @@ class LibraryStore:
             self.save()
             return {"ok": True, "set_id": set_id}
 
-    def set_categories(self, media_id: str, categories: list[str]) -> dict[str, Any]:
+    def set_categories(self, media_id: str, categories: list[str], in_all: Any = None) -> dict[str, Any]:
         with self.lock:
             m = self.media_item(media_id)
             if not m:
                 raise KeyError("Media not found")
             categories = self._validate_categories(m["character_id"], categories)
-            if m.get("categories") == categories:
+            next_in_all = bool(m.get("in_all", True)) if in_all is None else bool(in_all)
+            if m.get("media_type") == "video":
+                next_in_all = False
+            elif in_all is None and categories and not next_in_all:
+                # Keep the long-standing behavior: assigning a custom category to a
+                # set-only image also promotes it into the main All image view.
+                next_in_all = True
+            if m.get("categories") == categories and bool(m.get("in_all", True)) == next_in_all:
                 return m
             m["categories"] = categories
+            m["in_all"] = next_in_all
             self.save()
             return m
 
@@ -988,6 +1021,31 @@ class LibraryStore:
             if thumb and m.get("thumb_rel"):
                 return path, mimetypes.guess_type(path.name)[0] or "image/webp"
             return path, m.get("content_type") or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+
+    def media_quality(self, media_id: str) -> dict[str, Any]:
+        """Return lightweight source-size metadata for the selected media item."""
+        with self.lock:
+            item = self.media_item(media_id)
+            if not item:
+                raise KeyError("Media not found")
+            source = self.root / str(item.get("stored_rel") or "")
+            media_type = str(item.get("media_type") or "image")
+        if not source.exists():
+            raise FileNotFoundError("Media file not found")
+        result: dict[str, Any] = {
+            "media_id": media_id,
+            "media_type": media_type,
+            "file_bytes": source.stat().st_size,
+            "width": None,
+            "height": None,
+        }
+        if media_type == "image" and Image is not None:
+            try:
+                with Image.open(source) as image:
+                    result["width"], result["height"] = image.size
+            except Exception:
+                pass
+        return result
 
 
 class MediaHandler(BaseHTTPRequestHandler):
@@ -1198,6 +1256,10 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/library":
                 self._send_json(200, self.store.public_library())
                 return
+            match = re.fullmatch(r"/api/media/([0-9a-f]+)/quality", path)
+            if match:
+                self._send_json(200, self.store.media_quality(match.group(1)))
+                return
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/(?:(thumb)|(original))", path)
             if match:
                 media_id = match.group(1)
@@ -1334,7 +1396,7 @@ class MediaHandler(BaseHTTPRequestHandler):
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/categories", path)
             if match:
                 body = self._read_json()
-                item = self.store.set_categories(match.group(1), list(body.get("categories", [])))
+                item = self.store.set_categories(match.group(1), list(body.get("categories", [])), body.get("in_all") if "in_all" in body else None)
                 self._send_json(200, item)
                 return
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/favorite", path)
