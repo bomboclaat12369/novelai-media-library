@@ -291,6 +291,7 @@ test('set-only members open from Sets, remain available after selection, and sav
     await delay(200);
     const ids=()=>[...f.root.querySelectorAll('#grid .tile')].map(tile=>tile.dataset.id);
     assert.deepEqual(ids(),['member1','member2'],'set membership must not depend on visible All tiles');
+    assert.equal(f.root.getElementById('counter').textContent, '— / 2');
     assert.ok(f.root.querySelector('.tile[data-id="member2"] img'),'pending thumbnails still render an image element');
     const before=f.root.getElementById('stages').innerHTML;
     f.root.querySelector('.tile[data-id="member2"] .naiSetCover216').click();
@@ -302,6 +303,7 @@ test('set-only members open from Sets, remain available after selection, and sav
     assert.equal(f.root.querySelector('.tile[data-id="member2"] .naiSetCover216').getAttribute('aria-pressed'),'true');
     f.root.querySelector('.tile[data-id="member1"]').click();
     await delay(200);
+    assert.equal(f.root.getElementById('counter').textContent, '1 / 2');
     assert.deepEqual(ids(),['member1','member2']);
     f.root.getElementById('naiSetBackBtn').click();
     await delay(100);
@@ -309,6 +311,39 @@ test('set-only members open from Sets, remain available after selection, and sav
     f.root.querySelector('.naiSetTile').click();
     await delay(200);
     assert.deepEqual(ids(),['member1','member2']);
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
+
+test('a set-only image can be promoted directly into All without exposing its whole set', async () => {
+  const f = await fixture();
+  try {
+    f.library.media.push(...[1,2].map(i=>({id:`all-member${i}`,character_id:'character',media_type:'image',original_name:`All image ${i}.png`,categories:[],in_review:false,in_all:false,thumb_rel:null})));
+    f.library.sets.push({id:'set-all',character_id:'character',name:'All promotion',media_ids:['all-member1','all-member2'],cover_media_id:'all-member1'});
+    f.root.getElementById('refreshBtn').click();
+    await delay(500);
+    f.root.getElementById('naiSetsCat').click();
+    await delay(60);
+    f.root.querySelector('.naiSetTile').click();
+    await delay(180);
+    f.root.querySelector('.tile[data-id="all-member1"]').click();
+    await delay(120);
+    f.root.getElementById('editBtn').click();
+    await delay(20);
+    const all = f.root.getElementById('editAllMedia');
+    assert.equal(all.checked, false);
+    all.click();
+    f.root.getElementById('saveImageCats').click();
+    await delay(220);
+    assert.equal(f.library.media.find(m=>m.id==='all-member1').in_all, true);
+    assert.equal(f.library.media.find(m=>m.id==='all-member2').in_all, false);
+    f.root.getElementById('naiSetBackBtn').click();
+    await delay(180);
+    f.root.querySelector('.cat:not(.naiSetsCat)').click();
+    await delay(120);
+    assert.ok(f.root.querySelector('.tile[data-id="all-member1"]'), `grid=${f.root.getElementById('grid').innerHTML}`);
+    assert.equal(f.root.querySelector('.tile[data-id="all-member2"]'), null);
+    assert.equal(f.root.getElementById('counter').textContent, '1 / 1');
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
