@@ -24,6 +24,11 @@ jobs:
           node-version: '22'
       - name: Validate assembled userscript and stability regressions
         run: node --test tests/test-ui-stability.cjs
+      - name: Validate complete UI interactions in a DOM
+        timeout-minutes: 3
+        run: |
+          npm install --prefix "$RUNNER_TEMP/nai-dom-test" jsdom@26.1.0 --no-audit --no-fund
+          NODE_PATH="$RUNNER_TEMP/nai-dom-test/node_modules" timeout 45s node --test tests/test-review-dom.cjs
       - name: Update manifest checksum and userscript release
         run: |
           python - <<'PY'
