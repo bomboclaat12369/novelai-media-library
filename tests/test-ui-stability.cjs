@@ -211,6 +211,8 @@ test('the UI patches reset viewer state and expose bulk image editing', () => {
   const review = read(release.parts.find(p => p.endsWith('.review-core.txt')));
   assert.doesNotMatch(review, /\? Review/);
   assert.match(review, /setTextIfChanged\(review, `Review /);
+  assert.doesNotMatch(review, /naiFavVideosCat270/);
+  assert.match(review, /naiFavVideoFilter270/);
   assert.doesNotMatch(ui, /cleanReviewLabels|labelCleanupQueued|observe\(catWrap/);
 });
 
@@ -305,11 +307,11 @@ test('jumping does not save; an explicit Save marks the item while allowing it t
   assert.equal(f.media[1].in_review, true);
 });
 
-test('Rapid Review keeps the supplied file order instead of sorting by filename', () => {
+test('Rapid Review sorts files by descending natural filename order', () => {
   const f = reviewQueueFixture();
-  const files = Array.from({length:15}, (_, i) => ({name:`Image #${15-i}.jpg`}));
-  assert.deepEqual(Array.from(f.sortFiles(files), x => x.name), files.map(file => file.name));
-  assert.equal(files[0].name, 'Image #15.jpg');
+  const files = Array.from({length:15}, (_, i) => ({name:`Image #${i+1}.jpg`}));
+  assert.deepEqual(Array.from(f.sortFiles(files), x => x.name), Array.from({length:15}, (_, i) => `Image #${15-i}.jpg`));
+  assert.equal(files[0].name, 'Image #1.jpg');
 });
 
 test('previewing and closing draft imports writes nothing and releases all preview URLs', async () => {
