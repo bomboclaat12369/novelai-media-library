@@ -3,11 +3,11 @@
   "launcher_version": "1.0.0",
   "launcher_url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/companion.pyw",
   "launcher_sha256": "39538ee93f2469bf761291cbdaabf678d8e0234e7de19a285954a85c622ee998",
-  "userscript_payload_version": "2.8.18",
+  "userscript_payload_version": "2.8.19",
   "userscript_parts": [
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.3.transport-start.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.5.reset-state.txt",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.18.part01.txt",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.19.part01.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.3.0.patch01.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.3.0.patch02.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.3.5.patch01.txt",
@@ -21,12 +21,12 @@
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.4.5.patch01.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.4.7.patch01.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.4.10.patch01.txt",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.16.sets.txt",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.19.sets.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.5.1.patch01.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.8.crop-bridge.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.4.drag-safety.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.6.2.patch01.txt",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.16.review-core.txt",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.19.review-core.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.16.ui-updates.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.8.update-status.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.10.review-height.txt",
@@ -47,5 +47,5 @@
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.13.part09.b64",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.13.part10.b64"
   ],
-  "userscript_sha256": "c4e5a51105cfb84fe8df5f263d2d7e682d2d70438eb27cc5821c3622d180da34"
+  "userscript_sha256": "98c3cc5cc6e6ac7460bd61c33ebd3991333fa22adcc8d367e70a971b86192268"
 }
