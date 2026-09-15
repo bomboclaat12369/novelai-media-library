@@ -55,6 +55,12 @@ async function fixture() {
           const file = options.data.get('file');
           const item = {id:`saved${library.media.length+1}`,character_id:'character',original_name:file.name,media_type:'image',categories:[],in_review:false};
           library.media.push(item); value = {item,duplicate:false};
+        } else if (route.startsWith('/api/media/') && method === 'POST' && route.endsWith('/replace')) {
+          const id = route.split('/')[3];
+          const item = library.media.find(m => m.id === id);
+          if (!item) throw new Error(`Replacing unknown media ${id}`);
+          const file = options.data.get('file');
+          Object.assign(item, {original_name:file.name, thumb_rel:null}); value = item;
         } else if (route.startsWith('/api/media/') && method === 'POST') {
           const id = route.split('/')[3], action = route.split('/')[4];
           const item = library.media.find(m => m.id === id);
@@ -140,6 +146,46 @@ test('viewer delete button sits with navigation controls and deletes the active 
     assert.deepEqual(f.writes,[{route:'/api/media/saved-viewer',method:'DELETE'}]);
     assert.equal(f.root.getElementById('deleteBtn').disabled,true);
     assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
+
+test('viewer edit button assigns categories and replaces an image without changing its set membership', async () => {
+  const f = await fixture();
+  try {
+    const item = {id:'saved-edit',character_id:'character',original_name:'old.png',media_type:'image',categories:[],in_review:false,thumb_rel:'fixture/thumb.webp'};
+    f.library.media.push(item);
+    f.root.getElementById('refreshBtn').click();
+    await delay(160);
+    f.root.querySelector('.tile[data-id="saved-edit"]').click();
+    await delay(100);
+    const editButton = f.root.getElementById('editBtn');
+    assert.ok(f.root.querySelector('.viewerNav')?.contains(editButton));
+    assert.equal(editButton.disabled, false);
+    editButton.click();
+    await delay(20);
+    const category = f.root.querySelector('#editImageCats input[data-catid="dress"]');
+    assert.ok(category);
+    category.click();
+    f.root.getElementById('saveImageCats').click();
+    await delay(170);
+    assert.deepEqual(item.categories, ['dress']);
+    f.library.sets.push({id:'set-edit',character_id:'character',name:'Set',media_ids:['saved-edit'],cover_media_id:'saved-edit'});
+    assert.deepEqual(f.library.sets[0].media_ids, ['saved-edit']);
+
+    editButton.click();
+    await delay(20);
+    const input = f.root.getElementById('replaceSourceInput');
+    Object.defineProperty(input, 'files', {value:[new f.w.File(['new'], 'higher-quality.png', {type:'image/png'})]});
+    input.dispatchEvent(new f.w.Event('change', {bubbles:true}));
+    await delay(220);
+    assert.equal(item.original_name, 'higher-quality.png');
+    assert.deepEqual(item.categories, ['dress']);
+    assert.deepEqual(f.library.sets[0].media_ids, ['saved-edit']);
+    assert.deepEqual(f.writes, [
+      {route:'/api/media/saved-edit/categories',method:'POST'},
+      {route:'/api/media/saved-edit/replace',method:'POST'},
+    ]);
+    assert.deepEqual(f.errors, []);
   } finally { f.dom.window.close(); }
 });
 
