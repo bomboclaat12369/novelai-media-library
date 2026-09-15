@@ -881,8 +881,6 @@ class LibraryStore:
             m = self.media_item(media_id)
             if not m:
                 raise KeyError("Media not found")
-            if m.get("media_type") != "image":
-                raise ValueError("Only images can be placed in Review")
             if bool(m.get("in_review")) == bool(in_review):
                 return m
             m["in_review"] = bool(in_review)
