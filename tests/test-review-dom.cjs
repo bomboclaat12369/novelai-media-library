@@ -71,7 +71,7 @@ async function fixture() {
     root.getElementById('addMediaBtn').click();
     await delay(40);
     const input = root.getElementById('fileInput');
-    Object.defineProperty(input,'files',{value:files.map(n => new w.File(['image'],`Image #${n}.png`,{type:'image/png'}))});
+    Object.defineProperty(input,'files',{value:files.map(n => n instanceof w.File ? n : new w.File(['image'], typeof n === 'object' ? n.name : `Image #${n}.png`,{type:'image/png'}))});
     input.dispatchEvent(new w.Event('change',{bubbles:true}));
     root.getElementById('importReview').click();
     await delay(70);
@@ -237,6 +237,18 @@ test('large queues use bounded stable pages; paging never selects or saves media
     assert.equal(cards().length, 24);
     assert.equal(f.library.media.length, 1);
     assert.deepEqual(f.errors, []);
+  } finally { f.dom.window.close(); }
+});
+
+test('Rapid Review preserves upload order and only reverses an unambiguous descending numbered list', async () => {
+  const f = await fixture();
+  try {
+    await f.open([{name:'zeta.jpg'},{name:'alpha.jpg'},{name:'middle.jpg'}]);
+    assert.equal(f.root.querySelector('#reviewStage img').alt, 'zeta.jpg');
+    f.root.getElementById('naiReviewClose270').click();
+    await delay(30);
+    await f.open([3,2,1]);
+    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #1.png');
   } finally { f.dom.window.close(); }
 });
 
