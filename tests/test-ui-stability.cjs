@@ -230,29 +230,45 @@ function reviewQueueFixture() {
   }));
   const session = {ids:media.map(m => m.id), index:0, saved:new Set(), carry:false};
   const requests = [];
+  const drafts = new Map();
+  const revoked = [];
+  const uploads = [];
+  let token = 0;
   const context = vm.createContext({
     API:'http://127.0.0.1:8765', reviewSession:session,
+    drafts, queueSetOverlay:null, root:{},
+    URL:{createObjectURL:() => `blob:fixture-${++token}`, revokeObjectURL:url => revoked.push(url)},
+    importToken274:() => String(++token),
+    uploadFileResilient:async (...args) => { uploads.push(args); return {item:{id:`persisted-${uploads.length}`}}; },
+    refreshLibrary:async () => ({}), refreshBtn:null, schedulePseudoSync() {}, scheduleMainFilter() {},
     document:{createElement:tag => new Element(tag)},
     modalRoot:{
       querySelector:selector => selector === '#naiQueueStrip270' ? strip : {checked:true},
       querySelectorAll:() => [],
     },
-    mediaById:id => media.find(m => m.id === id),
+    mediaById:id => drafts.get(id)?.media || media.find(m => m.id === id),
     gmRequest:async options => { requests.push(options); return JSON.parse(options.data); },
     alert:message => { throw new Error(message); },
   });
   const start = source.indexOf('  async function loadQueueThumb(');
   const end = source.indexOf('  async function renderReviewQueue()', start);
   assert.ok(start >= 0 && end > start);
-  vm.runInContext(source.slice(start, end) + `
+  const helpers = source.slice(source.indexOf('  function orderedReviewFiles('), source.indexOf('  // ----- Review / Rapid Review'));
+  const cleanup = source.slice(source.indexOf('  function revokeSessionUrls()'), source.indexOf('  async function openReviewQueue('));
+  vm.runInContext(helpers + cleanup + source.slice(start, end) + `
     async function renderReviewQueue() {
       for (const child of strip.children) child.parent = null;
       strip.children = [];
       await renderQueueStrip();
     }
     this.render = renderQueueStrip;
+    this.save = saveCurrentReview;
+    this.close = finishReviewQueue;
+    this.addDraft = addReviewDraft;
+    this.sortFiles = orderedReviewFiles;
   `, Object.assign(context, {strip}));
-  return {strip, media, session, requests, render:context.render};
+  return {strip, media, session, requests, drafts, revoked, uploads, context,
+    render:context.render, save:context.save, close:context.close, addDraft:context.addDraft, sortFiles:context.sortFiles};
 }
 
 test('queue image previews get thumbnail URLs on first render and after navigation', async () => {
@@ -274,15 +290,54 @@ test('queue image previews get thumbnail URLs on first render and after navigati
   checkPreviews();
 });
 
-test('jumping saves the departed item; the saved check does not mean promoted from Review', async () => {
+test('jumping does not save; an explicit Save marks the item while allowing it to remain in Review', async () => {
   const f = reviewQueueFixture();
   await f.render();
   await f.strip.children[1].listeners.click();
-  assert.deepEqual([...f.session.saved], ['image 0']);
+  assert.deepEqual([...f.session.saved], []);
+  assert.equal(f.requests.length, 0);
+  await f.save();
+  assert.deepEqual([...f.session.saved], ['image 1']);
   assert.equal(f.requests.length, 2);
   assert.match(f.requests[1].path, /\/review$/);
-  assert.equal(f.media[0].in_review, true);
-  assert.match(f.strip.children[0].className, / saved/);
-  assert.doesNotMatch(f.strip.children[1].className, / saved/);
-  assert.match(f.strip.children[1].className, / current/);
+  assert.equal(f.media[1].in_review, true);
+});
+
+test('numbered local files sort naturally rather than following a reversed FileList', () => {
+  const f = reviewQueueFixture();
+  const files = Array.from({length:15}, (_, i) => ({name:`Image #${15-i}.jpg`}));
+  assert.deepEqual(Array.from(f.sortFiles(files), x => x.name), Array.from({length:15}, (_, i) => `Image #${i+1}.jpg`));
+  assert.equal(files[0].name, 'Image #15.jpg');
+});
+
+test('previewing and closing draft imports writes nothing and releases all preview URLs', async () => {
+  const f = reviewQueueFixture();
+  const ids = [1,2,3].map(i => f.addDraft({name:`image-${i}.jpg`,type:'image/jpeg'}, 'character', []));
+  f.session.ids = ids;
+  await f.render();
+  assert.ok(f.strip.children[0].children[0].src.startsWith('blob:'));
+  await f.strip.children[1].listeners.click();
+  await f.close();
+  assert.equal(f.uploads.length, 0);
+  assert.equal(f.requests.length, 0);
+  assert.equal(f.drafts.size, 0);
+  assert.equal(f.revoked.length, 3);
+});
+
+test('saving one draft imports only it, commits its crop, and does not re-upload on retry', async () => {
+  const f = reviewQueueFixture();
+  const ids = [1,2].map(i => f.addDraft({name:`image-${i}.jpg`,type:'image/jpeg'}, 'character', []));
+  f.session.ids = ids;
+  const draft = f.drafts.get(ids[0]);
+  draft.media.crop_top = .1; draft.cropDirty = true;
+  await f.save();
+  assert.equal(f.uploads.length, 1);
+  assert.equal(f.uploads[0][0].name, 'image-1.jpg');
+  assert.ok(f.requests.some(r => r.path.endsWith('/crop') && JSON.parse(r.data).top === .1));
+  assert.equal(draft.cropDirty, false);
+  await f.save();
+  assert.equal(f.uploads.length, 1);
+  await f.close();
+  assert.equal(f.uploads.length, 1);
+  assert.equal(f.drafts.size, 0);
 });
