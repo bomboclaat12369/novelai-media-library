@@ -285,7 +285,8 @@ class RuntimeStabilityTests(unittest.TestCase):
             image = self.import_image(0)
         video = self.store.import_bytes(b'video fixture', 'fixture.mp4', self.character['id'], [], {'kind':'local'}, 'video/mp4')[0]
         self.assertEqual(self.post(f"/api/media/{video['id']}/favorite", {'favorite':True})[0], 200)
-        self.assertEqual(self.post(f"/api/media/{video['id']}/review", {'in_review':True})[0], 400)
+        self.assertEqual(self.post(f"/api/media/{video['id']}/review", {'in_review':True})[0], 200)
+        self.assertTrue(video['in_review'])
         original = (self.store.root / image['stored_rel']).read_bytes()
         self.assertEqual(self.post(f"/api/media/{image['id']}/crop", {'top':0.1, 'bottom':0.2})[0], 200)
         self.assertEqual((self.store.root / image['stored_rel']).read_bytes(), original)
