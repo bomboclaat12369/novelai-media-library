@@ -177,3 +177,77 @@ test('update indicator distinguishes active and ready versions and blocks reload
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
+
+test('a nine-image queue keeps the same nine previews at every selected position', async () => {
+  const f = await fixture();
+  try {
+    await f.open([9,8,7,6,5,4,3,2,1]);
+    const titles = () => [...f.root.querySelectorAll('.naiQueueThumb270')].map(card => card.title);
+    const expected = Array.from({length:9}, (_, i) => `${i+1}. Image #${i+1}.png`);
+    assert.deepEqual(titles(), expected);
+    for (let i = 0; i < 9; i++) {
+      f.root.querySelectorAll('.naiQueueThumb270')[i].click();
+      await delay(10);
+      assert.deepEqual(titles(), expected);
+      assert.equal(f.root.querySelector('#reviewStage img').alt, `Image #${i+1}.png`);
+      assert.equal(f.root.getElementById('naiQueueRange289').textContent, '1–9 of 9');
+      assert.equal(f.root.getElementById('naiQueuePager289').hidden, true);
+    }
+    assert.deepEqual(f.writes, []);
+    assert.deepEqual(f.errors, []);
+  } finally { f.dom.window.close(); }
+});
+
+test('large queues use bounded stable pages; paging never selects or saves media', async () => {
+  const f = await fixture();
+  try {
+    await f.open(Array.from({length:57}, (_, i) => i+1));
+    const cards = () => [...f.root.querySelectorAll('.naiQueueThumb270')];
+    const range = () => f.root.getElementById('naiQueueRange289').textContent;
+    assert.equal(cards().length, 24);
+    assert.equal(range(), '1–24 of 57');
+    assert.equal(f.root.getElementById('naiQueuePagePrev289').disabled, true);
+    assert.ok(cards().every(card => card.querySelector('img').loading === 'lazy'));
+    f.root.getElementById('naiQueuePageNext289').click();
+    assert.equal(cards().length, 24);
+    assert.equal(range(), '25–48 of 57');
+    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #1.png');
+    f.root.getElementById('naiQueuePageNext289').click();
+    assert.equal(cards().length, 9);
+    assert.equal(range(), '49–57 of 57');
+    assert.equal(f.root.getElementById('naiQueuePageNext289').disabled, true);
+    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #1.png');
+    f.root.getElementById('naiQueuePagePrev289').click();
+    assert.equal(cards().length, 24);
+    assert.deepEqual(f.writes, []);
+    cards()[23].click();
+    await delay(20);
+    assert.equal(range(), '25–48 of 57');
+    assert.equal(cards().length, 24);
+    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #48.png');
+    f.root.getElementById('naiReviewNext270').click();
+    await delay(80);
+    assert.equal(f.library.media.length, 1);
+    assert.equal(f.library.media[0].original_name, 'Image #48.png');
+    assert.equal(range(), '49–57 of 57');
+    assert.equal(cards().length, 9);
+    f.root.getElementById('naiReviewPrev270').click();
+    await delay(20);
+    assert.equal(range(), '25–48 of 57');
+    assert.equal(cards().length, 24);
+    assert.equal(f.library.media.length, 1);
+    assert.deepEqual(f.errors, []);
+  } finally { f.dom.window.close(); }
+});
+
+test('Rapid Review keeps a large but bounded workspace for portrait and landscape media', async () => {
+  const f = await fixture();
+  try {
+    await f.open([1]);
+    const modal = f.root.querySelector('[data-nai-review-v270] > .modal.large');
+    const styles = [...f.root.querySelectorAll('style')].map(node => node.textContent).join('\n');
+    assert.match(styles, /width:min\(1500px,94vw\)/);
+    assert.match(styles, /height:min\(96vh,980px\)/);
+    assert.equal(modal.classList.contains('large'), true);
+  } finally { f.dom.window.close(); }
+});
