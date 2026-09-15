@@ -344,7 +344,7 @@ test('videos in Review stay out of Videos and can be promoted from the video Rev
     f.root.getElementById('naiReviewNext270').click();
     await delay(220);
     assert.equal(f.library.media.find(m => m.id === 'video-review').in_review,false);
-    assert.equal(videoTab.textContent,'▶ Videos 2');
+    assert.equal([...f.root.querySelectorAll('#categories .cat:not(.naiSetsCat)')][2].textContent,'▶ Videos 2');
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
