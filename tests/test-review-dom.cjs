@@ -104,30 +104,28 @@ test('assembled UI opens ordered previews without importing, navigates, and disc
   } finally { f.dom.window.close(); }
 });
 
-test('Sets assignment stages drafts; Save commits just one image and X discards the rest', async () => {
+test('Sets assignment saves selected drafts, adds them to the set, and removes them from the queue', async () => {
   const f = await fixture();
   try {
     await f.open([1,2,3]);
+    f.library.sets.push({id:'set-existing',character_id:'character',name:'Existing set',media_ids:['saved0'],cover_media_id:'saved0'});
     f.root.getElementById('naiQueueSets270').click();
     await delay(50);
     assert.equal(f.root.querySelectorAll('.naiSetQueueCard270').length,3);
     assert.ok(f.root.getElementById('naiSetQueueCreate270'));
-    f.root.getElementById('naiSetQueueNew270').value='Fixture set';
-    f.root.getElementById('naiSetQueueCreate270').click();
+    assert.equal(f.root.getElementById('naiSetQueueNew270'),null);
+    f.root.getElementById('naiSetQueueExisting270').value='set-existing';
+    f.root.querySelectorAll('.naiSetQueueCard270 input')[2].click();
+    f.root.getElementById('naiSetQueueSave270').click();
     await delay(60);
-    assert.equal(f.library.media.length,0);
-    assert.equal(f.library.sets.length,0);
-    f.root.getElementById('naiReviewNext270').click();
-    f.root.getElementById('naiReviewNext270').click();
+    assert.equal(f.library.media.length,2);
+    assert.deepEqual(f.library.media.map(m => m.original_name),['Image #3.png','Image #2.png']);
+    assert.deepEqual(f.library.sets[0].media_ids,['saved0','saved1','saved2']);
+    assert.equal(f.root.querySelectorAll('.naiQueueThumb270').length,1);
+    assert.equal(f.root.querySelector('#reviewStage img').alt,'Image #1.png');
     f.root.getElementById('naiReviewClose270').click();
     await delay(100);
-    assert.equal(f.library.media.length,1);
-    assert.equal(f.library.media[0].original_name,'Image #3.png');
-    assert.deepEqual(f.library.sets[0].media_ids,['saved1']);
-    assert.equal(f.root.querySelector('#reviewStage img').alt,'Image #2.png');
-    f.root.getElementById('naiReviewClose270').click();
-    await delay(100);
-    assert.equal(f.library.media.length,1);
+    assert.equal(f.library.media.length,2);
     assert.equal(f.root.naiReviewDrafts.size,0);
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
