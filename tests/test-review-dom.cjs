@@ -251,3 +251,15 @@ test('Rapid Review keeps a large but bounded workspace for portrait and landscap
     assert.equal(modal.classList.contains('large'), true);
   } finally { f.dom.window.close(); }
 });
+
+test('Rapid Review uses the full available webpage height without changing its width', async () => {
+  const f = await fixture();
+  try {
+    await f.open([1]);
+    const styles = [...f.root.querySelectorAll('style')].map(node => node.textContent).join('\n');
+    assert.match(styles, /\.modalWrap \{ padding:0!important; \}/);
+    assert.match(styles, /height:100vh!important/);
+    assert.match(styles, /max-height:none!important/);
+    assert.match(styles, /width:min\(1500px,94vw\)/);
+  } finally { f.dom.window.close(); }
+});
