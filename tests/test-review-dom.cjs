@@ -189,9 +189,52 @@ test('normal Sets manager can create and display a set without saved images', as
   } finally { f.dom.window.close(); }
 });
 
+test('set-only members open from Sets, remain available after selection, and save a cover independently', async () => {
+  const f = await fixture();
+  try {
+    f.library.media.push(...[1,2,3].map(i=>({id:`member${i}`,character_id:'character',media_type:'image',original_name:`Image ${i}.png`,categories:[],in_review:i===3,thumb_rel:null})));
+    f.library.sets.push({id:'set-only',character_id:'character',name:'Set only',media_ids:['member1','member2','member3'],cover_media_id:'member1'});
+    f.root.getElementById('refreshBtn').click();
+    await delay(650);
+    assert.equal(f.root.querySelectorAll('#grid .tile').length,0,'All intentionally excludes uncategorized set-only images');
+    f.root.getElementById('naiSetsCat').click();
+    await delay(60);
+    f.root.querySelector('.naiSetTile').click();
+    await delay(200);
+    const ids=()=>[...f.root.querySelectorAll('#grid .tile')].map(tile=>tile.dataset.id);
+    assert.deepEqual(ids(),['member1','member2'],'set membership must not depend on visible All tiles');
+    assert.ok(f.root.querySelector('.tile[data-id="member2"] img'),'pending thumbnails still render an image element');
+    const before=f.root.getElementById('stages').innerHTML;
+    f.root.querySelector('.tile[data-id="member2"] .naiSetCover216').click();
+    await delay(100);
+    assert.equal(f.library.sets[0].cover_media_id,'member2');
+    assert.deepEqual(f.library.sets[0].media_ids,['member1','member2','member3']);
+    assert.equal(f.library.media[1].favorite,undefined);
+    assert.equal(f.root.getElementById('stages').innerHTML,before,'cover button must not select an image');
+    assert.equal(f.root.querySelector('.tile[data-id="member2"] .naiSetCover216').getAttribute('aria-pressed'),'true');
+    f.root.querySelector('.tile[data-id="member1"]').click();
+    await delay(200);
+    assert.deepEqual(ids(),['member1','member2']);
+    f.root.getElementById('naiSetBackBtn').click();
+    await delay(100);
+    assert.equal(f.root.querySelector('.naiSetTile').dataset.coverId,'member2');
+    f.root.querySelector('.naiSetTile').click();
+    await delay(200);
+    assert.deepEqual(ids(),['member1','member2']);
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
+
 test('character deletion respects cancel and deletes an empty last character without media calls', async () => {
   const f = await fixture();
   try {
+    assert.equal(f.root.getElementById('naiDeleteCharacter215'),null);
+    f.root.getElementById('addMediaBtn').click();
+    f.root.getElementById('modalEditImages').click();
+    await delay(60);
+    const options=f.root.getElementById('naiCharacterOptions216');
+    assert.equal(options.open,false);
+    options.open=true;
     f.w.confirm=()=>false;
     f.root.getElementById('naiDeleteCharacter215').click();
     await delay(50);
@@ -211,11 +254,16 @@ test('character deletion refuses even a hidden review image', async () => {
   const f = await fixture();
   try {
     f.library.media.push({id:'hidden',character_id:'character',media_type:'image',in_review:true});
+    f.root.getElementById('addMediaBtn').click();
+    f.root.getElementById('modalEditImages').click();
+    await delay(60);
+    f.root.getElementById('naiCharacterOptions216').open=true;
     f.root.getElementById('naiDeleteCharacter215').click();
     await delay(50);
     assert.equal(f.library.characters.length,1);
     assert.deepEqual(f.writes,[]);
-    assert.match(f.errors[0].message,/contains images or videos/);
+    assert.match(f.root.getElementById('naiBulkStatus285').textContent,/contains images or videos/);
+    assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
 
