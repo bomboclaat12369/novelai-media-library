@@ -67,7 +67,7 @@ async function fixture() {
   await delay(250);
   const root = w.document.getElementById('nai-media-host').shadowRoot;
   assert.equal(root.getElementById('status').textContent, 'Local library connected');
-  async function open(files=[15,10,2,1]) {
+  async function open(files=[1,2,3,4]) {
     root.getElementById('addMediaBtn').click();
     await delay(40);
     const input = root.getElementById('fileInput');
@@ -107,12 +107,13 @@ test('assembled UI opens ordered previews without importing, navigates, and disc
 test('Sets assignment stages drafts; Save commits just one image and X discards the rest', async () => {
   const f = await fixture();
   try {
-    await f.open([3,2,1]);
+    await f.open([1,2,3]);
     f.root.getElementById('naiQueueSets270').click();
     await delay(50);
     assert.equal(f.root.querySelectorAll('.naiSetQueueCard270').length,3);
+    assert.ok(f.root.getElementById('naiSetQueueCreate270'));
     f.root.getElementById('naiSetQueueNew270').value='Fixture set';
-    f.root.getElementById('naiSetQueueSave270').click();
+    f.root.getElementById('naiSetQueueCreate270').click();
     await delay(60);
     assert.equal(f.library.media.length,0);
     assert.equal(f.library.sets.length,0);
@@ -181,7 +182,7 @@ test('update indicator distinguishes active and ready versions and blocks reload
 test('a nine-image queue keeps the same nine previews at every selected position', async () => {
   const f = await fixture();
   try {
-    await f.open([9,8,7,6,5,4,3,2,1]);
+    await f.open([1,2,3,4,5,6,7,8,9]);
     const titles = () => [...f.root.querySelectorAll('.naiQueueThumb270')].map(card => card.title);
     const expected = Array.from({length:9}, (_, i) => `${i+1}. Image #${i+1}.png`);
     assert.deepEqual(titles(), expected);
@@ -240,7 +241,7 @@ test('large queues use bounded stable pages; paging never selects or saves media
   } finally { f.dom.window.close(); }
 });
 
-test('Rapid Review preserves upload order and only reverses an unambiguous descending numbered list', async () => {
+test('Rapid Review preserves the upload event order regardless of filenames', async () => {
   const f = await fixture();
   try {
     await f.open([{name:'zeta.jpg'},{name:'alpha.jpg'},{name:'middle.jpg'}]);
@@ -248,7 +249,7 @@ test('Rapid Review preserves upload order and only reverses an unambiguous desce
     f.root.getElementById('naiReviewClose270').click();
     await delay(30);
     await f.open([3,2,1]);
-    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #1.png');
+    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #3.png');
   } finally { f.dom.window.close(); }
 });
 
@@ -273,5 +274,6 @@ test('Rapid Review uses the full available webpage height without changing its w
     assert.match(styles, /height:100vh!important/);
     assert.match(styles, /max-height:none!important/);
     assert.match(styles, /width:min\(1500px,94vw\)/);
+    assert.match(assembled, /inline:'center'/);
   } finally { f.dom.window.close(); }
 });
