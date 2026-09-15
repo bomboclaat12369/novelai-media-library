@@ -1,5 +1,5 @@
 {
-  "version": "2.8.9",
+  "version": "2.8.10",
   "parts": [
     "payload/userscript-2.8.3.transport-start.txt",
     "payload/userscript-2.8.5.reset-state.txt",
@@ -25,7 +25,8 @@
     "payload/userscript-2.8.9.review-core.txt",
     "payload/userscript-2.8.6.ui-updates.txt",
     "payload/userscript-2.8.8.update-status.txt",
+    "payload/userscript-2.8.10.review-height.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 62
+  "release_build": 63
 }
