@@ -215,6 +215,9 @@ test('the UI patches reset viewer state and expose bulk image editing', () => {
   assert.match(review, /setTextIfChanged\(review, `Review /);
   assert.doesNotMatch(review, /naiFavVideosCat270/);
   assert.match(review, /naiFavVideoFilter270/);
+  assert.match(review, /naiReviewVideoFilter270/);
+  assert.match(review, /m\.media_type === 'video' && !m\.in_review/);
+  assert.match(review, /post\('review', \{in_review:m\.in_review\}\)/);
   assert.doesNotMatch(ui, /cleanReviewLabels|labelCleanupQueued|observe\(catWrap/);
 });
 
