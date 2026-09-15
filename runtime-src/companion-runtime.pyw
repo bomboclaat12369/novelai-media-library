@@ -567,7 +567,8 @@ class LibraryStore:
                 pass
         return result
 
-    def import_url(self, url: str, character_id: str, categories: list[str]) -> tuple[dict[str, Any], bool]:
+    def download_url_preview(self, url: str) -> tuple[Path, str, str]:
+        """Download to a temporary file without registering media or generating thumbnails."""
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme not in ("http", "https"):
             raise ValueError("Only http:// and https:// URLs are supported")
@@ -605,20 +606,20 @@ class LibraryStore:
                     filename = Path(urllib.parse.unquote(parsed.path)).name or "download"
                 if not Path(filename).suffix:
                     filename += mimetypes.guess_extension(content_type) or ""
-            return self._register_file(
-                temp,
-                filename,
-                character_id,
-                categories,
-                {"kind": "url", "url": url},
-                content_type,
-            )
+            return temp, filename, content_type
         except Exception:
             try:
                 temp.unlink(missing_ok=True)
             except Exception:
                 pass
             raise
+
+    def import_url(self, url: str, character_id: str, categories: list[str]) -> tuple[dict[str, Any], bool]:
+        temp, filename, content_type = self.download_url_preview(url)
+        try:
+            return self._register_file(temp, filename, character_id, categories, {"kind": "url", "url": url}, content_type)
+        finally:
+            temp.unlink(missing_ok=True)
 
     def _validate_set_media(self, character_id: str, media_ids: list[Any]) -> list[str]:
         c = self.character(character_id)
@@ -981,7 +982,7 @@ class MediaHandler(BaseHTTPRequestHandler):
             return default
         return values[0][1].decode("utf-8", errors="replace")
 
-    def _send_file_with_range(self, file_path: Path, content_type: str) -> None:
+    def _send_file_with_range(self, file_path: Path, content_type: str, preview_name: str | None = None) -> None:
         size = file_path.stat().st_size
         range_header = self.headers.get("Range", "")
         start = 0
@@ -1042,7 +1043,9 @@ class MediaHandler(BaseHTTPRequestHandler):
         self.send_header("Accept-Ranges", "bytes")
         if partial:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        self.send_header("Cache-Control", "private, max-age=86400")
+        self.send_header("Cache-Control", "no-store" if preview_name is not None else "private, max-age=86400")
+        if preview_name is not None:
+            self.send_header("X-NovelAI-Filename", urllib.parse.quote(preview_name, safe=""))
         self.end_headers()
 
         if self.command == "HEAD" or length <= 0:
@@ -1152,6 +1155,14 @@ class MediaHandler(BaseHTTPRequestHandler):
                 )
                 self._send_json(200, item)
                 return
+            if path == "/api/preview/url":
+                body = self._read_json()
+                temp, filename, content_type = self.store.download_url_preview(str(body.get("url", "")).strip())
+                try:
+                    self._send_file_with_range(temp, content_type, preview_name=filename)
+                finally:
+                    temp.unlink(missing_ok=True)
+                return
             if path == "/api/import/file":
                 import_started = time.perf_counter()
                 fields = self._read_multipart()
@@ -1169,12 +1180,15 @@ class MediaHandler(BaseHTTPRequestHandler):
                     content_type = guessed or content_type
                 if not (content_type or "").startswith(("image/", "video/")):
                     raise ValueError("Only image and video files are supported")
+                source_url = self._field_text(fields, "source_url").strip()
+                if source_url and urllib.parse.urlparse(source_url).scheme not in ("http", "https"):
+                    raise ValueError("Only http:// and https:// source URLs are supported")
                 item, duplicate, backend_timing = self.store.import_bytes_profiled(
                     payload,
                     filename,
                     character_id,
                     list(categories) if isinstance(categories, list) else [],
-                    {"kind": "local", "original_name": filename},
+                    {"kind": "url", "url": source_url} if source_url else {"kind": "local", "original_name": filename},
                     content_type,
                 )
                 finished = time.perf_counter()
