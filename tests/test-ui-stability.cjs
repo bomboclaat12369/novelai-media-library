@@ -305,10 +305,10 @@ test('jumping does not save; an explicit Save marks the item while allowing it t
   assert.equal(f.media[1].in_review, true);
 });
 
-test('numbered local files sort naturally rather than following a reversed FileList', () => {
+test('Rapid Review keeps the supplied file order instead of sorting by filename', () => {
   const f = reviewQueueFixture();
   const files = Array.from({length:15}, (_, i) => ({name:`Image #${15-i}.jpg`}));
-  assert.deepEqual(Array.from(f.sortFiles(files), x => x.name), Array.from({length:15}, (_, i) => `Image #${i+1}.jpg`));
+  assert.deepEqual(Array.from(f.sortFiles(files), x => x.name), files.map(file => file.name));
   assert.equal(files[0].name, 'Image #15.jpg');
 });
 
