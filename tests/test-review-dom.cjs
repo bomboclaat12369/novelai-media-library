@@ -46,6 +46,11 @@ async function fixture() {
           library.sets = library.sets.filter(s => s.character_id !== id);
           value = {ok:true};
         }
+        else if (route.startsWith('/api/media/') && method === 'DELETE') {
+          const id = route.split('/')[3];
+          library.media = library.media.filter(m => m.id !== id);
+          value = {ok:true};
+        }
         else if (route === '/api/import/file') {
           const file = options.data.get('file');
           const item = {id:`saved${library.media.length+1}`,character_id:'character',original_name:file.name,media_type:'image',categories:[],in_review:false};
@@ -106,6 +111,34 @@ test('assembled UI opens ordered previews without importing, navigates, and disc
     const before = f.frames;
     await delay(120);
     assert.ok(f.frames-before < 10,'observers should settle');
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
+
+test('viewer delete button sits with navigation controls and deletes the active media', async () => {
+  const f = await fixture();
+  try {
+    f.library.media.push({id:'saved-viewer',character_id:'character',original_name:'Viewer image.png',media_type:'image',categories:[],in_review:false,thumb_rel:'fixture/thumb.webp'});
+    f.root.getElementById('refreshBtn').click();
+    await delay(160);
+    const tile = f.root.querySelector('.tile[data-id="saved-viewer"]');
+    assert.ok(tile);
+    tile.click();
+    await delay(100);
+    const nav = f.root.querySelector('.viewerNav');
+    const deleteButton = f.root.getElementById('deleteBtn');
+    assert.ok(nav?.contains(deleteButton));
+    assert.equal(deleteButton.disabled,false);
+    f.w.confirm = () => false;
+    deleteButton.click();
+    await delay(40);
+    assert.ok(f.library.media.some(m => m.id === 'saved-viewer'));
+    f.w.confirm = () => true;
+    deleteButton.click();
+    await delay(170);
+    assert.equal(f.library.media.some(m => m.id === 'saved-viewer'),false);
+    assert.deepEqual(f.writes,[{route:'/api/media/saved-viewer',method:'DELETE'}]);
+    assert.equal(f.root.getElementById('deleteBtn').disabled,true);
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
