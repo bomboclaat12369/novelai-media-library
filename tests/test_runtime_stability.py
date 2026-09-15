@@ -128,6 +128,31 @@ class RuntimeStabilityTests(unittest.TestCase):
             self.store._thumbnail_queue.join()
             self.assertEqual(len(decoded), 13)
 
+    def test_large_duplicate_hash_does_not_hold_library_lock(self):
+        source = self.store.root / 'duplicate-video.mp4'
+        source.write_bytes(b'video-bytes')
+        entered = threading.Event()
+        release = threading.Event()
+        original_hash = self.store._hash_file
+
+        def blocked_hash(path):
+            entered.set()
+            self.assertTrue(release.wait(timeout=3))
+            return original_hash(path)
+
+        with patch.object(self.store, '_hash_file', side_effect=blocked_hash):
+            worker = threading.Thread(target=lambda: self.store.import_bytes(
+                source.read_bytes(), source.name, self.character['id'], [],
+                {'kind':'local'}, 'video/mp4'))
+            worker.start()
+            self.assertTrue(entered.wait(timeout=1))
+            # Metadata reads must remain responsive while the upload is hashed.
+            snapshot = self.store.public_library()
+            self.assertEqual(snapshot['characters'][0]['id'], self.character['id'])
+            release.set()
+            worker.join(timeout=3)
+            self.assertFalse(worker.is_alive())
+
     def test_deleted_queued_media_is_not_decoded_or_resurrected(self):
         entered = threading.Event()
         decoded = []
