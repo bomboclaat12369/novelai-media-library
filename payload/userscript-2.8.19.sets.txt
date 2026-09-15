@@ -1,0 +1,990 @@
+// NovelAI Media Library v2.8.16: direct set membership rendering and cover selection
+(() => {
+  'use strict';
+
+  const API = 'http://127.0.0.1:8765';
+  const UI_STATE_KEY = 'nai-media-v1-ui';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV250 === '1') return;
+  document.documentElement.dataset.naiMediaV250 = '1';
+
+  const catWrap = root.getElementById('categories');
+  const grid = root.getElementById('grid');
+  const charSelect = root.getElementById('characterSelect');
+  const searchInput = root.getElementById('search');
+  const modalRoot = root.getElementById('modalRoot');
+  const lightRoot = root.getElementById('lightRoot');
+  const toolbar = root.querySelector('.right .toolbar');
+  const counter = root.getElementById('counter');
+  const prevBtn = root.getElementById('prevBtn');
+  const nextBtn = root.getElementById('nextBtn');
+  const randomBtn = root.getElementById('randomBtn');
+  if (!catWrap || !grid || !charSelect || !searchInput || !modalRoot || !toolbar || !lightRoot) return;
+
+  let library = null;
+  let setsView = false;
+  let openSetId = null;
+  let internalNavigation = false;
+  let internalSearch = false;
+  let returnView = { categoryKey: 'all', search: '' };
+  let syncQueued = false;
+  let refreshQueued = false;
+  const thumbUrls = new Map();
+  let coverSaving = false;
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v250-style';
+  style.textContent = `
+    .naiSetCover216{position:absolute;top:5px;left:5px;z-index:3;padding:2px 5px!important;font-size:18px!important;line-height:1.2;background:rgba(8,10,25,.85)!important;color:#fff}
+    .naiSetCover216[aria-pressed="true"]{color:#ffdb66}
+    .naiSetsCat { white-space:nowrap; }
+    #naiManageSetsBtn { white-space:nowrap; }
+
+    .naiSetTile {
+      position:relative;
+      aspect-ratio:1/1;
+      border-radius:8px;
+      overflow:hidden;
+      background:#0e1025;
+      border:1px solid rgba(255,255,255,.10);
+      cursor:pointer;
+    }
+    .naiSetTile:hover { outline:1px solid rgba(124,112,255,.75); }
+    .naiSetTile img { width:100%; height:100%; object-fit:cover; display:block; }
+    .naiSetTile .naiSetFallback {
+      position:absolute; inset:0; display:grid; place-items:center;
+      font:700 22px system-ui; color:#9fa4d3; background:#161a38;
+    }
+    .naiSetTile .naiSetStack {
+      position:absolute; top:4px; left:5px; z-index:2;
+      padding:2px 5px; border-radius:5px; background:rgba(8,10,24,.78);
+      font:700 10px/1.25 system-ui; color:#fff;
+    }
+    .naiSetTile .naiSetCaption {
+      position:absolute; left:0; right:0; bottom:0; z-index:2;
+      padding:16px 5px 5px;
+      background:linear-gradient(transparent,rgba(4,5,14,.94));
+      color:#fff; font:700 9px/1.15 system-ui;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      text-align:center;
+    }
+    .naiSetTile .naiSetCount {
+      position:absolute; top:4px; right:5px; z-index:2;
+      min-width:19px; padding:2px 5px; border-radius:999px;
+      background:rgba(8,10,24,.82); color:#fff; text-align:center;
+      font:700 9px/1.25 system-ui;
+    }
+
+    .naiSetBreadcrumb {
+      grid-column:1/-1;
+      min-height:34px;
+      display:flex; align-items:center; gap:7px;
+      padding:2px 3px 5px;
+    }
+    .naiSetBreadcrumb .naiSetTitle {
+      flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      font:700 12px system-ui; color:#ececff;
+    }
+    .naiSetBreadcrumb button { padding:5px 8px !important; font-size:10px !important; }
+
+    .naiSetManagerBody {
+      flex:1; min-height:0; display:grid;
+      grid-template-columns:220px minmax(0,1fr);
+      gap:12px; padding:12px;
+    }
+    .naiSetList {
+      min-height:0; overflow:auto; border-right:1px solid rgba(255,255,255,.09); padding-right:10px;
+    }
+    .naiSetList button { width:100%; margin-bottom:6px; text-align:left; }
+    .naiSetList button.active { background:#6155d9; border-color:#7268e5; }
+    .naiSetEditor { min-width:0; min-height:0; display:flex; flex-direction:column; gap:9px; }
+    .naiSetEditorTop { display:flex; gap:8px; align-items:center; }
+    .naiSetEditorTop input { flex:1; min-width:0; }
+    .naiSetGallery {
+      flex:1; min-height:0; overflow:auto; display:grid;
+      grid-template-columns:repeat(6,minmax(0,1fr)); grid-auto-rows:max-content;
+      gap:6px; align-content:start; padding:3px;
+    }
+    .naiSetPick {
+      position:relative; aspect-ratio:1/1; overflow:hidden; border-radius:7px;
+      border:1px solid rgba(255,255,255,.10); background:#0d1024; cursor:pointer;
+    }
+    .naiSetPick.selected { outline:2px solid #7c70ff; outline-offset:1px; }
+    .naiSetPick.cover { box-shadow:inset 0 0 0 2px #f1ca58; }
+    .naiSetPick img { width:100%; height:100%; object-fit:cover; display:block; }
+    .naiSetPick .naiSetPickName {
+      position:absolute; left:0; right:0; bottom:0; padding:12px 4px 3px;
+      background:linear-gradient(transparent,rgba(3,5,14,.92)); color:#fff;
+      font:600 8px/1.1 system-ui; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      pointer-events:none;
+    }
+    .naiSetPick .naiSetPickCheck {
+      position:absolute; top:4px; left:4px; min-width:18px; height:18px; padding:0 4px;
+      display:grid; place-items:center; border-radius:5px; background:rgba(8,10,24,.82);
+      color:#fff; font:700 10px/1 system-ui; pointer-events:none;
+    }
+    .naiSetPick .naiSetCoverBtn {
+      position:absolute; top:3px; right:3px; width:22px; height:22px; min-width:22px;
+      padding:0 !important; display:grid; place-items:center; border-radius:5px !important;
+      font-size:12px !important; z-index:3;
+    }
+    .naiSetPick .naiOtherSetBadge {
+      position:absolute; left:3px; top:27px; max-width:calc(100% - 6px); padding:2px 4px;
+      border-radius:4px; background:rgba(74,50,29,.88); color:#ffdca8;
+      font:600 7px/1 system-ui; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      pointer-events:none;
+    }
+    .naiSetManagerFoot {
+      display:flex; gap:8px; align-items:center; justify-content:flex-end;
+      padding:10px 12px; border-top:1px solid rgba(255,255,255,.09);
+    }
+
+    .naiFullscreenThumbRow { display:flex !important; justify-content:center !important; }
+    .naiFullscreenMarkerRail .naiFsThumb {
+      width:50px !important; min-width:50px !important; max-width:50px !important;
+      height:22px !important; padding:0 !important; border-radius:4px !important;
+      display:flex !important; align-items:center !important; justify-content:center !important;
+      text-align:center !important; font:700 9px/1 system-ui !important;
+    }
+  `;
+  root.appendChild(style);
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+  }
+
+  function gmRequest({method='GET', path, data=null, headers={}, responseType='text', timeout=120000}) {
+    return new Promise((resolve, reject) => GM_xmlhttpRequest({
+      method,
+      url:`${API}${path}`,
+      data,
+      headers:{Origin:'https://novelai.net', ...headers},
+      responseType,
+      timeout,
+      onload:res => {
+        if (res.status >= 200 && res.status < 300) {
+          if (responseType === 'blob') return resolve(res.response);
+          const text = res.responseText || '';
+          if (!text) return resolve(null);
+          try { return resolve(JSON.parse(text)); } catch (_) { return resolve(text); }
+        }
+        let message = `Request failed (${res.status})`;
+        try { message = JSON.parse(res.responseText || '{}').error || message; } catch (_) {}
+        reject(new Error(message));
+      },
+      onerror:()=>reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+      ontimeout:()=>reject(new Error('The local media request timed out.')),
+    }));
+  }
+
+  async function refreshLibrary() {
+    library = await gmRequest({path:'/api/library'});
+    if (!Array.isArray(library?.sets)) library.sets = [];
+    return library;
+  }
+
+  // Keep set collapsing and set-only navigation in sync with edits made from the
+  // viewer, without waiting for a second manual refresh.
+  root.naiSetsApplyLibrary216 = snapshot => {
+    if (!snapshot) return;
+    library = snapshot;
+    if (!Array.isArray(library.sets)) library.sets = [];
+    if (openSetId) renderOpenSet();
+    else if (setsView) renderSetsView();
+    else {
+      ensureControls();
+      collapseNormalGrid();
+    }
+  };
+
+  function currentCharacter() {
+    const id = charSelect.value || '';
+    return (library?.characters || []).find(c => c.id === id) || null;
+  }
+
+  function mediaById(id) {
+    return (library?.media || []).find(m => m.id === id) || null;
+  }
+
+  function setsForCurrentCharacter() {
+    const id = charSelect.value || '';
+    return (library?.sets || []).filter(s => s.character_id === id);
+  }
+
+  function setById(id) {
+    return (library?.sets || []).find(s => s.id === id) || null;
+  }
+
+  function availableSetIds(set) {
+    const map = new Map((library?.media || []).map(m => [m.id, m]));
+    return (set?.media_ids || []).filter(id => {
+      const m = map.get(id);
+      return m && m.character_id === set.character_id && m.media_type === 'image' && !m.in_review;
+    });
+  }
+
+  function baseCatButtons() {
+    return [...catWrap.querySelectorAll('.cat:not(.naiSetsCat)')];
+  }
+
+  function currentCategoryKey() {
+    const buttons = baseCatButtons();
+    const idx = buttons.findIndex(b => b.classList.contains('active'));
+    if (idx <= 0) return 'all';
+    if (idx === 1) return 'favorites';
+    if (idx === 2) return 'videos';
+    const c = currentCharacter();
+    return c?.categories?.[idx - 3]?.id || 'all';
+  }
+
+  function buttonForCategoryKey(key) {
+    const buttons = baseCatButtons();
+    if (key === 'all') return buttons[0] || null;
+    if (key === 'favorites') return buttons[1] || null;
+    if (key === 'videos') return buttons[2] || null;
+    const c = currentCharacter();
+    const idx = (c?.categories || []).findIndex(cat => cat.id === key);
+    return idx >= 0 ? buttons[idx + 3] || null : buttons[0] || null;
+  }
+
+  function uiState() {
+    try { return JSON.parse(localStorage.getItem(UI_STATE_KEY) || '{}') || {}; }
+    catch (_) { return {}; }
+  }
+
+  function activeSelectedMediaId() {
+    const state = uiState();
+    const activeSlot = state.activeSlot === 1 ? 1 : 0;
+    const ids = Array.isArray(state.slotMediaIds) ? state.slotMediaIds : [];
+    return ids[activeSlot] || state.selectedMediaId || null;
+  }
+
+  function revokeThumb(mediaId) {
+    const old = thumbUrls.get(mediaId);
+    if (old) URL.revokeObjectURL(old);
+    thumbUrls.delete(mediaId);
+  }
+
+  async function loadThumb(mediaId, img, force=false) {
+    if (!img || !mediaId) return;
+    if (force) revokeThumb(mediaId);
+    let url = thumbUrls.get(mediaId);
+    if (!url) {
+      try {
+        const blob = await gmRequest({path:`/api/media/${encodeURIComponent(mediaId)}/thumb`, responseType:'blob'});
+        url = URL.createObjectURL(blob);
+        thumbUrls.set(mediaId, url);
+      } catch (_) { return; }
+    }
+    img.src = url;
+  }
+
+  function createSetTile(set) {
+    const tile = document.createElement('div');
+    tile.className = 'naiSetTile';
+    tile.dataset.setId = set.id;
+    tile.dataset.coverId = set.cover_media_id || set.media_ids?.[0] || '';
+    tile.title = `${set.name || 'Set'} — ${(set.media_ids || []).length} images`;
+
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.alt = '';
+    if (tile.dataset.coverId) {
+      tile.appendChild(img);
+      loadThumb(tile.dataset.coverId, img);
+    } else {
+      const empty = document.createElement('div');
+      empty.textContent = 'Empty set';
+      empty.style.cssText = 'display:grid;place-items:center;height:100%;color:#a8abc4';
+      tile.appendChild(empty);
+    }
+
+    const stack = document.createElement('div');
+    stack.className = 'naiSetStack';
+    stack.textContent = '▧';
+    tile.appendChild(stack);
+
+    const count = document.createElement('div');
+    count.className = 'naiSetCount';
+    count.textContent = String((set.media_ids || []).length);
+    tile.appendChild(count);
+
+    const caption = document.createElement('div');
+    caption.className = 'naiSetCaption';
+    caption.textContent = set.name || 'Untitled set';
+    tile.appendChild(caption);
+
+    tile.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      openSet(set.id);
+    });
+    return tile;
+  }
+
+  function ensureControls() {
+    if (!library) return;
+
+    let setsButton = root.getElementById('naiSetsCat');
+    if (!setsButton) {
+      setsButton = document.createElement('button');
+      setsButton.type = 'button';
+      setsButton.id = 'naiSetsCat';
+      setsButton.className = 'cat naiSetsCat';
+      setsButton.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        openSetId = null;
+        setsView = true;
+        renderSetsView();
+      });
+      const buttons = baseCatButtons();
+      const anchor = buttons[2]?.nextSibling || null;
+      catWrap.insertBefore(setsButton, anchor);
+    }
+    setsButton.textContent = `▧ Sets ${setsForCurrentCharacter().length}`;
+    setsButton.classList.toggle('active', setsView && !openSetId);
+    if (setsView && !openSetId) baseCatButtons().forEach(b => b.classList.remove('active'));
+
+    if (!root.getElementById('naiManageSetsBtn')) {
+      const manage = document.createElement('button');
+      manage.type = 'button';
+      manage.id = 'naiManageSetsBtn';
+      manage.textContent = 'Sets';
+      manage.title = 'Create or edit image sets';
+      manage.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        openSetManager();
+      });
+      const random = root.getElementById('randomBtn');
+      if (random) toolbar.insertBefore(manage, random);
+      else toolbar.appendChild(manage);
+    }
+  }
+
+  function renderSetsView() {
+    if (!library) return;
+    openSetId = null;
+    setsView = true;
+    ensureControls();
+    baseCatButtons().forEach(b => b.classList.remove('active'));
+    root.getElementById('naiSetsCat')?.classList.add('active');
+
+    const q = String(searchInput.value || '').trim().toLowerCase();
+    const mediaMap = new Map((library.media || []).map(m => [m.id, m]));
+    let sets = setsForCurrentCharacter();
+    if (q) {
+      sets = sets.filter(set => {
+        if (String(set.name || '').toLowerCase().includes(q)) return true;
+        return (set.media_ids || []).some(id => String(mediaMap.get(id)?.original_name || '').toLowerCase().includes(q));
+      });
+    }
+
+    grid.innerHTML = '';
+    if (!sets.length) {
+      grid.innerHTML = '<div class="empty">No image sets in this view yet.<br>Use the “Sets” button beside + Media to create one.</div>';
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    sets.forEach(set => frag.appendChild(createSetTile(set)));
+    grid.appendChild(frag);
+  }
+
+  function collapseNormalGrid() {
+    if (!library || setsView || openSetId) return;
+    ensureControls();
+    if (currentCategoryKey() === 'videos') return;
+
+    const visibleTiles = new Map();
+    grid.querySelectorAll('.tile[data-id]').forEach(tile => visibleTiles.set(tile.dataset.id, tile));
+    if (!visibleTiles.size) return;
+
+    for (const set of setsForCurrentCharacter()) {
+      const memberTiles = (set.media_ids || []).map(id => visibleTiles.get(id)).filter(Boolean);
+      // A set tile may represent the set only when every member is visible in the
+      // current category. Otherwise showing the set here makes one categorized/All
+      // image look like the entire set was added to that view.
+      if (!memberTiles.length || memberTiles.length !== (set.media_ids || []).length) continue;
+      const first = memberTiles[0];
+      first.parentNode?.insertBefore(createSetTile(set), first);
+      memberTiles.forEach(tile => tile.remove());
+    }
+  }
+
+  function renderOpenSet() {
+    if (!library || !openSetId) return;
+    const set = setById(openSetId);
+    if (!set) {
+      openSetId = null;
+      returnToPreviousView();
+      return;
+    }
+
+    ensureControls();
+    root.getElementById('naiSetsCat')?.classList.remove('active');
+
+    const ids = availableSetIds(set);
+    root.naiRenderSetMedia216(library, ids);
+    const tiles = new Map();
+    grid.querySelectorAll('.tile[data-id]').forEach(tile => tiles.set(tile.dataset.id, tile));
+    const ordered = ids.map(id => tiles.get(id)).filter(Boolean);
+
+    grid.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'naiSetBreadcrumb';
+    head.innerHTML = `
+      <button type="button" id="naiSetBackBtn">← Back</button>
+      <div class="naiSetTitle">${escapeHtml(set.name || 'Untitled set')} · ${ids.length} images</div>
+      <button type="button" id="naiSetEditBtn">Edit Set</button>
+    `;
+    head.querySelector('#naiSetBackBtn')?.addEventListener('click', event => {
+      event.preventDefault(); event.stopPropagation(); returnToPreviousView();
+    });
+    head.querySelector('#naiSetEditBtn')?.addEventListener('click', event => {
+      event.preventDefault(); event.stopPropagation(); openSetManager(set.id);
+    });
+    grid.appendChild(head);
+    ordered.forEach(tile => {
+      let cover = tile.querySelector('.naiSetCover216');
+      if (!cover) {
+        cover = document.createElement('button');
+        cover.type = 'button';
+        cover.className = 'naiSetCover216';
+        cover.addEventListener('click', async event => {
+          event.preventDefault(); event.stopPropagation();
+          if (coverSaving) return;
+          coverSaving = true;
+          grid.querySelectorAll('.naiSetCover216').forEach(button => button.disabled = true);
+          try {
+            const updated = await gmRequest({method:'POST',path:`/api/sets/${encodeURIComponent(set.id)}`,
+              headers:{'Content-Type':'application/json'},data:JSON.stringify({cover_media_id:tile.dataset.id})});
+            library.sets = library.sets.map(item => item.id === updated.id ? updated : item);
+          } catch (err) { alert(err?.message || String(err)); }
+          finally {
+            coverSaving = false;
+            if (openSetId === set.id) renderOpenSet();
+          }
+        });
+        tile.appendChild(cover);
+      }
+      const chosen = tile.dataset.id === set.cover_media_id;
+      cover.textContent = chosen ? '★' : '☆';
+      cover.title = chosen ? 'Current set thumbnail' : 'Use as set thumbnail';
+      cover.setAttribute('aria-label', cover.title);
+      cover.setAttribute('aria-pressed', String(chosen));
+      cover.disabled = coverSaving;
+      grid.appendChild(tile);
+    });
+
+    if (!ordered.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'This set has no available images.';
+      grid.appendChild(empty);
+    }
+
+    filterOpenSetBySearch();
+    updateSetCounter();
+  }
+
+  function filterOpenSetBySearch() {
+    if (!openSetId || !library) return;
+    const q = String(searchInput.value || '').trim().toLowerCase();
+    grid.querySelectorAll('.tile[data-id]').forEach(tile => {
+      const m = mediaById(tile.dataset.id);
+      const show = !q || String(m?.original_name || '').toLowerCase().includes(q);
+      tile.style.display = show ? '' : 'none';
+    });
+  }
+
+  function updateSetCounter() {
+    if (!openSetId || !counter) return;
+    const set = setById(openSetId);
+    if (!set) return;
+    const id = activeSelectedMediaId();
+    const ids = availableSetIds(set);
+    const idx = ids.indexOf(id);
+    counter.textContent = idx >= 0 ? `${idx + 1} / ${ids.length}` : `— / ${ids.length}`;
+  }
+
+  function clickCategoryKey(key) {
+    const button = buttonForCategoryKey(key);
+    if (!button) return;
+    internalNavigation = true;
+    try { button.click(); }
+    finally { internalNavigation = false; }
+  }
+
+  async function openSet(setId) {
+    const characterId = charSelect.value;
+    try { await refreshLibrary(); } catch (err) { alert(err?.message || String(err)); return; }
+    if (charSelect.value !== characterId) return;
+    const set = setById(setId);
+    if (!set) return;
+    returnView = {
+      categoryKey: setsView ? 'sets' : currentCategoryKey(),
+      search: String(searchInput.value || ''),
+    };
+    openSetId = setId;
+    setsView = false;
+
+    internalSearch = true;
+    try {
+      searchInput.value = '';
+      searchInput.dispatchEvent(new Event('input', {bubbles:true, composed:true}));
+    } finally {
+      internalSearch = false;
+    }
+    clickCategoryKey('all');
+    [0,40,120].forEach(ms => setTimeout(renderOpenSet, ms));
+  }
+
+  function returnToPreviousView() {
+    const previous = returnView || {categoryKey:'all', search:''};
+    openSetId = null;
+    if (previous.categoryKey === 'sets') {
+      setsView = true;
+      searchInput.value = previous.search || '';
+      renderSetsView();
+      return;
+    }
+    setsView = false;
+    clickCategoryKey(previous.categoryKey || 'all');
+    searchInput.value = previous.search || '';
+    searchInput.dispatchEvent(new Event('input', {bubbles:true, composed:true}));
+    scheduleSync(false, 0);
+  }
+
+  function selectSetRelative(delta) {
+    const set = setById(openSetId);
+    const ids = availableSetIds(set);
+    if (!ids.length) return;
+    const current = activeSelectedMediaId();
+    let idx = ids.indexOf(current);
+    if (idx < 0) idx = 0;
+    idx = (idx + delta + ids.length) % ids.length;
+    const tile = grid.querySelector(`.tile[data-id="${ids[idx]}"]`);
+    tile?.click();
+    [0,30].forEach(ms => setTimeout(() => { renderOpenSet(); updateSetCounter(); }, ms));
+  }
+
+  function selectRandomSetMember() {
+    const set = setById(openSetId);
+    const ids = availableSetIds(set);
+    if (!ids.length) return;
+    const id = ids[Math.floor(Math.random() * ids.length)];
+    grid.querySelector(`.tile[data-id="${id}"]`)?.click();
+    [0,30].forEach(ms => setTimeout(() => { renderOpenSet(); updateSetCounter(); }, ms));
+  }
+
+  async function syncUI(forceRefresh=false) {
+    syncQueued = false;
+    try {
+      if (forceRefresh || !library) await refreshLibrary();
+    } catch (_) {
+      return;
+    }
+    ensureControls();
+    if (openSetId) renderOpenSet();
+    else if (setsView) renderSetsView();
+    else collapseNormalGrid();
+  }
+
+  function scheduleSync(forceRefresh=false, delay=0) {
+    refreshQueued = refreshQueued || forceRefresh;
+    if (syncQueued && delay === 0) return;
+    syncQueued = true;
+    setTimeout(() => {
+      const refresh = refreshQueued;
+      refreshQueued = false;
+      syncUI(refresh);
+    }, delay);
+  }
+
+  function setMembershipMap() {
+    const map = new Map();
+    for (const set of setsForCurrentCharacter()) {
+      for (const id of (set.media_ids || [])) map.set(id, set);
+    }
+    return map;
+  }
+
+  async function openSetManager(initialSetId=null) {
+    try { await refreshLibrary(); } catch (err) { alert(err?.message || String(err)); return; }
+    const character = currentCharacter();
+    if (!character) { alert('Choose a character first.'); return; }
+    const images = (library.media || []).filter(m => m.character_id === character.id && m.media_type === 'image');
+    const sets = setsForCurrentCharacter();
+
+    let editingId = initialSetId && sets.some(s => s.id === initialSetId) ? initialSetId : null;
+    let selected = new Set();
+    let coverId = null;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'modalWrap';
+    wrap.innerHTML = `
+      <div class="modal large" style="width:min(1180px,96vw);height:min(850px,92vh)">
+        <div class="modalHead">
+          <div class="modalTitle">Manage Image Sets — ${escapeHtml(character.name)}</div>
+          <button type="button" data-close>✕</button>
+        </div>
+        <div class="naiSetManagerBody">
+          <div class="naiSetList">
+            <button type="button" class="primary" id="naiNewSetBtn">+ New Set</button>
+            <div id="naiExistingSets"></div>
+          </div>
+          <div class="naiSetEditor">
+            <div class="naiSetEditorTop">
+              <input type="text" id="naiSetNameInput" placeholder="Set name, e.g. Yellow Dress" />
+              <button type="button" class="danger" id="naiDeleteSetBtn">Delete Set</button>
+            </div>
+            <div class="muted">Click images to include them. Click ☆ on an image to make it the cover. An image can belong to one set; saving moves it out of another set automatically.</div>
+            <div class="naiSetGallery" id="naiSetGallery"></div>
+          </div>
+        </div>
+        <div class="naiSetManagerFoot">
+          <div class="muted grow" id="naiSetSelectionSummary"></div>
+          <button type="button" data-close>Cancel</button>
+          <button type="button" class="primary" id="naiSaveSetBtn">Save Set</button>
+        </div>
+      </div>
+    `;
+    modalRoot.innerHTML = '';
+    modalRoot.appendChild(wrap);
+
+    const close = () => { modalRoot.innerHTML = ''; };
+    wrap.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', close));
+    wrap.addEventListener('click', e => { if (e.target === wrap) close(); });
+
+    const listEl = wrap.querySelector('#naiExistingSets');
+    const gallery = wrap.querySelector('#naiSetGallery');
+    const nameInput = wrap.querySelector('#naiSetNameInput');
+    const deleteBtn = wrap.querySelector('#naiDeleteSetBtn');
+    const summary = wrap.querySelector('#naiSetSelectionSummary');
+    const membership = setMembershipMap();
+
+    const io = typeof IntersectionObserver === 'function'
+      ? new IntersectionObserver(entries => entries.forEach(entry => {
+          if (!entry.isIntersecting) return;
+          const img = entry.target;
+          io.unobserve(img);
+          loadThumb(img.dataset.mediaId, img);
+        }), {root:gallery, rootMargin:'150px'})
+      : null;
+
+    function chooseSet(id) {
+      editingId = id || null;
+      const set = editingId ? setsForCurrentCharacter().find(s => s.id === editingId) : null;
+      selected = new Set(set?.media_ids || []);
+      coverId = set?.cover_media_id || set?.media_ids?.[0] || null;
+      nameInput.value = set?.name || '';
+      deleteBtn.style.display = set ? '' : 'none';
+      paintList();
+      paintGallery();
+    }
+
+    function paintList() {
+      listEl.innerHTML = '';
+      for (const set of setsForCurrentCharacter()) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = set.id === editingId ? 'active' : '';
+        btn.textContent = `${set.name || 'Untitled'} (${(set.media_ids || []).length})`;
+        btn.addEventListener('click', () => chooseSet(set.id));
+        listEl.appendChild(btn);
+      }
+      if (!setsForCurrentCharacter().length) {
+        const p = document.createElement('div');
+        p.className = 'muted';
+        p.style.padding = '8px 2px';
+        p.textContent = 'No sets yet.';
+        listEl.appendChild(p);
+      }
+    }
+
+    function paintSummary() {
+      summary.textContent = `${selected.size} image${selected.size === 1 ? '' : 's'} selected${coverId ? ' · cover chosen' : ''}`;
+    }
+
+    function paintGallery() {
+      io?.disconnect();
+      gallery.innerHTML = '';
+      if (!images.length) {
+        const note = document.createElement('div');
+        note.className = 'muted';
+        note.textContent = 'No saved images yet. Create an empty set and assign images later.';
+        gallery.appendChild(note);
+      }
+      const frag = document.createDocumentFragment();
+      for (const m of images) {
+        const card = document.createElement('div');
+        card.className = `naiSetPick${selected.has(m.id) ? ' selected' : ''}${coverId === m.id ? ' cover' : ''}`;
+        card.dataset.mediaId = m.id;
+
+        const img = document.createElement('img');
+        img.alt = '';
+        img.dataset.mediaId = m.id;
+        card.appendChild(img);
+        if (io) io.observe(img); else loadThumb(m.id, img);
+
+        const check = document.createElement('div');
+        check.className = 'naiSetPickCheck';
+        check.textContent = selected.has(m.id) ? '✓' : '';
+        card.appendChild(check);
+
+        const cover = document.createElement('button');
+        cover.type = 'button';
+        cover.className = 'naiSetCoverBtn';
+        cover.textContent = coverId === m.id ? '★' : '☆';
+        cover.title = 'Use as set cover';
+        cover.addEventListener('click', event => {
+          event.preventDefault(); event.stopPropagation();
+          selected.add(m.id);
+          coverId = m.id;
+          paintGallery();
+        });
+        card.appendChild(cover);
+
+        const otherSet = membership.get(m.id);
+        if (otherSet && otherSet.id !== editingId) {
+          const badge = document.createElement('div');
+          badge.className = 'naiOtherSetBadge';
+          badge.textContent = otherSet.name || 'Another set';
+          badge.title = 'Saving will move this image from that set';
+          card.appendChild(badge);
+        }
+
+        const name = document.createElement('div');
+        name.className = 'naiSetPickName';
+        name.textContent = m.original_name || '';
+        card.appendChild(name);
+
+        card.addEventListener('click', () => {
+          if (selected.has(m.id)) {
+            selected.delete(m.id);
+            if (coverId === m.id) coverId = [...selected][0] || null;
+          } else {
+            selected.add(m.id);
+            if (!coverId) coverId = m.id;
+          }
+          paintGallery();
+        });
+        frag.appendChild(card);
+      }
+      gallery.appendChild(frag);
+      paintSummary();
+    }
+
+    wrap.querySelector('#naiNewSetBtn')?.addEventListener('click', () => chooseSet(null));
+
+    deleteBtn.addEventListener('click', async () => {
+      if (!editingId) return;
+      const set = setsForCurrentCharacter().find(s => s.id === editingId);
+      if (!set) return;
+      if (!confirm(`Delete the set “${set.name}”?\n\nThe images will stay in your library; they will only be ungrouped.`)) return;
+      deleteBtn.disabled = true;
+      try {
+        await gmRequest({method:'DELETE', path:`/api/sets/${encodeURIComponent(editingId)}`});
+        await refreshLibrary();
+        editingId = null;
+        selected = new Set();
+        coverId = null;
+        nameInput.value = '';
+        paintList();
+        paintGallery();
+        scheduleSync(false, 0);
+      } catch (err) {
+        alert(err?.message || String(err));
+      } finally {
+        deleteBtn.disabled = false;
+      }
+    });
+
+    wrap.querySelector('#naiSaveSetBtn')?.addEventListener('click', async event => {
+      const save = event.currentTarget;
+      const name = String(nameInput.value || '').trim();
+      if (!name) { alert('Enter a set name.'); return; }
+      if (!coverId || !selected.has(coverId)) coverId = [...selected][0] || null;
+      save.disabled = true;
+      try {
+        const payload = {
+          name,
+          media_ids:[...selected],
+          cover_media_id:coverId,
+        };
+        if (!editingId) payload.character_id = character.id;
+        const path = editingId ? `/api/sets/${encodeURIComponent(editingId)}` : '/api/sets';
+        await gmRequest({
+          method:'POST', path,
+          headers:{'Content-Type':'application/json'},
+          data:JSON.stringify(payload),
+        });
+        await refreshLibrary();
+        close();
+        scheduleSync(false, 0);
+      } catch (err) {
+        alert(err?.message || String(err));
+      } finally {
+        save.disabled = false;
+      }
+    });
+
+    chooseSet(editingId);
+  }
+
+  async function captureDisplayedVideoFrame(video) {
+    if (!video?.videoWidth || !video?.videoHeight) throw new Error('Video frame is not ready yet.');
+    const maxSide = 960;
+    const scale = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not capture this video frame.');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return await new Promise((resolve, reject) => canvas.toBlob(
+      blob => blob ? resolve(blob) : reject(new Error('Could not create thumbnail image.')),
+      'image/jpeg', 0.9
+    ));
+  }
+
+  function rememberThumbBlob(mediaId, blob) {
+    revokeThumb(mediaId);
+    const url = URL.createObjectURL(blob);
+    thumbUrls.set(mediaId, url);
+    root.querySelectorAll(`img[data-mid="${mediaId}"]`).forEach(img => { img.src = url; });
+    root.querySelectorAll(`.naiSetTile[data-cover-id="${mediaId}"] img`).forEach(img => { img.src = url; });
+  }
+
+  function ensureFullscreenThumbButtons() {
+    root.querySelectorAll('.naiFullscreenMarkerRail').forEach(rail => {
+      if (rail.querySelector(':scope > .naiFullscreenThumbRow')) return;
+      const container = rail.parentElement;
+      const video = container?.querySelector(':scope > video');
+      const mediaId = rail.dataset.mediaId;
+      if (!video || !mediaId) return;
+
+      const row = document.createElement('div');
+      row.className = 'naiFullscreenThumbRow';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'naiFsThumb';
+      button.textContent = 'Thumb';
+      button.title = 'Set thumbnail to current frame';
+      button.addEventListener('click', async event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (button.disabled) return;
+        button.disabled = true;
+        try {
+          const seconds = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+          const blob = await captureDisplayedVideoFrame(video);
+          await gmRequest({
+            method:'POST',
+            path:`/api/media/${encodeURIComponent(mediaId)}/thumbnail?seconds=${encodeURIComponent(seconds)}`,
+            headers:{'Content-Type':'image/jpeg'},
+            data:blob,
+          });
+          rememberThumbBlob(mediaId, blob);
+          button.textContent = '✓';
+          setTimeout(() => { if (button.isConnected) button.textContent = 'Thumb'; }, 650);
+        } catch (err) {
+          alert(err?.message || String(err));
+        } finally {
+          button.disabled = false;
+        }
+      });
+      row.appendChild(button);
+      rail.insertBefore(row, rail.firstChild);
+    });
+  }
+
+  const fullscreenObserver = new MutationObserver(() => queueMicrotask(ensureFullscreenThumbButtons));
+  fullscreenObserver.observe(lightRoot, {childList:true, subtree:true});
+
+  window.addEventListener('click', event => {
+    if (!openSetId) return;
+    const path = event.composedPath?.() || [];
+    if (!path.includes(host)) return;
+    const prev = path.includes(prevBtn);
+    const next = path.includes(nextBtn);
+    const random = path.includes(randomBtn);
+    if (!prev && !next && !random) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (random) selectRandomSetMember();
+    else selectSetRelative(prev ? -1 : 1);
+  }, true);
+
+  catWrap.addEventListener('click', event => {
+    const cat = event.target.closest?.('.cat');
+    if (!cat || cat.classList.contains('naiSetsCat') || internalNavigation) return;
+    const wasSetsView = setsView;
+    setsView = false;
+    openSetId = null;
+    scheduleSync(false, 0);
+    if (wasSetsView) {
+      setTimeout(() => {
+        internalSearch = true;
+        try { searchInput.dispatchEvent(new Event('input', {bubbles:true, composed:true})); }
+        finally { internalSearch = false; }
+        scheduleSync(false, 0);
+      }, 0);
+    }
+  }, true);
+
+  searchInput.addEventListener('input', event => {
+    if (internalSearch) return;
+    if (openSetId) {
+      event.stopImmediatePropagation();
+      filterOpenSetBySearch();
+      return;
+    }
+    if (setsView) {
+      event.stopImmediatePropagation();
+      renderSetsView();
+      return;
+    }
+    scheduleSync(false, 0);
+  }, true);
+
+  charSelect.addEventListener('change', () => {
+    setsView = false;
+    openSetId = null;
+    [0,80].forEach(ms => setTimeout(() => scheduleSync(true, 0), ms));
+  });
+
+  root.addEventListener('click', event => {
+    const target = event.target;
+    if (openSetId && target?.closest?.('.tile[data-id]')) {
+      [0,30,100].forEach(ms => setTimeout(() => { renderOpenSet(); updateSetCounter(); }, ms));
+      return;
+    }
+    if (target?.id === 'refreshBtn') {
+      [120,500].forEach(ms => setTimeout(() => scheduleSync(true, 0), ms));
+      return;
+    }
+    if (target?.id === 'addMediaBtn' || target?.closest?.('#modalRoot')) {
+      setTimeout(() => scheduleSync(true, 0), 900);
+      return;
+    }
+    if (target?.closest?.('.cat') || target?.closest?.('.tile[data-id]')) {
+      setTimeout(() => scheduleSync(false, 0), 0);
+    }
+    setTimeout(ensureFullscreenThumbButtons, 0);
+  });
+
+  window.addEventListener('beforeunload', () => {
+    fullscreenObserver.disconnect();
+    for (const url of thumbUrls.values()) URL.revokeObjectURL(url);
+    thumbUrls.clear();
+  }, {once:true});
+
+  refreshLibrary().then(() => {
+    ensureControls();
+    collapseNormalGrid();
+    ensureFullscreenThumbButtons();
+  }).catch(() => {});
+})();
