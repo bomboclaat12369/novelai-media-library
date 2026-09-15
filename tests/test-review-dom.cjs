@@ -83,13 +83,13 @@ test('assembled UI opens ordered previews without importing, navigates, and disc
   const f = await fixture();
   try {
     await f.open();
-    assert.equal(f.root.querySelector('#reviewStage img').alt,'Image #1.png');
+    assert.equal(f.root.querySelector('#reviewStage img').alt,'Image #4.png');
     const previews = [...f.root.querySelectorAll('.naiQueueThumb270 img')];
     assert.equal(previews.length,4);
     assert.ok(previews.every(img => img.src.startsWith('blob:')));
     f.root.querySelectorAll('.naiQueueThumb270')[1].click();
     await delay(50);
-    assert.equal(f.root.querySelector('#reviewStage img').alt,'Image #2.png');
+    assert.equal(f.root.querySelector('#reviewStage img').alt,'Image #3.png');
     assert.equal(f.library.media.length,0);
     f.root.getElementById('naiReviewClose270').click();
     await delay(120);
@@ -122,7 +122,7 @@ test('Sets assignment stages drafts; Save commits just one image and X discards 
     f.root.getElementById('naiReviewClose270').click();
     await delay(100);
     assert.equal(f.library.media.length,1);
-    assert.equal(f.library.media[0].original_name,'Image #1.png');
+    assert.equal(f.library.media[0].original_name,'Image #3.png');
     assert.deepEqual(f.library.sets[0].media_ids,['saved1']);
     assert.equal(f.root.querySelector('#reviewStage img').alt,'Image #2.png');
     f.root.getElementById('naiReviewClose270').click();
@@ -184,13 +184,13 @@ test('a nine-image queue keeps the same nine previews at every selected position
   try {
     await f.open([1,2,3,4,5,6,7,8,9]);
     const titles = () => [...f.root.querySelectorAll('.naiQueueThumb270')].map(card => card.title);
-    const expected = Array.from({length:9}, (_, i) => `${i+1}. Image #${i+1}.png`);
+    const expected = Array.from({length:9}, (_, i) => `${i+1}. Image #${9-i}.png`);
     assert.deepEqual(titles(), expected);
     for (let i = 0; i < 9; i++) {
       f.root.querySelectorAll('.naiQueueThumb270')[i].click();
       await delay(10);
       assert.deepEqual(titles(), expected);
-      assert.equal(f.root.querySelector('#reviewStage img').alt, `Image #${i+1}.png`);
+      assert.equal(f.root.querySelector('#reviewStage img').alt, `Image #${9-i}.png`);
       assert.equal(f.root.getElementById('naiQueueRange289').textContent, '1–9 of 9');
       assert.equal(f.root.getElementById('naiQueuePager289').hidden, true);
     }
@@ -212,12 +212,12 @@ test('large queues use bounded stable pages; paging never selects or saves media
     f.root.getElementById('naiQueuePageNext289').click();
     assert.equal(cards().length, 24);
     assert.equal(range(), '25–48 of 57');
-    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #1.png');
+    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #57.png');
     f.root.getElementById('naiQueuePageNext289').click();
     assert.equal(cards().length, 9);
     assert.equal(range(), '49–57 of 57');
     assert.equal(f.root.getElementById('naiQueuePageNext289').disabled, true);
-    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #1.png');
+    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #57.png');
     f.root.getElementById('naiQueuePagePrev289').click();
     assert.equal(cards().length, 24);
     assert.deepEqual(f.writes, []);
@@ -225,11 +225,11 @@ test('large queues use bounded stable pages; paging never selects or saves media
     await delay(20);
     assert.equal(range(), '25–48 of 57');
     assert.equal(cards().length, 24);
-    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #48.png');
+    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #10.png');
     f.root.getElementById('naiReviewNext270').click();
     await delay(80);
     assert.equal(f.library.media.length, 1);
-    assert.equal(f.library.media[0].original_name, 'Image #48.png');
+    assert.equal(f.library.media[0].original_name, 'Image #10.png');
     assert.equal(range(), '49–57 of 57');
     assert.equal(cards().length, 9);
     f.root.getElementById('naiReviewPrev270').click();
@@ -241,15 +241,22 @@ test('large queues use bounded stable pages; paging never selects or saves media
   } finally { f.dom.window.close(); }
 });
 
-test('Rapid Review preserves the upload event order regardless of filenames', async () => {
+test('Rapid Review sorts uploaded filenames in descending natural order', async () => {
   const f = await fixture();
   try {
     await f.open([{name:'zeta.jpg'},{name:'alpha.jpg'},{name:'middle.jpg'}]);
     assert.equal(f.root.querySelector('#reviewStage img').alt, 'zeta.jpg');
+    f.root.querySelectorAll('.naiQueueThumb270')[1].click();
+    await delay(20);
+    assert.equal(f.root.querySelector('#reviewStage img').alt, 'middle.jpg');
     f.root.getElementById('naiReviewClose270').click();
     await delay(30);
     await f.open([3,2,1]);
     assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #3.png');
+    f.root.getElementById('naiReviewClose270').click();
+    await delay(30);
+    await f.open([{name:'Image_998.jpg'},{name:'Image_1000.jpg'},{name:'Image_999.jpg'}]);
+    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image_1000.jpg');
   } finally { f.dom.window.close(); }
 });
 
