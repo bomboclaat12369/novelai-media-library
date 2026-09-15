@@ -410,12 +410,17 @@ class LibraryStore:
         source: dict[str, Any],
         content_type: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
+        # Hashing can read a large video for many seconds. Do it before taking the
+        # library lock so playback, metadata reads, and other UI requests remain
+        # responsive while duplicate detection is in progress. The final duplicate
+        # check and registration still happen under the lock, so concurrent imports
+        # cannot register the same file twice.
+        sha = self._hash_file(temp_path)
         with self.lock:
             c = self.character(character_id)
             if not c:
                 raise KeyError("Character not found")
             categories = self._validate_categories(character_id, categories)
-            sha = self._hash_file(temp_path)
             for existing in self.data["media"]:
                 if existing.get("character_id") == character_id and existing.get("sha256") == sha:
                     changed = False
