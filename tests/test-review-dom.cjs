@@ -50,6 +50,8 @@ async function fixture() {
           const id = route.split('/')[3];
           library.media = library.media.filter(m => m.id !== id);
           value = {ok:true};
+        } else if (route.startsWith('/api/media/') && method === 'GET' && route.endsWith('/quality')) {
+          value = {media_id:route.split('/')[3],media_type:'image',file_bytes:2048,width:1536,height:2048};
         }
         else if (route === '/api/import/file') {
           const file = options.data.get('file');
@@ -152,12 +154,13 @@ test('viewer delete button sits with navigation controls and deletes the active 
 test('viewer edit button assigns categories and replaces an image without changing its set membership', async () => {
   const f = await fixture();
   try {
-    const item = {id:'saved-edit',character_id:'character',original_name:'old.png',media_type:'image',categories:[],in_review:false,thumb_rel:'fixture/thumb.webp'};
+    const item = {id:'saved-edit',character_id:'character',original_name:'old.png',media_type:'image',categories:[],in_review:false,in_all:true,thumb_rel:'fixture/thumb.webp'};
     f.library.media.push(item);
     f.root.getElementById('refreshBtn').click();
     await delay(160);
     f.root.querySelector('.tile[data-id="saved-edit"]').click();
     await delay(100);
+    assert.equal(f.root.getElementById('qualityInfo').textContent, 'Source quality: 1536 × 2048 · 2.0 KB');
     const editButton = f.root.getElementById('editBtn');
     assert.ok(f.root.querySelector('.viewerNav')?.contains(editButton));
     assert.equal(editButton.disabled, false);
@@ -165,12 +168,18 @@ test('viewer edit button assigns categories and replaces an image without changi
     await delay(20);
     const category = f.root.querySelector('#editImageCats input[data-catid="dress"]');
     assert.ok(category);
+    assert.equal(f.root.getElementById('editAllMedia').checked, true);
     category.click();
     f.root.getElementById('saveImageCats').click();
     await delay(170);
     assert.deepEqual(item.categories, ['dress']);
-    f.library.sets.push({id:'set-edit',character_id:'character',name:'Set',media_ids:['saved-edit'],cover_media_id:'saved-edit'});
-    assert.deepEqual(f.library.sets[0].media_ids, ['saved-edit']);
+    f.library.media.push({id:'saved-other',character_id:'character',original_name:'other.png',media_type:'image',categories:[],in_review:false,in_all:false});
+    f.library.sets.push({id:'set-edit',character_id:'character',name:'Set',media_ids:['saved-edit','saved-other'],cover_media_id:'saved-edit'});
+    f.root.getElementById('refreshBtn').click();
+    await delay(170);
+    assert.ok(f.root.querySelector('.tile[data-id="saved-edit"]'));
+    assert.equal(f.root.querySelector('.naiSetTile[data-set-id="set-edit"]'), null);
+    assert.deepEqual(f.library.sets[0].media_ids, ['saved-edit','saved-other']);
 
     editButton.click();
     await delay(20);
@@ -180,7 +189,7 @@ test('viewer edit button assigns categories and replaces an image without changi
     await delay(220);
     assert.equal(item.original_name, 'higher-quality.png');
     assert.deepEqual(item.categories, ['dress']);
-    assert.deepEqual(f.library.sets[0].media_ids, ['saved-edit']);
+    assert.deepEqual(f.library.sets[0].media_ids, ['saved-edit','saved-other']);
     assert.deepEqual(f.writes, [
       {route:'/api/media/saved-edit/categories',method:'POST'},
       {route:'/api/media/saved-edit/replace',method:'POST'},
