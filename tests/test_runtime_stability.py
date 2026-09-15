@@ -214,6 +214,27 @@ class RuntimeStabilityTests(unittest.TestCase):
         self.assertIn('already in this character', body['error'])
         self.assertEqual(original_path.read_bytes(), original_bytes)
 
+    def test_all_membership_is_per_image_and_quality_endpoint_reports_source_size(self):
+        category = self.store.add_category(self.character['id'], 'Dress')
+        with patch.object(self.store, '_queue_image_thumbnail'):
+            first = self.import_image(1)
+            second = self.import_image(2)
+        self.assertTrue(first['in_all'])
+        self.assertTrue(second['in_all'])
+        updated = self.store.set_categories(first['id'], [category['id']], in_all=False)
+        self.assertEqual(updated['categories'], [category['id']])
+        self.assertFalse(updated['in_all'])
+        # Explicitly assigning a category must not implicitly re-add an image to All.
+        self.assertFalse(self.store.set_categories(first['id'], [category['id']], in_all=False)['in_all'])
+        set_item = self.store.create_set(self.character['id'], 'Set only', [first['id'], second['id']])
+        self.assertEqual(set_item['media_ids'], [first['id'], second['id']])
+        self.assertFalse(self.store.data['media'][0]['in_all'])
+        self.assertFalse(self.store.data['media'][1]['in_all'])
+        quality = self.store.media_quality(second['id'])
+        self.assertEqual(quality['media_id'], second['id'])
+        self.assertEqual(quality['media_type'], 'image')
+        self.assertEqual(quality['file_bytes'], len(b'fixture-2'))
+
     def test_deleted_queued_media_is_not_decoded_or_resurrected(self):
         entered = threading.Event()
         decoded = []
