@@ -304,6 +304,9 @@ test('set-only members open from Sets, remain available after selection, and sav
     f.root.querySelector('.tile[data-id="member1"]').click();
     await delay(200);
     assert.equal(f.root.getElementById('counter').textContent, '1 / 2');
+    f.root.getElementById('counter').textContent = '— / 1';
+    await delay(20);
+    assert.equal(f.root.getElementById('counter').textContent, '1 / 2','late base viewer updates must not replace set-relative numbering');
     assert.deepEqual(ids(),['member1','member2']);
     f.root.getElementById('naiSetBackBtn').click();
     await delay(100);
@@ -311,6 +314,37 @@ test('set-only members open from Sets, remain available after selection, and sav
     f.root.querySelector('.naiSetTile').click();
     await delay(200);
     assert.deepEqual(ids(),['member1','member2']);
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
+
+test('videos in Review stay out of Videos and can be promoted from the video Review queue', async () => {
+  const f = await fixture();
+  try {
+    f.library.media.push(
+      {id:'video-published',character_id:'character',original_name:'Published.mp4',media_type:'video',categories:[],favorite:false,in_review:false},
+      {id:'video-review',character_id:'character',original_name:'Review.mp4',media_type:'video',categories:[],favorite:false,in_review:true},
+    );
+    f.root.getElementById('refreshBtn').click();
+    await delay(220);
+    const videoTab = [...f.root.querySelectorAll('#categories .cat:not(.naiSetsCat)')][2];
+    assert.equal(videoTab.textContent,'▶ Videos 1');
+    videoTab.click();
+    await delay(100);
+    assert.deepEqual([...f.root.querySelectorAll('#grid .tile[data-id]')].map(tile => tile.dataset.id),['video-published']);
+    const reviewVideos = f.root.getElementById('naiReviewVideoFilter270');
+    assert.equal(reviewVideos.textContent,'Review videos 1');
+    assert.equal(reviewVideos.classList.contains('hidden'),false);
+    reviewVideos.click();
+    await delay(100);
+    assert.equal(f.root.querySelector('#reviewStage video') !== null,true);
+    const hold = f.root.getElementById('naiReviewHold270');
+    assert.equal(hold.checked,true);
+    hold.checked = false;
+    f.root.getElementById('naiReviewNext270').click();
+    await delay(220);
+    assert.equal(f.library.media.find(m => m.id === 'video-review').in_review,false);
+    assert.equal(videoTab.textContent,'▶ Videos 2');
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
