@@ -40,6 +40,12 @@ async function fixture() {
         if (method !== 'GET') writes.push({route,method});
         if (route === '/api/health') value = {ok:true,version:6};
         else if (route === '/api/library') value = library;
+        else if (route.startsWith('/api/characters/') && method === 'DELETE') {
+          const id = route.split('/')[3];
+          library.characters = library.characters.filter(c => c.id !== id);
+          library.sets = library.sets.filter(s => s.character_id !== id);
+          value = {ok:true};
+        }
         else if (route === '/api/import/file') {
           const file = options.data.get('file');
           const item = {id:`saved${library.media.length+1}`,character_id:'character',original_name:file.name,media_type:'image',categories:[],in_review:false};
@@ -113,7 +119,7 @@ test('Sets assignment saves selected drafts, adds them to the set, and removes t
     await delay(50);
     assert.equal(f.root.querySelectorAll('.naiSetQueueCard270').length,3);
     assert.ok(f.root.getElementById('naiSetQueueCreate270'));
-    assert.equal(f.root.getElementById('naiSetQueueNew270'),null);
+    assert.ok(f.root.getElementById('naiSetQueueNew270'));
     f.root.getElementById('naiSetQueueExisting270').value='set-existing';
     f.root.querySelectorAll('.naiSetQueueCard270 input')[2].click();
     f.root.getElementById('naiSetQueueSave270').click();
@@ -128,6 +134,88 @@ test('Sets assignment saves selected drafts, adds them to the set, and removes t
     assert.equal(f.library.media.length,2);
     assert.equal(f.root.naiReviewDrafts.size,0);
     assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
+
+test('Create set in Rapid Review keeps unsaved queue and creates a separate empty set', async () => {
+  const f = await fixture();
+  try {
+    await f.open([1,2]);
+    f.root.getElementById('naiQueueSets270').click();
+    await delay(50);
+    f.root.getElementById('naiSetQueueNew270').value = 'New empty set';
+    f.root.getElementById('naiSetQueueCreate270').click();
+    assert.equal(f.root.getElementById('naiSetQueueClose270').disabled,true);
+    await delay(60);
+    assert.equal(f.library.sets.length,1);
+    assert.deepEqual(f.library.sets[0].media_ids,[]);
+    assert.equal(f.library.sets[0].cover_media_id,null);
+    assert.equal(f.library.media.length,0);
+    assert.equal(f.root.naiReviewDrafts.size,2);
+    assert.equal(f.root.querySelectorAll('.naiSetQueueCard270').length,2);
+    assert.equal(f.root.getElementById('naiSetQueueExisting270').value,f.library.sets[0].id);
+    assert.ok(f.root.querySelector('[data-nai-review-v270]'));
+    f.root.getElementById('naiSetQueueCancel270').click();
+    f.root.getElementById('naiQueueSets270').click();
+    await delay(50);
+    f.root.getElementById('naiSetQueueExisting270').value=f.library.sets[0].id;
+    f.root.getElementById('naiSetQueueSave270').click();
+    await delay(150);
+    assert.equal(f.library.media.length,2);
+    assert.equal(f.library.sets[0].media_ids.length,2);
+    assert.equal(f.root.naiReviewDrafts.size,0);
+    assert.equal(f.root.querySelector('[data-nai-review-v270]'),null);
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
+
+test('normal Sets manager can create and display a set without saved images', async () => {
+  const f = await fixture();
+  try {
+    f.root.getElementById('naiManageSetsBtn').click();
+    await delay(60);
+    f.root.getElementById('naiSetNameInput').value='Empty';
+    f.root.getElementById('naiSaveSetBtn').click();
+    await delay(90);
+    assert.deepEqual(f.library.sets[0].media_ids,[]);
+    assert.equal(f.library.media.length,0);
+    const setsTab = f.root.getElementById('naiSetsCat');
+    assert.ok(setsTab);
+    setsTab.click();
+    await delay(90);
+    assert.equal(f.root.querySelectorAll('.naiSetTile').length,1);
+    assert.match(f.root.querySelector('.naiSetTile').textContent,/Empty set/);
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
+
+test('character deletion respects cancel and deletes an empty last character without media calls', async () => {
+  const f = await fixture();
+  try {
+    f.w.confirm=()=>false;
+    f.root.getElementById('naiDeleteCharacter215').click();
+    await delay(50);
+    assert.equal(f.library.characters.length,1);
+    assert.deepEqual(f.writes,[]);
+    f.w.confirm=()=>true;
+    f.root.getElementById('naiDeleteCharacter215').click();
+    await delay(180);
+    assert.equal(f.library.characters.length,0);
+    assert.equal(f.root.getElementById('characterSelect').value,'');
+    assert.deepEqual(f.writes,[{method:'DELETE',route:'/api/characters/character'}]);
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
+
+test('character deletion refuses even a hidden review image', async () => {
+  const f = await fixture();
+  try {
+    f.library.media.push({id:'hidden',character_id:'character',media_type:'image',in_review:true});
+    f.root.getElementById('naiDeleteCharacter215').click();
+    await delay(50);
+    assert.equal(f.library.characters.length,1);
+    assert.deepEqual(f.writes,[]);
+    assert.match(f.errors[0].message,/contains images or videos/);
   } finally { f.dom.window.close(); }
 });
 
