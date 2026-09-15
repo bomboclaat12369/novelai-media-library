@@ -222,6 +222,8 @@ function reviewQueueFixture() {
     constructor(tag) { this.tagName = tag; this.children = []; this.listeners = {}; }
     get isConnected() { return this.connected === true || !!this.parent?.isConnected; }
     appendChild(child) { child.parent = this; this.children.push(child); return child; }
+    replaceChildren() { for (const child of this.children) child.parent = null; this.children = []; }
+    querySelector(selector) { return selector === '.current' ? this.children.find(child => child.className.includes(' current')) : null; }
     addEventListener(type, callback) { this.listeners[type] = callback; }
   }
   const strip = new Element('div'); strip.connected = true;
@@ -274,7 +276,7 @@ function reviewQueueFixture() {
 test('queue image previews get thumbnail URLs on first render and after navigation', async () => {
   const f = reviewQueueFixture();
   await f.render();
-  assert.equal(f.strip.children.length, 6);
+  assert.equal(f.strip.children.length, 10);
   function checkPreviews() {
     for (const card of f.strip.children) {
       const index = Number(card.title.split('.')[0]) - 1;
