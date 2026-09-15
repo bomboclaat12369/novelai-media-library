@@ -50,6 +50,53 @@ class RuntimeStabilityTests(unittest.TestCase):
         self.assertEqual(len(responses), 1)
         return responses[0]
 
+    def test_empty_sets_create_update_reload_and_retain_empty_membership(self):
+        status, empty = self.post('/api/sets', {'character_id': self.character['id'], 'name': 'Empty', 'media_ids': []})
+        self.assertEqual(status, 200)
+        self.assertEqual(empty['media_ids'], [])
+        self.assertIsNone(empty['cover_media_id'])
+        restored = RUNTIME['LibraryStore'](self.store.root)
+        self.assertEqual(restored.set_item(empty['id'])['media_ids'], [])
+        image = self.import_image(1)
+        updated = self.store.update_set(empty['id'], media_ids=[image['id']])
+        self.assertEqual(updated['cover_media_id'], image['id'])
+        other = self.store.create_set(self.character['id'], 'Other', [image['id']])
+        self.assertEqual(self.store.set_item(empty['id'])['media_ids'], [])
+        self.assertIsNone(self.store.set_item(empty['id'])['cover_media_id'])
+        self.store.delete_media(image['id'])
+        self.assertEqual(self.store.set_item(other['id'])['media_ids'], [])
+        self.assertIsNone(self.store.set_item(other['id'])['cover_media_id'])
+        self.assertEqual(self.store.update_set(empty['id'], name='Renamed')['name'], 'Renamed')
+        with self.assertRaises(ValueError):
+            self.store.create_set(self.character['id'], 'renamed', [])
+        with self.assertRaises((KeyError, ValueError)):
+            self.store.update_set(empty['id'], media_ids=['missing'])
+
+    def test_delete_empty_character_route_and_preserve_other_characters(self):
+        self.store.create_set(self.character['id'], 'Empty', [])
+        other = self.store.add_character('Keep')
+        handler = object.__new__(RUNTIME['MediaHandler'])
+        handler.server = SimpleNamespace(store=self.store)
+        handler.path = '/api/characters/' + self.character['id']
+        handler.headers = {'Origin': 'https://novelai.net'}
+        responses = []
+        handler._send_json = lambda status, value: responses.append((status, value))
+        handler.do_DELETE()
+        self.assertEqual(responses[0][0], 200)
+        self.assertEqual(self.store.data['characters'], [other])
+        self.assertEqual(self.store.data['sets'], [])
+        self.assertEqual(RUNTIME['LibraryStore'](self.store.root).data['characters'], [other])
+
+    def test_delete_character_refuses_review_images_and_videos(self):
+        image = self.import_image(1)
+        image['in_review'] = True
+        for media_type in ('image', 'video'):
+            image['media_type'] = media_type
+            with self.assertRaises(ValueError):
+                self.store.delete_character(self.character['id'])
+            self.assertIsNotNone(self.store.character(self.character['id']))
+            self.assertTrue((self.store.root / image['stored_rel']).exists())
+
     def test_batch_import_and_review_do_not_wait_for_thumbnail_decoder(self):
         entered = threading.Event()
         decoded = []
