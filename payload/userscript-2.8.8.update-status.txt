@@ -1,0 +1,40 @@
+// NovelAI Media Library v2.8.8: visible active version and one-click update activation
+(() => {
+  'use strict';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  const status = root?.getElementById('status');
+  if (!status || root.getElementById('naiUpdateStatus')) return;
+  const row = document.createElement('div');
+  row.id = 'naiUpdateStatus';
+  row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:2px 12px 6px;color:#b9bdd8;font:10px system-ui;';
+  const label = document.createElement('span');
+  const apply = document.createElement('button');
+  apply.type = 'button';
+  apply.textContent = 'Reload to apply';
+  apply.style.cssText = 'font:10px system-ui;padding:3px 7px;';
+  apply.addEventListener('click', () => {
+    if (root.querySelector('.modalWrap,.naiCropWrap,.naiSetQueueWrap270')) return;
+    location.reload();
+  });
+  row.append(label, apply);
+  status.insertAdjacentElement('afterend', row);
+  function render() {
+    const active = document.documentElement.dataset.naiMediaPayloadVersion || '2.8.8';
+    const ready = document.documentElement.dataset.naiMediaUpdateReady;
+    const pending = !!ready && ready !== active;
+    const busy = !!root.querySelector('.modalWrap,.naiCropWrap,.naiSetQueueWrap270');
+    const text = `v${active} active` + (pending ? ` · v${ready} ready${busy ? ' — close the editor to apply' : ''}` : '');
+    if (label.textContent !== text) label.textContent = text;
+    apply.hidden = !pending;
+    apply.disabled = busy;
+  }
+  // Observe only the loader's two status attributes and direct modal additions/removals.
+  new MutationObserver(render).observe(document.documentElement, {
+    attributes:true, attributeFilter:['data-nai-media-payload-version','data-nai-media-update-ready'],
+  });
+  const modalRoot = root.getElementById('modalRoot');
+  if (modalRoot) new MutationObserver(render).observe(modalRoot, {childList:true});
+  new MutationObserver(render).observe(root, {childList:true});
+  render();
+})();
