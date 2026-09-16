@@ -2,7 +2,7 @@
   "parts": [
     "payload/userscript-2.8.3.transport-start.txt",
     "payload/userscript-2.8.5.reset-state.txt",
-    "payload/userscript-2.8.24.part01.txt",
+    "payload/userscript-2.8.26.part01.txt",
     "payload/userscript-2.3.0.patch01.txt",
     "payload/userscript-2.3.0.patch02.txt",
     "payload/userscript-2.3.5.patch01.txt",
@@ -20,13 +20,13 @@
     "payload/userscript-2.8.21.patch01.txt",
     "payload/userscript-2.8.8.crop-bridge.txt",
     "payload/userscript-2.8.4.drag-safety.txt",
-    "payload/userscript-2.6.2.patch01.txt",
+    "payload/userscript-2.8.26.thumbnail-picker.txt",
     "payload/userscript-2.8.25.review-core.txt",
     "payload/userscript-2.8.16.ui-updates.txt",
     "payload/userscript-2.8.8.update-status.txt",
     "payload/userscript-2.8.10.review-height.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 78,
-  "version": "2.8.25"
+  "release_build": 79,
+  "version": "2.8.26"
 }
