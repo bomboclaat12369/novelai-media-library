@@ -946,13 +946,16 @@ class LibraryStore:
                 self.save()
             return m
 
-    def set_video_thumbnail_bytes(self, media_id: str, payload: bytes, content_type: str, seconds: float | None = None) -> dict[str, Any]:
+    def set_video_thumbnail_bytes(self, media_id: str, payload: bytes, content_type: str, seconds: float | None = None, automatic: bool = False) -> dict[str, Any]:
         with self.lock:
             m = self.media_item(media_id)
             if not m:
                 raise KeyError("Media not found")
             if m.get("media_type") != "video":
                 raise ValueError("Selected media is not a video")
+            # A delayed automatic capture must never overwrite a manual choice.
+            if automatic and m.get("thumb_rel"):
+                return m
             if not payload or len(payload) > 12 * 1024 * 1024:
                 raise ValueError("Thumbnail image is empty or too large")
             if content_type not in ("image/jpeg", "image/png", "image/webp"):
@@ -974,6 +977,7 @@ class LibraryStore:
                 f.write(payload)
             os.replace(tmp, out)
             m["thumb_rel"] = out.relative_to(self.root).as_posix()
+            m["video_thumb_automatic"] = automatic
             if seconds is not None:
                 m["video_thumb_seconds"] = max(0.0, float(seconds))
             self.save()
@@ -1242,7 +1246,7 @@ class MediaHandler(BaseHTTPRequestHandler):
         try:
             path = urllib.parse.urlparse(self.path).path
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "automatic_video_thumbnails": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/diagnostics/last-import":
                 payload = dict(self.store.last_import_debug) if self.store.last_import_debug else {"state": "none"}
@@ -1423,7 +1427,8 @@ class MediaHandler(BaseHTTPRequestHandler):
                 seconds = float(seconds_text) if seconds_text not in (None, "") else None
                 content_type = (self.headers.get("Content-Type", "") or "").split(";", 1)[0].strip().lower()
                 payload = self._read_raw()
-                item = self.store.set_video_thumbnail_bytes(match.group(1), payload, content_type, seconds)
+                automatic = (query.get("automatic") or ["0"])[0] == "1"
+                item = self.store.set_video_thumbnail_bytes(match.group(1), payload, content_type, seconds, automatic)
                 self._send_json(200, item)
                 return
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/video-meta", path)
