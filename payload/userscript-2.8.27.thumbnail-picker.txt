@@ -1,0 +1,84 @@
+// NovelAI Media Library v2.6.2: clean 1:1 video thumbnail picker
+(() => {
+  'use strict';
+  const API='http://127.0.0.1:8765', KEY='nai-media-v1-ui';
+  const host=document.getElementById('nai-media-host'), root=host?.shadowRoot;
+  if(!root||document.documentElement.dataset.naiMediaThumb262==='1')return;
+  document.documentElement.dataset.naiMediaThumb262='1';
+  const slots=[root.getElementById('stage1'),root.getElementById('stage2')], tools=root.getElementById('videoTools'), light=root.getElementById('lightRoot');
+  if(!slots[0]||!slots[1]||!tools||!light)return;
+
+  const style=document.createElement('style');
+  style.textContent=`
+    #naiThumbPickerBtnV262{width:54px!important;min-width:54px!important;max-width:54px!important;height:22px!important;padding:0!important;margin:auto!important;display:flex!important;align-items:center!important;justify-content:center!important;font:700 9px/1 system-ui!important}
+    .naiTPWrap262{position:fixed;inset:0;z-index:2147484300;background:rgba(2,3,8,.92);display:flex;align-items:center;justify-content:center;padding:20px}
+    .naiTPModal262{width:min(980px,96vw);max-height:94vh;background:#171a36;border:1px solid rgba(255,255,255,.14);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+    .naiTPHead262,.naiTPFoot262{display:flex;align-items:center;gap:9px;padding:11px 13px}.naiTPHead262{border-bottom:1px solid rgba(255,255,255,.09)}.naiTPFoot262{border-top:1px solid rgba(255,255,255,.09);justify-content:flex-end}
+    .naiTPTitle262{flex:1;font:700 14px system-ui}.naiTPHint262{color:#a8abc4;font:11px system-ui}.naiTPBody262{flex:1;min-height:0;overflow:auto;padding:14px;background:#080a17;display:flex;align-items:center;justify-content:center}
+    .naiTPFrame262{position:relative;display:inline-block;line-height:0;max-width:100%;user-select:none;touch-action:none}.naiTPFrame262>canvas{display:block;width:auto;height:auto;max-width:min(880px,90vw);max-height:72vh;object-fit:contain}
+    .naiTPShade262{position:absolute;background:rgba(0,0,0,.58);pointer-events:none}.naiTPSquare262{position:absolute;z-index:3;border:2px solid #8c83ff;box-shadow:0 0 0 1px rgba(255,255,255,.7),0 0 14px rgba(140,131,255,.55);cursor:move;touch-action:none;box-sizing:border-box}
+    .naiTPSquare262:after{content:'Drag';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:4px 7px;border-radius:6px;background:rgba(25,28,61,.82);color:#fff;font:700 10px/1 system-ui;pointer-events:none}
+  `;
+  root.appendChild(style);
+
+  const request=({method='GET',path,data=null,headers={},responseType='text'})=>new Promise((resolve,reject)=>GM_xmlhttpRequest({
+    method,url:`${API}${path}`,data,headers:{Origin:'https://novelai.net',...headers},responseType,timeout:300000,
+    onload:r=>{if(r.status>=200&&r.status<300){if(responseType==='blob')return resolve(r.response);try{return resolve(JSON.parse(r.responseText||'{}'))}catch(_){return resolve(r.responseText)}}let m=`Request failed (${r.status})`;try{m=JSON.parse(r.responseText||'{}').error||m}catch(_){}reject(new Error(m))},
+    onerror:()=>reject(new Error('Could not connect to the local media program.')),ontimeout:()=>reject(new Error('Media request timed out.'))
+  }));
+  const state=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'{}')||{}}catch(_){return{}}};
+  const active=()=>slots[1].classList.contains('slot-active')?1:0;
+  const activeId=()=>{const s=state(),ids=Array.isArray(s.slotMediaIds)?s.slotMediaIds:[];return ids[active()]||s.selectedMediaId||root.querySelector('.tile.active[data-id]')?.dataset?.id||null};
+  const activeVideo=()=>root.querySelector('.stage.slot-active video')||root.querySelector('.stage:not(.hidden) video');
+
+  function waitFor(video,eventName,timeout=30000){return new Promise((resolve,reject)=>{let timer=0;const cleanup=()=>{clearTimeout(timer);video.removeEventListener(eventName,done);video.removeEventListener('error',fail)};const done=()=>{cleanup();resolve()};const fail=()=>{cleanup();reject(new Error('Could not load the video frame.'))};timer=setTimeout(()=>{cleanup();reject(new Error(`Timed out waiting for video ${eventName}.`))},timeout);video.addEventListener(eventName,done,{once:true});video.addEventListener('error',fail,{once:true})})}
+
+  async function cleanFrameCanvas(mediaId,seconds){
+    const blob=await request({path:`/api/media/${encodeURIComponent(mediaId)}/original`,responseType:'blob'});
+    const url=URL.createObjectURL(blob), video=document.createElement('video');
+    video.preload='auto';video.muted=true;video.playsInline=true;video.src=url;
+    try{
+      if(video.readyState<1)await waitFor(video,'loadedmetadata');
+      const duration=Number.isFinite(video.duration)?video.duration:0;
+      const target=duration>0?Math.min(Math.max(0,seconds),Math.max(0,duration-.01)):Math.max(0,seconds);
+      if(Math.abs(video.currentTime-target)>.001){video.currentTime=target;await waitFor(video,'seeked')}else if(video.readyState<2){await waitFor(video,'loadeddata')}
+      if(!video.videoWidth||!video.videoHeight)throw new Error('Video frame is not ready yet.');
+      const canvas=document.createElement('canvas');canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+      const ctx=canvas.getContext('2d',{alpha:false});if(!ctx)throw new Error('Could not capture this video frame.');
+      ctx.drawImage(video,0,0,canvas.width,canvas.height);return canvas;
+    }finally{video.pause();video.removeAttribute('src');video.load();URL.revokeObjectURL(url)}
+  }
+
+  let picker=null;const changed=new Map();
+  function applyThumb(id){const url=changed.get(id);if(!url)return;const sel=CSS.escape(id);const tile=root.querySelector(`.tile[data-id="${sel}"]`);if(tile){let img=tile.querySelector('img[data-mid]')||tile.querySelector('img');if(!img){img=document.createElement('img');tile.insertBefore(img,tile.firstChild)}img.dataset.mid=id;img.src=url;img.alt=''}root.querySelectorAll(`img[data-mid="${sel}"]`).forEach(i=>i.src=url);root.querySelectorAll(`.naiSetTile[data-cover-id="${sel}"] img`).forEach(i=>i.src=url)}
+  function remember(id,blob){const old=changed.get(id);if(old)URL.revokeObjectURL(old);changed.set(id,URL.createObjectURL(blob));applyThumb(id)}
+  const reapply=()=>setTimeout(()=>{for(const id of changed.keys())applyThumb(id)},0);
+
+  function close(){if(!picker)return;const p=picker;picker=null;window.removeEventListener('pointermove',p.move,true);window.removeEventListener('pointerup',p.up,true);p.wrap.remove()}
+  function layout(){if(!picker)return;const r=picker.canvas.getBoundingClientRect();if(!r.width||!r.height)return;const side=Math.min(r.width,r.height);picker.side=side;if(!picker.ready){picker.x=(r.width-side)/2;picker.y=(r.height-side)/2;picker.ready=true}picker.x=Math.max(0,Math.min(r.width-side,picker.x));picker.y=Math.max(0,Math.min(r.height-side,picker.y));picker.square.style.left=`${picker.x}px`;picker.square.style.top=`${picker.y}px`;picker.square.style.width=`${side}px`;picker.square.style.height=`${side}px`;const [T,B,L,R]=picker.shades;T.style.cssText=`left:0;top:0;width:${r.width}px;height:${picker.y}px`;B.style.cssText=`left:0;top:${picker.y+side}px;width:${r.width}px;height:${Math.max(0,r.height-picker.y-side)}px`;L.style.cssText=`left:0;top:${picker.y}px;width:${picker.x}px;height:${side}px`;R.style.cssText=`left:${picker.x+side}px;top:${picker.y}px;width:${Math.max(0,r.width-picker.x-side)}px;height:${side}px`}
+  function down(e){if(!picker)return;e.preventDefault();const r=picker.canvas.getBoundingClientRect();picker.drag=true;picker.dx=e.clientX-r.left-picker.x;picker.dy=e.clientY-r.top-picker.y}
+  function move(e){if(!picker?.drag)return;e.preventDefault();const r=picker.canvas.getBoundingClientRect(),side=picker.side;picker.x=Math.max(0,Math.min(r.width-side,e.clientX-r.left-picker.dx));picker.y=Math.max(0,Math.min(r.height-side,e.clientY-r.top-picker.dy));layout()}
+
+  async function save(){if(!picker)return;const p=picker,r=p.canvas.getBoundingClientRect(),w=p.source.width,h=p.source.height,sourceSide=Math.min(w,h);const sx=Math.max(0,Math.min(w-sourceSide,p.x/r.width*w)),sy=Math.max(0,Math.min(h-sourceSide,p.y/r.height*h));const n=Math.max(1,Math.min(960,Math.round(sourceSide))),out=document.createElement('canvas');out.width=n;out.height=n;const ctx=out.getContext('2d',{alpha:false});if(!ctx)throw new Error('Could not create thumbnail crop.');ctx.drawImage(p.source,sx,sy,sourceSide,sourceSide,0,0,n,n);const blob=await new Promise((res,rej)=>out.toBlob(b=>b?res(b):rej(new Error('Could not create thumbnail image.')),'image/jpeg',.9));p.save.disabled=true;p.save.textContent='Saving…';const updated=await request({method:'POST',path:`/api/media/${encodeURIComponent(p.id)}/thumbnail?seconds=${encodeURIComponent(p.seconds.toFixed(3))}`,headers:{'Content-Type':'image/jpeg'},data:blob});root.naiVideoThumbnailSaved?.(updated,blob);remember(p.id,blob);close()}
+
+  async function open(video,id){
+    if(picker||!video||!id)return;
+    const seconds=Number.isFinite(video.currentTime)?Math.max(0,video.currentTime):0;
+    let source;
+    try{source=await cleanFrameCanvas(id,seconds)}catch(e){alert(e?.message||String(e));return}
+    const wrap=document.createElement('div');wrap.className='naiTPWrap262';wrap.innerHTML=`<div class="naiTPModal262"><div class="naiTPHead262"><div class="naiTPTitle262">Choose video thumbnail</div><div class="naiTPHint262">Drag the square to choose the exact 1:1 thumbnail area.</div><button class="naiTPClose262">×</button></div><div class="naiTPBody262"><div class="naiTPFrame262"><canvas></canvas><div class="naiTPShade262"></div><div class="naiTPShade262"></div><div class="naiTPShade262"></div><div class="naiTPShade262"></div><div class="naiTPSquare262"></div></div></div><div class="naiTPFoot262"><button class="naiTPCancel262">Cancel</button><button class="primary naiTPSave262">Save Thumbnail</button></div></div>`;root.appendChild(wrap);
+    const frame=wrap.querySelector('.naiTPFrame262'),canvas=frame.querySelector('canvas');canvas.width=source.width;canvas.height=source.height;canvas.getContext('2d',{alpha:false}).drawImage(source,0,0);
+    picker={wrap,frame,canvas,source,id,seconds,square:frame.querySelector('.naiTPSquare262'),shades:[...frame.querySelectorAll('.naiTPShade262')],save:wrap.querySelector('.naiTPSave262'),x:0,y:0,side:0,ready:false,drag:false,dx:0,dy:0,move,up:()=>{if(picker)picker.drag=false}};
+    picker.square.addEventListener('pointerdown',down);window.addEventListener('pointermove',picker.move,true);window.addEventListener('pointerup',picker.up,true);wrap.querySelector('.naiTPClose262').onclick=close;wrap.querySelector('.naiTPCancel262').onclick=close;wrap.addEventListener('click',e=>{if(e.target===wrap)close()});picker.save.onclick=async()=>{try{await save()}catch(e){alert(e?.message||String(e));if(picker&&picker.save.isConnected){picker.save.disabled=false;picker.save.textContent='Save Thumbnail'}}};requestAnimationFrame(()=>{layout();setTimeout(layout,40)})
+  }
+
+  function upgradeNormal(){const old=tools.querySelector('#setThumbBtn');if(!old)return;const b=old.cloneNode(false);b.id='naiThumbPickerBtnV262';b.className=old.className;b.textContent='Thumb';b.title='Choose the 1:1 thumbnail area from the current frame';b.disabled=false;b.onclick=e=>{e.preventDefault();e.stopPropagation();const v=activeVideo(),id=activeId();if(!v||!id){alert('Could not determine which video is active. Select it again, then retry.');return}open(v,id)};old.replaceWith(b)}
+  function upgradeFs(){root.querySelectorAll('.naiFsThumb:not([data-nai-v262-picker])').forEach(old=>{const rail=old.closest('.naiFullscreenMarkerRail'),v=rail?.parentElement?.querySelector(':scope > video'),id=rail?.dataset?.mediaId;if(!v||!id)return;const b=old.cloneNode(false);b.className=old.className;b.dataset.naiV262Picker='1';b.textContent='Thumb';b.title='Choose the 1:1 thumbnail area from the current frame';b.disabled=false;b.onclick=e=>{e.preventDefault();e.stopPropagation();open(v,id)};old.replaceWith(b)})}
+  let queued=false;function upgrade(){if(queued)return;queued=true;queueMicrotask(()=>{queued=false;upgradeNormal();upgradeFs()})}
+  new MutationObserver(upgrade).observe(tools,{childList:true,subtree:true});new MutationObserver(upgrade).observe(light,{childList:true,subtree:true});upgrade();
+  root.addEventListener('click',reapply);root.addEventListener('change',reapply);root.addEventListener('input',reapply);
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&picker){e.preventDefault();e.stopImmediatePropagation();close()}},true);window.addEventListener('resize',()=>{if(picker)requestAnimationFrame(layout)});
+  window.addEventListener('pagehide',()=>{for(const u of changed.values())URL.revokeObjectURL(u);changed.clear()},{once:true});
+})();
+
+
