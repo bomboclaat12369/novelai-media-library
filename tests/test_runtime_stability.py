@@ -37,6 +37,25 @@ class RuntimeStabilityTests(unittest.TestCase):
             self.character['id'], [], {'kind':'local'}, 'image/png',
         )[0]
 
+    def test_automatic_video_preview_cannot_overwrite_manual_thumbnail(self):
+        item, _ = self.store.import_bytes(
+            b'video fixture', 'preview.mp4', self.character['id'], [],
+            {'kind': 'local'}, 'video/mp4',
+        )
+        mid = item['id']
+        automatic = self.store.set_video_thumbnail_bytes(mid, b'auto', 'image/jpeg', automatic=True)
+        self.assertTrue(automatic['video_thumb_automatic'])
+        manual = self.store.set_video_thumbnail_bytes(mid, b'manual', 'image/jpeg', 2.5)
+        self.assertFalse(manual['video_thumb_automatic'])
+        self.store.set_video_thumbnail_bytes(mid, b'late auto', 'image/jpeg', automatic=True)
+        self.assertEqual((self.store.root / manual['thumb_rel']).read_bytes(), b'manual')
+        self.assertEqual(manual['video_thumb_seconds'], 2.5)
+        legacy = dict(manual)
+        legacy.pop('video_thumb_automatic')
+        item.pop('video_thumb_automatic')
+        self.store.set_video_thumbnail_bytes(mid, b'late auto', 'image/jpeg', automatic=True)
+        self.assertEqual((self.store.root / legacy['thumb_rel']).read_bytes(), b'manual')
+
     def post(self, path, body):
         handler = object.__new__(RUNTIME['MediaHandler'])
         handler.server = SimpleNamespace(store=self.store)
