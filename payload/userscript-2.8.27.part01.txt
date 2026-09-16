@@ -1,0 +1,1643 @@
+// ==UserScript==
+// @name         NovelAI Local Media Library
+// @namespace    local.novelai.media.library
+// @version      2.1.0
+// @description  Local character image/video library for NovelAI with split-view, video bookmarks, and responsive duplicate imports.
+// @match        https://novelai.net/*
+// @grant        GM_xmlhttpRequest
+// @connect      127.0.0.1
+// @connect      localhost
+// @run-at       document-idle
+// @noframes
+// ==/UserScript==
+
+(() => {
+  'use strict';
+
+  // A stale Tampermonkey copy or a second loader execution can otherwise create
+  // another full Shadow DOM library over the same NovelAI page. Each copy adds
+  // its own observers, image requests, and event handlers, which can stall the
+  // page even though the companion itself is idle. Keep exactly one base host.
+  const existingHost = document.getElementById('nai-media-host');
+  if (existingHost) {
+    existingHost.dataset.naiMediaDuplicateSuppressed = '1';
+    console.warn('[NovelAI Media] duplicate payload suppressed; keeping the existing library host.');
+    return;
+  }
+  document.documentElement.dataset.naiMediaPayloadInstance = '2.8.27';
+
+  const API = 'http://127.0.0.1:8765';
+  const STATE_KEY = 'nai-media-v1-ui';
+  const MAX_THUMB_CACHE = 90;
+
+  const state = {
+    library: null,
+    characterId: null,
+    categoryId: 'all',
+    selectedMediaId: null,
+    search: '',
+    visible: true,
+    connected: false,
+    thumbCache: new Map(),
+    splitView: false,
+    activeSlot: 0,
+    slotMediaIds: [null, null],
+    slotObjectUrls: [null, null],
+    reviewQueue: [],
+    reviewIndex: 0,
+    carryReviewCategories: false,
+    carryCategories: null,
+    qualityToken: 0,
+    libraryLoadToken: 0,
+  };
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(STATE_KEY) || '{}');
+    state.characterId = saved.characterId || null;
+    state.categoryId = saved.categoryId || 'all';
+    state.selectedMediaId = saved.selectedMediaId || null;
+    state.splitView = !!saved.splitView;
+    state.activeSlot = saved.activeSlot === 1 ? 1 : 0;
+    state.slotMediaIds = Array.isArray(saved.slotMediaIds) ? [saved.slotMediaIds[0] || null, saved.slotMediaIds[1] || null] : [state.selectedMediaId, null];
+    if (!state.slotMediaIds[0] && state.selectedMediaId) state.slotMediaIds[0] = state.selectedMediaId;
+    state.selectedMediaId = state.slotMediaIds[state.activeSlot] || state.slotMediaIds[0] || null;
+    state.visible = saved.visible !== false;
+  } catch (_) {}
+
+  function persistUI() {
+    localStorage.setItem(STATE_KEY, JSON.stringify({
+      characterId: state.characterId,
+      categoryId: state.categoryId,
+      selectedMediaId: state.selectedMediaId,
+      splitView: state.splitView,
+      activeSlot: state.activeSlot,
+      slotMediaIds: state.slotMediaIds,
+      visible: state.visible,
+    }));
+  }
+
+  function gmRequest({ method = 'GET', path, data = null, headers = {}, responseType = 'text', timeout = 120000 }) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method,
+        url: `${API}${path}`,
+        data,
+        headers: { Origin: 'https://novelai.net', ...headers },
+        responseType,
+        timeout,
+        onload: (res) => {
+          if (res.status >= 200 && res.status < 300) {
+            if (responseType === 'blob') return resolve(res.response);
+            const text = res.responseText ?? '';
+            if (!text) return resolve(null);
+            try { resolve(JSON.parse(text)); } catch (_) { resolve(text); }
+          } else {
+            let message = `Request failed (${res.status})`;
+            try {
+              const parsed = JSON.parse(res.responseText || '{}');
+              if (parsed.error) message = parsed.error;
+            } catch (_) {}
+            reject(new Error(message));
+          }
+        },
+        onerror: () => reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+        ontimeout: () => reject(new Error('The local media request timed out.')),
+      });
+    });
+  }
+
+  const host = document.createElement('div');
+  host.id = 'nai-media-host';
+  document.documentElement.appendChild(host);
+  const shadow = host.attachShadow({ mode: 'open' });
+
+  shadow.innerHTML = `
+    <style>
+      :host { all: initial; --nai-left-edge: 28.25vw; --nai-right-edge: 66.45vw; }
+      * { box-sizing: border-box; }
+      .app { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #f1f1f6; }
+      .panel {
+        position: fixed; top: 0; bottom: 0; z-index: 2147482000;
+        background: #13152b;
+        border: 0; border-radius: 0; box-shadow: none; overflow: hidden;
+        backdrop-filter: none;
+      }
+      /* Calibrated from the user's 16:9 NovelAI layout:
+         left panel stops where story text begins; right panel starts at the Send-button edge. */
+      .left { left: 0; width: var(--nai-left-edge); display:flex; flex-direction:column; border-right:1px solid rgba(255,255,255,.08); }
+      .right { left: var(--nai-right-edge); right: 0; width:auto; display:flex; flex-direction:column; border-left:1px solid rgba(255,255,255,.08); }
+      .hidden { display:none !important; }
+      .toggle {
+        position: fixed; right: 7px; top: 50%; transform: translateY(-50%); z-index: 2147483000;
+        border: 1px solid rgba(255,255,255,.14); border-radius: 8px 0 0 8px; border-right:0;
+        padding: 10px 7px; writing-mode: vertical-rl; rotate: 180deg; cursor:pointer;
+        background:#282b53; color:#fff; font: 600 12px/1 system-ui; letter-spacing:.4px;
+      }
+      .panel-head { padding: 12px; border-bottom:1px solid rgba(255,255,255,.08); background:#151833; }
+      .row { display:flex; align-items:center; gap:8px; }
+      .grow { flex:1; min-width:0; }
+      select, input[type="text"], textarea {
+        width:100%; background:#11142c; color:#fff; border:1px solid rgba(255,255,255,.13); border-radius:8px;
+        padding:8px 9px; outline:none; font: 13px system-ui;
+      }
+      textarea { min-height:180px; resize:vertical; }
+      button {
+        border:1px solid rgba(255,255,255,.14); background:#2b2f5b; color:#fff; border-radius:8px;
+        padding:8px 10px; cursor:pointer; font: 600 12px system-ui;
+      }
+      button:hover { background:#353a6e; }
+      button.primary { background:#6155d9; border-color:#7268e5; }
+      button.danger { background:#65313a; border-color:#7b3a45; }
+      button.ghost { background:transparent; }
+      button.icon { width:34px; height:34px; padding:0; display:grid; place-items:center; font-size:16px; }
+      .muted { color:#a8abc4; font-size:12px; }
+      .status { font-size:12px; color:#b8bad0; margin-top:7px; }
+      .status.bad { color:#ff9c9c; }
+      .cats { display:flex; flex-wrap:wrap; gap:6px; padding:10px 12px 6px; }
+      .cat { padding:6px 9px; border-radius:999px; background:#202449; border:1px solid rgba(255,255,255,.09); color:#d8daf0; cursor:pointer; font: 600 11px system-ui; }
+      .cat.active { background:#675cda; color:white; }
+      .toolbar { padding:8px 12px; display:flex; gap:8px; }
+      .grid { flex:1; overflow:auto; padding:8px 3px 14px; display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); grid-auto-rows:max-content; gap:4px; align-content:start; }
+      .tile { position:relative; aspect-ratio:1/1; border-radius:8px; overflow:hidden; background:#0e1025; border:1px solid rgba(255,255,255,.08); cursor:pointer; }
+      .tile.active { outline:2px solid #7c70ff; outline-offset:1px; }
+      .tile img { width:100%; height:100%; object-fit:cover; display:block; }
+      .tile .videoMark { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; padding:6px; text-align:center; font:700 13px system-ui; color:#e6e7f7; background:linear-gradient(135deg,#171a37,#272b52); }
+      .tile .videoName { width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:500 9px system-ui; color:#aeb2cf; }
+      .tile .star { position:absolute; top:4px; right:5px; text-shadow:0 1px 4px black; font-size:15px; }
+      .empty { grid-column:1/-1; padding:36px 12px; text-align:center; color:#a7abc4; font:13px/1.5 system-ui; }
+      .viewer { flex:1; min-height:0; padding:4px 0 6px; display:flex; flex-direction:column; gap:5px; }
+      .stages { flex:1; min-height:0; display:flex; flex-direction:column; gap:3px; overflow:hidden; }
+      .stage { flex:1; min-height:0; border-radius:0; background:#0b0d1d; display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; border:1px solid transparent; }
+      .stages.split .stage { flex:1 1 50%; }
+      .stage.slot-active { border-color:#7c70ff; box-shadow:inset 0 0 0 1px #7c70ff; }
+      .slotHint { text-align:center; padding:16px; }
+      #splitBtn.active { background:#6155d9; border-color:#7268e5; }
+      .stage img, .stage video { width:100%; height:100%; max-width:100%; max-height:100%; object-fit:contain; display:block; }
+      .stage img { cursor:zoom-in; }
+      .viewerMeta { font-size:12px; color:#c8cade; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .viewerNav { display:flex; align-items:center; justify-content:center; gap:10px; }
+      .viewerNav .counter { min-width:78px; text-align:center; font:600 12px system-ui; color:#d8daea; }
+      .badgeRow { display:flex; flex-wrap:wrap; gap:5px; min-height:20px; }
+      .badge { padding:4px 7px; background:#202449; border-radius:999px; font:600 10px system-ui; color:#cfd2e8; }
+      .videoTools { display:none; padding:4px 0 2px; }
+      .videoTools.visible { display:block; }
+      .videoToolRow { display:flex; align-items:center; gap:6px; margin:4px 0; }
+      .videoToolRow .label { width:44px; color:#b8bad0; font:600 11px system-ui; }
+      .videoToolRow button { padding:6px 8px; }
+      .videoTools .wide { width:100%; justify-content:center; }
+      .progress.indeterminate > div { width:35% !important; animation:naiIndeterminate 1s ease-in-out infinite; }
+      @keyframes naiIndeterminate { 0% { transform:translateX(-110%);} 100% { transform:translateX(320%);} }
+      .modalWrap { position:fixed; inset:0; z-index:2147483600; background:rgba(5,6,15,.78); display:flex; align-items:center; justify-content:center; padding:28px; }
+      .modal { width:min(900px, 94vw); max-height:90vh; overflow:auto; border-radius:14px; background:#171a36; border:1px solid rgba(255,255,255,.12); box-shadow:0 30px 90px rgba(0,0,0,.55); }
+      .modal.large { width:min(1180px, 96vw); height:min(820px, 92vh); overflow:hidden; display:flex; flex-direction:column; }
+      .modalHead { padding:14px 16px; display:flex; align-items:center; gap:10px; border-bottom:1px solid rgba(255,255,255,.09); }
+      .modalTitle { font:700 16px system-ui; flex:1; }
+      .modalBody { padding:16px; }
+      .modalFoot { padding:12px 16px; border-top:1px solid rgba(255,255,255,.09); display:flex; justify-content:flex-end; gap:8px; }
+      .checkGrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:10px 0; }
+      .check { display:flex; gap:8px; align-items:center; padding:8px; border-radius:8px; background:#11142c; font:12px system-ui; }
+      .tabs { display:flex; gap:6px; margin-bottom:12px; }
+      .tab.active { background:#6155d9; }
+      .progress { height:8px; border-radius:999px; overflow:hidden; background:#0f1126; margin-top:10px; }
+      .progress > div { height:100%; background:#6960df; width:0%; transition:width .15s linear; }
+      .dropZone {
+        min-height:150px; border:2px dashed rgba(255,255,255,.20); border-radius:12px;
+        background:#11142c; padding:20px; display:flex; flex-direction:column; align-items:center;
+        justify-content:center; gap:7px; text-align:center; cursor:pointer; transition:.12s ease;
+      }
+      .dropZone:hover, .dropZone.dragover { border-color:#8278ff; background:#171a3a; box-shadow:inset 0 0 0 1px rgba(130,120,255,.18); }
+      .dropTitle { font:700 14px system-ui; color:#f2f2fb; }
+      .fileSummary { margin-top:9px; padding:9px 10px; background:#0f1126; border-radius:8px; font:12px/1.45 system-ui; color:#c8cade; word-break:break-word; }
+      .reviewBody { flex:1; min-height:0; display:grid; grid-template-columns:minmax(0, 2fr) minmax(300px, 1fr); gap:14px; padding:14px; }
+      .reviewStage { min-height:0; border-radius:10px; background:#0a0c1b; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+      .reviewStage img, .reviewStage video { max-width:100%; max-height:100%; object-fit:contain; }
+      .reviewSide { overflow:auto; padding-right:4px; }
+      .reviewCat { display:flex; align-items:center; gap:9px; padding:9px 10px; margin-bottom:7px; border-radius:8px; background:#11142c; cursor:pointer; font:13px system-ui; }
+      .key { margin-left:auto; font:700 11px monospace; color:#9ea3c2; border:1px solid rgba(255,255,255,.12); border-radius:5px; padding:2px 6px; }
+      .lightbox { position:fixed; inset:0; z-index:2147483900; background:rgba(0,0,0,.92); display:flex; align-items:center; justify-content:center; padding:30px; }
+      .lightbox img, .lightbox video { max-width:96vw; max-height:94vh; object-fit:contain; }
+      .lightClose { position:absolute; top:14px; right:16px; font-size:20px; }
+      @media (max-width: 1300px) { .grid{grid-template-columns:repeat(4, minmax(0,1fr));} }
+      @media (max-width: 980px) { .grid{grid-template-columns:repeat(3, minmax(0,1fr));} }
+    </style>
+    <div class="app">
+      <button class="toggle" title="Toggle media UI (Alt+M)">MEDIA</button>
+      <section class="panel left">
+        <div class="panel-head row">
+          <div class="grow">
+            <div style="font:700 13px system-ui">Selected media</div>
+            <div class="muted" id="leftSubtitle">Nothing selected</div>
+          </div>
+          <button id="splitBtn" title="Show two media slots">Split</button>
+          <button class="icon ghost" id="fullBtn" title="Open active media full-size">⛶</button>
+        </div>
+        <div class="viewer">
+          <div class="stages" id="stages">
+            <div class="stage slot-active" id="stage1" data-slot="0"><div class="muted slotHint">Choose an image or video from the library.</div></div>
+            <div class="stage hidden" id="stage2" data-slot="1"><div class="muted slotHint">Click this slot, then choose any image or video — even from the same character.</div></div>
+          </div>
+          <div class="viewerNav">
+            <button class="icon" id="prevBtn" title="Previous">‹</button>
+            <div class="counter" id="counter">0 / 0</div>
+            <button class="icon" id="nextBtn" title="Next">›</button>
+            <button class="icon" id="favBtn" title="Favorite">☆</button>
+            <button class="icon" id="editBtn" title="Edit categories or replace source" disabled>✎</button>
+            <button class="icon danger" id="deleteBtn" title="Delete selected media" disabled>🗑</button>
+          </div>
+          <div class="badgeRow" id="selectedBadges"></div>
+          <div class="videoTools" id="videoTools"></div>
+          <div class="viewerMeta" id="selectedName"></div>
+          <div class="muted" id="qualityInfo"></div>
+        </div>
+      </section>
+      <section class="panel right">
+        <div class="panel-head">
+          <div class="row">
+            <select id="characterSelect" class="grow"></select>
+            <button class="icon" id="addCharacterBtn" title="Add character">+</button>
+            <button class="icon ghost" id="refreshBtn" title="Refresh">↻</button>
+          </div>
+          <div class="status" id="status">Connecting…</div>
+        </div>
+        <div class="cats" id="categories"></div>
+        <div class="toolbar">
+          <input id="search" type="text" placeholder="Search filenames…" class="grow" />
+          <button class="primary" id="addMediaBtn">+ Media</button>
+          <button id="randomBtn">Random</button>
+        </div>
+        <div class="grid" id="grid"></div>
+      </section>
+      <div id="modalRoot"></div>
+      <div id="lightRoot"></div>
+    </div>
+  `;
+
+  const $ = (sel) => shadow.querySelector(sel);
+  const leftPanel = $('.left');
+  const rightPanel = $('.right');
+  const toggleBtn = $('.toggle');
+  const statusEl = $('#status');
+  const charSelect = $('#characterSelect');
+  const catWrap = $('#categories');
+  const grid = $('#grid');
+  const stages = $('#stages');
+  const stageEls = [$('#stage1'), $('#stage2')];
+  const counter = $('#counter');
+  const videoTools = $('#videoTools');
+  const leftSubtitle = $('#leftSubtitle');
+  const selectedName = $('#selectedName');
+  const selectedBadges = $('#selectedBadges');
+  const qualityInfo = $('#qualityInfo');
+  const modalRoot = $('#modalRoot');
+  const lightRoot = $('#lightRoot');
+
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+  }
+
+  function setStatus(text, bad = false) {
+    statusEl.textContent = text;
+    statusEl.classList.toggle('bad', bad);
+  }
+
+  function toggleUI(force) {
+    state.visible = typeof force === 'boolean' ? force : !state.visible;
+    leftPanel.classList.toggle('hidden', !state.visible);
+    rightPanel.classList.toggle('hidden', !state.visible);
+    toggleBtn.textContent = state.visible ? 'HIDE MEDIA' : 'SHOW MEDIA';
+    persistUI();
+  }
+
+  toggleBtn.addEventListener('click', () => toggleUI());
+  toggleUI(state.visible);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.altKey && e.key.toLowerCase() === 'm') {
+      e.preventDefault();
+      toggleUI();
+      return;
+    }
+    if (lightRoot.childElementCount && e.key === 'Escape') {
+      e.preventDefault();
+      closeLightbox();
+      return;
+    }
+    if (!state.visible || modalRoot.childElementCount) return;
+    const editing = e.composedPath().some(node => node?.matches?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])'));
+    if (editing || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const video = lightRoot.childElementCount
+        ? lightRoot.querySelector('video') : activeVideoElement();
+      if (video) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (video.readyState >= 1) {
+          const limit = Number.isFinite(video.duration) ? video.duration : Infinity;
+          video.currentTime = Math.max(0, Math.min(limit, video.currentTime + (e.key === 'ArrowRight' ? 3 : -3)));
+        }
+        return;
+      }
+    }
+    if (lightRoot.childElementCount) return;
+    if (e.key === 'ArrowLeft') selectRelative(-1);
+    if (e.key === 'ArrowRight') selectRelative(1);
+  }, true);
+
+  function currentCharacter() {
+    return state.library?.characters?.find(c => c.id === state.characterId) || null;
+  }
+
+  function allCurrentMedia() {
+    if (!state.library || !state.characterId) return [];
+    return state.library.media.filter(m => m.character_id === state.characterId);
+  }
+
+  function filteredMedia() {
+    // Review is a holding area for both images and videos. Items stay out of all
+    // ordinary viewer navigation until the user promotes them.
+    let items = allCurrentMedia().filter(m => !m.in_review);
+    if (state.categoryId === 'favorites') items = items.filter(m => !!m.favorite && m.media_type !== 'video');
+    else if (state.categoryId === 'videos') items = items.filter(m => m.media_type === 'video');
+    else if (state.categoryId === 'all') items = items.filter(m => m.media_type !== 'video' && m.in_all !== false);
+    else items = items.filter(m => m.media_type !== 'video' && (m.categories || []).includes(state.categoryId));
+    const q = state.search.trim().toLowerCase();
+    if (q) items = items.filter(m => (m.original_name || '').toLowerCase().includes(q));
+    return items;
+  }
+
+  function categoryName(id) {
+    if (id === 'all') return 'All';
+    if (id === 'favorites') return 'Favorites';
+    if (id === 'videos') return 'Videos';
+    const c = currentCharacter();
+    return c?.categories?.find(x => x.id === id)?.name || '';
+  }
+
+  function renderCharacters() {
+    const chars = state.library?.characters || [];
+    charSelect.innerHTML = '';
+    if (!chars.length) {
+      charSelect.innerHTML = '<option value="">No characters yet</option>';
+      state.characterId = null;
+      return;
+    }
+    if (!chars.some(c => c.id === state.characterId)) state.characterId = chars[0].id;
+    for (const c of chars) {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      if (c.id === state.characterId) opt.selected = true;
+      charSelect.appendChild(opt);
+    }
+    persistUI();
+  }
+
+  function renderCategories() {
+    catWrap.innerHTML = '';
+    const c = currentCharacter();
+    if (!c) return;
+    const countFor = (catId) => allCurrentMedia().filter(m => {
+      if (catId === 'all') return m.media_type !== 'video' && m.in_all !== false;
+      if (catId === 'favorites') return m.media_type !== 'video' && !!m.favorite;
+      if (catId === 'videos') return m.media_type === 'video';
+      return m.media_type !== 'video' && (m.categories || []).includes(catId);
+    }).length;
+    const cats = [{ id: 'all', name: 'All' }, { id: 'favorites', name: '★ Favorites' }, { id: 'videos', name: '▶ Videos' }, ...(c.categories || [])];
+    if (!cats.some(x => x.id === state.categoryId)) state.categoryId = 'all';
+    for (const cat of cats) {
+      const b = document.createElement('button');
+      b.className = `cat${cat.id === state.categoryId ? ' active' : ''}`;
+      b.textContent = `${cat.name} ${countFor(cat.id)}`;
+      b.addEventListener('click', () => {
+        state.categoryId = cat.id;
+        persistUI();
+        renderCategories();
+        renderGrid();
+        updateCounter();
+      });
+      catWrap.appendChild(b);
+    }
+  }
+
+  const io = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const tile = entry.target;
+      io.unobserve(tile);
+      const img = tile.querySelector('img[data-mid]');
+      if (img) loadThumb(img.dataset.mid, img);
+    }
+  }, { root: grid, rootMargin: '250px' });
+
+  // Serialize automatic frame decoding; never use the user's playing video.
+  const videoPreviewJobs = new Map();
+  const thumbSession = Date.now().toString(36);
+  const thumbRevisions = new Map();
+  let videoPreviewTail = Promise.resolve();
+  function updateAutoThumbBadge(tile, m) {
+    tile.querySelector('.naiAutoThumb')?.remove();
+    if (m.media_type !== 'video' || (m.thumb_rel && !m.video_thumb_automatic)) return;
+    const badge = document.createElement('span');
+    badge.className = 'naiAutoThumb';
+    badge.textContent = m.thumb_rel ? 'Auto' : 'Preview pending';
+    badge.title = 'No thumbnail manually selected. Use Thumb in the viewer to choose one.';
+    badge.style.cssText = 'position:absolute;left:4px;top:4px;z-index:2;padding:2px 5px;border-radius:4px;background:#46380ee6;color:#ffe497;font-size:10px;pointer-events:none';
+    tile.appendChild(badge);
+  }
+  function applyVideoPreview(m, savedBlob = null) {
+    const current = mediaById(m.id);
+    if (m.video_thumb_automatic && current?.thumb_rel && !current.video_thumb_automatic) return;
+    if (current) Object.assign(current, m);
+    thumbRevisions.set(m.id, (thumbRevisions.get(m.id) || 0) + 1);
+    const old = state.thumbCache.get(m.id);
+    if (old) { URL.revokeObjectURL(old); state.thumbCache.delete(m.id); }
+    if (savedBlob) cacheThumb(m.id, URL.createObjectURL(savedBlob));
+    for (const tile of grid.querySelectorAll('.tile[data-id]')) {
+      if (tile.dataset.id !== m.id) continue;
+      updateAutoThumbBadge(tile, m);
+      const mark = tile.querySelector('.videoMark');
+      if (mark) mark.innerHTML = '<div style="position:absolute;left:6px;bottom:6px;padding:2px 6px;border-radius:999px;background:rgba(0,0,0,.6)">▶ VIDEO</div>';
+      const img = tile.querySelector('img');
+      if (img) loadThumb(m.id, img);
+    }
+  }
+  shadow.naiVideoThumbnailSaved = applyVideoPreview;
+  function previewEvent(video, name, start) {
+    return new Promise((resolve, reject) => {
+      const cleanup = () => { clearTimeout(timer); video.removeEventListener(name, done); video.removeEventListener('error', fail); };
+      const done = () => { cleanup(); resolve(); };
+      const fail = () => { cleanup(); reject(new Error('Video preview unavailable')); };
+      const timer = setTimeout(fail, 15000);
+      video.addEventListener(name, done, {once:true});
+      video.addEventListener('error', fail, {once:true});
+      start();
+    });
+  }
+  function queueVideoPreview(id) {
+    if (!state.automaticVideoThumbnails) return Promise.resolve();
+    if (videoPreviewJobs.has(id)) return videoPreviewJobs.get(id);
+    const job = videoPreviewTail.then(async () => {
+      const m = mediaById(id);
+      if (!m || m.thumb_rel || !state.connected) return;
+      const video = document.createElement('video');
+      video.crossOrigin = 'anonymous';
+      video.preload = 'auto'; video.muted = true; video.playsInline = true;
+      try {
+        await previewEvent(video, 'loadeddata', () => { video.src = directOriginalUrl(id); });
+        const target = Number.isFinite(video.duration) ? Math.min(1, video.duration / 10) : 0;
+        if (target > 0) await previewEvent(video, 'seeked', () => { video.currentTime = target; });
+        const scale = Math.min(1, 420 / Math.max(video.videoWidth, video.videoHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+        canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+        if (!blob || !mediaById(id) || mediaById(id).thumb_rel) return;
+        const updated = await gmRequest({method:'POST', path:`/api/media/${id}/thumbnail?automatic=1`, headers:{'Content-Type':'image/jpeg'}, data:blob});
+        applyVideoPreview(updated);
+      } catch (err) {
+        console.debug('[NovelAI Media] Automatic video preview unavailable', id, err);
+      } finally {
+        video.pause(); video.removeAttribute('src'); video.load();
+      }
+    });
+    videoPreviewJobs.set(id, job);
+    videoPreviewTail = job.catch(() => {});
+    return job;
+  }
+
+  function cacheThumb(id, url) {
+    if (state.thumbCache.has(id)) {
+      const old = state.thumbCache.get(id);
+      state.thumbCache.delete(id);
+      state.thumbCache.set(id, old);
+      return old;
+    }
+    state.thumbCache.set(id, url);
+    while (state.thumbCache.size > MAX_THUMB_CACHE) {
+      const [oldId, oldUrl] = state.thumbCache.entries().next().value;
+      state.thumbCache.delete(oldId);
+      URL.revokeObjectURL(oldUrl);
+    }
+    return url;
+  }
+
+  async function loadThumb(id, img) {
+    try {
+      const item = mediaById(id);
+      if (item?.media_type === 'video' && !item.thumb_rel) {
+        await queueVideoPreview(id);
+        if (!mediaById(id)?.thumb_rel) return;
+      }
+      if (state.thumbCache.has(id)) {
+        const url = state.thumbCache.get(id);
+        state.thumbCache.delete(id);
+        state.thumbCache.set(id, url);
+        img.src = url;
+        return;
+      }
+      const revision = thumbRevisions.get(id) || 0;
+      const blob = await gmRequest({ path: `/api/media/${id}/thumb?v=${thumbSession}-${revision}`, responseType: 'blob' });
+      if (revision !== (thumbRevisions.get(id) || 0)) return loadThumb(id, img);
+      const url = cacheThumb(id, URL.createObjectURL(blob));
+      img.src = url;
+    } catch (_) {
+      img.alt = 'Thumbnail unavailable';
+    }
+  }
+
+  function renderGrid(itemsOverride = null) {
+    grid.innerHTML = '';
+    if (!state.connected) {
+      grid.innerHTML = '<div class="empty">Start the local companion program, then click Refresh.</div>';
+      return;
+    }
+    if (!state.characterId) {
+      grid.innerHTML = '<div class="empty">Create a character, then add media.</div>';
+      return;
+    }
+    const items = itemsOverride || filteredMedia();
+    if (!items.length) {
+      grid.innerHTML = '<div class="empty">No media in this view yet.<br>Use “+ Media” to import local files or URLs.</div>';
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const m of items) {
+      const tile = document.createElement('div');
+      tile.className = `tile${m.id === state.selectedMediaId ? ' active' : ''}`;
+      tile.title = m.original_name || '';
+      tile.dataset.id = m.id;
+      if (m.thumb_rel || m.media_type === 'video' || (itemsOverride && m.media_type === 'image')) {
+        const img = document.createElement('img');
+        img.loading = 'lazy';
+        img.dataset.mid = m.id;
+        tile.appendChild(img);
+        io.observe(tile);
+      }
+      if (m.media_type === 'video') {
+        const mark = document.createElement('div');
+        mark.className = 'videoMark';
+        mark.innerHTML = m.thumb_rel ? `<div style="position:absolute; left:6px; bottom:6px; padding:2px 6px; border-radius:999px; background:rgba(0,0,0,.6)">▶ VIDEO</div>` : `<div>▶ VIDEO</div><div class="videoName">${escapeHtml(m.original_name || '')}</div>`;
+        tile.appendChild(mark);
+        updateAutoThumbBadge(tile, m);
+      }
+      if (m.favorite) {
+        const star = document.createElement('div');
+        star.className = 'star';
+        star.textContent = '★';
+        tile.appendChild(star);
+      }
+      tile.addEventListener('click', () => selectMedia(m.id));
+      frag.appendChild(tile);
+    }
+    grid.appendChild(frag);
+  }
+
+  // Sets supply their own membership, independently of the filtered All grid.
+  shadow.naiRenderSetMedia216 = (snapshot, ids) => {
+    state.library = snapshot;
+    const map = new Map(snapshot.media.map(m => [m.id, m]));
+    const items = ids.map(id => map.get(id)).filter(m => m && m.character_id === state.characterId && m.media_type === 'image' && !m.in_review);
+    const visible = [...grid.querySelectorAll('.tile[data-id]')];
+    if (visible.length !== items.length || items.some((m, i) => m.id !== visible[i].dataset.id || !visible[i].querySelector('img'))) renderGrid(items);
+  };
+
+  function mediaById(id) {
+    return state.library?.media?.find(x => x.id === id) || null;
+  }
+
+  function ownerForMedia(m) {
+    return state.library?.characters?.find(c => c.id === m?.character_id) || null;
+  }
+
+  function directOriginalUrl(id) {
+    return `${API}/api/media/${id}/original`;
+  }
+
+  function revokeSlotUrl(slot) {
+    const url = state.slotObjectUrls[slot];
+    if (url) URL.revokeObjectURL(url);
+    state.slotObjectUrls[slot] = null;
+  }
+
+  function updateSplitUI() {
+    stages.classList.toggle('split', state.splitView);
+    stageEls[1].classList.toggle('hidden', !state.splitView);
+    $('#splitBtn').classList.toggle('active', state.splitView);
+    $('#splitBtn').textContent = state.splitView ? 'Single' : 'Split';
+    stageEls.forEach((el, i) => el.classList.toggle('slot-active', i === state.activeSlot));
+  }
+
+  function activeMedia() {
+    return mediaById(state.slotMediaIds[state.activeSlot]);
+  }
+
+  function renderActiveMetadata() {
+    const m = activeMedia();
+    const editButton = $('#editBtn');
+    const deleteButton = $('#deleteBtn');
+    if (editButton) editButton.disabled = !m;
+    if (deleteButton) deleteButton.disabled = !m || !!state.deletingMedia;
+    selectedBadges.innerHTML = '';
+    if (!m) {
+      selectedName.textContent = '';
+      qualityInfo.textContent = '';
+      leftSubtitle.textContent = state.splitView ? `Slot ${state.activeSlot + 1} · Empty` : 'Nothing selected';
+      $('#favBtn').textContent = '☆';
+      renderVideoTools();
+      updateCounter();
+      return;
+    }
+    const owner = ownerForMedia(m);
+    selectedName.textContent = m.original_name || '';
+    leftSubtitle.textContent = `${owner?.name || ''} · ${m.media_type === 'video' ? 'Video' : 'Image'}${state.splitView ? ` · Slot ${state.activeSlot + 1}` : ''}`;
+    for (const id of (m.categories || [])) {
+      const cat = owner?.categories?.find(x => x.id === id);
+      if (!cat) continue;
+      const s = document.createElement('span');
+      s.className = 'badge';
+      s.textContent = cat.name;
+      selectedBadges.appendChild(s);
+    }
+    $('#favBtn').textContent = m.media_type === 'video' ? '☆' : (m.favorite ? '★' : '☆');
+    renderVideoTools();
+    updateCounter();
+    loadMediaQuality(m);
+  }
+
+  function formatBytes(value) {
+    const bytes = Number(value);
+    if (!Number.isFinite(bytes) || bytes < 0) return '';
+    if (bytes < 1024) return `${Math.round(bytes)} B`;
+    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+    return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  }
+
+  async function loadMediaQuality(m) {
+    const token = ++state.qualityToken;
+    qualityInfo.textContent = 'Source quality: loading…';
+    try {
+      const info = await gmRequest({path:`/api/media/${encodeURIComponent(m.id)}/quality`, timeout:15000});
+      if (token !== state.qualityToken || activeMedia()?.id !== m.id) return;
+      const size = formatBytes(info?.file_bytes);
+      const dimensions = Number(info?.width) > 0 && Number(info?.height) > 0 ? `${info.width} × ${info.height}` : '';
+      const details = [dimensions, size].filter(Boolean).join(' · ');
+      qualityInfo.textContent = details ? `Source quality: ${details}` : 'Source quality: unavailable';
+    } catch (_) {
+      if (token === state.qualityToken && activeMedia()?.id === m.id) qualityInfo.textContent = 'Source quality: unavailable';
+    }
+  }
+
+  function activeVideoElement() {
+    return stageEls[state.activeSlot]?.querySelector('video') || null;
+  }
+
+  function formatTime(seconds) {
+    if (seconds === null || seconds === undefined || Number.isNaN(Number(seconds))) return '—';
+    const total = Math.max(0, Math.floor(Number(seconds)));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${m}:${String(s).padStart(2,'0')}`;
+  }
+
+  function currentVideoTime() {
+    const v = activeVideoElement();
+    return v && Number.isFinite(v.currentTime) ? Math.max(0, v.currentTime) : 0;
+  }
+
+  async function canvasThumbnailBlob(video) {
+    if (!video || !video.videoWidth || !video.videoHeight) throw new Error('Wait for the video frame to appear first.');
+    const maxSide = 840;
+    const scale = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.86));
+    if (!blob) throw new Error('Could not capture this video frame.');
+    return blob;
+  }
+
+  async function saveVideoMarkers(m, markers) {
+    try {
+      const updated = await gmRequest({ method:'POST', path:`/api/media/${m.id}/video-meta`, headers:{'Content-Type':'application/json'}, data:JSON.stringify({ markers }) });
+      Object.assign(m, updated);
+      return updated;
+    } catch (err) {
+      if (/not found/i.test(err.message)) throw new Error('The local companion program is out of date. Replace companion.pyw with the v2.1 version and restart it.');
+      throw err;
+    }
+  }
+
+  function renderVideoTools() {
+    const m = activeMedia();
+    if (!m || m.media_type !== 'video') {
+      videoTools.classList.remove('visible');
+      videoTools.innerHTML = '';
+      return;
+    }
+    const markers = Array.isArray(m.video_markers) ? [m.video_markers[0] ?? null, m.video_markers[1] ?? null, m.video_markers[2] ?? null] : [null, null, null];
+    videoTools.classList.add('visible');
+    videoTools.innerHTML = `
+      <div class="videoToolRow"><button class="wide" id="setThumbBtn">Set thumbnail to current frame</button></div>
+      ${markers.map((value, idx) => `
+        <div class="videoToolRow">
+          <div class="label">T${idx + 1}</div>
+          <button data-seek-marker="${idx}" ${value === null ? 'disabled' : ''}>${formatTime(value)}</button>
+          <button data-set-marker="${idx}">Set</button>
+        </div>
+      `).join('')}
+    `;
+    videoTools.querySelector('#setThumbBtn').addEventListener('click', async () => {
+      const v = activeVideoElement();
+      if (!v) return;
+      const btn = videoTools.querySelector('#setThumbBtn');
+      btn.disabled = true;
+      btn.textContent = 'Saving thumbnail…';
+      try {
+        const seconds = currentVideoTime();
+        const blob = await canvasThumbnailBlob(v);
+        const updated = await gmRequest({
+          method:'POST',
+          path:`/api/media/${m.id}/thumbnail?seconds=${encodeURIComponent(seconds.toFixed(3))}`,
+          headers:{'Content-Type':'image/jpeg'},
+          data: blob,
+          timeout: 300000,
+        });
+        Object.assign(m, updated);
+        const old = state.thumbCache.get(m.id);
+        if (old) { URL.revokeObjectURL(old); state.thumbCache.delete(m.id); }
+        renderGrid();
+        btn.textContent = 'Thumbnail saved';
+      } catch (err) {
+        alert(/not found/i.test(err.message) ? 'The companion program is out of date. Replace companion.pyw with the v2.1 file, restart it, then refresh NovelAI.' : err.message);
+        btn.textContent = 'Set thumbnail to current frame';
+      } finally {
+        setTimeout(() => { if (videoTools.isConnected) renderVideoTools(); }, 500);
+      }
+    });
+    videoTools.querySelectorAll('[data-set-marker]').forEach(btn => btn.addEventListener('click', async () => {
+      const idx = Number(btn.dataset.setMarker);
+      const v = activeVideoElement();
+      if (!v) return;
+      const nextMarkers = [...markers];
+      nextMarkers[idx] = currentVideoTime();
+      btn.disabled = true;
+      try {
+        await saveVideoMarkers(m, nextMarkers);
+        renderVideoTools();
+      } catch (err) { alert(/not found/i.test(err.message) ? 'The companion program is out of date. Replace companion.pyw with the v2.1 file, restart it, then refresh NovelAI.' : err.message); }
+    }));
+    videoTools.querySelectorAll('[data-seek-marker]').forEach(btn => btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.seekMarker);
+      const v = activeVideoElement();
+      const marker = markers[idx];
+      if (!v || marker === null || marker === undefined) return;
+      v.currentTime = Number(marker);
+      v.play().catch(() => {});
+    }));
+  }
+
+  // Chromium delays native picture clicks by 300ms for double-click detection.
+  // Cancel that default action and toggle immediately, outside the controls band.
+  const pictureClicks = new WeakMap();
+  shadow.addEventListener('click', event => {
+    const video = event.target;
+    if (video?.tagName !== 'VIDEO' || event.button !== 0) return;
+    const rect = video.getBoundingClientRect();
+    if (video.controls && event.clientY >= rect.bottom - 64) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (event.detail > 1) return;
+    pictureClicks.set(video, video.paused);
+    if (video.paused) video.play().catch(() => {});
+    else video.pause();
+  }, true);
+  shadow.addEventListener('dblclick', event => {
+    const video = event.target;
+    if (video?.tagName !== 'VIDEO' || event.clientY >= video.getBoundingClientRect().bottom - 64) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    // Restore the playback state before the first click, then toggle fullscreen.
+    if (pictureClicks.get(video)) video.pause();
+    else video.play().catch(() => {});
+    if (document.fullscreenElement) document.exitFullscreen()?.catch(() => {});
+    else video.requestFullscreen?.()?.catch(() => {});
+  }, true);
+
+  async function setVideoSourceWithFallback(video, m, slot = null) {
+    video.controls = true;
+    video.preload = 'metadata';
+    video.playsInline = true;
+    video.loop = true;
+    video.volume = 0.08;
+    video.src = directOriginalUrl(m.id);
+    let triedFallback = false;
+    video.addEventListener('error', async () => {
+      if (triedFallback || !video.isConnected) return;
+      triedFallback = true;
+      try {
+        const blob = await gmRequest({ path: `/api/media/${m.id}/original`, responseType: 'blob', timeout: 300000 });
+        const url = URL.createObjectURL(blob);
+        if (slot !== null) {
+          revokeSlotUrl(slot);
+          state.slotObjectUrls[slot] = url;
+        } else {
+          video._naiBlobUrl = url;
+        }
+        video.src = url;
+        video.load();
+      } catch (_) {}
+    }, { once: true });
+  }
+
+  async function renderSlot(slot, mediaId) {
+    const el = stageEls[slot];
+    const m = mediaById(mediaId);
+    const oldVideo = el.querySelector('video');
+    if (oldVideo) oldVideo.pause();
+    revokeSlotUrl(slot);
+    el.innerHTML = '';
+    if (!m) {
+      el.innerHTML = `<div class="muted slotHint">${slot === 1 ? 'Click this slot, then choose any image or video — even from the same character.' : 'Choose an image or video from the library.'}</div>`;
+      return;
+    }
+    if (m.media_type === 'video') {
+      const video = document.createElement('video');
+      // A click on an already-active video should only control playback. Re-running
+      // setActiveSlot here rebuilt the grid and reloaded source quality on every
+      // pause/play click, which caused the visible thumbnail flicker and delay.
+      video.addEventListener('pointerdown', () => {
+        if (state.activeSlot !== slot) setActiveSlot(slot);
+      }, { passive: true });
+      await setVideoSourceWithFallback(video, m, slot);
+      el.appendChild(video);
+      return;
+    }
+    el.innerHTML = '<div class="muted">Loading…</div>';
+    try {
+      const blob = await gmRequest({ path: `/api/media/${m.id}/original`, responseType: 'blob', timeout: 300000 });
+      const url = URL.createObjectURL(blob);
+      revokeSlotUrl(slot);
+      state.slotObjectUrls[slot] = url;
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = m.original_name || '';
+      img.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await setActiveSlot(slot);
+        openLightbox();
+      });
+      el.innerHTML = '';
+      el.appendChild(img);
+    } catch (err) {
+      el.innerHTML = `<div class="muted">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  async function setActiveSlot(slot, { syncSelection = true } = {}) {
+    if (slot === 1 && !state.splitView) return;
+    state.activeSlot = slot;
+    state.selectedMediaId = state.slotMediaIds[slot] || null;
+    updateSplitUI();
+    if (syncSelection) renderGrid();
+    renderActiveMetadata();
+    persistUI();
+  }
+
+  async function selectMedia(id) {
+    const m = mediaById(id);
+    if (!m) return;
+    state.slotMediaIds[state.activeSlot] = id;
+    state.selectedMediaId = id;
+    persistUI();
+    renderGrid();
+    await renderSlot(state.activeSlot, id);
+    renderActiveMetadata();
+  }
+
+  function updateCounter() {
+    const items = filteredMedia();
+    const i = items.findIndex(m => m.id === state.selectedMediaId);
+    counter.textContent = i >= 0 ? `${i + 1} / ${items.length}` : `— / ${items.length}`;
+  }
+
+  function ensureSelectionVisible() {
+    const items = filteredMedia();
+    if (!items.length) {
+      updateCounter();
+      return;
+    }
+    if (!items.some(m => m.id === state.selectedMediaId)) selectMedia(items[0].id);
+    else updateCounter();
+  }
+
+  function selectRelative(delta) {
+    const items = filteredMedia();
+    if (!items.length) return;
+    let i = items.findIndex(m => m.id === state.selectedMediaId);
+    if (i < 0) i = 0;
+    i = (i + delta + items.length) % items.length;
+    selectMedia(items[i].id);
+  }
+
+  async function openLightbox() {
+    const m = activeMedia();
+    if (!m) return;
+    lightRoot.innerHTML = '<div class="lightbox"><button class="lightClose">×</button></div>';
+    const box = lightRoot.querySelector('.lightbox');
+    if (m.media_type === 'video') {
+      const v = document.createElement('video');
+      v.controls = true;
+      v.autoplay = true;
+      v.playsInline = true;
+      await setVideoSourceWithFallback(v, m, null);
+      box.appendChild(v);
+    } else {
+      const img = document.createElement('img');
+      img.src = state.slotObjectUrls[state.activeSlot] || directOriginalUrl(m.id);
+      img.alt = m.original_name || '';
+      box.appendChild(img);
+    }
+    box.querySelector('.lightClose').addEventListener('click', closeLightbox);
+    box.addEventListener('click', e => { if (e.target === box) closeLightbox(); });
+  }
+
+  function closeLightbox() {
+    const video = lightRoot.querySelector('video');
+    if (video) {
+      video.pause();
+      if (video._naiBlobUrl) URL.revokeObjectURL(video._naiBlobUrl);
+    }
+    lightRoot.innerHTML = '';
+  }
+
+  async function loadLibrary(preserveSelection = true) {
+    const requestToken = ++state.libraryLoadToken;
+    setStatus('Connecting…');
+    try {
+      const health = await gmRequest({ path: '/api/health' });
+      state.automaticVideoThumbnails = !!health?.automatic_video_thumbnails;
+      if (requestToken !== state.libraryLoadToken) return;
+      if (Number(health?.version || 0) < 3) throw new Error('Companion update required: install the v2.1 companion.pyw and restart it.');
+      const lib = await gmRequest({ path: '/api/library' });
+      if (requestToken !== state.libraryLoadToken) return;
+      state.library = lib;
+      state.connected = true;
+      setStatus('Local library connected');
+      const prev = preserveSelection ? state.selectedMediaId : null;
+      state.slotMediaIds = state.slotMediaIds.map(id => id && state.library.media.some(m => m.id === id) ? id : null);
+      if (prev && state.library.media.some(m => m.id === prev)) state.slotMediaIds[state.activeSlot] = prev;
+      state.selectedMediaId = state.slotMediaIds[state.activeSlot] || null;
+      renderCharacters();
+      renderCategories();
+      updateSplitUI();
+      renderGrid();
+      await renderSlot(0, state.slotMediaIds[0]);
+      if (state.splitView) await renderSlot(1, state.slotMediaIds[1]);
+      renderActiveMetadata();
+      shadow.naiReviewApplyLibrary270?.(state.library);
+      shadow.naiSetsApplyLibrary216?.(state.library);
+      shadow.naiSetVisibilityApplyLibrary281?.(state.library);
+    } catch (err) {
+      if (requestToken !== state.libraryLoadToken) return;
+      state.connected = false;
+      state.library = { characters: [], media: [] };
+      setStatus(err.message, true);
+      renderCharacters(); renderCategories(); renderGrid();
+    }
+  }
+
+  charSelect.addEventListener('change', () => {
+    state.characterId = charSelect.value || null;
+    state.categoryId = 'all';
+    persistUI();
+    renderCategories();
+    renderGrid();
+    renderActiveMetadata();
+  });
+
+  $('#search').addEventListener('input', (e) => {
+    state.search = e.target.value;
+    renderGrid();
+    updateCounter();
+  });
+
+  $('#refreshBtn').addEventListener('click', () => loadLibrary());
+  $('#prevBtn').addEventListener('click', () => selectRelative(-1));
+  $('#nextBtn').addEventListener('click', () => selectRelative(1));
+  $('#splitBtn').addEventListener('click', async () => {
+    state.splitView = !state.splitView;
+    if (!state.splitView && state.activeSlot === 1) {
+      await setActiveSlot(0);
+      const v = stageEls[1].querySelector('video');
+      if (v) v.pause();
+    }
+    updateSplitUI();
+    if (state.splitView) await renderSlot(1, state.slotMediaIds[1]);
+    persistUI();
+  });
+
+  stageEls.forEach((el, slot) => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('video')) return;
+      setActiveSlot(slot);
+    });
+  });
+
+  $('#fullBtn').addEventListener('click', openLightbox);
+
+  $('#favBtn').addEventListener('click', async () => {
+    const m = activeMedia();
+    if (!m || m.media_type === 'video') return;
+    try {
+      const updated = await gmRequest({ method: 'POST', path: `/api/media/${m.id}/favorite`, headers: { 'Content-Type': 'application/json' }, data: JSON.stringify({ favorite: !m.favorite }) });
+      Object.assign(m, updated);
+      $('#favBtn').textContent = m.favorite ? '★' : '☆';
+      renderCategories();
+      renderGrid();
+    } catch (err) { alert(err.message); }
+  });
+
+  $('#editBtn').addEventListener('click', () => openEditImagesModal());
+
+  $('#deleteBtn').addEventListener('click', async () => {
+    const m = activeMedia();
+    if (!m || state.deletingMedia) return;
+    if (!confirm(`Permanently delete “${m.original_name || 'this media item'}” from the managed library?\n\nThis deletes the managed local copy and its thumbnail.`)) return;
+    const button = $('#deleteBtn');
+    state.deletingMedia = true;
+    button.disabled = true;
+    button.textContent = '…';
+    try {
+      await gmRequest({ method: 'DELETE', path: `/api/media/${encodeURIComponent(m.id)}` });
+      state.slotMediaIds = state.slotMediaIds.map(id => id === m.id ? null : id);
+      if (state.selectedMediaId === m.id) state.selectedMediaId = null;
+      closeLightbox();
+      await loadLibrary(false);
+    } catch (err) {
+      alert(err?.message || String(err));
+    } finally {
+      state.deletingMedia = false;
+      button.textContent = '🗑';
+      button.disabled = !activeMedia();
+    }
+  });
+
+  $('#addCharacterBtn').addEventListener('click', async () => {
+    if (!state.connected) return alert('Start the local companion program first.');
+    const name = prompt('Character name:');
+    if (!name?.trim()) return;
+    try {
+      const c = await gmRequest({ method:'POST', path:'/api/characters', headers:{'Content-Type':'application/json'}, data:JSON.stringify({ name: name.trim() }) });
+      await loadLibrary(false);
+      state.characterId = c.id; state.categoryId = 'all';
+      renderCharacters(); renderCategories(); renderGrid(); updateCounter(); persistUI();
+    } catch (err) { alert(err.message); }
+  });
+
+  $('#randomBtn').addEventListener('click', () => {
+    const items = filteredMedia();
+    if (!items.length) return;
+    let choice = items[Math.floor(Math.random() * items.length)];
+    if (items.length > 1 && choice.id === state.selectedMediaId) choice = items[(items.findIndex(x => x.id === choice.id) + 1) % items.length];
+    selectMedia(choice.id);
+  });
+
+  async function createCategoryFlow() {
+    if (!state.characterId) return alert('Create or select a character first.');
+    const name = prompt(`New category for ${currentCharacter()?.name || 'character'}:`);
+    if (!name?.trim()) return null;
+    try {
+      const cat = await gmRequest({ method:'POST', path:'/api/categories', headers:{'Content-Type':'application/json'}, data:JSON.stringify({ character_id: state.characterId, name: name.trim() }) });
+      await loadLibrary();
+      return cat;
+    } catch (err) { alert(err.message); return null; }
+  }
+
+  $('#addMediaBtn').addEventListener('click', openImportModal);
+
+  if ($('#editImagesBtn')) $('#editImagesBtn').addEventListener('click', openEditImagesModal);
+
+  function openEditImagesModal() {
+    if (!state.connected) return alert('Start the local companion program first.');
+    if (!state.characterId) return alert('Create or select a character first.');
+
+    const m = state.library?.media?.find(x => x.id === state.selectedMediaId) || null;
+    const c = currentCharacter();
+    const selectedIds = m ? [...(m.categories || [])] : [];
+    const realCategories = c?.categories || [];
+
+    modalRoot.innerHTML = `
+      <div class="modalWrap">
+        <div class="modal">
+          <div class="modalHead">
+            <div class="modalTitle">Edit library — ${escapeHtml(c?.name || '')}</div>
+            <button class="icon ghost" data-close>×</button>
+          </div>
+          <div class="modalBody">
+            <div style="font:700 13px system-ui; margin-bottom:6px">Selected media</div>
+            ${m ? `
+              <div class="fileSummary" style="margin-top:0">${escapeHtml(m.original_name || 'Selected media')}</div>
+              ${m.media_type === 'video' ? `<div class="muted" style="margin-top:12px">Videos only appear in the automatic Videos category. Source replacement is currently available for images.</div>` : `<div class="muted" style="margin-top:12px">Choose whether this image appears in All, then add or remove it from any custom category. If this image belongs to a set, these choices do not remove it from that set:</div><label class="check" style="margin-top:10px"><input type="checkbox" id="editAllMedia" ${m.in_all !== false ? 'checked' : ''}> <span>All (main image view)</span></label><div id="editImageCats">${categoryCheckboxes(selectedIds)}</div>`}
+              <div class="row" style="margin-top:10px">
+                ${m.media_type === 'video' ? '' : '<button id="replaceSourceBtn">Replace Source Image</button><input id="replaceSourceInput" type="file" accept="image/*" class="hidden">'}
+                <button class="danger" id="deleteCurrentImage">Delete Image</button>
+              </div>
+            ` : `
+              <div class="muted">Select a thumbnail first if you want to recategorize or delete an image.</div>
+            `}
+
+            <div style="height:1px; background:rgba(255,255,255,.09); margin:20px 0"></div>
+
+            <div style="font:700 13px system-ui; margin-bottom:6px">Category actions</div>
+            ${m?.media_type === 'image' ? '<div class="row" style="margin-bottom:12px"><button class="primary" id="saveImageCats">Save Categories</button></div>' : ''}
+            <details style="margin-top:4px">
+              <summary class="muted" style="cursor:pointer;user-select:none">Advanced: delete a custom category</summary>
+              <div class="muted" style="margin:10px 0">This removes the category tag from every image; it does not delete images. “All” and “Favorites” cannot be deleted.</div>
+              ${realCategories.length ? `
+                <div class="row">
+                  <select id="deleteCategorySelect" class="grow">
+                    ${realCategories.map(cat => `<option value="${cat.id}">${escapeHtml(cat.name)}</option>`).join('')}
+                  </select>
+                  <button class="ghost danger" style="font-size:10px;padding:5px 7px;opacity:.8" id="deleteCategoryBtn">Delete Category</button>
+                </div>
+              ` : `
+                <div class="muted">This character has no custom categories.</div>
+              `}
+            </details>
+          </div>
+          <div class="modalFoot">
+            <button data-close>Close</button>
+          </div>
+        </div>
+      </div>`;
+
+    const wrap = modalRoot.querySelector('.modalWrap');
+    const close = () => { modalRoot.innerHTML = ''; };
+    modalRoot.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', close));
+    wrap.addEventListener('click', e => { if (e.target === wrap) close(); });
+
+    if (m) {
+      const saveCatsBtn = modalRoot.querySelector('#saveImageCats');
+      if (saveCatsBtn) saveCatsBtn.addEventListener('click', async () => {
+        try {
+          const categories = selectedCategoryIds(modalRoot.querySelector('#editImageCats'));
+          const inAll = modalRoot.querySelector('#editAllMedia')?.checked !== false;
+          const updated = await gmRequest({
+            method: 'POST',
+            path: `/api/media/${m.id}/categories`,
+            headers: { 'Content-Type': 'application/json' },
+            data: JSON.stringify({ categories, in_all: inAll })
+          });
+          Object.assign(m, updated);
+          close();
+          await loadLibrary();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+
+      modalRoot.querySelector('#deleteCurrentImage').addEventListener('click', async () => {
+        if (!confirm(`Permanently delete “${m.original_name || 'this media item'}” from the managed library?\n\nThis deletes the managed local copy and its thumbnail.`)) return;
+        try {
+          await gmRequest({ method: 'DELETE', path: `/api/media/${m.id}` });
+          state.slotMediaIds = state.slotMediaIds.map(id => id === m.id ? null : id);
+          if (state.selectedMediaId === m.id) state.selectedMediaId = null;
+          close();
+          await loadLibrary(false);
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+
+      const replaceButton = modalRoot.querySelector('#replaceSourceBtn');
+      const replaceInput = modalRoot.querySelector('#replaceSourceInput');
+      if (replaceButton && replaceInput) {
+        replaceButton.addEventListener('click', () => replaceInput.click());
+        replaceInput.addEventListener('change', async () => {
+          const file = replaceInput.files?.[0];
+          if (!file) return;
+          if (!confirm(`Replace “${m.original_name || 'this image'}” with “${file.name}”?\n\nIts categories, favorite/Review state, position, crop settings, and set membership will be preserved.`)) {
+            replaceInput.value = '';
+            return;
+          }
+          replaceButton.disabled = true;
+          replaceButton.textContent = 'Replacing…';
+          try {
+            const form = new FormData();
+            form.append('file', file, file.name || 'replacement');
+            const updated = await gmRequest({
+              method: 'POST',
+              path: `/api/media/${encodeURIComponent(m.id)}/replace`,
+              data: form,
+              timeout: 300000,
+            });
+            Object.assign(m, updated || {});
+            const cached = state.thumbCache.get(m.id);
+            if (cached) { URL.revokeObjectURL(cached); state.thumbCache.delete(m.id); }
+            close();
+            await loadLibrary(true);
+            if (state.library.media.some(x => x.id === m.id)) await selectMedia(m.id);
+          } catch (err) {
+            alert(err.message);
+            replaceButton.disabled = false;
+            replaceButton.textContent = 'Replace Source Image';
+          } finally {
+            replaceInput.value = '';
+          }
+        });
+      }
+    }
+
+    const deleteCategoryBtn = modalRoot.querySelector('#deleteCategoryBtn');
+    if (deleteCategoryBtn) {
+      deleteCategoryBtn.addEventListener('click', async () => {
+        const select = modalRoot.querySelector('#deleteCategorySelect');
+        const categoryId = select?.value;
+        const category = realCategories.find(cat => cat.id === categoryId);
+        if (!category) return;
+        const count = allCurrentMedia().filter(item => (item.categories || []).includes(categoryId)).length;
+        if (!confirm(`Delete the category “${category.name}”?\n\nIt will be removed from ${count} image${count === 1 ? '' : 's'}. The images themselves will not be deleted.`)) return;
+        try {
+          await gmRequest({ method: 'DELETE', path: `/api/categories/${categoryId}` });
+          if (state.categoryId === categoryId) state.categoryId = 'all';
+          close();
+          await loadLibrary();
+        } catch (err) {
+          alert(`${err.message}\n\nIf you are still running the original companion program, replace companion.pyw with the current companion included with this update and restart it.`);
+        }
+      });
+    }
+  }
+
+  function categoryCheckboxes(selectedIds = []) {
+    const c = currentCharacter();
+    if (!c) return '<div class="muted">No character selected.</div>';
+    return `<div class="checkGrid">${(c.categories || []).map((cat, i) => `
+      <label class="check"><input type="checkbox" data-catid="${cat.id}" ${selectedIds.includes(cat.id) ? 'checked' : ''}> <span>${escapeHtml(cat.name)}</span></label>
+    `).join('')}</div>`;
+  }
+
+  function selectedCategoryIds(container) {
+    return [...container.querySelectorAll('input[data-catid]:checked')].map(x => x.dataset.catid);
+  }
+
+  function openImportModal() {
+    if (!state.connected) return alert('Start the local companion program first.');
+    if (!state.characterId) return alert('Create a character first.');
+    modalRoot.innerHTML = `
+      <div class="modalWrap">
+        <div class="modal">
+          <div class="modalHead"><div class="modalTitle">Add media to ${escapeHtml(currentCharacter().name)}</div><button class="icon ghost" data-close>×</button></div>
+          <div class="modalBody">
+            <div class="muted">Optional categories to apply to imported images. Videos ignore custom categories, stay out of All, and only appear in the automatic Videos category.</div>
+            <div id="importCats">${categoryCheckboxes([])}</div>
+            <div class="row"><button id="modalAddCategory">+ Create Category</button><button id="modalEditImages">Edit Images</button></div>
+            <div class="tabs" style="margin-top:16px">
+              <button class="tab active" data-tab="local">Local files</button>
+              <button class="tab" data-tab="url">URLs</button>
+            </div>
+            <div id="localPane">
+              <input id="fileInput" type="file" accept="image/*,video/*" multiple class="hidden">
+              <div id="fileDropZone" class="dropZone" tabindex="0" role="button" aria-label="Add local media files">
+                <div class="dropTitle">Drop images or videos here</div>
+                <div class="muted">or click here to choose files</div>
+                <div class="muted">You can drop a large batch at once.</div>
+              </div>
+              <div id="fileSummary" class="fileSummary hidden"></div>
+              <div class="row" style="margin-top:8px">
+                <button id="chooseMoreFiles">Choose more files</button>
+                <button id="clearFiles" class="ghost" disabled>Clear selection</button>
+              </div>
+              <div class="muted" style="margin-top:8px">Each file is copied byte-for-byte into the managed media library. Only the thumbnail preview is resized/compressed.</div>
+            </div>
+            <div id="urlPane" class="hidden">
+              <textarea id="urlInput" placeholder="Paste one direct image/video URL per line"></textarea>
+              <div class="muted" style="margin-top:8px">Every URL is downloaded immediately into the local media library. The original URL is kept only as metadata.</div>
+            </div>
+            <div class="progress hidden" id="importProgress"><div></div></div>
+            <div class="status" id="importStatus"></div>
+          </div>
+          <div class="modalFoot">
+            <button data-close id="importCancelBtn">Cancel</button>
+            <button id="importDirect">Import with selected categories</button>
+            <button class="primary" id="importReview">Import & review one by one</button>
+          </div>
+        </div>
+      </div>`;
+    const wrap = modalRoot.querySelector('.modalWrap');
+    const close = () => { modalRoot.innerHTML = ''; };
+    modalRoot.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', close));
+    wrap.addEventListener('click', e => { if (e.target === wrap) close(); });
+    let activeTab = 'local';
+    modalRoot.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => {
+      activeTab = b.dataset.tab;
+      modalRoot.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === b));
+      $('#noop');
+      modalRoot.querySelector('#localPane').classList.toggle('hidden', activeTab !== 'local');
+      modalRoot.querySelector('#urlPane').classList.toggle('hidden', activeTab !== 'url');
+    }));
+    modalRoot.querySelector('#modalAddCategory').addEventListener('click', async () => {
+      const cat = await createCategoryFlow();
+      if (!cat || !modalRoot.childElementCount) return;
+      modalRoot.querySelector('#importCats').innerHTML = categoryCheckboxes([]);
+    });
+    modalRoot.querySelector('#modalEditImages').addEventListener('click', () => {
+      close();
+      openEditImagesModal();
+    });
+
+    let pendingLocalFiles = [];
+    const fileInput = modalRoot.querySelector('#fileInput');
+    const dropZone = modalRoot.querySelector('#fileDropZone');
+    const fileSummary = modalRoot.querySelector('#fileSummary');
+    const clearFiles = modalRoot.querySelector('#clearFiles');
+
+    function isLikelyMediaFile(file) {
+      if (!file) return false;
+      if ((file.type || '').startsWith('image/') || (file.type || '').startsWith('video/')) return true;
+      return /\.(?:jpe?g|png|gif|webp|bmp|tiff?|avif|heic|heif|mp4|webm|mov|m4v|avi|mkv)$/i.test(file.name || '');
+    }
+
+    function addPendingFiles(files) {
+      const incoming = [...files].filter(isLikelyMediaFile);
+      const seen = new Set(pendingLocalFiles.map(f => `${f.name}::${f.size}::${f.lastModified}`));
+      for (const file of incoming) {
+        const key = `${file.name}::${file.size}::${file.lastModified}`;
+        if (!seen.has(key)) {
+          pendingLocalFiles.push(file);
+          seen.add(key);
+        }
+      }
+      paintFileSummary();
+    }
+
+    function paintFileSummary() {
+      if (!pendingLocalFiles.length) {
+        fileSummary.classList.add('hidden');
+        fileSummary.innerHTML = '';
+        clearFiles.disabled = true;
+        return;
+      }
+      const shown = pendingLocalFiles.slice(0, 6).map(f => escapeHtml(f.name));
+      const more = pendingLocalFiles.length > shown.length ? `<br>…and ${pendingLocalFiles.length - shown.length} more` : '';
+      fileSummary.innerHTML = `<strong>${pendingLocalFiles.length} file${pendingLocalFiles.length === 1 ? '' : 's'} selected</strong><br>${shown.join('<br>')}${more}`;
+      fileSummary.classList.remove('hidden');
+      clearFiles.disabled = false;
+    }
+
+    function chooseFiles() { fileInput.click(); }
+    dropZone.addEventListener('click', chooseFiles);
+    dropZone.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chooseFiles(); }
+    });
+    modalRoot.querySelector('#chooseMoreFiles').addEventListener('click', chooseFiles);
+    fileInput.addEventListener('change', () => {
+      addPendingFiles(fileInput.files || []);
+      fileInput.value = '';
+    });
+    clearFiles.addEventListener('click', () => {
+      pendingLocalFiles = [];
+      fileInput.value = '';
+      paintFileSummary();
+    });
+    for (const eventName of ['dragenter','dragover']) {
+      dropZone.addEventListener(eventName, e => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+        dropZone.classList.add('dragover');
+      });
+    }
+    for (const eventName of ['dragleave','drop']) {
+      dropZone.addEventListener(eventName, e => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('dragover');
+      });
+    }
+    dropZone.addEventListener('drop', e => {
+      if (e.dataTransfer?.files?.length) addPendingFiles(e.dataTransfer.files);
+    });
+
+    let currentImportRequest = null;
+    let importCanceled = false;
+
+    async function doImport(review) {
+      const selectedCats = selectedCategoryIds(modalRoot.querySelector('#importCats'));
+      const progress = modalRoot.querySelector('#importProgress');
+      const bar = progress.firstElementChild;
+      const status = modalRoot.querySelector('#importStatus');
+      const cancelBtn = modalRoot.querySelector('#importCancelBtn');
+      progress.classList.remove('hidden');
+      progress.classList.add('indeterminate');
+      const importedIds = [];
+      const errors = [];
+      let jobs = [];
+      if (activeTab === 'local') jobs = pendingLocalFiles.map(file => ({ kind:'file', file }));
+      else jobs = modalRoot.querySelector('#urlInput').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean).map(url => ({ kind:'url', url }));
+      if (!jobs.length) { status.textContent = 'Choose at least one file or URL.'; status.classList.add('bad'); return; }
+      importCanceled = false;
+      modalRoot.querySelectorAll('button, input, textarea').forEach(x => x.disabled = true);
+      cancelBtn.disabled = false;
+      cancelBtn.textContent = 'Cancel Import';
+      cancelBtn.addEventListener('click', () => {
+        importCanceled = true;
+        if (currentImportRequest && typeof currentImportRequest.abort === 'function') currentImportRequest.abort();
+        status.textContent = 'Canceling import…';
+      }, { once: true });
+      for (let i = 0; i < jobs.length; i++) {
+        if (importCanceled) break;
+        const job = jobs[i];
+        status.textContent = `Importing ${i + 1} of ${jobs.length}… ${job.kind === 'file' ? job.file.name : job.url}`;
+        bar.style.width = `${Math.round((i / jobs.length) * 100)}%`;
+        try {
+          let result;
+          if (job.kind === 'file') {
+            const form = new FormData();
+            form.append('character_id', state.characterId);
+            form.append('categories', JSON.stringify(selectedCats));
+            form.append('file', job.file, job.file.name);
+            result = await new Promise((resolve, reject) => {
+              currentImportRequest = GM_xmlhttpRequest({
+                method:'POST', url:`${API}/api/import/file`, data:form, timeout:300000, headers:{ Origin:'https://novelai.net' },
+                onload:(res)=>{ currentImportRequest = null; if (res.status >= 200 && res.status < 300) { try { resolve(JSON.parse(res.responseText || '{}')); } catch (_) { resolve(null); } } else { try { reject(new Error(JSON.parse(res.responseText || '{}').error || `Request failed (${res.status})`)); } catch (_) { reject(new Error(`Request failed (${res.status})`)); } } },
+                onerror:()=>{ currentImportRequest = null; reject(new Error(importCanceled ? 'Import canceled' : 'Could not connect to the local NovelAI Media Library program.')); },
+                ontimeout:()=>{ currentImportRequest = null; reject(new Error(importCanceled ? 'Import canceled' : 'The local media request timed out.')); },
+              });
+            });
+          } else {
+            result = await gmRequest({ method:'POST', path:'/api/import/url', headers:{'Content-Type':'application/json'}, data:JSON.stringify({ character_id: state.characterId, categories:selectedCats, url:job.url }), timeout:300000 });
+          }
+          if (result?.item?.id && !importedIds.includes(result.item.id)) importedIds.push(result.item.id);
+        } catch (err) {
+          if (importCanceled && /canceled/i.test(String(err.message || ''))) break;
+          errors.push(`${job.kind === 'file' ? job.file.name : job.url}: ${err.message}`);
+        }
+      }
+      currentImportRequest = null;
+      progress.classList.remove('indeterminate');
+      bar.style.width = '100%';
+      await loadLibrary(false);
+      if (importCanceled) {
+        status.textContent = `Import canceled. Imported ${importedIds.length} item(s).`;
+        modalRoot.querySelectorAll('button, input, textarea').forEach(x => x.disabled = false);
+        cancelBtn.textContent = 'Close';
+        cancelBtn.addEventListener('click', close, { once: true });
+        return;
+      }
+      status.textContent = `Imported ${importedIds.length} item(s)${errors.length ? `; ${errors.length} failed` : ''}.`;
+      if (errors.length) console.warn('NovelAI Media import errors:', errors);
+      if (review && importedIds.length) { close(); startReview(importedIds); }
+      else { setTimeout(close, 650); }
+    }
+
+    modalRoot.querySelector('#importDirect').addEventListener('click', () => doImport(false));
+    modalRoot.querySelector('#importReview').addEventListener('click', () => doImport(true));
+  }
+
+  function startReview(ids) {
+    state.reviewQueue = ids.filter(id => state.library.media.some(m => m.id === id));
+    state.reviewIndex = 0;
+    state.carryCategories = null;
+    if (!state.reviewQueue.length) return;
+    renderReviewModal();
+  }
+
+  async function renderReviewModal() {
+    const id = state.reviewQueue[state.reviewIndex];
+    const m = state.library.media.find(x => x.id === id);
+    if (!m) return finishReview();
+    const c = state.library.characters.find(x => x.id === m.character_id);
+    let selected = state.carryReviewCategories && state.carryCategories ? [...state.carryCategories] : [...(m.categories || [])];
+    modalRoot.innerHTML = `
+      <div class="modalWrap">
+        <div class="modal large">
+          <div class="modalHead">
+            <div class="modalTitle">Rapid review — ${escapeHtml(c?.name || '')}</div>
+            <div class="muted">${state.reviewIndex + 1} / ${state.reviewQueue.length}</div>
+            <button class="icon ghost" data-close>×</button>
+          </div>
+          <div class="reviewBody">
+            <div class="reviewStage" id="reviewStage"><div class="muted">Loading…</div></div>
+            <div class="reviewSide">
+              <div style="font:700 13px system-ui; margin-bottom:4px">Categories</div>
+              <div class="muted" style="margin-bottom:10px">${m.media_type === 'video' ? 'Videos only appear in the automatic Videos category.' : 'Press 1–9 to toggle the first nine categories. Enter or → saves and advances.'}</div>
+              <div id="reviewCats"></div>
+              ${m.media_type === 'video' ? '' : '<button id="reviewAddCat">+ Create Category</button>'}
+              <label class="check" style="margin-top:14px"><input type="checkbox" id="carryCats" ${state.carryReviewCategories ? 'checked' : ''}> Carry this category selection to the next image</label>
+              <div class="muted" style="margin-top:12px; word-break:break-word">${escapeHtml(m.original_name || '')}</div>
+            </div>
+          </div>
+          <div class="modalFoot">
+            <button id="reviewDelete" class="danger">Delete media</button>
+            <div class="grow"></div>
+            <button id="reviewPrev">← Save + Previous</button>
+            <button class="primary" id="reviewNext">Save + Next →</button>
+          </div>
+        </div>
+      </div>`;
+
+    const wrap = modalRoot.querySelector('.modalWrap');
+    const rs = modalRoot.querySelector('#reviewStage');
+    const reviewCats = modalRoot.querySelector('#reviewCats');
+
+    function paintCats() {
+      reviewCats.innerHTML = '';
+      if (m.media_type === 'video') return;
+      (c?.categories || []).forEach((cat, idx) => {
+        const label = document.createElement('label');
+        label.className = 'reviewCat';
+        label.innerHTML = `<input type="checkbox" data-catid="${cat.id}" ${selected.includes(cat.id) ? 'checked' : ''}> <span>${escapeHtml(cat.name)}</span>${idx < 9 ? `<span class="key">${idx+1}</span>` : ''}`;
+        reviewCats.appendChild(label);
+      });
+    }
+    paintCats();
+
+    let reviewUrl = null;
+    try {
+      if (m.media_type === 'video') {
+        const v = document.createElement('video');
+        v.src = directOriginalUrl(m.id); v.controls = true; v.loop = true; v.volume = 0.08; rs.innerHTML = ''; rs.appendChild(v);
+      } else {
+        const blob = await gmRequest({ path:`/api/media/${m.id}/original`, responseType:'blob', timeout:300000 });
+        reviewUrl = URL.createObjectURL(blob);
+        const img = document.createElement('img'); img.src = reviewUrl; rs.innerHTML = ''; rs.appendChild(img);
+      }
+    } catch (err) { rs.innerHTML = `<div class="muted">${escapeHtml(err.message)}</div>`; }
+
+    const cleanup = () => { if (reviewUrl) URL.revokeObjectURL(reviewUrl); };
+    modalRoot.querySelector('[data-close]').addEventListener('click', () => { cleanup(); finishReview(); });
+    wrap.addEventListener('click', e => { if (e.target === wrap) { cleanup(); finishReview(); } });
+
+    modalRoot.querySelector('#carryCats').addEventListener('change', (e) => { state.carryReviewCategories = e.target.checked; });
+    const reviewAddCatBtn = modalRoot.querySelector('#reviewAddCat');
+    if (reviewAddCatBtn) reviewAddCatBtn.addEventListener('click', async () => {
+        selected = [...reviewCats.querySelectorAll('input[data-catid]:checked')].map(x => x.dataset.catid);
+        const cat = await createCategoryFlow();
+        if (!cat) return;
+        c.categories = currentCharacter()?.categories || c.categories;
+        paintCats();
+      });
+
+    async function saveCurrent() {
+      if (m.media_type === 'video') {
+        state.carryCategories = [];
+        return;
+      }
+      selected = [...reviewCats.querySelectorAll('input[data-catid]:checked')].map(x => x.dataset.catid);
+      const updated = await gmRequest({ method:'POST', path:`/api/media/${m.id}/categories`, headers:{'Content-Type':'application/json'}, data:JSON.stringify({ categories:selected }) });
+      Object.assign(m, updated);
+      state.carryCategories = [...selected];
+    }
+
+    async function move(delta) {
+      try {
+        await saveCurrent();
+        cleanup();
+        state.reviewIndex += delta;
+        if (state.reviewIndex < 0) state.reviewIndex = 0;
+        if (state.reviewIndex >= state.reviewQueue.length) return finishReview();
+        renderReviewModal();
+      } catch (err) { alert(err.message); }
+    }
+
+    modalRoot.querySelector('#reviewNext').addEventListener('click', () => move(1));
+    modalRoot.querySelector('#reviewPrev').addEventListener('click', () => move(-1));
+    modalRoot.querySelector('#reviewDelete').addEventListener('click', async () => {
+      if (!confirm('Delete this media item from the managed library?')) return;
+      try {
+        await gmRequest({ method:'DELETE', path:`/api/media/${m.id}` });
+        cleanup();
+        state.reviewQueue.splice(state.reviewIndex, 1);
+        await loadLibrary(false);
+        if (!state.reviewQueue.length || state.reviewIndex >= state.reviewQueue.length) return finishReview();
+        renderReviewModal();
+      } catch (err) { alert(err.message); }
+    });
+
+    const keyHandler = (e) => {
+      if (!modalRoot.childElementCount) return document.removeEventListener('keydown', keyHandler, true);
+      if (e.target.matches('input, textarea, select')) return;
+      if (e.key >= '1' && e.key <= '9' && m.media_type !== 'video') {
+        const i = Number(e.key) - 1;
+        const boxes = [...reviewCats.querySelectorAll('input[data-catid]')];
+        if (boxes[i]) { e.preventDefault(); boxes[i].checked = !boxes[i].checked; }
+      } else if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); move(1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); move(-1); }
+    };
+    document.addEventListener('keydown', keyHandler, true);
+  }
+
+  function finishReview() {
+    modalRoot.innerHTML = '';
+    state.reviewQueue = [];
+    state.reviewIndex = 0;
+    loadLibrary();
+  }
+
+  loadLibrary(false);
+})();
