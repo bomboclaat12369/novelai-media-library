@@ -617,51 +617,55 @@ test('large library selection preserves thumbnail nodes and scroll position', as
 });
 
 for (const mode of ['display', 'navigate', 'error']) {
-  test(`cold cropped viewer waits before display: ${mode}`, async () => {
-    let complete, fail, decodes=0;
+  test(`cold cropped viewer clips the original without encoding: ${mode}`, async () => {
+    let extraWork=0;
     const media = ['cropped','plain'].map(id=>({id,character_id:'character',original_name:id+'.png',media_type:'image',categories:[],in_all:true,in_review:false,thumb_rel:'thumb.png',crop_top:id==='cropped'?.2:0,crop_bottom:0}));
     const f = await fixture({media, configure(w) {
-      w.createImageBitmap = () => { decodes++; return new Promise((resolve,reject)=>{complete=()=>resolve({width:100,height:100,close(){}});fail=reject;}); };
-      w.HTMLCanvasElement.prototype.getContext = () => ({drawImage(){}});
-      w.HTMLCanvasElement.prototype.toBlob = fn => fn(new w.Blob(['crop'],{type:'image/png'}));
-      w.HTMLImageElement.prototype.decode = async function() {};
+      w.createImageBitmap = () => { extraWork++; throw new Error('Unexpected bitmap crop'); };
+      w.HTMLCanvasElement.prototype.toBlob = () => { extraWork++; throw new Error('Unexpected crop encoding'); };
     }});
     try {
       const stage=f.root.getElementById('stage1');
+      Object.defineProperties(stage,{clientWidth:{value:100},clientHeight:{value:100}});
       const exposed=[];
       const observer=new f.w.MutationObserver(records=>{
-        for(const r of records) for(const node of r.addedNodes) if(node.tagName==='IMG' && node.alt==='cropped.png') exposed.push({src:node.src,original:node.dataset.naiCropOriginal,key:node.dataset.naiCropKey});
+        for(const r of records) for(const node of r.addedNodes) if(node.tagName==='IMG' && node.alt==='cropped.png') exposed.push(node.style.visibility);
       });
       observer.observe(stage,{childList:true});
       f.root.querySelector('.tile[data-id="cropped"]').click();
       await delay(120);
-      assert.equal(decodes,1,'prepare one crop while original remains detached');
-      assert.equal(stage.querySelector('img'),null,'uncropped original must never be attached while crop is pending');
-      assert.match(stage.textContent,/Loading/);
+      const img=stage.querySelector('img'), original=img.src;
+      assert.equal(img.style.visibility,'hidden','hide only while original dimensions are unavailable');
+      assert.deepEqual(exposed,['hidden'],'never attach a visible uncropped original');
+      assert.equal(extraWork,0);
       if(mode==='navigate') {
         f.root.querySelector('.tile[data-id="plain"]').click();
         await delay(70);
-        assert.equal(stage.querySelector('img').alt,'plain.png');
-        complete();
-      } else if(mode==='error') fail(new Error('fixture crop failed'));
-      else complete();
-      await delay(120);
-      if(mode==='display') {
-        assert.equal(exposed.length,1);
-        assert.ok(exposed[0].key.startsWith('cropped:'));
-        assert.notEqual(exposed[0].src,exposed[0].original);
-        f.root.querySelector('.tile[data-id="plain"]').click();
-        await delay(40);
-        f.root.querySelector('.tile[data-id="cropped"]').click();
-        await delay(100);
-        assert.equal(decodes,1,'reselection reuses the prepared crop');
-        assert.equal(exposed.length,2);
-        assert.notEqual(exposed[1].src,exposed[1].original);
-      } else {
-        assert.equal(exposed.length,0);
-        if(mode==='navigate') assert.equal(stage.querySelector('img').alt,'plain.png','late crop must not overwrite a newer selection');
-        else {assert.equal(stage.querySelector('img'),null);assert.match(stage.textContent,/fixture crop failed/);}
       }
+      Object.defineProperties(img,{naturalWidth:{value:100},naturalHeight:{value:100}});
+      img.dispatchEvent(new f.w.Event(mode==='error'?'error':'load'));
+      await delay(40);
+      if(mode==='display') {
+        assert.equal(stage.querySelector('img'),img);
+        assert.equal(img.src,original,'use the original URL without a second image');
+        assert.equal(img.style.visibility,'visible');
+        assert.equal(img.style.clipPath,'inset(20% 0 0% 0)');
+        assert.equal(img.style.width,'100px');
+        assert.equal(img.style.height,'100px');
+        assert.equal(img.style.top,'-10px');
+        let mutations=0;
+        const styles=new f.w.MutationObserver(rs=>{mutations+=rs.length;});
+        styles.observe(img,{attributes:true,attributeFilter:['style']});
+        f.root.naiPrepareViewerImage(img,media[0]);
+        await delay(20); styles.disconnect();
+        assert.equal(mutations,0,'unchanged crop must not keep writing layout styles');
+      } else if(mode==='navigate') {
+        assert.equal(stage.querySelector('img').alt,'plain.png','late image load must not replace the new selection');
+      } else {
+        assert.equal(stage.querySelector('img'),null);
+        assert.match(stage.textContent,/Image could not be loaded/);
+      }
+      assert.equal(extraWork,0);
       observer.disconnect();
       assert.deepEqual(f.errors,[]);
     } finally { f.dom.window.close(); }
