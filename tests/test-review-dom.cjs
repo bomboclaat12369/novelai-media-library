@@ -575,3 +575,42 @@ test('Rapid Review uses the full available webpage height without changing its w
     assert.match(assembled, /inline:'center'/);
   } finally { f.dom.window.close(); }
 });
+
+
+test('large library selection preserves thumbnail nodes and scroll position', async () => {
+  const f = await fixture();
+  try {
+    const count = Number(process.env.NAI_GRID_FIXTURE_SIZE || 1000);
+    f.library.media.push(...Array.from({length:count}, (_,i) => ({
+      id:`scale-${i}`, character_id:'character', original_name:`Image ${i}.png`,
+      media_type:'image', categories:[], in_review:false, in_all:true, thumb_rel:'fixture/thumb.webp',
+    })));
+    f.root.getElementById('refreshBtn').click();
+    await delay(750);
+    const grid = f.root.getElementById('grid');
+    const tiles = [...grid.querySelectorAll('.tile[data-id]')];
+    assert.equal(tiles.length,count);
+    const images = tiles.map(tile=>tile.querySelector('img'));
+    grid.scrollTop=640;
+    let replaced=0;
+    const observer=new f.w.MutationObserver(records=>{
+      for(const r of records) replaced+=r.addedNodes.length+r.removedNodes.length;
+    });
+    observer.observe(grid,{childList:true});
+    for(const index of [0,Math.floor(count/2),count-1]) {
+      tiles[index].click();
+      await delay(180);
+      assert.equal(f.root.querySelector('#grid .tile.active')?.dataset.id,`scale-${index}`);
+      assert.equal(f.root.getElementById('counter').textContent,`${index+1} / ${count}`);
+      assert.equal(grid.scrollTop,640);
+    }
+    observer.disconnect();
+    assert.equal(replaced,0,'selection must not remove/reinsert grid tiles');
+    const after=[...grid.querySelectorAll('.tile[data-id]')];
+    for(let i=0;i<count;i++){
+      assert.equal(after[i],tiles[i]);
+      assert.equal(after[i].querySelector('img'),images[i]);
+    }
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
