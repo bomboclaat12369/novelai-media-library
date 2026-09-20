@@ -9,7 +9,7 @@ const config = JSON.parse(fs.readFileSync(path.join(repo, process.env.NAI_RELEAS
 const assembled = config.parts.map(p => fs.readFileSync(path.join(repo,p),'utf8')).join('');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function fixture() {
+async function fixture({media = [], configure = null} = {}) {
   const errors = [], writes = [], revoked = [];
   const vc = new VirtualConsole();
   vc.on('jsdomError', e => { if (!e.message.includes('Not implemented:')) errors.push(e); });
@@ -17,7 +17,7 @@ async function fixture() {
     url:'https://novelai.net/stories', runScripts:'outside-only', pretendToBeVisual:true, virtualConsole:vc,
   });
   const w = dom.window;
-  const library = {characters:[{id:'character',name:'Fixture',categories:[{id:'dress',name:'Dress'}]}], media:[], sets:[]};
+  const library = {characters:[{id:'character',name:'Fixture',categories:[{id:'dress',name:'Dress'}]}], media, sets:[]};
   let blobIndex = 0, frames = 0;
   w.URL.createObjectURL = () => `blob:https://novelai.net/${++blobIndex}`;
   w.URL.revokeObjectURL = url => revoked.push(url);
@@ -82,6 +82,7 @@ async function fixture() {
     return {abort() { canceled = true; options.onabort?.({}); }};
   };
   w.document.documentElement.dataset.naiMediaPayloadVersion = config.version;
+  if (configure) configure(w);
   w.eval(assembled);
   await delay(250);
   const root = w.document.getElementById('nai-media-host').shadowRoot;
@@ -614,3 +615,55 @@ test('large library selection preserves thumbnail nodes and scroll position', as
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
+
+for (const mode of ['display', 'navigate', 'error']) {
+  test(`cold cropped viewer waits before display: ${mode}`, async () => {
+    let complete, fail, decodes=0;
+    const media = ['cropped','plain'].map(id=>({id,character_id:'character',original_name:id+'.png',media_type:'image',categories:[],in_all:true,in_review:false,thumb_rel:'thumb.png',crop_top:id==='cropped'?.2:0,crop_bottom:0}));
+    const f = await fixture({media, configure(w) {
+      w.createImageBitmap = () => { decodes++; return new Promise((resolve,reject)=>{complete=()=>resolve({width:100,height:100,close(){}});fail=reject;}); };
+      w.HTMLCanvasElement.prototype.getContext = () => ({drawImage(){}});
+      w.HTMLCanvasElement.prototype.toBlob = fn => fn(new w.Blob(['crop'],{type:'image/png'}));
+      w.HTMLImageElement.prototype.decode = async function() {};
+    }});
+    try {
+      const stage=f.root.getElementById('stage1');
+      const exposed=[];
+      const observer=new f.w.MutationObserver(records=>{
+        for(const r of records) for(const node of r.addedNodes) if(node.tagName==='IMG' && node.alt==='cropped.png') exposed.push({src:node.src,original:node.dataset.naiCropOriginal,key:node.dataset.naiCropKey});
+      });
+      observer.observe(stage,{childList:true});
+      f.root.querySelector('.tile[data-id="cropped"]').click();
+      await delay(120);
+      assert.equal(decodes,1,'prepare one crop while original remains detached');
+      assert.equal(stage.querySelector('img'),null,'uncropped original must never be attached while crop is pending');
+      assert.match(stage.textContent,/Loading/);
+      if(mode==='navigate') {
+        f.root.querySelector('.tile[data-id="plain"]').click();
+        await delay(70);
+        assert.equal(stage.querySelector('img').alt,'plain.png');
+        complete();
+      } else if(mode==='error') fail(new Error('fixture crop failed'));
+      else complete();
+      await delay(120);
+      if(mode==='display') {
+        assert.equal(exposed.length,1);
+        assert.ok(exposed[0].key.startsWith('cropped:'));
+        assert.notEqual(exposed[0].src,exposed[0].original);
+        f.root.querySelector('.tile[data-id="plain"]').click();
+        await delay(40);
+        f.root.querySelector('.tile[data-id="cropped"]').click();
+        await delay(100);
+        assert.equal(decodes,1,'reselection reuses the prepared crop');
+        assert.equal(exposed.length,2);
+        assert.notEqual(exposed[1].src,exposed[1].original);
+      } else {
+        assert.equal(exposed.length,0);
+        if(mode==='navigate') assert.equal(stage.querySelector('img').alt,'plain.png','late crop must not overwrite a newer selection');
+        else {assert.equal(stage.querySelector('img'),null);assert.match(stage.textContent,/fixture crop failed/);}
+      }
+      observer.disconnect();
+      assert.deepEqual(f.errors,[]);
+    } finally { f.dom.window.close(); }
+  });
+}
