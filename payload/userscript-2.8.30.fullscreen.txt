@@ -1,0 +1,441 @@
+// NovelAI Media Library v2.3.8: explicit slot selection + unified 2/3-pane fullscreen
+(() => {
+  'use strict';
+
+  const API = 'http://127.0.0.1:8765';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV238 === '1') return;
+  document.documentElement.dataset.naiMediaV238 = '1';
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v238-style';
+  style.textContent = `
+    .naiSlotSelectBtn {
+      display:none;
+      padding:5px 8px !important;
+      min-width:52px;
+      font-size:11px !important;
+    }
+    .naiSlotSelectBtn.active {
+      background:#6155d9 !important;
+      border-color:#7268e5 !important;
+    }
+
+    .naiTripleFullscreen {
+      position:fixed !important;
+      inset:0 !important;
+      z-index:2147483970 !important;
+      background:rgba(0,0,0,.97) !important;
+      display:grid !important;
+      grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+      gap:7px !important;
+      padding:12px !important;
+    }
+    .naiTripleFullscreen.twoPane {
+      grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+    }
+    .naiTripleFullscreen.twoPane .naiThirdPane {
+      display:none !important;
+    }
+    .naiTriplePane {
+      position:relative !important;
+      min-width:0 !important;
+      min-height:0 !important;
+      overflow:hidden !important;
+      display:flex !important;
+      align-items:center !important;
+      justify-content:center !important;
+      background:#05060d !important;
+      border:1px solid rgba(255,255,255,.06) !important;
+    }
+    .naiTriplePane > img,
+    .naiTriplePane > video,
+    .naiThirdMedia > img,
+    .naiThirdMedia > video {
+      width:100% !important;
+      height:100% !important;
+      max-width:100% !important;
+      max-height:100% !important;
+      object-fit:contain !important;
+      display:block !important;
+    }
+    .naiThirdPane {
+      align-items:stretch !important;
+      justify-content:stretch !important;
+    }
+    .right.naiTripleBrowserPanel {
+      position:relative !important;
+      inset:auto !important;
+      left:auto !important;
+      right:auto !important;
+      top:auto !important;
+      bottom:auto !important;
+      width:100% !important;
+      height:100% !important;
+      max-width:none !important;
+      min-width:0 !important;
+      z-index:1 !important;
+      border-left:0 !important;
+    }
+    .naiThirdMedia {
+      position:absolute !important;
+      inset:0 !important;
+      display:flex !important;
+      align-items:center !important;
+      justify-content:center !important;
+      background:#05060d !important;
+    }
+    .naiThirdMedia[hidden] { display:none !important; }
+    .naiThirdChange {
+      position:absolute !important;
+      top:10px !important;
+      left:10px !important;
+      z-index:4 !important;
+      padding:7px 10px !important;
+      border-radius:8px !important;
+      background:rgba(22,24,47,.90) !important;
+      backdrop-filter:blur(4px) !important;
+    }
+    .naiPaneToggle {
+      position:fixed !important;
+      top:13px !important;
+      right:66px !important;
+      z-index:2147483980 !important;
+      min-width:86px !important;
+      height:38px !important;
+      padding:0 11px !important;
+      border-radius:8px !important;
+      background:rgba(22,24,47,.90) !important;
+    }
+    .naiTripleClose {
+      position:fixed !important;
+      top:12px !important;
+      right:14px !important;
+      z-index:2147483980 !important;
+      width:40px !important;
+      height:40px !important;
+      padding:0 !important;
+      display:grid !important;
+      place-items:center !important;
+      border-radius:50% !important;
+      background:rgba(22,24,47,.90) !important;
+      font-size:24px !important;
+    }
+    @media (max-width:1200px) {
+      .naiTripleFullscreen { gap:4px !important; padding:6px !important; }
+    }
+  `;
+  root.appendChild(style);
+
+  root.querySelectorAll('.naiSlotClickOverlay').forEach(el => { el.style.display = 'none'; });
+
+  const viewerNav = root.querySelector('.viewerNav');
+  const stages = root.getElementById('stages');
+  const splitBtn = root.getElementById('splitBtn');
+  const slotButtons = [];
+
+  function updateSlotButtons() {
+    const isSplit = !!stages?.classList.contains('split');
+    slotButtons.forEach((button, i) => {
+      button.style.display = isSplit ? '' : 'none';
+      button.classList.toggle('active', !!root.getElementById(`stage${i + 1}`)?.classList.contains('slot-active'));
+    });
+  }
+
+  if (viewerNav && !root.getElementById('naiSlotSelect1')) {
+    for (let i = 0; i < 2; i++) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.id = `naiSlotSelect${i + 1}`;
+      button.className = 'naiSlotSelectBtn';
+      button.textContent = `Slot ${i + 1}`;
+      button.title = `Select slot ${i + 1}`;
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const stage = root.getElementById(`stage${i + 1}`);
+        if (!stage || !stages?.classList.contains('split')) return;
+        stage.dispatchEvent(new MouseEvent('click', { bubbles:true, composed:true, cancelable:true }));
+        setTimeout(updateSlotButtons, 0);
+      });
+      slotButtons.push(button);
+    }
+    viewerNav.insertBefore(slotButtons[0], viewerNav.firstChild);
+    viewerNav.insertBefore(slotButtons[1], slotButtons[0].nextSibling);
+    updateSlotButtons();
+    splitBtn?.addEventListener('click', () => setTimeout(updateSlotButtons, 0));
+    stages?.addEventListener('pointerdown', () => setTimeout(updateSlotButtons, 0), true);
+  }
+
+  function gmRequest(path) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method:'GET',
+        url:`${API}${path}`,
+        headers:{ Origin:'https://novelai.net' },
+        timeout:60000,
+        onload:res => {
+          if (res.status < 200 || res.status >= 300) {
+            reject(new Error(`Request failed (${res.status})`));
+            return;
+          }
+          try { resolve(JSON.parse(res.responseText || '{}')); }
+          catch (_) { reject(new Error('Invalid library response.')); }
+        },
+        onerror:() => reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+        ontimeout:() => reject(new Error('The local media request timed out.')),
+      });
+    });
+  }
+
+  function mediaUrl(id) {
+    return `${API}/api/media/${encodeURIComponent(id)}/original`;
+  }
+
+  function copyViewerMedia(source) {
+    if (!source) return null;
+    if (source.tagName === 'IMG') {
+      const img = document.createElement('img');
+      img.src = source.currentSrc || source.src;
+      img.alt = source.alt || '';
+      if (source.dataset.naiCropMediaId) root.naiPrepareViewerImage?.(img, {id:source.dataset.naiCropMediaId});
+      return img;
+    }
+    if (source.tagName === 'VIDEO') {
+      const video = document.createElement('video');
+      const startTime = Number.isFinite(source.currentTime) ? source.currentTime : 0;
+      const wasPlaying = !source.paused;
+      video.dataset.naiTripleFull = '1';
+      video.controls = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.volume = Number.isFinite(source.volume) ? source.volume : 0.08;
+      video.muted = source.muted;
+      video._naiOriginalVideo = source;
+      video.src = source.currentSrc || source.src;
+      source.pause();
+      video.addEventListener('loadedmetadata', () => {
+        try {
+          const end = Number.isFinite(video.duration) && video.duration > 0
+            ? Math.max(0, video.duration - 0.05)
+            : startTime;
+          video.currentTime = Math.min(startTime, end);
+        } catch (_) {}
+        if (wasPlaying) video.play().catch(() => {});
+      }, { once:true });
+      return video;
+    }
+    return null;
+  }
+
+  let fullscreenState = null;
+  let lastThirdMediaId = null;
+  let preferTwoPane = false;
+
+  function restoreRightPanel() {
+    const s = fullscreenState;
+    if (!s?.rightPanel || !s.originalParent) return;
+    s.rightPanel.classList.remove('naiTripleBrowserPanel');
+    s.rightPanel.style.removeProperty('display');
+    if (s.originalNext && s.originalNext.parentNode === s.originalParent) {
+      s.originalParent.insertBefore(s.rightPanel, s.originalNext);
+    } else {
+      s.originalParent.appendChild(s.rightPanel);
+    }
+  }
+
+  function closeTripleFullscreen() {
+    const s = fullscreenState;
+    if (!s) return;
+
+    s.box.querySelectorAll('video[data-nai-triple-full]').forEach(fullVideo => {
+      const original = fullVideo._naiOriginalVideo;
+      if (original?.isConnected) {
+        try { original.currentTime = fullVideo.currentTime; } catch (_) {}
+        if (!fullVideo.paused) original.play().catch(() => {});
+        else original.pause();
+      }
+      try { fullVideo.pause(); } catch (_) {}
+    });
+    s.thirdMedia?.querySelectorAll('video').forEach(v => { try { v.pause(); } catch (_) {} });
+
+    restoreRightPanel();
+    s.box.remove();
+    fullscreenState = null;
+  }
+
+  function showThirdBrowser() {
+    const s = fullscreenState;
+    if (!s) return;
+    s.thirdMedia.querySelectorAll('video').forEach(v => { try { v.pause(); } catch (_) {} });
+    s.thirdMedia.hidden = true;
+    s.rightPanel.style.removeProperty('display');
+  }
+
+  async function showThirdMedia(mediaId) {
+    const s = fullscreenState;
+    if (!s || !mediaId) return;
+    try {
+      const library = await gmRequest('/api/library');
+      const media = Array.isArray(library?.media) ? library.media.find(m => m.id === mediaId) : null;
+      if (!media) throw new Error('Could not find that media item.');
+
+      lastThirdMediaId = mediaId;
+      s.thirdMedia.innerHTML = '';
+
+      const change = document.createElement('button');
+      change.type = 'button';
+      change.className = 'naiThirdChange';
+      change.textContent = 'Choose different';
+      change.title = 'Return to thumbnails';
+      change.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        showThirdBrowser();
+      });
+      s.thirdMedia.appendChild(change);
+
+      if (media.media_type === 'video') {
+        const video = document.createElement('video');
+        video.controls = true;
+        video.loop = true;
+        video.playsInline = true;
+        video.volume = 0.08;
+        video.src = mediaUrl(mediaId);
+        s.thirdMedia.appendChild(video);
+      } else {
+        const img = document.createElement('img');
+        img.src = mediaUrl(mediaId);
+        img.alt = media.original_name || '';
+        root.naiPrepareViewerImage?.(img, media);
+        s.thirdMedia.appendChild(img);
+      }
+
+      s.rightPanel.style.display = 'none';
+      s.thirdMedia.hidden = false;
+    } catch (err) {
+      alert(err?.message || String(err));
+    }
+  }
+
+  function setPaneMode(twoPane) {
+    const s = fullscreenState;
+    if (!s) return;
+    preferTwoPane = !!twoPane;
+    s.box.classList.toggle('twoPane', preferTwoPane);
+    s.toggle.textContent = preferTwoPane ? 'Show 3rd pane' : '2 images';
+    s.toggle.title = preferTwoPane
+      ? 'Restore the third media/browser pane'
+      : 'Hide the third pane and maximize the first two';
+    if (preferTwoPane) {
+      s.thirdMedia.querySelectorAll('video').forEach(v => { try { v.pause(); } catch (_) {} });
+    }
+  }
+
+  function openTripleFullscreen() {
+    if (fullscreenState) return true;
+    if (!stages?.classList.contains('split')) return false;
+
+    const source1 = root.getElementById('stage1')?.querySelector('img,video');
+    const source2 = root.getElementById('stage2')?.querySelector('img,video');
+    if (!source1 && !source2) return false;
+
+    const lightRoot = root.getElementById('lightRoot');
+    const rightPanel = root.querySelector('.panel.right');
+    if (!lightRoot || !rightPanel) return false;
+    lightRoot.innerHTML = '';
+
+    const originalParent = rightPanel.parentNode;
+    const originalNext = rightPanel.nextSibling;
+
+    const box = document.createElement('div');
+    box.className = 'naiTripleFullscreen';
+
+    for (const source of [source1, source2]) {
+      const pane = document.createElement('div');
+      pane.className = 'naiTriplePane';
+      if (source) {
+        const copy = copyViewerMedia(source);
+        if (copy) pane.appendChild(copy);
+      }
+      box.appendChild(pane);
+    }
+
+    const thirdPane = document.createElement('div');
+    thirdPane.className = 'naiTriplePane naiThirdPane';
+    box.appendChild(thirdPane);
+
+    rightPanel.classList.add('naiTripleBrowserPanel');
+    thirdPane.appendChild(rightPanel);
+
+    const thirdMedia = document.createElement('div');
+    thirdMedia.className = 'naiThirdMedia';
+    thirdMedia.hidden = true;
+    thirdPane.appendChild(thirdMedia);
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'naiPaneToggle';
+    toggle.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      setPaneMode(!fullscreenState?.box.classList.contains('twoPane'));
+    });
+    box.appendChild(toggle);
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'naiTripleClose';
+    close.textContent = '×';
+    close.title = 'Close fullscreen';
+    close.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeTripleFullscreen();
+    });
+    box.appendChild(close);
+
+    fullscreenState = {
+      box,
+      rightPanel,
+      originalParent,
+      originalNext,
+      thirdPane,
+      thirdMedia,
+      toggle,
+    };
+
+    lightRoot.appendChild(box);
+    setPaneMode(preferTwoPane);
+    if (lastThirdMediaId) showThirdMedia(lastThirdMediaId);
+    return true;
+  }
+
+  root.addEventListener('click', event => {
+    const s = fullscreenState;
+    if (!s || !s.rightPanel.contains(event.target)) return;
+    const tile = event.target.closest?.('.tile[data-id]');
+    if (!tile) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    showThirdMedia(tile.dataset.id);
+  }, true);
+
+  window.addEventListener('click', event => {
+    const path = event.composedPath?.() || [];
+    if (!path.includes(host) || !stages?.classList.contains('split')) return;
+
+    const fullButton = path.find(node => node?.id === 'fullBtn');
+    const stageImage = path.find(node => node?.tagName === 'IMG' && node?.parentElement?.classList?.contains('stage'));
+    if (!fullButton && !stageImage) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    openTripleFullscreen();
+  }, true);
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && fullscreenState) closeTripleFullscreen();
+  }, true);
+})();
