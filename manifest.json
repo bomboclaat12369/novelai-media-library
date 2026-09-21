@@ -33,22 +33,22 @@
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.10.review-height.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.3.transport-end.txt"
   ],
-  "runtime_version": "2.7.20",
+  "runtime_version": "2.7.21",
   "runtime_encoding": "base64",
-  "runtime_sha256": "7af46a8ea7d1994da2b72f98ff36756bbf7e932449cd788093bd87d0cbe82e52",
+  "runtime_sha256": "798c04bef413ab91ea6908b2fc7b37d5fa1672d473b8b70754f8ef9dd06627af",
   "runtime_parts": [
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.20.part01.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.20.part02.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.20.part03.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.20.part04.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.20.part05.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.20.part06.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.20.part07.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.20.part08.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.20.part09.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.20.part10.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.20.part11.b64",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.20.part12.b64"
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.21.part01.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.21.part02.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.21.part03.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.21.part04.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.21.part05.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.21.part06.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.21.part07.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.21.part08.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.21.part09.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.21.part10.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.21.part11.b64",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.21.part12.b64"
   ],
   "userscript_sha256": "588a2684190fbb59da754df682e00cf263a202987f2d3cda7f24643609ad822a"
 }
