@@ -78,6 +78,8 @@ class LibraryStore:
         self.last_import_debug: dict[str, Any] = {}
         self._thumbnail_queue = queue.Queue()
         self._thumbnail_worker = None
+        self._metadata_index_worker = None
+        self._metadata_index = {"running": False, "total": 0, "processed": 0, "updated": 0}
         self.root.mkdir(parents=True, exist_ok=True)
         self.media_dir.mkdir(parents=True, exist_ok=True)
         self.thumb_dir.mkdir(parents=True, exist_ok=True)
@@ -1240,6 +1242,70 @@ class LibraryStore:
                 pass
         return result
 
+    def metadata_index_status(self) -> dict[str, Any]:
+        with self.lock:
+            return dict(self._metadata_index)
+
+    def start_metadata_index(self) -> dict[str, Any]:
+        """Index existing source headers only when the user asks to sort by size."""
+        with self.lock:
+            if self._metadata_index_worker is not None and self._metadata_index_worker.is_alive():
+                return dict(self._metadata_index)
+            jobs = [
+                (str(m.get("id") or ""), str(m.get("stored_rel") or ""), str(m.get("media_type") or "image"))
+                for m in self.data.get("media", [])
+                if m.get("stored_rel") and (
+                    m.get("file_bytes") is None or
+                    (m.get("media_type") == "image" and (m.get("width") is None or m.get("height") is None))
+                )
+            ]
+            self._metadata_index = {"running": bool(jobs), "total": len(jobs), "processed": 0, "updated": 0}
+            if not jobs:
+                return dict(self._metadata_index)
+            self._metadata_index_worker = threading.Thread(
+                target=self._run_metadata_index, args=(jobs,), name="nai-metadata-index", daemon=True,
+            )
+            self._metadata_index_worker.start()
+            return dict(self._metadata_index)
+
+    def _run_metadata_index(self, jobs: list[tuple[str, str, str]]) -> None:
+        dirty = False
+        try:
+            for position, (media_id, stored_rel, media_type) in enumerate(jobs, start=1):
+                source = (self.root / stored_rel).resolve()
+                file_bytes = width = height = None
+                try:
+                    if source.exists() and self.root.resolve() in source.parents:
+                        file_bytes = source.stat().st_size
+                        if media_type == "image" and Image is not None:
+                            # Image.open reads headers; it does not fully decode the source.
+                            with Image.open(source) as image:
+                                width, height = image.size
+                except Exception:
+                    pass
+                with self.lock:
+                    item = self.media_item(media_id)
+                    changed = False
+                    if item:
+                        if file_bytes is not None and item.get("file_bytes") != file_bytes:
+                            item["file_bytes"] = file_bytes; changed = True
+                        if width and height and (item.get("width") != width or item.get("height") != height):
+                            item["width"] = width; item["height"] = height; changed = True
+                    dirty = dirty or changed
+                    self._metadata_index["processed"] = position
+                    if changed:
+                        self._metadata_index["updated"] += 1
+                    # Persist in batches, so a large library never performs one database
+                    # rewrite per item and interruption still leaves useful progress.
+                    if dirty and (position % 100 == 0 or position == len(jobs)):
+                        self.save(); dirty = False
+                time.sleep(0.003)
+        finally:
+            with self.lock:
+                if dirty:
+                    self.save()
+                self._metadata_index["running"] = False
+
 
 class MediaHandler(BaseHTTPRequestHandler):
     server_version = "NovelAIMedia/1.0"
@@ -1452,6 +1518,9 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/library":
                 self._send_json(200, self.store.public_library())
                 return
+            if path == "/api/media/metadata-index":
+                self._send_json(200, self.store.metadata_index_status())
+                return
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/quality", path)
             if match:
                 self._send_json(200, self.store.media_quality(match.group(1)))
@@ -1480,6 +1549,10 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/undo/clear":
                 body = self._read_json()
                 self._send_json(200, self.store.clear_undo_history(str(body.get("entry_id", ""))))
+                return
+            if path == "/api/media/metadata-index":
+                self._read_json()
+                self._send_json(200, self.store.start_metadata_index())
                 return
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/needs-replacement", path)
             if match:
