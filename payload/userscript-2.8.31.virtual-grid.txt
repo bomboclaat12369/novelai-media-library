@@ -1,0 +1,103 @@
+// NovelAI Media Library 2.8.31: viewport-sized thumbnail grid, no idle polling.
+(() => {
+  'use strict';
+  const root = document.getElementById('nai-media-host')?.shadowRoot;
+  const grid = root?.getElementById('grid');
+  if (!grid) return;
+  const style = document.createElement('style');
+  style.textContent = `#grid{overflow-anchor:none;min-height:0} .naiGridSpacer{grid-column:1/-1;pointer-events:none;min-height:0}`;
+  root.appendChild(style);
+  const columns = 5, bufferRows = 3;
+  let entries = [], viewKey = '', options = {}, frame = 0, header = null;
+  const nodes = new Map();
+  const top = document.createElement('div'), bottom = document.createElement('div');
+  for (const spacer of [top,bottom]) { spacer.className='naiGridSpacer'; spacer.setAttribute('aria-hidden','true'); }
+  let metrics = null;
+
+  function dispose(node) { root.naiUnobserveGridTile?.(node); node.remove(); }
+  function measure() {
+    const css = getComputedStyle(grid);
+    const gap = parseFloat(css.rowGap) || 4;
+    const colGap = parseFloat(css.columnGap) || gap;
+    const px = (parseFloat(css.paddingLeft)||0)+(parseFloat(css.paddingRight)||0);
+    const paddingTop = parseFloat(css.paddingTop)||0;
+    const paddingBottom = parseFloat(css.paddingBottom)||0;
+    // A hidden panel keeps a bounded placeholder window until ResizeObserver reports its real size.
+    const width = grid.clientWidth || 500, height = grid.clientHeight || 700;
+    const cell = Math.max(1,(width-px-colGap*(columns-1))/columns);
+    const headHeight = header ? header.getBoundingClientRect().height + gap : 0;
+    return {gap,cell,stride:cell+gap,height,paddingTop,paddingBottom,headHeight};
+  }
+  function paint() {
+    frame = 0;
+    if (!viewKey) return;
+    metrics = measure();
+    const {gap,stride,height,paddingTop,paddingBottom,headHeight} = metrics;
+    const rows = Math.ceil(entries.length/columns);
+    const total = paddingTop+headHeight+Math.max(0,rows*stride-gap)+paddingBottom;
+    const scroll = Math.min(grid.scrollTop,Math.max(0,total-height));
+    if (grid.scrollTop !== scroll) grid.scrollTop=scroll;
+    const start = Math.max(0,Math.floor((scroll-paddingTop-headHeight)/stride)-bufferRows);
+    const end = Math.min(rows,Math.max(start+1,Math.ceil((scroll+height-paddingTop-headHeight)/stride)+bufferRows));
+    const wanted = entries.slice(start*columns,end*columns);
+    const keys = new Set(wanted.map(entry=>entry.key));
+    for (const [key,record] of nodes) {
+      if (!keys.has(key)) { dispose(record.node); nodes.delete(key); }
+    }
+    const desired = header ? [header] : [];
+    function spacer(node,pixels) {
+      const height = `${Math.max(0,pixels)}px`;
+      if (node.style.height !== height) node.style.height=height;
+      desired.push(node);
+    }
+    if (start) spacer(top,start*stride-gap);
+    for (const entry of wanted) {
+      let record=nodes.get(entry.key);
+      if (record && (record.value !== entry.value || record.decorationKey !== options.decorationKey)) {
+        dispose(record.node); nodes.delete(entry.key); record=null;
+      }
+      if (!record) {
+        const node=options.create(entry);
+        record={node,value:entry.value,decorationKey:options.decorationKey}; nodes.set(entry.key,record);
+      }
+      desired.push(record.node);
+    }
+    if (end<rows) spacer(bottom,(rows-end)*stride-gap);
+    if (!entries.length && options.empty) desired.push(options.empty);
+    const keep = new Set(desired);
+    for (const child of [...grid.children]) if (!keep.has(child)) dispose(child);
+    let cursor=grid.firstChild;
+    for (const node of desired) {
+      if (cursor===node) cursor=cursor.nextSibling;
+      else grid.insertBefore(node,cursor);
+    }
+    root.naiSyncGridSelection?.();
+  }
+  function schedule() { if (!frame) frame=requestAnimationFrame(paint); }
+  root.naiVirtualGrid = {
+    get key() { return viewKey; },
+    render(key,items,next) {
+      const changed = key !== viewKey;
+      if (changed) {
+        for (const record of nodes.values()) dispose(record.node);
+        nodes.clear(); grid.replaceChildren(); grid.scrollTop=0; header=null;
+      }
+      if (changed || next.headerKey !== options.headerKey) header=next.header || null;
+      viewKey=key; entries=items; options=next;
+      // Measure a new breadcrumb before computing the visible rows.
+      if (header && header.parentNode!==grid) grid.prepend(header);
+      if (frame) { cancelAnimationFrame(frame); frame=0; }
+      paint();
+    },
+    clear() {
+      viewKey=''; entries=[];
+      if (frame) { cancelAnimationFrame(frame); frame=0; }
+      for (const record of nodes.values()) dispose(record.node);
+      nodes.clear(); header=null;
+    },
+  };
+  grid.addEventListener('scroll',schedule,{passive:true});
+  const resize = new ResizeObserver(schedule);
+  resize.observe(grid);
+  window.addEventListener('pagehide',()=>{resize.disconnect();if(frame)cancelAnimationFrame(frame);},{once:true});
+})();
