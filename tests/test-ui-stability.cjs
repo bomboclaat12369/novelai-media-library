@@ -307,8 +307,12 @@ test('jumping does not save; an explicit Save marks the item while allowing it t
   assert.equal(f.requests.length, 0);
   await f.save();
   assert.deepEqual([...f.session.saved], ['image 1']);
-  assert.equal(f.requests.length, 2);
-  assert.match(f.requests[1].path, /\/review$/);
+  assert.equal(f.requests.length, 5);
+  assert.match(f.requests[0].path, /\/categories$/);
+  assert.match(f.requests[1].path, /\/favorite$/);
+  assert.match(f.requests[2].path, /\/featured$/);
+  assert.match(f.requests[3].path, /\/needs-replacement$/);
+  assert.match(f.requests[4].path, /\/review$/);
   assert.equal(f.media[1].in_review, true);
 });
 
