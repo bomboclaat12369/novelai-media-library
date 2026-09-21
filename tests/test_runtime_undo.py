@@ -46,15 +46,17 @@ class UndoTests(unittest.TestCase):
         self.assertFalse(restored.get('needs_replacement', False))
         self.assertEqual((self.store.root / restored['stored_rel']).read_bytes(), b'one')
 
-    def test_featured_is_image_only_and_undoable(self):
+    def test_featured_is_undoable_for_images_and_videos(self):
         image = self.image('featured')
         self.store.set_featured(image['id'], True)
         self.assertTrue(self.store.media_item(image['id'])['featured'])
         self.undo()
         self.assertFalse(self.store.media_item(image['id'])['featured'])
         video = self.store.import_bytes(b'clip', 'clip.mp4', self.owner['id'], [], {}, 'video/mp4')[0]
-        with self.assertRaises(ValueError):
-            self.store.set_featured(video['id'], True)
+        self.store.set_featured(video['id'], True)
+        self.assertTrue(self.store.media_item(video['id'])['featured'])
+        self.undo()
+        self.assertFalse(self.store.media_item(video['id'])['featured'])
 
     def test_delete_undo_restores_order_set_membership_cover_and_file_bytes(self):
         images = [self.image(str(i)) for i in range(3)]
