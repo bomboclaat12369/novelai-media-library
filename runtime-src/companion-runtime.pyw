@@ -137,6 +137,9 @@ class LibraryStore:
                 if "in_review" not in m:
                     m["in_review"] = False
                     changed = True
+                if "in_purgatory" not in m:
+                    m["in_purgatory"] = False
+                    changed = True
                 if "categories" not in m or not isinstance(m.get("categories"), list):
                     m["categories"] = []
                     changed = True
@@ -1049,7 +1052,7 @@ class LibraryStore:
             next_in_all = bool(m.get("in_all", True)) if in_all is None else bool(in_all)
             if m.get("media_type") == "video":
                 next_in_all = False
-            elif in_all is None and categories and not next_in_all:
+            elif in_all is None and categories and not next_in_all and not m.get("in_purgatory"):
                 # Keep the long-standing behavior: assigning a custom category to a
                 # set-only image also promotes it into the main All image view.
                 next_in_all = True
@@ -1071,9 +1074,28 @@ class LibraryStore:
             m = self.media_item(media_id)
             if not m:
                 raise KeyError("Media not found")
-            if bool(m.get("in_review")) == bool(in_review):
+            if bool(m.get("in_review")) == bool(in_review) and not (not in_review and bool(m.get("in_purgatory"))):
                 return m
-            return self._change_media(m, {"in_review": bool(in_review)}, "Change Review status")
+            if in_review:
+                return self._change_media(m, {"in_review": True, "in_purgatory": False}, "Change Review status")
+            # Promotion is the moment an item enters the normal library. Date-imported
+            # sorting should therefore use this time rather than its earlier Review import.
+            return self._change_media(m, {"in_review": False, "in_purgatory": False, "in_all": True, "created_at": now_iso()}, "Promote from Review")
+
+    def set_purgatory(self, media_id: str, in_purgatory: bool) -> dict[str, Any]:
+        with self.lock:
+            m = self.media_item(media_id)
+            if not m:
+                raise KeyError("Media not found")
+            if m.get("media_type") != "image":
+                raise ValueError("Only images can be sent to Purgatory")
+            target = bool(in_purgatory)
+            changes = {"in_purgatory": target}
+            if target:
+                changes.update({"in_review": False, "in_all": False})
+            if all(m.get(key) == value for key, value in changes.items()):
+                return m
+            return self._change_media(m, changes, "Send to Purgatory" if target else "Restore from Purgatory")
 
     def set_crop(self, media_id: str, top: Any = 0.0, bottom: Any = 0.0) -> dict[str, Any]:
         with self.lock:
@@ -1696,6 +1718,12 @@ class MediaHandler(BaseHTTPRequestHandler):
             if match:
                 body = self._read_json()
                 item = self.store.set_review(match.group(1), bool(body.get("in_review")))
+                self._send_json(200, item)
+                return
+            match = re.fullmatch(r"/api/media/([0-9a-f]+)/purgatory", path)
+            if match:
+                body = self._read_json()
+                item = self.store.set_purgatory(match.group(1), bool(body.get("in_purgatory")))
                 self._send_json(200, item)
                 return
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/crop", path)
