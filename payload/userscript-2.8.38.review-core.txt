@@ -1,0 +1,1579 @@
+// NovelAI Media Library v2.8.38: video Featured, retained queues, and per-character UI state
+(() => {
+  'use strict';
+
+  const API = 'http://127.0.0.1:8765';
+  const UI_STATE_KEY = 'nai-media-v1-ui';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV274 === '1') return;
+  document.documentElement.dataset.naiMediaV274 = '1';
+
+  const modalRoot = root.getElementById('modalRoot');
+  const catWrap = root.getElementById('categories');
+  const grid = root.getElementById('grid');
+  const charSelect = root.getElementById('characterSelect');
+  const searchInput = root.getElementById('search');
+  const refreshBtn = root.getElementById('refreshBtn');
+  const favBtn = root.getElementById('favBtn');
+  const prevBtn = root.getElementById('prevBtn');
+  const nextBtn = root.getElementById('nextBtn');
+  const randomBtn = root.getElementById('randomBtn');
+  const toolbar = root.querySelector('.toolbar');
+  const counter = root.getElementById('counter');
+  const stages = root.getElementById('stages');
+  if (!modalRoot || !catWrap || !grid || !charSelect || !favBtn || !stages) return;
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v270-style';
+  style.textContent = `
+    .naiReviewCat270{white-space:nowrap}
+    .naiFavVideoFilter270.active,.naiReviewVideoFilter270.active{background:#6155d9!important;border-color:#7268e5!important}
+    [data-nai-review-v270].modalWrap{padding:6px!important}
+    [data-nai-review-v270]>.modal.large{width:min(1500px,94vw)!important;height:min(96vh,980px)!important;max-width:none!important;max-height:none!important;box-sizing:border-box}
+    [data-nai-review-v270] .reviewBody{grid-template-columns:minmax(0,1fr) minmax(240px,300px);padding:8px;gap:10px}
+    [data-nai-review-v270] .reviewStage{position:relative}
+    [data-nai-review-v270] .reviewStage>img,[data-nai-review-v270] .reviewStage>video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+    [data-nai-review-v270] .reviewSide{overflow:auto;min-height:0}
+    [data-nai-review-v270] .modalHead,[data-nai-review-v270] .modalFoot{flex-shrink:0}
+    .naiReviewVisual270{min-height:0;display:flex;flex-direction:column;gap:8px}
+    .naiReviewVisual270 .reviewStage{flex:1;min-height:0}
+    .naiQueueHead270{display:flex;align-items:center;gap:8px;min-height:18px;color:#a8abc4;font:600 10px system-ui}
+    .naiQueueHead270 .grow{flex:1}
+    .naiQueuePager289{display:flex;align-items:center;gap:6px;white-space:nowrap}
+    .naiQueuePager289[hidden]{display:none!important}
+    .naiQueuePager289 button{font:600 10px system-ui;padding:2px 6px;height:22px}
+    .naiQueueHead270{flex-wrap:wrap;flex-shrink:0}
+    .naiQueueStrip270{flex-shrink:0}
+    .naiQueueStrip270{height:84px;display:flex;gap:6px;overflow:hidden;padding:2px}
+    .naiQueueThumb270{position:relative;flex:0 0 74px;width:74px;height:74px;border-radius:7px;overflow:hidden;background:#0d1024;border:1px solid rgba(255,255,255,.11);cursor:pointer;padding:0!important}
+    .naiQueueThumb270 img{width:100%;height:100%;object-fit:cover;display:block}
+    .naiQueueThumb270.current{outline:2px solid #8278ff;outline-offset:1px}
+    .naiQueueThumb270.saved:after{content:'✓';position:absolute;right:3px;top:3px;width:17px;height:17px;border-radius:999px;display:grid;place-items:center;background:rgba(30,130,72,.9);color:#fff;font:800 10px/1 system-ui}
+    .naiQueueThumb270 .idx{position:absolute;left:3px;bottom:3px;padding:2px 4px;border-radius:4px;background:rgba(0,0,0,.7);color:#fff;font:700 8px/1 system-ui}
+    .naiReviewSpecial270{border:1px solid rgba(142,132,255,.36)!important;background:#171b3e!important}
+    .naiReviewSpecial270 span:first-of-type{font-weight:700}
+    .naiReviewActions270{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+    .naiSetQueueWrap270{position:fixed;inset:0;z-index:2147484450;background:rgba(3,4,11,.9);display:flex;align-items:center;justify-content:center;padding:22px}
+    .naiSetQueueModal270{width:min(1040px,96vw);height:min(800px,92vh);display:flex;flex-direction:column;background:#171a36;border:1px solid rgba(255,255,255,.13);border-radius:12px;overflow:hidden}
+    .naiSetQueueHead270,.naiSetQueueFoot270{display:flex;align-items:center;gap:8px;padding:11px 13px}.naiSetQueueHead270{border-bottom:1px solid rgba(255,255,255,.09)}.naiSetQueueFoot270{border-top:1px solid rgba(255,255,255,.09);justify-content:flex-end}
+    .naiSetQueueBody270{flex:1;min-height:0;display:grid;grid-template-columns:240px minmax(0,1fr);gap:12px;padding:12px}
+    .naiSetQueueSide270{overflow:auto}.naiSetQueueGallery270{min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:max-content;gap:6px;align-content:start;padding:3px}
+    .naiSetQueueCard270{position:relative;aspect-ratio:1/1;border-radius:7px;overflow:hidden;background:#0d1024;border:1px solid rgba(255,255,255,.1);cursor:pointer}
+    .naiSetQueueCard270.selected{outline:2px solid #8278ff;outline-offset:1px}.naiSetQueueCard270 img{width:100%;height:100%;object-fit:cover;display:block}.naiSetQueueCard270 input{position:absolute;left:5px;top:5px;z-index:2}
+    .naiSetQueueCard270 .name{position:absolute;left:0;right:0;bottom:0;padding:12px 4px 3px;background:linear-gradient(transparent,rgba(3,5,14,.94));font:600 8px/1.1 system-ui;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .naiReviewFilteredEmpty270{grid-column:1/-1;padding:36px 12px;text-align:center;color:#a7abc4;font:13px/1.5 system-ui}
+  `;
+  root.appendChild(style);
+
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+  const formatBytes = bytes => {
+    const value=Number(bytes)||0;
+    if (value < 1024) return `${value} B`;
+    const units=['KB','MB','GB','TB']; let n=value/1024, i=0;
+    while(n>=1024 && i<units.length-1){ n/=1024; i++; }
+    return `${n.toFixed(n>=100 ? 0 : 1)} ${units[i]}`;
+  };
+
+  function gmRequest({method='GET', path, data=null, headers={}, responseType='text', timeout=120000}) {
+    return new Promise((resolve, reject) => GM_xmlhttpRequest({
+      method,
+      url:`${API}${path}`,
+      data,
+      headers:{Origin:'https://novelai.net', ...headers},
+      responseType,
+      timeout,
+      onload:res => {
+        if (res.status >= 200 && res.status < 300) {
+          if (responseType === 'blob') return resolve(res.response);
+          const text = res.responseText || '';
+          if (!text) return resolve(null);
+          try { return resolve(JSON.parse(text)); } catch (_) { return resolve(text); }
+        }
+        let message = `Request failed (${res.status})`;
+        try { message = JSON.parse(res.responseText || '{}').error || message; } catch (_) {}
+        reject(new Error(message));
+      },
+      onerror:()=>reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+      ontimeout:()=>reject(new Error('The local media request timed out.')),
+    }));
+  }
+
+  let library = null;
+  let favVideoMode = false;
+  let filterQueued = false;
+  let pseudoQueued = false;
+
+  async function refreshLibrary() {
+    // Use Tampermonkey's localhost-capable request path directly. Native page fetches from
+    // https://novelai.net to http://127.0.0.1 can sit in private-network/mixed-content checks
+    // for seconds before failing, which made otherwise local operations feel frozen.
+    library = await gmRequest({path:'/api/library', timeout:15000});
+    if (!Array.isArray(library?.sets)) library.sets = [];
+    return library;
+  }
+
+  // The base viewer and this layer keep separate snapshots. Allow a completed edit
+  // to update this layer immediately instead of waiting for a later refresh.
+  root.naiReviewApplyLibrary270 = snapshot => {
+    if (!snapshot) return;
+    library = snapshot;
+    if (!Array.isArray(library.sets)) library.sets = [];
+    scheduleMainFilter();
+    syncCategoryCounts();
+  };
+
+  const currentCharacterId = () => charSelect.value || '';
+  const currentCharacter = () => (library?.characters || []).find(c => c.id === currentCharacterId()) || null;
+  const drafts = new Map();
+  root.naiReviewDrafts = drafts;
+  const mediaById = id => drafts.get(id)?.media || (library?.media || []).find(m => m.id === id) || null;
+  const setById = id => (library?.sets || []).find(s => s.id === id) || null;
+
+  function uiState() {
+    try { return JSON.parse(localStorage.getItem(UI_STATE_KEY) || '{}') || {}; }
+    catch (_) { return {}; }
+  }
+
+  function activeMediaId() {
+    const state = uiState();
+    const slot = state.activeSlot === 1 ? 1 : 0;
+    const ids = Array.isArray(state.slotMediaIds) ? state.slotMediaIds : [];
+    return ids[slot] || state.selectedMediaId || root.querySelector('.tile.active[data-id]')?.dataset?.id || null;
+  }
+
+  function baseCategoryButtons() {
+    return [...catWrap.querySelectorAll('.cat:not(.naiSetsCat):not(.naiPurgatoryCat)')];
+  }
+
+  function publishedAllCount(characterId) {
+    return (library?.media || []).filter(m => {
+      if (m.character_id !== characterId || m.media_type === 'video' || m.in_review) return false;
+      return m.in_all !== false;
+    }).length;
+  }
+
+  function setTextIfChanged(el, text) {
+    if (el && el.textContent !== text) el.textContent = text;
+  }
+
+  function syncCategoryCounts() {
+    if (!library) return;
+    const cid = currentCharacterId();
+    const c = currentCharacter();
+    if (!cid || !c) return;
+    const items = (library.media || []).filter(m => m.character_id === cid);
+    const base = baseCategoryButtons();
+    setTextIfChanged(base[0], `All ${publishedAllCount(cid)}`);
+    setTextIfChanged(base[1], `★ Favorites ${items.filter(m => m.media_type !== 'video' && !m.in_review && !!m.favorite).length}`);
+    setTextIfChanged(base[2], `▶ Videos ${items.filter(m => m.media_type === 'video' && !m.in_review && !m.in_purgatory).length}`);
+    (c.categories || []).forEach((cat, idx) => {
+      setTextIfChanged(base[idx + 3], `${cat.name} ${items.filter(m => m.media_type !== 'video' && !m.in_review && (m.categories || []).includes(cat.id)).length}`);
+    });
+    const review = root.getElementById('naiReviewCat270');
+    const favoriteVideoFilter = root.getElementById('naiFavVideoFilter270');
+    setTextIfChanged(review, `Review ${items.filter(m => m.media_type === 'image' && !!m.in_review).length}`);
+    const reviewVideoFilter = root.getElementById('naiReviewVideoFilter270');
+    setTextIfChanged(favoriteVideoFilter, `★ Favorites ${items.filter(m => m.media_type === 'video' && !m.in_review && !m.in_purgatory && !!m.favorite).length}`);
+    setTextIfChanged(reviewVideoFilter, `Review videos ${items.filter(m => m.media_type === 'video' && !!m.in_review).length}`);
+    favoriteVideoFilter?.classList.toggle('active', favVideoMode);
+    favoriteVideoFilter?.classList.toggle('hidden', !base[2]?.classList.contains('active'));
+    reviewVideoFilter?.classList.toggle('hidden', !base[2]?.classList.contains('active'));
+  }
+
+  function ensurePseudoCategories() {
+    pseudoQueued = false;
+    if (!library) return;
+    const base = baseCategoryButtons();
+    const video = base[2];
+    if (!video) return;
+
+    let review = root.getElementById('naiReviewCat270');
+    if (!review) {
+      review = document.createElement('button');
+      review.type = 'button';
+      review.id = 'naiReviewCat270';
+      // naiSetsCat keeps the v2.5.0 index-based category code from treating this as a real category.
+      review.className = 'cat naiSetsCat naiReviewCat270';
+      review.title = 'Open images that are waiting for a keep/reject decision';
+      review.addEventListener('click', async event => {
+        event.preventDefault();
+        event.stopPropagation();
+        favVideoMode = false;
+        try {
+          await refreshLibrary();
+          const ids = reviewIdsByFilename('image');
+          if (!ids.length) return alert('There are no images in Review for this character.');
+          openReviewQueue(ids, 'review');
+        } catch (err) { alert(err?.message || String(err)); }
+      });
+    }
+    if (review.parentNode !== catWrap || review.nextSibling !== video) catWrap.insertBefore(review, video);
+
+    let favoriteVideoFilter = root.getElementById('naiFavVideoFilter270');
+    if (!favoriteVideoFilter && toolbar) {
+      favoriteVideoFilter = document.createElement('button');
+      favoriteVideoFilter.type = 'button';
+      favoriteVideoFilter.id = 'naiFavVideoFilter270';
+      favoriteVideoFilter.className = 'naiFavVideoFilter270 hidden';
+      favoriteVideoFilter.title = 'Show only favorited videos while the Videos tab is active';
+      favoriteVideoFilter.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const currentVideo=baseCategoryButtons()[2];
+        if (currentVideo && !currentVideo.classList.contains('active')) currentVideo.click();
+        favVideoMode = !favVideoMode;
+        scheduleMainFilter();
+        syncCategoryCounts();
+      });
+      toolbar.insertBefore(favoriteVideoFilter, root.getElementById('addMediaBtn') || null);
+    }
+
+    let reviewVideoFilter = root.getElementById('naiReviewVideoFilter270');
+    if (!reviewVideoFilter && toolbar) {
+      reviewVideoFilter = document.createElement('button');
+      reviewVideoFilter.type = 'button';
+      reviewVideoFilter.id = 'naiReviewVideoFilter270';
+      reviewVideoFilter.className = 'naiReviewVideoFilter270 hidden';
+      reviewVideoFilter.title = 'Open videos that are waiting for a keep/reject decision';
+      reviewVideoFilter.addEventListener('click', async event => {
+        event.preventDefault();
+        event.stopPropagation();
+        favVideoMode = false;
+        try {
+          await refreshLibrary();
+          const ids = reviewIdsByFilename('video');
+          if (!ids.length) return alert('There are no videos in Review for this character.');
+          openReviewQueue(ids, 'video-review');
+        } catch (err) { alert(err?.message || String(err)); }
+      });
+      toolbar.insertBefore(reviewVideoFilter, favoriteVideoFilter || root.getElementById('addMediaBtn') || null);
+    }
+
+    syncCategoryCounts();
+  }
+
+  function reviewIdsByFilename(mediaType) {
+    return (library.media || [])
+      .filter(m => m.character_id === currentCharacterId() && m.media_type === mediaType && !!m.in_review)
+      .sort((a,b) => String(b.original_name || '').localeCompare(String(a.original_name || ''), undefined, {numeric:true, sensitivity:'base'}) || String(b.id).localeCompare(String(a.id)))
+      .map(m => m.id);
+  }
+
+  function schedulePseudoSync() {
+    if (pseudoQueued) return;
+    pseudoQueued = true;
+    queueMicrotask(ensurePseudoCategories);
+  }
+
+  function favoriteVideoItems() {
+    if (!library) return [];
+    const q = String(searchInput?.value || '').trim().toLowerCase();
+    return (library.media || []).filter(m =>
+      m.character_id === currentCharacterId() &&
+      m.media_type === 'video' &&
+      !m.in_review &&
+      !m.in_purgatory &&
+      !!m.favorite &&
+      (!q || String(m.original_name || '').toLowerCase().includes(q))
+    );
+  }
+
+  function updateFavoriteVideoCounter() {
+    if (!favVideoMode || !counter) return;
+    const items = favoriteVideoItems();
+    const id = activeMediaId();
+    const idx = items.findIndex(m => m.id === id);
+    counter.textContent = `${idx >= 0 ? idx + 1 : 0} / ${items.length}`;
+  }
+
+  async function loadThumbInto(mediaId, img) {
+    if (!mediaId || !img?.isConnected) return null;
+    try {
+      const blob = await gmRequest({path:`/api/media/${encodeURIComponent(mediaId)}/thumb`, responseType:'blob'});
+      const url = URL.createObjectURL(blob);
+      if (img.isConnected) img.src = url;
+      else URL.revokeObjectURL(url);
+      return url;
+    } catch (_) { return null; }
+  }
+
+  function applyMainFilter() {
+    filterQueued = false;
+    if (!library) return;
+    root.naiRefreshGrid();
+
+    updateFavoriteVideoCounter();
+    syncFavoriteButton();
+    syncCategoryCounts();
+  }
+
+  root.naiFilterGridMedia = items => {
+    if (!library) return items;
+    const reviews=new Set(library.media.filter(m=>m.in_review).map(m=>m.id));
+    const favorites=favVideoMode && baseCategoryButtons()[2]?.classList.contains('active')
+      ? new Set(favoriteVideoItems().map(m=>m.id)) : null;
+    return items.filter(m=>!reviews.has(m.id) && (!favorites || favorites.has(m.id)));
+  };
+
+  function scheduleMainFilter() {
+    if (filterQueued) return;
+    filterQueued = true;
+    queueMicrotask(applyMainFilter);
+  }
+
+  function selectFavoriteRelative(delta, random=false) {
+    const items = favoriteVideoItems();
+    if (!items.length) return;
+    const id = activeMediaId();
+    let idx = items.findIndex(m => m.id === id);
+    if (random) {
+      let next = Math.floor(Math.random() * items.length);
+      if (items.length > 1 && next === idx) next = (next + 1) % items.length;
+      idx = next;
+    } else {
+      if (idx < 0) idx = delta < 0 ? 0 : -1;
+      idx = (idx + delta + items.length) % items.length;
+    }
+    root.naiSelectMedia(items[idx].id);
+    setTimeout(() => { syncFavoriteButton(); updateFavoriteVideoCounter(); }, 0);
+  }
+
+  function syncFavoriteButton() {
+    if (!library) return;
+    const m = mediaById(activeMediaId());
+    if (m?.media_type === 'video') {
+      const text = m.favorite ? '★' : '☆';
+      if (favBtn.textContent !== text) favBtn.textContent = text;
+      favBtn.disabled = false;
+      favBtn.setAttribute('aria-pressed', String(!!m.favorite));
+      favBtn.title = m.favorite ? 'Remove from Favorite Videos' : 'Add to Favorite Videos';
+    }
+  }
+
+  function paintFavoriteStar(mediaId) {
+    const m = mediaById(mediaId);
+    const tile = grid.querySelector(`.tile[data-id="${CSS.escape(mediaId)}"]`);
+    if (!m || !tile) return;
+    let star = tile.querySelector('.star');
+    if (m.favorite) {
+      if (!star) {
+        star = document.createElement('div');
+        star.className = 'star';
+        star.textContent = '★';
+        tile.appendChild(star);
+      }
+    } else star?.remove();
+  }
+
+  favBtn.addEventListener('click', async event => {
+    const m = mediaById(activeMediaId());
+    if (!m || m.media_type !== 'video') return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    try {
+      const updated = await gmRequest({
+        method:'POST', path:`/api/media/${encodeURIComponent(m.id)}/favorite`,
+        headers:{'Content-Type':'application/json'}, data:JSON.stringify({favorite:!m.favorite}),
+      });
+      Object.assign(m, updated);
+      syncFavoriteButton();
+      paintFavoriteStar(m.id);
+      syncCategoryCounts();
+      if (favVideoMode && !m.favorite) scheduleMainFilter();
+    } catch (err) { alert(err?.message || String(err)); }
+  }, true);
+
+  root.addEventListener('click', event => {
+    const target = event.target?.closest?.('.cat');
+    if (target && !target.classList.contains('naiReviewCat270')) {
+      favVideoMode = false;
+      baseCategoryButtons()[2]?.classList.remove('naiFavBase270');
+      root.getElementById('naiFavVideoFilter270')?.classList.remove('active');
+    }
+    if (!favVideoMode) return;
+    const nav = event.target?.closest?.('#prevBtn,#nextBtn,#randomBtn');
+    if (!nav) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (nav === prevBtn) selectFavoriteRelative(-1);
+    else if (nav === nextBtn) selectFavoriteRelative(1);
+    else if (nav === randomBtn) selectFavoriteRelative(0, true);
+  }, true);
+
+  // ----- Resilient import path -------------------------------------------------
+  let mirroredFiles = [];
+  let importModalIdentity = null;
+  let importBusy = false;
+  let importCancel = false;
+  let activeUploadHandle = null;
+
+  const fileKey = file => `${file?.name || ''}::${file?.size || 0}::${file?.lastModified || 0}`;
+  function syncImportModalMirror() {
+    const dropZone = modalRoot.querySelector('#fileDropZone');
+    if (!dropZone) {
+      importModalIdentity = null;
+      return null;
+    }
+    if (dropZone !== importModalIdentity) {
+      importModalIdentity = dropZone;
+      mirroredFiles = [];
+      importCancel = false;
+    }
+    return dropZone;
+  }
+  function mirrorAddFiles(files) {
+    const seen = new Set(mirroredFiles.map(fileKey));
+    for (const file of [...(files || [])]) {
+      if (!file) continue;
+      const key = fileKey(file);
+      if (!seen.has(key)) { mirroredFiles.push(file); seen.add(key); }
+    }
+  }
+
+  function hookImportModal274() {
+    const dropZone = modalRoot.querySelector('#fileDropZone');
+    if (!dropZone) return;
+    syncImportModalMirror();
+
+    for (const id of ['importDirect', 'importReview']) {
+      const oldButton = modalRoot.querySelector(`#${id}`);
+      if (!oldButton || oldButton.dataset.naiOwnImport274 === '1') continue;
+      const fresh = oldButton.cloneNode(true);
+      fresh.dataset.naiOwnImport274 = '1';
+      if (id === 'importReview') fresh.textContent = 'Review before saving';
+      oldButton.replaceWith(fresh);
+      fresh.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        runOwnImport(id === 'importReview').catch(err => {
+          importBusy = false;
+          activeUploadHandle = null;
+          alert(err?.message || String(err));
+        });
+      });
+    }
+    setTextIfChanged(modalRoot.querySelector('#localPane > .muted'), 'Direct import saves immediately. Review before saving keeps temporary previews until you click Save. Original files are never re-encoded.');
+    setTextIfChanged(modalRoot.querySelector('#urlPane > .muted'), 'Direct import saves immediately. Review before saving downloads temporary previews; only images you save join the library.');
+    modalRoot.querySelectorAll('[data-close]').forEach(el => { el.disabled = false; });
+  }
+
+  const importModalObserver274 = new MutationObserver(() => queueMicrotask(hookImportModal274));
+  importModalObserver274.observe(modalRoot, {childList:true, subtree:true});
+  queueMicrotask(hookImportModal274);
+
+  modalRoot.addEventListener('change', event => {
+    if (event.target?.id !== 'fileInput') return;
+    syncImportModalMirror();
+    mirrorAddFiles(event.target.files || []);
+  }, true);
+  modalRoot.addEventListener('drop', event => {
+    const path = event.composedPath?.() || [];
+    if (!path.some(node => node?.id === 'fileDropZone')) return;
+    event.preventDefault();
+    syncImportModalMirror();
+    mirrorAddFiles(event.dataTransfer?.files || []);
+  }, true);
+  // Prevent the browser's native file-drop navigation before it can start a page load.
+  host.addEventListener('dragover', event => {
+    const path = event.composedPath?.() || [];
+    if (path.some(node => node?.id === 'fileDropZone')) event.preventDefault();
+  }, true);
+  host.addEventListener('drop', event => {
+    const path = event.composedPath?.() || [];
+    if (path.some(node => node?.id === 'fileDropZone')) event.preventDefault();
+  }, true);
+
+  async function sha256File(file) {
+    if (!file || file.size > 128 * 1024 * 1024) return null;
+    try {
+      const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+      return [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
+    } catch (_) { return null; }
+  }
+
+  async function nativeLibrary(timeoutMs=12000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${API}/api/library?cb=${Date.now()}-${Math.random()}`, {
+        method:'GET',
+        cache:'no-store',
+        signal:controller.signal,
+      });
+      if (!res.ok) throw new Error(`Library request failed (${res.status})`);
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function confirmImportedFile(characterId, file, sha, beforeIds, categories, beforeItem, deadlineMs=120000) {
+    const deadline = Date.now() + deadlineMs;
+    await sleep(300);
+    while (!importCancel && Date.now() < deadline) {
+      try {
+        let lib;
+        try { lib = await nativeLibrary(8000); }
+        catch (_) { lib = await gmRequest({path:'/api/library', timeout:8000}); }
+        const item = (lib?.media || []).find(m => {
+          if (m.character_id !== characterId) return false;
+          if (sha) return m.sha256 === sha;
+          return !beforeIds.has(m.id) && m.original_name === file.name;
+        });
+        if (item) {
+          const duplicate = beforeIds.has(item.id);
+          if (!duplicate) return {item, duplicate:false, confirmed:true};
+          if (item.media_type === 'video') return {item, duplicate:true, confirmed:true};
+          const required = Array.isArray(categories) ? categories : [];
+          const beforeCats = Array.isArray(beforeItem?.categories) ? beforeItem.categories : [];
+          const nowCats = Array.isArray(item.categories) ? item.categories : [];
+          const noChangeNeeded = required.every(id => beforeCats.includes(id));
+          const serverAppliedChange = required.every(id => nowCats.includes(id));
+          if (noChangeNeeded || serverAppliedChange) return {item, duplicate:true, confirmed:true};
+        }
+      } catch (_) {}
+      await sleep(450);
+    }
+    throw new Error(importCancel ? 'Import canceled' : 'The import could not be confirmed.');
+  }
+
+  function importToken274() {
+    try { return `nai_${crypto.randomUUID().replace(/-/g, '')}`; }
+    catch (_) { return `nai_${Date.now()}_${Math.random().toString(36).slice(2)}`; }
+  }
+
+  async function importJobStatus274(token) {
+    // Same rule as refreshLibrary: avoid native HTTPS-page -> HTTP-localhost fetches.
+    // GM_xmlhttpRequest is already authorized for this companion and does not incur the
+    // browser private-network delay before every status poll.
+    try {
+      return await gmRequest({path:`/api/import/status/${encodeURIComponent(token)}`, timeout:5000});
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function uploadFileResilient(file, characterId, categories, sourceUrl='') {
+    // Restore the original proven-fast local import transport. The raw/status transport
+    // introduced in 2.7.x added a second polling lifecycle and is no longer used for files.
+    const form = new FormData();
+    form.append('character_id', characterId);
+    form.append('categories', JSON.stringify(Array.isArray(categories) ? categories : []));
+    form.append('file', file, file.name || 'upload');
+    if (sourceUrl) form.append('source_url', sourceUrl);
+    const started = performance.now();
+    return await new Promise((resolve, reject) => {
+      activeUploadHandle = GM_xmlhttpRequest({
+        method:'POST',
+        url:`${API}/api/import/file`,
+        data:form,
+        // A stuck companion request must not permanently lock Rapid Review.  Users can
+        // also close a save in progress, which aborts this request and restores controls.
+        timeout:90000,
+        headers:{Origin:'https://novelai.net'},
+        onload:res => {
+          activeUploadHandle = null;
+          const elapsed = Math.round(performance.now() - started);
+          console.info(`[NovelAI Media timing] local import response: ${elapsed} ms`);
+          if (res.status >= 200 && res.status < 300) {
+            try { resolve(JSON.parse(res.responseText || '{}')); }
+            catch (_) { resolve(null); }
+            return;
+          }
+          let message = `Request failed (${res.status})`;
+          try { message = JSON.parse(res.responseText || '{}').error || message; } catch (_) {}
+          reject(new Error(message));
+        },
+        onerror:()=>{
+          activeUploadHandle = null;
+          reject(new Error(importCancel ? 'Import canceled' : 'Could not connect to the local NovelAI Media Library program.'));
+        },
+        ontimeout:()=>{
+          activeUploadHandle = null;
+          reject(new Error(importCancel ? 'Import canceled' : 'The local media request timed out.'));
+        },
+        onabort:()=>{
+          activeUploadHandle = null;
+          reject(new Error('Import canceled'));
+        },
+      });
+    });
+  }
+
+  async function confirmImportedUrl(characterId, url, beforeIds, categories, beforeItem, deadlineMs=120000) {
+    const deadline = Date.now() + deadlineMs;
+    await sleep(500);
+    while (!importCancel && Date.now() < deadline) {
+      try {
+        const lib = await gmRequest({path:'/api/library', timeout:12000});
+        const item = (lib?.media || []).find(m =>
+          m.character_id === characterId &&
+          (!beforeIds.has(m.id) || m.source?.url === url) &&
+          m.source?.kind === 'url' && m.source?.url === url
+        );
+        if (item) {
+          const duplicate = beforeIds.has(item.id);
+          if (!duplicate) return {item, duplicate:false, confirmed:true};
+          if (item.media_type === 'video') return {item, duplicate:true, confirmed:true};
+          const required = Array.isArray(categories) ? categories : [];
+          const beforeCats = Array.isArray(beforeItem?.categories) ? beforeItem.categories : [];
+          const nowCats = Array.isArray(item.categories) ? item.categories : [];
+          const noChangeNeeded = required.every(id => beforeCats.includes(id));
+          const serverAppliedChange = required.every(id => nowCats.includes(id));
+          if (noChangeNeeded || serverAppliedChange) return {item, duplicate:true, confirmed:true};
+        }
+      } catch (_) {}
+      await sleep(600);
+    }
+    return null;
+  }
+
+  async function uploadUrlResilient(url, characterId, categories) {
+    const before = library || await refreshLibrary();
+    const beforeIds = new Set((before.media || []).map(m => m.id));
+    const beforeItem = (before.media || []).find(m =>
+      m.character_id === characterId && m.source?.kind === 'url' && m.source?.url === url
+    ) || null;
+    let requestReject = null;
+    const requestPromise = new Promise((resolve, reject) => {
+      activeUploadHandle = GM_xmlhttpRequest({
+        method:'POST', url:`${API}/api/import/url`, timeout:300000,
+        headers:{Origin:'https://novelai.net','Content-Type':'application/json'},
+        data:JSON.stringify({character_id:characterId, categories, url}),
+        onload:res => {
+          activeUploadHandle = null;
+          if (res.status >= 200 && res.status < 300) {
+            try { resolve(JSON.parse(res.responseText || '{}')); } catch (_) { resolve(null); }
+          } else {
+            let message = `Request failed (${res.status})`;
+            try { message = JSON.parse(res.responseText || '{}').error || message; } catch (_) {}
+            reject(new Error(message));
+          }
+        },
+        onerror:()=>{ activeUploadHandle = null; reject(new Error(importCancel ? 'Import canceled' : 'Could not connect to the local NovelAI Media Library program.')); },
+        ontimeout:()=>{ activeUploadHandle = null; reject(new Error(importCancel ? 'Import canceled' : 'The local media request timed out.')); },
+      });
+    }).catch(err => { requestReject = err; return null; });
+    const confirmPromise = confirmImportedUrl(characterId, url, beforeIds, categories, beforeItem).catch(() => null);
+    while (!importCancel) {
+      const winner = await Promise.race([
+        requestPromise.then(value => ({source:'request', value})),
+        confirmPromise.then(value => ({source:'confirm', value})),
+      ]);
+      if (winner.value?.item?.id) {
+        if (winner.source === 'confirm' && activeUploadHandle?.abort) {
+          try { activeUploadHandle.abort(); } catch (_) {}
+          activeUploadHandle = null;
+        }
+        return winner.value;
+      }
+      const other = winner.source === 'request' ? await confirmPromise : await requestPromise;
+      if (other?.item?.id) return other;
+      break;
+    }
+    if (importCancel) throw new Error('Import canceled');
+    throw requestReject || new Error('The URL import could not be confirmed.');
+  }
+
+  function importSelectedCategories() {
+    return [...modalRoot.querySelectorAll('#importCats input[data-catid]:checked')].map(x => x.dataset.catid).filter(Boolean);
+  }
+
+  modalRoot.addEventListener('click', event => {
+    if (event.target?.closest?.('#clearFiles')) {
+      mirroredFiles = [];
+      return;
+    }
+    if (!importBusy || !event.target?.closest?.('[data-close]')) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    importCancel = true;
+    importBusy = false;
+    try { activeUploadHandle?.abort?.(); } catch (_) {}
+    activeUploadHandle = null;
+    mirroredFiles = [];
+    modalRoot.innerHTML = '';
+    refreshBtn?.click();
+    schedulePseudoSync();
+    scheduleMainFilter();
+  }, true);
+
+  async function runOwnImport(reviewAfter) {
+    if (importBusy) return;
+    const dropZone = syncImportModalMirror();
+    if (!dropZone) return;
+    const isUrl = !modalRoot.querySelector('#urlPane')?.classList.contains('hidden');
+    const urls = isUrl ? String(modalRoot.querySelector('#urlInput')?.value || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean) : [];
+    const jobs = isUrl ? urls.map(url => ({kind:'url', url})) : orderedReviewFiles(mirroredFiles).map(file => ({kind:'file', file}));
+    const status = modalRoot.querySelector('#importStatus');
+    const progress = modalRoot.querySelector('#importProgress');
+    const bar = progress?.firstElementChild;
+    if (!jobs.length) {
+      if (status) { status.textContent = 'Choose at least one file or URL.'; status.classList.add('bad'); }
+      return;
+    }
+
+    importBusy = true;
+    importCancel = false;
+    const categories = importSelectedCategories();
+    const characterId = currentCharacterId();
+    if (reviewAfter) {
+      try {
+        const ids = [];
+        // Files stay in the browser. URL previews use a temporary download, never registration.
+        for (const job of jobs) {
+          if (importCancel) break;
+          if (status) status.textContent = `Preparing preview ${ids.length + 1} of ${jobs.length}…`;
+          const file = job.kind === 'file' ? job.file : await downloadUrlPreview(job.url);
+          if (importCancel) break;
+          ids.push(addReviewDraft(file, characterId, categories, job.url || ''));
+        }
+        if (!importCancel && ids.length) {
+          mirroredFiles = [];
+          await openReviewQueue(ids, 'import');
+        } else discardReviewDrafts();
+      } catch (err) {
+        discardReviewDrafts();
+        throw err;
+      } finally { importBusy = false; activeUploadHandle = null; }
+      return;
+    }
+    const importedIds = [];
+    const errors = [];
+    progress?.classList.remove('hidden','indeterminate');
+    if (bar) bar.style.width = '0%';
+    modalRoot.querySelectorAll('button,input,textarea').forEach(el => { if (!el.matches('[data-close]')) el.disabled = true; });
+    modalRoot.querySelectorAll('[data-close]').forEach(el => { el.disabled = false; });
+
+    const oldCancel = modalRoot.querySelector('#importCancelBtn');
+    const cancel = oldCancel?.cloneNode(true);
+    if (oldCancel && cancel) {
+      cancel.removeAttribute('data-close');
+      cancel.disabled = false;
+      cancel.textContent = 'Cancel Import';
+      oldCancel.replaceWith(cancel);
+      cancel.addEventListener('click', event => {
+        event.preventDefault();
+        importCancel = true;
+        try { activeUploadHandle?.abort?.(); } catch (_) {}
+        activeUploadHandle = null;
+        if (status) status.textContent = 'Canceling import…';
+        setTimeout(() => {
+          if (modalRoot.querySelector('#fileDropZone')) modalRoot.innerHTML = '';
+          refreshBtn?.click();
+          schedulePseudoSync();
+          scheduleMainFilter();
+        }, 0);
+      });
+    }
+
+    if (status) {
+      status.classList.remove('bad');
+      status.textContent = `Starting import of ${jobs.length} item${jobs.length === 1 ? '' : 's'}…`;
+    }
+
+    try {
+      // Do not refresh the entire library here. In 2.7.4 this request could stall
+      // before the upload even started, producing the exact blank-status screen.
+      for (let i = 0; i < jobs.length; i++) {
+        if (importCancel) break;
+        const job = jobs[i];
+        if (status) {
+          status.classList.remove('bad');
+          status.textContent = `Importing ${i + 1} of ${jobs.length}… ${job.kind === 'file' ? job.file.name : job.url}`;
+        }
+        if (bar) bar.style.width = `${Math.round((i / jobs.length) * 100)}%`;
+        try {
+          const result = job.kind === 'file'
+            ? await uploadFileResilient(job.file, characterId, categories)
+            : await uploadUrlResilient(job.url, characterId, categories);
+          if (result?.item?.id) {
+            if (!importedIds.includes(result.item.id)) importedIds.push(result.item.id);
+            if (library && Array.isArray(library.media)) {
+              const existingIndex = library.media.findIndex(m => m.id === result.item.id);
+              if (existingIndex >= 0) library.media[existingIndex] = result.item;
+              else library.media.push(result.item);
+            }
+          }
+        } catch (err) {
+          if (importCancel) break;
+          errors.push(`${job.kind === 'file' ? job.file.name : job.url}: ${err?.message || err}`);
+        }
+      }
+      if (bar) bar.style.width = '100%';
+
+      if (importCancel) {
+        if (status) status.textContent = `Import canceled. Imported ${importedIds.length} item(s).`;
+        return;
+      }
+      if (status) status.textContent = `Imported ${importedIds.length} item(s)${errors.length ? `; ${errors.length} failed` : ''}.`;
+      if (errors.length) console.warn('[NovelAI Media] import errors', errors);
+
+      if (reviewAfter && importedIds.length) {
+        mirroredFiles = [];
+        const reviewStarted = performance.now();
+        modalRoot.innerHTML = '';
+        await openReviewQueue(importedIds, 'import');
+        console.info(`[NovelAI Media timing] Rapid Review opened: ${Math.round(performance.now() - reviewStarted)} ms`);
+      } else if (importedIds.length || !errors.length) {
+        mirroredFiles = [];
+        setTimeout(() => {
+          modalRoot.innerHTML = '';
+          refreshBtn?.click();
+          schedulePseudoSync();
+          scheduleMainFilter();
+        }, 300);
+      } else {
+        modalRoot.querySelectorAll('button,input,textarea').forEach(el => el.disabled = false);
+        if (status) status.classList.add('bad');
+      }
+    } finally {
+      importBusy = false;
+      activeUploadHandle = null;
+    }
+  }
+
+  root.addEventListener('click', event => {
+    const button = event.target?.closest?.('#importReview,#importDirect');
+    if (!button) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    runOwnImport(button.id === 'importReview').catch(err => {
+      importBusy = false;
+      activeUploadHandle = null;
+      alert(err?.message || String(err));
+    });
+  }, true);
+
+  function orderedReviewFiles(files) {
+    // Use descending natural filename order so numbered batches remain intuitive:
+    // Image_1000, Image_999, Image_998 (rather than lexicographic 998, 999, 1000).
+    // Array#sort is stable in supported browsers, so identical names retain picker order.
+    return [...files].sort((a, b) => String(b?.name || '').localeCompare(String(a?.name || ''), undefined, {numeric:true, sensitivity:'base'}));
+  }
+
+  async function downloadUrlPreview(url) {
+    return new Promise((resolve, reject) => {
+      activeUploadHandle = GM_xmlhttpRequest({
+        method:'POST', url:`${API}/api/preview/url`, responseType:'blob', timeout:300000,
+        headers:{Origin:'https://novelai.net','Content-Type':'application/json'}, data:JSON.stringify({url}),
+        onload:async res => {
+          activeUploadHandle = null;
+          if (res.status >= 200 && res.status < 300) {
+            const header = /(?:^|\n)x-novelai-filename:\s*([^\r\n]+)/i.exec(res.responseHeaders || '');
+            const name = header ? decodeURIComponent(header[1].trim()) : 'download';
+            resolve(new File([res.response], name, {type:res.response.type}));
+          } else {
+            let message = res.status === 404 ? 'URL previews need companion runtime 2.7.9. Let the running companion update, then try again.' : `Preview failed (${res.status})`;
+            try { message = JSON.parse(await res.response.text()).error || message; } catch (_) {}
+            reject(new Error(message));
+          }
+        },
+        onerror:()=>{ activeUploadHandle = null; reject(new Error('Could not download this URL preview.')); },
+        ontimeout:()=>{ activeUploadHandle = null; reject(new Error('URL preview timed out.')); },
+        onabort:()=>{ activeUploadHandle = null; reject(new Error('Preview canceled.')); },
+      });
+    });
+  }
+
+  function addReviewDraft(file, characterId, categories, sourceUrl='') {
+    const id = `draft_${importToken274()}`;
+    const video = file.type.startsWith('video/') || /\.(mp4|webm|mov|m4v|avi|mkv)$/i.test(file.name);
+    const media = {id, character_id:characterId, original_name:file.name, media_type:video?'video':'image',
+      categories:video?[]:[...categories], favorite:false, featured:false, needs_replacement:false, in_review:false, crop_top:0, crop_bottom:0};
+    drafts.set(id, {media, file, sourceUrl, url:URL.createObjectURL(file), persistedId:null, setPlan:null, cropDirty:false});
+    return id;
+  }
+
+  function discardReviewDrafts() {
+    for (const draft of drafts.values()) URL.revokeObjectURL(draft.url);
+    drafts.clear();
+  }
+
+  function captureReviewChoices() {
+    const m = currentReviewMedia();
+    if (!m) return;
+    if (m.media_type === 'video') {
+      m.favorite = !!modalRoot.querySelector('#naiReviewVideoFavorite270')?.checked;
+      m.featured = !!modalRoot.querySelector('#naiReviewVideoFeatured270')?.checked;
+      m.in_review = !!modalRoot.querySelector('#naiReviewHold270')?.checked;
+    }
+    else {
+      m.categories = [...modalRoot.querySelectorAll('#reviewCats input[data-catid]:checked')].map(x => x.dataset.catid).filter(Boolean);
+      m.favorite = !!modalRoot.querySelector('#naiReviewFavorite270')?.checked;
+      m.featured = !!modalRoot.querySelector('#naiReviewFeatured270')?.checked;
+      m.needs_replacement = !!modalRoot.querySelector('#naiReviewReplacement270')?.checked;
+      m.in_review = !!modalRoot.querySelector('#naiReviewHold270')?.checked;
+    }
+    reviewSession.choices?.set(m.id, {categories:[...(m.categories || [])], in_review:m.in_review, favorite:m.favorite, featured:!!m.featured, needs_replacement:!!m.needs_replacement});
+  }
+
+  async function applyReviewSet(plan, ids, characterId) {
+    if (!plan || !ids.length) return;
+    // Re-read membership before merging; saved queue items must not replace existing members.
+    await refreshLibrary();
+    if (plan.id) {
+      const set = setById(plan.id);
+      if (!set) throw new Error('The assigned set no longer exists. Choose another set.');
+      const merged = [...new Set([...(set.media_ids || []), ...ids])];
+      await gmRequest({method:'POST', path:`/api/sets/${encodeURIComponent(plan.id)}`, headers:{'Content-Type':'application/json'},
+        data:JSON.stringify({media_ids:merged, cover_media_id:set.cover_media_id || merged[0]})});
+    } else {
+      const set = await gmRequest({method:'POST', path:'/api/sets', headers:{'Content-Type':'application/json'},
+        data:JSON.stringify({character_id:characterId, name:plan.name, media_ids:ids, cover_media_id:ids[0]})});
+      plan.id = set.id;
+    }
+  }
+
+  // ----- Review / Rapid Review -------------------------------------------------
+  let reviewSession = null;
+  let queueSetOverlay = null;
+
+  function revokeSessionUrls() {
+    if (!reviewSession) return;
+    root.naiReleaseReviewCrop?.(modalRoot.querySelector('#reviewStage'));
+    for (const url of reviewSession.urls || []) {
+      try { URL.revokeObjectURL(url); } catch (_) {}
+    }
+    reviewSession.urls = [];
+  }
+
+  async function finishReviewQueue(force=false) {
+    if (reviewSession?.busy && !force) return;
+    revokeSessionUrls();
+    discardReviewDrafts();
+    queueSetOverlay?.remove(); queueSetOverlay = null;
+    reviewSession = null;
+    modalRoot.innerHTML = '';
+    try { await refreshLibrary(); } catch (_) {}
+    refreshBtn?.click();
+    schedulePseudoSync();
+    scheduleMainFilter();
+  }
+
+  async function openReviewQueue(ids, mode='import') {
+    // Imported items are merged into the in-memory library immediately, so Rapid Review
+    // can open without waiting on another /api/library round trip.
+    if (mode !== 'import') {
+      try { await refreshLibrary(); } catch (_) {}
+    }
+    const queue = [...new Set(ids)].filter(id => mediaById(id));
+    if (!queue.length) return;
+    reviewSession = {
+      ids:queue,
+      index:0,
+      mode,
+      saved:new Set(),
+      choices:new Map(),
+      busy:false,
+      carry:false,
+      carryCats:null,
+      urls:[],
+      canceled:false,
+    };
+    await renderReviewQueue();
+  }
+
+  async function loadQueueThumb(id, img) {
+    if (!id || !img?.isConnected) return;
+    // Let the browser stream/cache the local thumbnail directly instead of waiting for
+    // Tampermonkey to download the entire Blob before anything can paint.
+    img.src = drafts.get(id)?.url || `${API}/api/media/${encodeURIComponent(id)}/thumb`;
+  }
+
+  function currentReviewMedia() {
+    if (!reviewSession) return null;
+    return mediaById(reviewSession.ids[reviewSession.index]);
+  }
+
+  async function persistReviewMedia(m) {
+    if (!m) return null;
+    const draft = drafts.get(m.id);
+    let id = draft?.persistedId || m.id;
+    if (draft && !draft.persistedId) {
+      const result = await uploadFileResilient(draft.file, m.character_id, m.categories, draft.sourceUrl);
+      if (!result?.item?.id) throw new Error('The media item could not be saved. Please try again.');
+      id = draft.persistedId = result.item.id;
+      // Remember registration immediately: a later metadata failure must not re-upload on retry.
+    }
+    const post = async (action, data) => gmRequest({method:'POST', path:`/api/media/${encodeURIComponent(id)}/${action}`,
+      headers:{'Content-Type':'application/json'}, data:JSON.stringify(data)});
+    if (m.media_type === 'video') {
+      await post('favorite', {favorite:m.favorite});
+      await post('featured', {featured:!!m.featured});
+      await post('review', {in_review:m.in_review});
+    }
+    else {
+      await post('categories', {categories:m.categories});
+      await post('favorite', {favorite:m.favorite});
+      await post('featured', {featured:!!m.featured});
+      await post('needs-replacement', {needs_replacement:!!m.needs_replacement});
+      await post('review', {in_review:m.in_review});
+      if (draft?.cropDirty) {
+        await post('crop', {top:m.crop_top, bottom:m.crop_bottom});
+        draft.cropDirty = false;
+      }
+      if (draft?.setPlan) await applyReviewSet(draft.setPlan, [id], m.character_id);
+    }
+    return id;
+  }
+
+  async function saveCurrentReview() {
+    if (!reviewSession) return;
+    captureReviewChoices();
+    const m = currentReviewMedia();
+    if (!m) return;
+    const id = await persistReviewMedia(m);
+    if (m.media_type === 'image' && reviewSession.carry) reviewSession.carryCats = [...m.categories];
+    if (id) reviewSession.saved.add(m.id);
+  }
+
+  async function assignReviewImagesToSet(selectedIds, setId, characterId) {
+    if (!reviewSession || !setId) return;
+    const beforeIds = [...reviewSession.ids];
+    const beforeIndex = reviewSession.index;
+    const selected = new Set(selectedIds);
+    const savedIds = [];
+    for (const queueId of selectedIds) {
+      const m = mediaById(queueId);
+      if (!m || m.media_type !== 'image') continue;
+      Object.assign(m, reviewSession.choices?.get(queueId) || {});
+      const persistedId = await persistReviewMedia(m);
+      if (!persistedId) throw new Error('The image could not be saved. Please try again.');
+      savedIds.push(persistedId);
+    }
+    if (!savedIds.length) return;
+    await applyReviewSet({id:setId, name:''}, savedIds, characterId);
+
+    // Set assignment is an explicit save action: release draft URLs and remove every
+    // assigned image from the review queue, leaving only unchecked items to review.
+    for (const queueId of selected) {
+      const draft = drafts.get(queueId);
+      if (draft) {
+        try { URL.revokeObjectURL(draft.url); } catch (_) {}
+        drafts.delete(queueId);
+      }
+      reviewSession.choices?.delete(queueId);
+      reviewSession.saved.delete(queueId);
+    }
+    const removedBefore = beforeIds.slice(0, beforeIndex).filter(id => selected.has(id)).length;
+    reviewSession.ids = beforeIds.filter(id => !selected.has(id));
+    reviewSession.index = Math.max(0, Math.min(beforeIndex - removedBefore, reviewSession.ids.length - 1));
+    await refreshLibrary();
+  }
+
+  async function reviewMove(delta) {
+    if (!reviewSession || reviewSession.busy) return;
+    const session = reviewSession;
+    session.busy = true;
+    modalRoot.querySelectorAll('button,input').forEach(el => { if (el.id !== 'naiReviewClose270') el.disabled = true; });
+    try {
+      await saveCurrentReview();
+      if (session.canceled || reviewSession !== session) return;
+      const next = session.index + delta;
+      session.busy = false;
+      if (next >= session.ids.length) {
+        if (session.ids.length === 1) return finishReviewQueue();
+        session.index = 0;
+      } else session.index = Math.max(0, next);
+      await renderReviewQueue();
+    } catch (err) {
+      if (!session.canceled) {
+        alert(err?.message || String(err));
+        modalRoot.querySelectorAll('button,input').forEach(el => el.disabled = false);
+      }
+    } finally { if (!session.canceled) session.busy = false; }
+  }
+
+  async function cancelBusyReview() {
+    const session = reviewSession;
+    if (!session) return;
+    session.canceled = true;
+    try { activeUploadHandle?.abort?.(); } catch (_) {}
+    activeUploadHandle = null;
+    // Discard only the interrupted file; its remaining queue previews stay open.
+    const failedId = session.ids[session.index];
+    const draft = drafts.get(failedId);
+    if (draft) {
+      try { URL.revokeObjectURL(draft.url); } catch (_) {}
+      drafts.delete(failedId);
+    }
+    const nextIds = session.ids.filter(id => id !== failedId);
+    if (!nextIds.length) {
+      session.busy = false;
+      return finishReviewQueue(true);
+    }
+    reviewSession = {
+      ...session,
+      ids:nextIds,
+      index:Math.min(session.index, nextIds.length - 1),
+      saved:new Set([...session.saved].filter(id => id !== failedId)),
+      choices:new Map([...session.choices].filter(([id]) => id !== failedId)),
+      busy:false,
+      canceled:false,
+    };
+    await renderReviewQueue();
+  }
+
+  async function reviewJump(index) {
+    if (!reviewSession || reviewSession.busy || index === reviewSession.index || index < 0 || index >= reviewSession.ids.length) return;
+    captureReviewChoices();
+    reviewSession.index = index;
+    await renderReviewQueue();
+  }
+
+  function queuePreviewRange(total, index, requestedPage) {
+    const pageSize = 14;
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    const requested = Number.isInteger(requestedPage) ? requestedPage : Math.floor(index / pageSize);
+    const page = Math.max(0, Math.min(pages - 1, requested));
+    const start = page * pageSize;
+    return {page, pages, start, end:Math.min(total, start + pageSize)};
+  }
+
+  function setReviewQuality(mediaId, text) {
+    const output=modalRoot.querySelector('#naiReviewQuality284');
+    const stage=modalRoot.querySelector('#reviewStage');
+    if (output && stage?.dataset.naiReviewMediaId === mediaId) output.textContent=text;
+  }
+  function showReviewQuality(m, element) {
+    const draft=drafts.get(m.id);
+    const fileBytes=draft?.file?.size ?? m.file_bytes;
+    const write = (width,height) => {
+      if (Number(width)>0 && Number(height)>0) {
+        m.width=Number(width); m.height=Number(height);
+        setReviewQuality(m.id,`Source quality: ${width} × ${height} · ${formatBytes(fileBytes)}`);
+      } else if (fileBytes != null) setReviewQuality(m.id,`Source quality: ${formatBytes(fileBytes)} · Dimensions unavailable`);
+    };
+    if (m.width && m.height) return write(m.width,m.height);
+    if (element?.tagName === 'IMG') {
+      if (element.complete) write(element.naturalWidth,element.naturalHeight);
+      else element.addEventListener('load',()=>write(element.naturalWidth,element.naturalHeight),{once:true});
+    } else if (element?.tagName === 'VIDEO') {
+      element.addEventListener('loadedmetadata',()=>write(element.videoWidth,element.videoHeight),{once:true});
+    }
+    if (!draft) gmRequest({path:`/api/media/${encodeURIComponent(m.id)}/quality`,timeout:15000}).then(info=>{
+      if (!info) return;
+      Object.assign(m,info);
+      write(info.width,info.height);
+    }).catch(()=>{ if (fileBytes != null) setReviewQuality(m.id,`Source quality: ${formatBytes(fileBytes)}`); });
+  }
+
+  async function renderQueueStrip() {
+    if (!reviewSession) return;
+    const strip = modalRoot.querySelector('#naiQueueStrip270');
+    if (!strip) return;
+    const {page, pages, start, end} = queuePreviewRange(reviewSession.ids.length, reviewSession.index, reviewSession.previewPage);
+    reviewSession.previewPage = page;
+    strip.replaceChildren();
+    const range = modalRoot.querySelector('#naiQueueRange289');
+    if (range) range.textContent = `${start + 1}–${end} of ${reviewSession.ids.length}`;
+    const pager = modalRoot.querySelector('#naiQueuePager289');
+    if (pager) pager.hidden = pages <= 1;
+    const pageLabel = modalRoot.querySelector('#naiQueuePage289');
+    if (pageLabel) pageLabel.textContent = `Page ${page + 1} / ${pages}`;
+    for (const [id, delta] of [['naiQueuePagePrev289', -1], ['naiQueuePageNext289', 1]]) {
+      const control = modalRoot.querySelector(`#${id}`);
+      if (!control) continue;
+      control.disabled = reviewSession.busy || page + delta < 0 || page + delta >= pages;
+      control.onclick = () => {
+        if (!reviewSession || reviewSession.busy) return;
+        reviewSession.previewPage = page + delta;
+        renderQueueStrip();
+      };
+    }
+    for (let i = start; i < end; i++) {
+      const id = reviewSession.ids[i];
+      const m = mediaById(id);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `naiQueueThumb270${i === reviewSession.index ? ' current' : ''}${reviewSession.saved.has(id) ? ' saved' : ''}`;
+      button.title = `${i + 1}. ${m?.original_name || ''}`;
+      let queueImg = null;
+      if (m?.media_type === 'video') {
+        button.innerHTML = `<div style="position:absolute;inset:0;display:grid;place-items:center;font:800 18px system-ui">▶</div><span class="idx">${i + 1}</span>`;
+      } else {
+        const img = document.createElement('img'); img.alt = '';
+        img.loading = 'lazy'; img.decoding = 'async';
+        button.appendChild(img);
+        const idx = document.createElement('span'); idx.className = 'idx'; idx.textContent = String(i + 1); button.appendChild(idx);
+        queueImg = img;
+      }
+      button.addEventListener('click', () => reviewJump(i));
+      strip.appendChild(button);
+      // The loader ignores detached previews; connect the card before assigning its URL.
+      if (queueImg) loadQueueThumb(id, queueImg);
+    }
+    strip.querySelector('.current')?.scrollIntoView?.({block:'nearest', inline:'center'});
+  }
+
+  async function renderReviewQueue() {
+    if (!reviewSession) return;
+    // Selecting/saving an item reveals its fixed page. Paging previews alone never selects or saves.
+    reviewSession.previewPage = null;
+    revokeSessionUrls();
+    // The queue already owns the exact imported/review media records. Refreshing the whole
+    // library here added a full localhost round-trip before every image and every Back/Next.
+    const m = currentReviewMedia();
+    if (!m) {
+      reviewSession.ids.splice(reviewSession.index, 1);
+      if (!reviewSession.ids.length) return finishReviewQueue();
+      if (reviewSession.index >= reviewSession.ids.length) reviewSession.index = reviewSession.ids.length - 1;
+      return renderReviewQueue();
+    }
+    const c = (library.characters || []).find(x => x.id === m.character_id);
+    const choices = reviewSession.choices?.get(m.id);
+    if (choices) Object.assign(m, choices);
+    const useCarry = m.media_type === 'image' && !choices && reviewSession.carry && reviewSession.carryCats && !reviewSession.saved.has(m.id);
+    const selected = useCarry ? [...reviewSession.carryCats] : [...(m.categories || [])];
+    const title = reviewSession.mode === 'review' || reviewSession.mode === 'video-review' ? `Review — ${escapeHtml(c?.name || '')}` : `Rapid review — ${escapeHtml(c?.name || '')}`;
+
+    modalRoot.innerHTML = `
+      <div class="modalWrap" data-nai-review-v270>
+        <div class="modal large">
+          <div class="modalHead">
+            <div class="modalTitle">${title}</div>
+            <div class="muted">${reviewSession.index + 1} / ${reviewSession.ids.length}</div>
+            <button class="icon ghost" id="naiReviewClose270">×</button>
+          </div>
+          <div class="reviewBody">
+            <div class="naiReviewVisual270">
+              <div class="reviewStage" id="reviewStage" data-nai-review-media-id="${m.id}"><div class="muted">Loading…</div></div>
+              <div class="naiQueueHead270"><span>Queue preview</span><span id="naiQueueRange289"></span>
+                <span class="naiQueuePager289" id="naiQueuePager289" hidden><button type="button" id="naiQueuePagePrev289">← Previous page</button><span id="naiQueuePage289"></span><button type="button" id="naiQueuePageNext289">Next page →</button></span>
+                <span class="grow"></span><span>Click a thumbnail to navigate. Only Save keeps a new import.</span></div>
+              <div class="naiQueueStrip270" id="naiQueueStrip270"></div>
+            </div>
+            <div class="reviewSide">
+              ${m.media_type === 'video' ? `
+                <div style="font:700 13px system-ui;margin-bottom:8px">Video quality</div>
+                <label class="reviewCat naiReviewSpecial270"><input type="checkbox" id="naiReviewHold270" ${m.in_review ? 'checked' : ''}><span>Review</span><span class="key">R</span></label>
+                <label class="reviewCat naiReviewSpecial270"><input type="checkbox" id="naiReviewVideoFavorite270" ${m.favorite ? 'checked' : ''}><span>★ Favorite video</span></label>
+                <label class="reviewCat naiReviewSpecial270"><input type="checkbox" id="naiReviewVideoFeatured270" ${m.featured ? 'checked' : ''}><span>✦ Featured</span></label>
+                <div class="muted" style="margin-bottom:10px">Videos in Review stay hidden from the normal Videos view until promoted.</div>
+              ` : `
+                <div style="font:700 13px system-ui;margin-bottom:4px">Categories</div>
+                <div class="muted" style="margin-bottom:10px">Press 1–9 to toggle categories. Enter saves and advances. Arrow keys navigate without saving.</div>
+                <label class="reviewCat naiReviewSpecial270"><input type="checkbox" id="naiReviewHold270" ${m.in_review ? 'checked' : ''}><span>Review</span><span class="key">R</span></label>
+                <label class="reviewCat naiReviewSpecial270"><input type="checkbox" id="naiReviewFavorite270" ${m.favorite ? 'checked' : ''}><span>★ Favorite</span></label>
+                <label class="reviewCat naiReviewSpecial270"><input type="checkbox" id="naiReviewFeatured270" ${m.featured ? 'checked' : ''}><span>✦ Featured</span></label>
+                <label class="reviewCat naiReviewSpecial270"><input type="checkbox" id="naiReviewReplacement270" ${m.needs_replacement ? 'checked' : ''}><span>⚑ Needs replacement</span></label>
+                <div id="reviewCats"></div>
+                <div class="naiReviewActions270"><button id="reviewAddCat">+ Create Category</button><button id="naiQueueSets270">Sets…</button></div>
+                <label class="check" style="margin-top:12px"><input type="checkbox" id="carryCats" ${reviewSession.carry ? 'checked' : ''}> Carry category selection to the next unsaved image</label>
+              `}
+              <div class="muted" style="margin-top:12px;word-break:break-word">${escapeHtml(m.original_name || '')}</div>
+              <div class="muted" id="naiReviewQuality284" style="margin-top:4px">Source quality: loading…</div>
+              <div class="muted" style="margin-top:12px">${drafts.has(m.id) ? 'New imports are kept only when you click Save. Closing discards unsaved previews.' : ''}</div>
+            </div>
+          </div>
+          <div class="modalFoot">
+            <button id="naiReviewDelete270" class="danger">${drafts.has(m.id) && !drafts.get(m.id).persistedId ? 'Discard media' : 'Delete media'}</button>
+            <div class="grow"></div>
+            ${m.in_review ? '<button id="naiPurgatoryNext270" class="danger" title="Keep this media locally, but remove it from Review and normal library views">Send to Purgatory</button>' : ''}
+            ${m.in_review ? '<button id="naiPromoteNext270">Promote + Next</button>' : ''}
+            <button id="naiReviewPrev270">← Previous</button>
+            <button class="primary" id="naiReviewNext270">Save + Next →</button>
+          </div>
+        </div>
+      </div>`;
+
+    const stage = modalRoot.querySelector('#reviewStage');
+    const reviewCats = modalRoot.querySelector('#reviewCats');
+    if (m.media_type === 'image' && reviewCats) {
+      (c?.categories || []).forEach((cat, idx) => {
+        const label = document.createElement('label');
+        label.className = 'reviewCat';
+        label.innerHTML = `<input type="checkbox" data-catid="${cat.id}" ${selected.includes(cat.id) ? 'checked' : ''}><span>${escapeHtml(cat.name)}</span>${idx < 9 ? `<span class="key">${idx + 1}</span>` : ''}`;
+        reviewCats.appendChild(label);
+      });
+    }
+
+    try {
+      if (m.media_type === 'video') {
+        const video = document.createElement('video');
+        video.src = drafts.get(m.id)?.url || `${API}/api/media/${encodeURIComponent(m.id)}/original`;
+        video.controls = true; video.loop = true; video.playsInline = true; video.volume = .08;
+        stage.innerHTML = ''; stage.appendChild(video);
+        showReviewQuality(m, video);
+      } else {
+        // Direct image source: Chrome can stream/decode immediately and use its normal cache.
+        // The previous Blob path waited for the complete original to cross GM_xmlhttpRequest
+        // before creating an <img>, which explains the extra 30+ second blank "Loading…".
+        const img = document.createElement('img');
+        img.alt = m.original_name || '';
+        img.decoding = 'async';
+        const imageStarted = performance.now();
+        img.addEventListener('load', () => console.info(`[NovelAI Media timing] Rapid Review image loaded: ${Math.round(performance.now() - imageStarted)} ms`), {once:true});
+        img.addEventListener('error', () => console.warn(`[NovelAI Media timing] Rapid Review image failed after ${Math.round(performance.now() - imageStarted)} ms`), {once:true});
+        img.src = drafts.get(m.id)?.url || `${API}/api/media/${encodeURIComponent(m.id)}/original`;
+        stage.innerHTML = '';
+        stage.appendChild(img);
+        showReviewQuality(m, img);
+      }
+    } catch (err) {
+      stage.innerHTML = `<div class="muted">${escapeHtml(err?.message || String(err))}</div>`;
+    }
+
+    renderQueueStrip();
+    if (m.media_type === 'image' && (m.crop_top || m.crop_bottom)) root.naiRefreshReviewCrop?.(stage, m.id);
+    modalRoot.querySelector('#naiReviewClose270')?.addEventListener('click', () => reviewSession?.busy ? cancelBusyReview() : finishReviewQueue());
+    modalRoot.querySelector('.modalWrap')?.addEventListener('click', event => { if (event.target === event.currentTarget) reviewSession?.busy ? cancelBusyReview() : finishReviewQueue(); });
+    modalRoot.querySelector('#naiReviewPrev270')?.addEventListener('click', () => reviewJump(reviewSession.index - 1));
+    modalRoot.querySelector('#naiReviewNext270')?.addEventListener('click', () => reviewMove(1));
+    modalRoot.querySelector('#carryCats')?.addEventListener('change', event => { if (reviewSession) reviewSession.carry = !!event.target.checked; });
+    modalRoot.querySelector('#naiPromoteNext270')?.addEventListener('click', () => {
+      const box = modalRoot.querySelector('#naiReviewHold270');
+      if (box) box.checked = false;
+      reviewMove(1);
+    });
+    modalRoot.querySelector('#naiPurgatoryNext270')?.addEventListener('click', async () => {
+      if (!reviewSession || reviewSession.busy) return;
+      reviewSession.busy=true;
+      modalRoot.querySelectorAll('button,input').forEach(el=> { if (el.id !== 'naiReviewClose270') el.disabled=true; });
+      try {
+        captureReviewChoices();
+        const id=await persistReviewMedia(m);
+        const updated=await gmRequest({method:'POST',path:`/api/media/${encodeURIComponent(id)}/purgatory`,headers:{'Content-Type':'application/json'},data:JSON.stringify({in_purgatory:true})});
+        Object.assign(m,updated);
+        const draft=drafts.get(m.id);
+        if (draft) { URL.revokeObjectURL(draft.url); drafts.delete(m.id); }
+        reviewSession.ids.splice(reviewSession.index,1);
+        reviewSession.saved.delete(m.id);
+        reviewSession.busy=false;
+        if (!reviewSession.ids.length) return finishReviewQueue();
+        if (reviewSession.index >= reviewSession.ids.length) reviewSession.index=reviewSession.ids.length-1;
+        await renderReviewQueue();
+      } catch (err) {
+        reviewSession.busy=false;
+        alert(err?.message || String(err));
+        modalRoot.querySelectorAll('button,input').forEach(el=>el.disabled=false);
+      }
+    });
+    modalRoot.querySelector('#reviewAddCat')?.addEventListener('click', async () => {
+      try {
+        captureReviewChoices();
+        const name = prompt(`New category for ${c?.name || 'character'}:`);
+        if (!name?.trim()) return;
+        await gmRequest({method:'POST', path:'/api/categories', headers:{'Content-Type':'application/json'}, data:JSON.stringify({character_id:m.character_id, name:name.trim()})});
+        await refreshLibrary();
+        await renderReviewQueue();
+      } catch (err) { alert(err?.message || String(err)); }
+    });
+    modalRoot.querySelector('#naiQueueSets270')?.addEventListener('click', openQueueSets);
+    modalRoot.querySelector('#naiReviewDelete270')?.addEventListener('click', async () => {
+      if (reviewSession.busy) return;
+      const draft = drafts.get(m.id);
+      const persistedId = draft ? draft.persistedId : m.id;
+      if (persistedId && !confirm('Delete this media item from the managed library?')) return;
+      reviewSession.busy = true;
+      try {
+        if (persistedId) await gmRequest({method:'DELETE', path:`/api/media/${encodeURIComponent(persistedId)}`});
+        if (draft) { URL.revokeObjectURL(draft.url); drafts.delete(m.id); }
+        reviewSession.busy = false;
+        reviewSession.ids.splice(reviewSession.index, 1);
+        reviewSession.saved.delete(m.id);
+        if (!reviewSession.ids.length) return finishReviewQueue();
+        if (reviewSession.index >= reviewSession.ids.length) reviewSession.index = reviewSession.ids.length - 1;
+        await renderReviewQueue();
+      } catch (err) { reviewSession.busy = false; alert(err?.message || String(err)); }
+    });
+  }
+
+  async function openQueueSets() {
+    if (!reviewSession || reviewSession.busy || queueSetOverlay) return;
+    const session = reviewSession;
+    captureReviewChoices();
+    try { await refreshLibrary(); } catch (_) {}
+    if (reviewSession !== session || session.busy || queueSetOverlay) return;
+    const queueImages = reviewSession.ids.map(mediaById).filter(m => m?.media_type === 'image');
+    if (!queueImages.length) return alert('There are no images in this queue to add to a set.');
+    const sets = (library.sets || []).filter(s => s.character_id === queueImages[0].character_id);
+    const wrap = document.createElement('div');
+    wrap.className = 'naiSetQueueWrap270';
+    wrap.innerHTML = `
+      <div class="naiSetQueueModal270">
+        <div class="naiSetQueueHead270"><div style="font:700 14px system-ui;flex:1">Assign upload queue images to a set</div><button id="naiSetQueueClose270">×</button></div>
+        <div class="naiSetQueueBody270">
+          <div class="naiSetQueueSide270">
+            <div class="muted" style="margin-bottom:8px">Assign checked images to an existing set. Assignment saves each image and removes it from this review queue. An image can belong to only one set.</div>
+            <div style="font:700 11px system-ui;margin:10px 0 5px">Assign to existing set</div>
+            <select id="naiSetQueueExisting270"><option value="">Choose a set…</option>${sets.map(s => `<option value="${s.id}">${escapeHtml(s.name || 'Set')}</option>`).join('')}</select>
+            <label for="naiSetQueueNew270" style="display:block;margin-top:14px">Create a new set</label>
+            <input id="naiSetQueueNew270" placeholder="Set name" style="width:100%;box-sizing:border-box;margin-top:5px">
+            <button id="naiSetQueueCreate270" style="margin-top:6px;width:100%">Create set</button>
+            <div id="naiSetQueueStatus215" role="status" class="muted" style="margin-top:6px;font-size:10px">Create an empty set first. Only Assign selected images saves queue images.</div>
+            <div class="row" style="margin-top:10px"><button id="naiSetQueueAll270">Select all</button><button id="naiSetQueueNone270">None</button></div>
+          </div>
+          <div class="naiSetQueueGallery270" id="naiSetQueueGallery270"></div>
+        </div>
+        <div class="naiSetQueueFoot270"><button id="naiSetQueueCancel270">Cancel</button><button class="primary" id="naiSetQueueSave270">Assign selected images</button></div>
+      </div>`;
+    root.appendChild(wrap);
+    queueSetOverlay = wrap;
+    const gallery = wrap.querySelector('#naiSetQueueGallery270');
+    const urls = [];
+    for (const m of queueImages) {
+      const card = document.createElement('label');
+      card.className = 'naiSetQueueCard270 selected';
+      card.dataset.id = m.id;
+      card.innerHTML = `<input type="checkbox" checked><img alt=""><div class="name">${escapeHtml(m.original_name || '')}</div>`;
+      gallery.appendChild(card);
+      card.querySelector('input').addEventListener('change', event => card.classList.toggle('selected', event.target.checked));
+      const draft = drafts.get(m.id);
+      if (draft) card.querySelector('img').src = draft.url;
+      else loadThumbInto(m.id, card.querySelector('img')).then(url => { if (url) { if (wrap.isConnected) urls.push(url); else URL.revokeObjectURL(url); } });
+    }
+    const setBusy = busy => {
+      reviewSession.busy = busy;
+      wrap.querySelectorAll('button,input,select').forEach(el => el.disabled = busy);
+    };
+    const close = () => {
+      if (!queueSetOverlay || reviewSession?.busy) return;
+      queueSetOverlay.remove(); queueSetOverlay = null;
+      for (const url of urls) try { URL.revokeObjectURL(url); } catch (_) {}
+    };
+    wrap.querySelector('#naiSetQueueClose270').onclick = close;
+    wrap.querySelector('#naiSetQueueCancel270').onclick = close;
+    wrap.addEventListener('click', event => { if (event.target === wrap) close(); });
+    wrap.querySelector('#naiSetQueueAll270').onclick = () => wrap.querySelectorAll('.naiSetQueueCard270 input').forEach(box => { box.checked = true; box.closest('.naiSetQueueCard270').classList.add('selected'); });
+    wrap.querySelector('#naiSetQueueNone270').onclick = () => wrap.querySelectorAll('.naiSetQueueCard270 input').forEach(box => { box.checked = false; box.closest('.naiSetQueueCard270').classList.remove('selected'); });
+    wrap.querySelector('#naiSetQueueSave270').onclick = async () => {
+      if (!reviewSession || reviewSession.busy) return;
+      const selected = [...wrap.querySelectorAll('.naiSetQueueCard270 input:checked')].map(box => box.closest('.naiSetQueueCard270')?.dataset.id).filter(Boolean);
+      if (!selected.length) return alert('Check at least one image.');
+      const existingId = wrap.querySelector('#naiSetQueueExisting270').value;
+      if (!existingId) return alert('Choose an existing set. To make a new set, use Create new set.');
+      const save = wrap.querySelector('#naiSetQueueSave270'); save.disabled = true; save.textContent = 'Saving selected…';
+      setBusy(true);
+      try {
+        await assignReviewImagesToSet(selected, existingId, queueImages[0].character_id);
+        setBusy(false);
+        close();
+        if (!reviewSession.ids.length) return finishReviewQueue();
+        await renderReviewQueue();
+      } catch (err) {
+        setBusy(false);
+        alert(err?.message || String(err));
+        if (save.isConnected) { save.disabled = false; save.textContent = 'Assign selected images'; }
+      }
+    };
+    wrap.querySelector('#naiSetQueueCreate270').onclick = async () => {
+      if (!reviewSession || reviewSession.busy) return;
+      const input = wrap.querySelector('#naiSetQueueNew270');
+      const name = input.value.trim();
+      if (!name) { input.focus(); return; }
+      const status = wrap.querySelector('#naiSetQueueStatus215');
+      setBusy(true);
+      status.textContent = 'Creating set…';
+      try {
+        const created = await gmRequest({method:'POST', path:'/api/sets', headers:{'Content-Type':'application/json'},
+          data:JSON.stringify({character_id:queueImages[0].character_id, name, media_ids:[], cover_media_id:null})});
+        const option = document.createElement('option');
+        option.value = created.id; option.textContent = created.name;
+        const select = wrap.querySelector('#naiSetQueueExisting270');
+        select.appendChild(option); select.value = created.id;
+        input.value = '';
+        status.textContent = 'Set created. Choose images and click Assign selected images when ready.';
+      } catch (err) {
+        status.textContent = /at least one image/i.test(err?.message || '')
+          ? 'Restart the companion to install runtime 2.7.10 or newer, then try again. Your queue is unchanged.'
+          : (err?.message || String(err));
+      } finally { setBusy(false); }
+    };
+  }
+
+  document.addEventListener('keydown', event => {
+    if (!reviewSession || reviewSession.busy || !modalRoot.querySelector('[data-nai-review-v270]')) return;
+    if (root.querySelector('.naiCropWrap') || queueSetOverlay) return;
+    if (event.target?.matches?.('input,textarea,select')) return;
+    if (event.key >= '1' && event.key <= '9') {
+      const boxes = [...modalRoot.querySelectorAll('#reviewCats input[data-catid]')];
+      const box = boxes[Number(event.key) - 1];
+      if (box) { event.preventDefault(); box.checked = !box.checked; }
+    } else if (event.key.toLowerCase() === 'r') {
+      const box = modalRoot.querySelector('#naiReviewHold270');
+      if (box) { event.preventDefault(); box.checked = !box.checked; }
+    } else if (event.key === 'Enter') {
+      event.preventDefault(); reviewMove(1);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault(); reviewJump(reviewSession.index + 1);
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault(); reviewJump(reviewSession.index - 1);
+    }
+  }, true);
+
+  // Add "Move to Review" to the existing single-media editor.
+  function decorateEditModal() {
+    const deleteBtn = modalRoot.querySelector('#deleteCurrentImage');
+    if (!deleteBtn || modalRoot.querySelector('#naiMoveReview270')) return;
+    const m = mediaById(activeMediaId());
+    if (!m) return;
+    const button = document.createElement('button');
+    button.type = 'button'; button.id = 'naiMoveReview270';
+    button.textContent = m.in_review ? 'Already in Review' : 'Move to Review';
+    button.disabled = !!m.in_review;
+    deleteBtn.parentElement?.insertBefore(button, deleteBtn);
+    button.addEventListener('click', async () => {
+      try {
+        button.disabled = true; button.textContent = 'Moving…';
+        const updated = await gmRequest({method:'POST', path:`/api/media/${encodeURIComponent(m.id)}/review`, headers:{'Content-Type':'application/json'}, data:JSON.stringify({in_review:true})});
+        Object.assign(m, updated);
+        modalRoot.innerHTML = '';
+        scheduleMainFilter(); syncCategoryCounts();
+      } catch (err) { button.disabled = false; button.textContent = 'Move to Review'; alert(err?.message || String(err)); }
+    });
+  }
+
+  function syncImportIdentityAndDecorations() {
+    const zone = modalRoot.querySelector('#fileDropZone');
+    if (zone && zone !== importModalIdentity) {
+      importModalIdentity = zone;
+      mirroredFiles = [];
+    } else if (!zone) importModalIdentity = null;
+    decorateEditModal();
+  }
+
+  // Narrow observers only: category row, media grid, review/import modal, and viewer stages.
+  new MutationObserver(() => { schedulePseudoSync(); }).observe(catWrap, {childList:true, subtree:true});
+  // Grid filtering is applied to data before windowing; scrolling must not rescan the library.
+  new MutationObserver(syncImportIdentityAndDecorations).observe(modalRoot, {childList:true, subtree:true});
+  new MutationObserver(() => setTimeout(syncFavoriteButton, 0)).observe(stages, {childList:true, subtree:true});
+
+  root.addEventListener('click', event => {
+    // A direct click on the active video should only start/pause playback.  Do
+    // not queue the library-wide filter pass below: it needlessly delays video
+    // playback while native controls never need it.
+    if (event.target?.closest?.('video')) return;
+    if (event.target?.closest?.('#clearFiles')) mirroredFiles = [];
+    const favoriteClick = event.target?.closest?.('#favBtn');
+    if (favoriteClick) {
+      const current = mediaById(activeMediaId());
+      if (current && current.media_type !== 'video') {
+        setTimeout(() => refreshLibrary().then(() => { schedulePseudoSync(); scheduleMainFilter(); }).catch(() => {}), 180);
+      }
+    }
+    setTimeout(() => { syncFavoriteButton(); scheduleMainFilter(); }, 0);
+  });
+  searchInput?.addEventListener('input', () => setTimeout(scheduleMainFilter, 0));
+  charSelect.addEventListener('change', () => {
+    favVideoMode = false;
+    root.getElementById('naiFavVideoFilter270')?.classList.remove('active');
+    setTimeout(() => refreshLibrary().then(() => { schedulePseudoSync(); scheduleMainFilter(); }).catch(() => {}), 0);
+  });
+  refreshBtn?.addEventListener('click', () => {
+    setTimeout(() => refreshLibrary().then(() => { schedulePseudoSync(); scheduleMainFilter(); }).catch(() => {}), 80);
+  });
+
+  window.addEventListener('pagehide', discardReviewDrafts, {once:true});
+
+
+  refreshLibrary().then(() => {
+    ensurePseudoCategories();
+    applyMainFilter();
+    syncImportIdentityAndDecorations();
+    syncFavoriteButton();
+  }).catch(() => {});
+})();
