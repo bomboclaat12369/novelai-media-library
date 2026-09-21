@@ -1087,8 +1087,6 @@ class LibraryStore:
             m = self.media_item(media_id)
             if not m:
                 raise KeyError("Media not found")
-            if m.get("media_type") != "image":
-                raise ValueError("Only images can be sent to Purgatory")
             target = bool(in_purgatory)
             changes = {"in_purgatory": target}
             if target:
