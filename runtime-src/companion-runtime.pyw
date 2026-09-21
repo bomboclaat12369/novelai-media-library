@@ -120,6 +120,9 @@ class LibraryStore:
                 if "favorite" not in m:
                     m["favorite"] = False
                     changed = True
+                if "featured" not in m:
+                    m["featured"] = False
+                    changed = True
                 if "in_review" not in m:
                     m["in_review"] = False
                     changed = True
@@ -264,6 +267,17 @@ class LibraryStore:
             if bool(media.get("needs_replacement")) == bool(needed):
                 return media
             return self._change_media(media, {"needs_replacement": bool(needed)}, "Change replacement flag")
+
+    def set_featured(self, media_id: str, featured: bool) -> dict[str, Any]:
+        with self.lock:
+            media = self.media_item(media_id)
+            if not media:
+                raise KeyError("Media not found")
+            if media.get("media_type") != "image":
+                raise ValueError("Only images can be Featured")
+            if bool(media.get("featured")) == bool(featured):
+                return media
+            return self._change_media(media, {"featured": bool(featured)}, "Change Featured status")
 
     def undo_last(self, entry_id: str) -> dict[str, Any]:
         with self.lock:
@@ -650,6 +664,7 @@ class LibraryStore:
                 "categories": categories,
                 "in_all": True,
                 "favorite": False,
+                "featured": False,
                 "in_review": False,
                 "crop_top": 0.0,
                 "crop_bottom": 0.0,
@@ -1392,7 +1407,7 @@ class MediaHandler(BaseHTTPRequestHandler):
         try:
             path = urllib.parse.urlparse(self.path).path
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/diagnostics/last-import":
                 payload = dict(self.store.last_import_debug) if self.store.last_import_debug else {"state": "none"}
@@ -1440,6 +1455,11 @@ class MediaHandler(BaseHTTPRequestHandler):
             if match:
                 body = self._read_json()
                 self._send_json(200, self.store.set_needs_replacement(match.group(1), bool(body.get("needs_replacement"))))
+                return
+            match = re.fullmatch(r"/api/media/([0-9a-f]+)/featured", path)
+            if match:
+                body = self._read_json()
+                self._send_json(200, self.store.set_featured(match.group(1), bool(body.get("featured"))))
                 return
             if path == "/api/characters":
                 body = self._read_json()
