@@ -287,6 +287,7 @@ class LibraryStore:
             media = self.media_item(media_id)
             if not media:
                 raise KeyError("Media not found")
+            # Featured is a library-wide quality marker, so it applies to images and videos.
             if bool(media.get("featured")) == bool(featured):
                 return media
             return self._change_media(media, {"featured": bool(featured)}, "Change Featured status")
