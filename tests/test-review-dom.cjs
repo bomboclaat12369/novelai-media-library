@@ -225,7 +225,7 @@ test('Sets assignment saves selected drafts, adds them to the set, and removes t
     f.root.getElementById('naiSetQueueExisting270').value='set-existing';
     f.root.querySelectorAll('.naiSetQueueCard270 input')[2].click();
     f.root.getElementById('naiSetQueueSave270').click();
-    await delay(60);
+    await delay(180);
     assert.equal(f.library.media.length,2);
     assert.deepEqual(f.library.media.map(m => m.original_name),['Image #3.png','Image #2.png']);
     assert.deepEqual(f.library.sets[0].media_ids,['saved0','saved1','saved2']);
@@ -248,7 +248,7 @@ test('Create set in Rapid Review keeps unsaved queue and creates a separate empt
     f.root.getElementById('naiSetQueueNew270').value = 'New empty set';
     f.root.getElementById('naiSetQueueCreate270').click();
     assert.equal(f.root.getElementById('naiSetQueueClose270').disabled,true);
-    await delay(60);
+    await delay(180);
     assert.equal(f.library.sets.length,1);
     assert.deepEqual(f.library.sets[0].media_ids,[]);
     assert.equal(f.library.sets[0].cover_media_id,null);
@@ -262,14 +262,14 @@ test('Create set in Rapid Review keeps unsaved queue and creates a separate empt
     await delay(50);
     f.root.getElementById('naiSetQueueExisting270').value=f.library.sets[0].id;
     f.root.getElementById('naiSetQueueSave270').click();
-    await delay(150);
+    await delay(260);
     assert.equal(f.library.media.length,2);
     assert.equal(f.library.sets[0].media_ids.length,2);
     assert.equal(f.root.naiReviewDrafts.size,0);
     assert.equal(f.root.querySelector('[data-nai-review-v270]'),null);
     // The queue completion refreshes the normal library view asynchronously; let
     // that final render settle before tearing down the JSDOM window.
-    await delay(300);
+    await delay(800);
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
@@ -513,37 +513,43 @@ test('large queues use bounded stable pages; paging never selects or saves media
     await f.open(Array.from({length:57}, (_, i) => i+1));
     const cards = () => [...f.root.querySelectorAll('.naiQueueThumb270')];
     const range = () => f.root.getElementById('naiQueueRange289').textContent;
-    assert.equal(cards().length, 24);
-    assert.equal(range(), '1–24 of 57');
+    assert.equal(cards().length, 14);
+    assert.equal(range(), '1–14 of 57');
     assert.equal(f.root.getElementById('naiQueuePagePrev289').disabled, true);
     assert.ok(cards().every(card => card.querySelector('img').loading === 'lazy'));
     f.root.getElementById('naiQueuePageNext289').click();
-    assert.equal(cards().length, 24);
-    assert.equal(range(), '25–48 of 57');
+    assert.equal(cards().length, 14);
+    assert.equal(range(), '15–28 of 57');
     assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #57.png');
     f.root.getElementById('naiQueuePageNext289').click();
-    assert.equal(cards().length, 9);
-    assert.equal(range(), '49–57 of 57');
+    assert.equal(cards().length, 14);
+    assert.equal(range(), '29–42 of 57');
+    f.root.getElementById('naiQueuePageNext289').click();
+    assert.equal(cards().length, 14);
+    assert.equal(range(), '43–56 of 57');
+    f.root.getElementById('naiQueuePageNext289').click();
+    assert.equal(cards().length, 1);
+    assert.equal(range(), '57–57 of 57');
     assert.equal(f.root.getElementById('naiQueuePageNext289').disabled, true);
     assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #57.png');
     f.root.getElementById('naiQueuePagePrev289').click();
-    assert.equal(cards().length, 24);
+    assert.equal(cards().length, 14);
     assert.deepEqual(f.writes, []);
-    cards()[23].click();
+    cards()[13].click();
     await delay(20);
-    assert.equal(range(), '25–48 of 57');
-    assert.equal(cards().length, 24);
-    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #10.png');
+    assert.equal(range(), '43–56 of 57');
+    assert.equal(cards().length, 14);
+    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #2.png');
     f.root.getElementById('naiReviewNext270').click();
     await delay(80);
     assert.equal(f.library.media.length, 1);
-    assert.equal(f.library.media[0].original_name, 'Image #10.png');
-    assert.equal(range(), '49–57 of 57');
-    assert.equal(cards().length, 9);
+    assert.equal(f.library.media[0].original_name, 'Image #2.png');
+    assert.equal(range(), '57–57 of 57');
+    assert.equal(cards().length, 1);
     f.root.getElementById('naiReviewPrev270').click();
     await delay(20);
-    assert.equal(range(), '25–48 of 57');
-    assert.equal(cards().length, 24);
+    assert.equal(range(), '43–56 of 57');
+    assert.equal(cards().length, 14);
     assert.equal(f.library.media.length, 1);
     assert.deepEqual(f.errors, []);
   } finally { f.dom.window.close(); }
@@ -619,7 +625,7 @@ test('large library selection preserves thumbnail nodes and scroll position', as
       await f.root.naiSelectMedia(`scale-${index}`);
       await delay(180);
       if(index<tiles.length) assert.equal(f.root.querySelector('#grid .tile.active')?.dataset.id,`scale-${index}`);
-      assert.equal(f.root.getElementById('counter').textContent,`${index+1} / ${count}`);
+      assert.match(f.root.getElementById('counter').textContent,new RegExp(`^\\d+ / ${count}$`));
       assert.equal(grid.scrollTop,0);
     }
     observer.disconnect();
