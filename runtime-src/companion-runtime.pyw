@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import mimetypes
@@ -192,6 +193,151 @@ class LibraryStore:
             self.data["updated_at"] = now_iso()
             self._write_atomic(self.data)
 
+    def undo_history(self) -> dict[str, Any]:
+        with self.lock:
+            entries = self.data.get("undo_history", [])
+            return {"limit": 20, "entries": [
+                {"id": e["id"], "label": e["label"], "filename": e.get("filename", ""),
+                 "recorded_at": e["recorded_at"], "media_id": e["media_id"]}
+                for e in reversed(entries)
+            ]}
+
+    def _purge_undo_files(self, expired: list[dict[str, Any]]) -> None:
+        # Files remain in place while recoverable: deletion/undo never copies a video.
+        protected = {m.get(k) for m in self.data["media"] for k in ("stored_rel", "thumb_rel")}
+        for e in self.data.get("undo_history", []):
+            if e["kind"] == "delete":
+                protected.update(e["media"].get(k) for k in ("stored_rel", "thumb_rel"))
+        for e in expired:
+            if e["kind"] != "delete":
+                continue
+            for k in ("stored_rel", "thumb_rel"):
+                rel = e["media"].get(k)
+                if not rel or rel in protected:
+                    continue
+                path = (self.root / rel).resolve()
+                if not any(path.is_relative_to(folder.resolve()) for folder in (self.media_dir, self.thumb_dir)):
+                    continue
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    # A video may still be open on Windows. Never lose an otherwise
+                    # successful metadata write because an expired file is locked.
+                    pass
+
+    def _save_undo(self, entry: dict[str, Any]) -> None:
+        previous = self.data.get("undo_history", [])
+        entry.update(id=uuid.uuid4().hex, recorded_at=now_iso())
+        combined = previous + [entry]
+        self.data["undo_history"] = combined[-20:]
+        try:
+            self.save()
+        except Exception:
+            self.data["undo_history"] = previous
+            raise
+        self._purge_undo_files(combined[:-20])
+
+    def _change_media(self, media: dict[str, Any], changes: dict[str, Any], label: str) -> dict[str, Any]:
+        changes = {k: v for k, v in changes.items() if media.get(k) != v}
+        if not changes:
+            return media
+        before = {k: copy.deepcopy(media.get(k)) for k in changes}
+        missing = [k for k in changes if k not in media]
+        media.update(changes)
+        try:
+            self._save_undo({"kind": "fields", "media_id": media["id"], "filename": media.get("original_name", ""),
+                             "label": label, "before": before, "missing": missing, "after": copy.deepcopy(changes)})
+        except Exception:
+            media.update(before)
+            for k in missing:
+                media.pop(k, None)
+            raise
+        return media
+
+    def set_needs_replacement(self, media_id: str, needed: bool) -> dict[str, Any]:
+        with self.lock:
+            media = self.media_item(media_id)
+            if not media:
+                raise KeyError("Media not found")
+            if media.get("media_type") != "image":
+                raise ValueError("Only images can be marked for replacement")
+            if bool(media.get("needs_replacement")) == bool(needed):
+                return media
+            return self._change_media(media, {"needs_replacement": bool(needed)}, "Change replacement flag")
+
+    def undo_last(self, entry_id: str) -> dict[str, Any]:
+        with self.lock:
+            history = self.data.get("undo_history", [])
+            if not history or history[-1]["id"] != entry_id:
+                raise ValueError("History changed. Reopen Undo before trying again.")
+            entry = history[-1]
+            if entry["kind"] == "fields":
+                media = self.media_item(entry["media_id"])
+                if not media or any(media.get(k) != v for k, v in entry["after"].items()):
+                    raise ValueError("This item changed after that action; it cannot be safely undone.")
+                old = copy.deepcopy(media)
+                restored_categories = entry["before"].get("categories")
+                if restored_categories is not None and self._validate_categories(media["character_id"], restored_categories) != restored_categories:
+                    raise ValueError("A category needed by this action no longer exists.")
+                media.update(copy.deepcopy(entry["before"]))
+                for k in entry.get("missing", []):
+                    media.pop(k, None)
+                self.data["undo_history"] = history[:-1]
+                try:
+                    self.save()
+                except Exception:
+                    media.clear(); media.update(old)
+                    self.data["undo_history"] = history
+                    raise
+            elif entry["kind"] == "delete":
+                media = copy.deepcopy(entry["media"])
+                if self.media_item(media["id"]) or not self.character(media["character_id"]):
+                    raise ValueError("The original character is missing or this item already exists.")
+                if not (self.root / media["stored_rel"]).is_file():
+                    raise ValueError("The retained original file is missing; deletion cannot be undone.")
+                if any(m.get("character_id") == media["character_id"] and m.get("sha256") == media.get("sha256") for m in self.data["media"]):
+                    raise ValueError("This source has already been imported again; undo would create a duplicate.")
+                if self._validate_categories(media["character_id"], media.get("categories", [])) != media.get("categories", []):
+                    raise ValueError("A category needed by this image no longer exists.")
+                for change in entry.get("sets", []):
+                    if self.set_item(change["id"]) != change["after"]:
+                        raise ValueError("This image's set changed after deletion; it cannot be safely restored.")
+                if media.get("media_type") == "image" and (not media.get("thumb_rel") or not (self.root / media["thumb_rel"]).is_file()):
+                    media["thumb_rel"] = None
+                previous_media, previous_sets = self.data["media"], self.data.get("sets", [])
+                restored = list(previous_media)
+                restored.insert(min(entry["index"], len(restored)), media)
+                restores = {change["id"]: copy.deepcopy(change["before"]) for change in entry.get("sets", [])}
+                self.data["media"] = restored
+                self.data["sets"] = [restores.get(s["id"], s) for s in previous_sets]
+                self.data["undo_history"] = history[:-1]
+                try:
+                    self.save()
+                except Exception:
+                    self.data["media"], self.data["sets"] = previous_media, previous_sets
+                    self.data["undo_history"] = history
+                    raise
+            else:
+                raise ValueError("Unknown history action")
+            if entry["kind"] == "delete" and media.get("media_type") == "image" and not media.get("thumb_rel"):
+                owner = self.character(media["character_id"])
+                self._queue_image_thumbnail(self.root / media["stored_rel"], media["id"], owner["name"])
+            return {"ok": True, "media_id": entry["media_id"], "label": entry["label"], "item": copy.deepcopy(media)}
+
+    def clear_undo_history(self, expected_id: str) -> dict[str, Any]:
+        with self.lock:
+            history = self.data.get("undo_history", [])
+            if history and history[-1]["id"] != expected_id:
+                raise ValueError("History changed. Reopen Undo before clearing it.")
+            self.data["undo_history"] = []
+            try:
+                self.save()
+            except Exception:
+                self.data["undo_history"] = history
+                raise
+            self._purge_undo_files(history)
+            return {"ok": True}
+
     def manual_backup(self) -> Path:
         with self.lock:
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -201,7 +347,7 @@ class LibraryStore:
 
     def public_library(self) -> dict[str, Any]:
         with self.lock:
-            return json.loads(json.dumps(self.data))
+            return json.loads(json.dumps({k: v for k, v in self.data.items() if k != "undo_history"}))
 
     def character(self, character_id: str) -> dict[str, Any] | None:
         return next((c for c in self.data["characters"] if c["id"] == character_id), None)
@@ -725,6 +871,8 @@ class LibraryStore:
                 item["sha256"] = sha
                 item["source"] = {"kind": "local", "original_name": safe_name}
                 item["in_all"] = bool(item.get("in_all", True))
+                item["needs_replacement"] = False
+                self.data["undo_history"] = [e for e in self.data.get("undo_history", []) if e.get("media_id") != media_id]
                 self.save()
                 result = item
             self._queue_image_thumbnail(destination, media_id, owner["name"])
@@ -860,10 +1008,7 @@ class LibraryStore:
                 next_in_all = True
             if m.get("categories") == categories and bool(m.get("in_all", True)) == next_in_all:
                 return m
-            m["categories"] = categories
-            m["in_all"] = next_in_all
-            self.save()
-            return m
+            return self._change_media(m, {"categories": categories, "in_all": next_in_all}, "Change categories / All")
 
     def set_favorite(self, media_id: str, favorite: bool) -> dict[str, Any]:
         with self.lock:
@@ -872,9 +1017,7 @@ class LibraryStore:
                 raise KeyError("Media not found")
             if bool(m.get("favorite")) == bool(favorite):
                 return m
-            m["favorite"] = bool(favorite)
-            self.save()
-            return m
+            return self._change_media(m, {"favorite": bool(favorite)}, "Change favorite")
 
     def set_review(self, media_id: str, in_review: bool) -> dict[str, Any]:
         with self.lock:
@@ -883,9 +1026,7 @@ class LibraryStore:
                 raise KeyError("Media not found")
             if bool(m.get("in_review")) == bool(in_review):
                 return m
-            m["in_review"] = bool(in_review)
-            self.save()
-            return m
+            return self._change_media(m, {"in_review": bool(in_review)}, "Change Review status")
 
     def set_crop(self, media_id: str, top: Any = 0.0, bottom: Any = 0.0) -> dict[str, Any]:
         with self.lock:
@@ -988,24 +1129,29 @@ class LibraryStore:
             m = self.media_item(media_id)
             if not m:
                 raise KeyError("Media not found")
-            for key in ("stored_rel", "thumb_rel"):
-                rel = m.get(key)
-                if rel:
-                    try:
-                        (self.root / rel).unlink(missing_ok=True)
-                    except Exception:
-                        pass
-            self.data["media"] = [x for x in self.data["media"] if x["id"] != media_id]
-            kept_sets = []
-            for item in self.data.get("sets", []):
-                members = [mid for mid in item.get("media_ids", []) if mid != media_id]
-                item["media_ids"] = members
-                if item.get("cover_media_id") not in members:
-                    item["cover_media_id"] = members[0] if members else None
-                item["updated_at"] = now_iso()
-                kept_sets.append(item)
-            self.data["sets"] = kept_sets
-            self.save()
+            previous_media, previous_sets = self.data["media"], self.data.get("sets", [])
+            changes, next_sets = [], []
+            for item in previous_sets:
+                if media_id not in item.get("media_ids", []):
+                    next_sets.append(item)
+                    continue
+                updated = copy.deepcopy(item)
+                updated["media_ids"] = [mid for mid in item.get("media_ids", []) if mid != media_id]
+                if updated.get("cover_media_id") not in updated["media_ids"]:
+                    updated["cover_media_id"] = next(iter(updated["media_ids"]), None)
+                updated["updated_at"] = now_iso()
+                changes.append({"id": item["id"], "before": copy.deepcopy(item), "after": copy.deepcopy(updated)})
+                next_sets.append(updated)
+            entry = {"kind": "delete", "label": "Delete media", "media_id": media_id,
+                     "filename": m.get("original_name", ""), "media": copy.deepcopy(m),
+                     "index": previous_media.index(m), "sets": changes}
+            self.data["media"] = [x for x in previous_media if x["id"] != media_id]
+            self.data["sets"] = next_sets
+            try:
+                self._save_undo(entry)
+            except Exception:
+                self.data["media"], self.data["sets"] = previous_media, previous_sets
+                raise
 
     def media_path(self, media_id: str, thumb: bool = False) -> tuple[Path, str]:
         with self.lock:
@@ -1246,7 +1392,7 @@ class MediaHandler(BaseHTTPRequestHandler):
         try:
             path = urllib.parse.urlparse(self.path).path
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "automatic_video_thumbnails": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/diagnostics/last-import":
                 payload = dict(self.store.last_import_debug) if self.store.last_import_debug else {"state": "none"}
@@ -1254,6 +1400,9 @@ class MediaHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/diagnostics/performance":
                 self._send_json(200, self.store.performance_probe())
+                return
+            if path == "/api/undo":
+                self._send_json(200, self.store.undo_history())
                 return
             if path == "/api/library":
                 self._send_json(200, self.store.public_library())
@@ -1279,6 +1428,19 @@ class MediaHandler(BaseHTTPRequestHandler):
             return
         try:
             path = urllib.parse.urlparse(self.path).path
+            if path == "/api/undo":
+                body = self._read_json()
+                self._send_json(200, self.store.undo_last(str(body.get("entry_id", ""))))
+                return
+            if path == "/api/undo/clear":
+                body = self._read_json()
+                self._send_json(200, self.store.clear_undo_history(str(body.get("entry_id", ""))))
+                return
+            match = re.fullmatch(r"/api/media/([0-9a-f]+)/needs-replacement", path)
+            if match:
+                body = self._read_json()
+                self._send_json(200, self.store.set_needs_replacement(match.group(1), bool(body.get("needs_replacement"))))
+                return
             if path == "/api/characters":
                 body = self._read_json()
                 self._send_json(200, self.store.add_character(str(body.get("name", ""))))
