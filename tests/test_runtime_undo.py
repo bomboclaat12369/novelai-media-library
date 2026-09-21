@@ -2,6 +2,7 @@
 import copy
 import io
 import json
+import os
 from types import SimpleNamespace
 import runpy
 import tempfile
@@ -9,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-RUNTIME = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'runtime-src/companion-runtime.pyw'))
+RUNTIME = runpy.run_path(str(Path(os.environ.get('NAI_RUNTIME_SOURCE', Path(__file__).resolve().parents[1] / 'runtime-src/companion-runtime.pyw'))))
 
 
 class UndoTests(unittest.TestCase):
@@ -44,6 +45,16 @@ class UndoTests(unittest.TestCase):
         self.undo()
         self.assertFalse(restored.get('needs_replacement', False))
         self.assertEqual((self.store.root / restored['stored_rel']).read_bytes(), b'one')
+
+    def test_featured_is_image_only_and_undoable(self):
+        image = self.image('featured')
+        self.store.set_featured(image['id'], True)
+        self.assertTrue(self.store.media_item(image['id'])['featured'])
+        self.undo()
+        self.assertFalse(self.store.media_item(image['id'])['featured'])
+        video = self.store.import_bytes(b'clip', 'clip.mp4', self.owner['id'], [], {}, 'video/mp4')[0]
+        with self.assertRaises(ValueError):
+            self.store.set_featured(video['id'], True)
 
     def test_delete_undo_restores_order_set_membership_cover_and_file_bytes(self):
         images = [self.image(str(i)) for i in range(3)]
