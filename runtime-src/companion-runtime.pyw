@@ -540,7 +540,14 @@ class LibraryStore:
                         continue
                 # Let the successful import response flush before background work starts.
                 time.sleep(0.10)
-                thumb_rel, width, height = self._make_thumbnail(original, media_id, character_name)
+                thumbnail_result = self._make_thumbnail(original, media_id, character_name)
+                # Keep the worker compatible with lightweight test/custom thumbnail
+                # hooks that return only a path (or None), while the built-in path
+                # returns source dimensions together with the thumbnail.
+                if isinstance(thumbnail_result, tuple):
+                    thumb_rel, width, height = thumbnail_result
+                else:
+                    thumb_rel, width, height = thumbnail_result, None, None
                 if not thumb_rel:
                     continue
                 with self.lock:
