@@ -267,6 +267,9 @@ test('Create set in Rapid Review keeps unsaved queue and creates a separate empt
     assert.equal(f.library.sets[0].media_ids.length,2);
     assert.equal(f.root.naiReviewDrafts.size,0);
     assert.equal(f.root.querySelector('[data-nai-review-v270]'),null);
+    // The queue completion refreshes the normal library view asynchronously; let
+    // that final render settle before tearing down the JSDOM window.
+    await delay(300);
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
