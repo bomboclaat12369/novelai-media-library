@@ -10,7 +10,7 @@ const assembled = config.parts.map(p => fs.readFileSync(path.join(repo,p),'utf8'
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function fixture({media = [], configure = null} = {}) {
-  const errors = [], writes = [], revoked = [];
+  const errors = [], writes = [], revoked = [], history = [];
   const vc = new VirtualConsole();
   vc.on('jsdomError', e => { if (!e.message.includes('Not implemented:')) errors.push(e); });
   const dom = new JSDOM('<!doctype html><html><head></head><body><main>NovelAI fixture</main></body></html>', {
@@ -38,8 +38,17 @@ async function fixture({media = [], configure = null} = {}) {
       try {
         let value, status = 200;
         if (method !== 'GET') writes.push({route,method});
-        if (route === '/api/health') value = {ok:true,version:6};
+        if (route === '/api/health') value = {ok:true,version:6,replacement_flags:true,undo_history:true};
         else if (route === '/api/library') value = library;
+        else if (route === '/api/undo' && method === 'GET') value = {entries:[...history].reverse(),limit:20};
+        else if (route === '/api/undo' && method === 'POST') {
+          const entry=history.pop();
+          if (!entry || entry.id!==JSON.parse(options.data).entry_id) throw new Error('Stale history request');
+          const item=library.media.find(m=>m.id===entry.media_id);
+          if (item) Object.assign(item,entry.before);
+          else library.media.splice(entry.index,0,entry.before);
+          value={ok:true,item:entry.before};
+        }
         else if (route.startsWith('/api/characters/') && method === 'DELETE') {
           const id = route.split('/')[3];
           library.characters = library.characters.filter(c => c.id !== id);
@@ -48,6 +57,9 @@ async function fixture({media = [], configure = null} = {}) {
         }
         else if (route.startsWith('/api/media/') && method === 'DELETE') {
           const id = route.split('/')[3];
+          const index=library.media.findIndex(m=>m.id===id);
+          const item=library.media[index];
+          history.push({id:'undo-'+history.length,label:'Delete media',media_id:id,filename:item.original_name,index,before:JSON.parse(JSON.stringify(item))});
           library.media = library.media.filter(m => m.id !== id);
           value = {ok:true};
         } else if (route.startsWith('/api/media/') && method === 'GET' && route.endsWith('/quality')) {
@@ -68,6 +80,7 @@ async function fixture({media = [], configure = null} = {}) {
           const item = library.media.find(m => m.id === id);
           if (!item) throw new Error(`Saving unknown media ${id}`);
           const body = JSON.parse(options.data);
+          history.push({id:'undo-'+history.length,label:'Change '+action,media_id:id,filename:item.original_name,before:JSON.parse(JSON.stringify(item))});
           Object.assign(item, action === 'crop' ? {crop_top:body.top,crop_bottom:body.bottom} : body); value = item;
         } else if (route === '/api/sets' && method === 'POST') {
           value = {id:`set${library.sets.length+1}`,...JSON.parse(options.data)}; library.sets.push(value);
@@ -96,7 +109,7 @@ async function fixture({media = [], configure = null} = {}) {
     root.getElementById('importReview').click();
     await delay(70);
   }
-  return {dom,w,root,library,writes,errors,revoked,open,get frames(){return frames;}};
+  return {dom,w,root,library,writes,errors,revoked,history,open,get frames(){return frames;}};
 }
 
 test('assembled UI opens ordered previews without importing, navigates, and discards on X', async () => {
@@ -684,3 +697,65 @@ for (const mode of ['display', 'navigate', 'error']) {
     } finally { f.dom.window.close(); }
   });
 }
+
+
+test('replacement flag finds set-only images and can be undone from the viewer', async () => {
+  const media=['first','second'].map(id=>({id,character_id:'character',original_name:id+'.png',media_type:'image',in_all:false,in_review:false,needs_replacement:false,categories:[],thumb_rel:'thumb.png'}));
+  const f=await fixture({media});
+  try {
+    f.library.sets.push({id:'flag-set',character_id:'character',name:'Flag set',media_ids:['first','second'],cover_media_id:'first'});
+    f.root.getElementById('refreshBtn').click(); await delay(250);
+    f.root.getElementById('naiSetsCat').click();
+    f.root.querySelector('.naiSetTile').click(); await delay(250);
+    f.root.querySelector('.tile[data-id="first"]').click(); await delay(120);
+    const button=f.root.getElementById('replacementBtn');
+    assert.equal(button.disabled,false);
+    button.click(); await delay(150);
+    assert.equal(f.library.media[0].needs_replacement,true);
+    assert.equal(button.getAttribute('aria-pressed'),'true');
+    assert.equal(f.library.media[0].in_all,false);
+    assert.deepEqual(f.library.sets[0].media_ids,['first','second']);
+    f.root.querySelector('.naiReplacementCat').click(); await delay(150);
+    assert.equal(f.root.querySelector('.naiSetBreadcrumb'),null);
+    assert.deepEqual([...f.root.querySelectorAll('#grid .tile[data-id]')].map(t=>t.dataset.id),['first']);
+    assert.ok(f.root.querySelector('#grid .naiReplacementBadge'));
+    button.click(); await delay(150);
+    assert.equal(f.root.querySelectorAll('#grid .tile[data-id]').length,0);
+    f.root.getElementById('undoBtn').click(); await delay(60);
+    assert.ok(f.root.getElementById('undoLatestBtn'));
+    f.root.getElementById('undoLatestBtn').click(); await delay(200);
+    assert.equal(f.library.media[0].needs_replacement,true);
+    assert.ok(f.root.querySelector('#grid .tile[data-id="first"]'));
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
+
+test('viewer Undo restores a deleted image at its original list position', async () => {
+  const media=['first','second','third'].map(id=>({id,character_id:'character',original_name:id+'.png',media_type:'image',in_all:true,in_review:false,categories:[],thumb_rel:'thumb.png'}));
+  const f=await fixture({media});
+  try {
+    f.root.querySelector('.tile[data-id="second"]').click(); await delay(80);
+    f.root.getElementById('deleteBtn').click(); await delay(140);
+    assert.deepEqual(f.library.media.map(m=>m.id),['first','third']);
+    f.root.getElementById('undoBtn').click(); await delay(60);
+    f.root.getElementById('undoLatestBtn').click(); await delay(180);
+    assert.deepEqual(f.library.media.map(m=>m.id),['first','second','third']);
+    assert.deepEqual([...f.root.querySelectorAll('#grid .tile[data-id]')].map(t=>t.dataset.id),['first','second','third']);
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
+
+
+test('undo restores saved crop metadata missing from the initial page snapshot', async () => {
+  const f=await fixture();
+  try {
+    const restored={id:'restored',character_id:'character',original_name:'restored.png',media_type:'image',in_all:true,in_review:false,categories:[],crop_top:.2,crop_bottom:.1,thumb_rel:'thumb.png'};
+    f.history.push({id:'prior-session-delete',label:'Delete media',media_id:restored.id,filename:restored.original_name,index:0,before:restored});
+    f.root.getElementById('undoBtn').click(); await delay(60);
+    f.root.getElementById('undoLatestBtn').click(); await delay(180);
+    f.root.querySelector('#modalRoot [data-close]').click();
+    f.root.querySelector('.tile[data-id="restored"]').click(); await delay(80);
+    assert.equal(f.root.querySelector('#stage1 img').dataset.naiCropKey,'restored:0.200000:0.100000');
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
