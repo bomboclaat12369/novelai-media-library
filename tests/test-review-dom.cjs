@@ -38,7 +38,7 @@ async function fixture({media = [], configure = null} = {}) {
       try {
         let value, status = 200;
         if (method !== 'GET') writes.push({route,method});
-        if (route === '/api/health') value = {ok:true,version:6,replacement_flags:true,undo_history:true};
+        if (route === '/api/health') value = {ok:true,version:6,replacement_flags:true,featured_flags:true,undo_history:true};
         else if (route === '/api/library') value = library;
         else if (route === '/api/undo' && method === 'GET') value = {entries:[...history].reverse(),limit:20};
         else if (route === '/api/undo' && method === 'POST') {
@@ -756,6 +756,28 @@ test('undo restores saved crop metadata missing from the initial page snapshot',
     f.root.querySelector('#modalRoot [data-close]').click();
     f.root.querySelector('.tile[data-id="restored"]').click(); await delay(80);
     assert.equal(f.root.querySelector('#stage1 img').dataset.naiCropKey,'restored:0.200000:0.100000');
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
+
+test('Rapid Review saves Favorite, Featured, and replacement flags, and Featured is cross-library', async () => {
+  const item={id:'best',character_id:'character',original_name:'best.png',media_type:'image',in_all:true,in_review:false,categories:[],thumb_rel:'thumb.png'};
+  const f=await fixture({media:[item]});
+  try {
+    f.root.querySelector('.tile[data-id="best"]').click(); await delay(80);
+    f.root.getElementById('featuredBtn').click(); await delay(80);
+    assert.equal(item.featured,true);
+    const select=f.root.getElementById('characterSelect');
+    select.value='__nai_featured__'; select.dispatchEvent(new f.w.Event('change',{bubbles:true})); await delay(80);
+    assert.ok(f.root.querySelector('.tile[data-id="best"]'));
+    select.value='character'; select.dispatchEvent(new f.w.Event('change',{bubbles:true})); await delay(60);
+    await f.open([new f.w.File(['image'],'rapid.png',{type:'image/png'})]);
+    f.root.getElementById('naiReviewFavorite270').checked=true;
+    f.root.getElementById('naiReviewFeatured270').checked=true;
+    f.root.getElementById('naiReviewReplacement270').checked=true;
+    f.root.getElementById('naiReviewNext270').click(); await delay(180);
+    const saved=f.library.media.find(m=>m.original_name==='rapid.png');
+    assert.equal(saved.favorite,true); assert.equal(saved.featured,true); assert.equal(saved.needs_replacement,true);
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
