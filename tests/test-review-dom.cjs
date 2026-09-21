@@ -590,28 +590,41 @@ test('large library selection preserves thumbnail nodes and scroll position', as
     await delay(750);
     const grid = f.root.getElementById('grid');
     const tiles = [...grid.querySelectorAll('.tile[data-id]')];
-    assert.equal(tiles.length,count);
+    assert.ok(tiles.length<=60, `Expected a viewport-sized grid, got ${tiles.length} tiles`);
+    assert.ok(tiles.length<count);
     const images = tiles.map(tile=>tile.querySelector('img'));
-    grid.scrollTop=640;
+    grid.scrollTop=0;
     let replaced=0;
     const observer=new f.w.MutationObserver(records=>{
       for(const r of records) replaced+=r.addedNodes.length+r.removedNodes.length;
     });
     observer.observe(grid,{childList:true});
     for(const index of [0,Math.floor(count/2),count-1]) {
-      tiles[index].click();
+      await f.root.naiSelectMedia(`scale-${index}`);
       await delay(180);
-      assert.equal(f.root.querySelector('#grid .tile.active')?.dataset.id,`scale-${index}`);
+      if(index<tiles.length) assert.equal(f.root.querySelector('#grid .tile.active')?.dataset.id,`scale-${index}`);
       assert.equal(f.root.getElementById('counter').textContent,`${index+1} / ${count}`);
-      assert.equal(grid.scrollTop,640);
+      assert.equal(grid.scrollTop,0);
     }
     observer.disconnect();
     assert.equal(replaced,0,'selection must not remove/reinsert grid tiles');
     const after=[...grid.querySelectorAll('.tile[data-id]')];
-    for(let i=0;i<count;i++){
+    for(let i=0;i<tiles.length;i++){
       assert.equal(after[i],tiles[i]);
       assert.equal(after[i].querySelector('img'),images[i]);
     }
+    grid.scrollTop=1e9;
+    grid.dispatchEvent(new f.w.Event('scroll'));
+    await delay(60);
+    const bottom=[...grid.querySelectorAll('.tile[data-id]')];
+    assert.ok(bottom.length<=65);
+    assert.equal(bottom.at(-1).dataset.id,`scale-${count-1}`);
+    assert.equal(tiles[0].isConnected,false,'offscreen tiles must be removed');
+    grid.scrollTop=0;
+    grid.dispatchEvent(new f.w.Event('scroll'));
+    await delay(60);
+    assert.equal(grid.querySelector('.tile[data-id]').dataset.id,'scale-0');
+    assert.ok(grid.querySelectorAll('.tile[data-id]').length<=60);
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
