@@ -345,7 +345,7 @@ test('videos in Review stay out of Videos and can be promoted from the video Rev
     f.root.getElementById('refreshBtn').click();
     await delay(220);
     const videoTab = [...f.root.querySelectorAll('#categories .cat:not(.naiSetsCat)')][2];
-    assert.equal(videoTab.textContent,'▶ Videos 1');
+    assert.equal(videoTab.textContent,'All 1');
     videoTab.click();
     await delay(100);
     assert.deepEqual([...f.root.querySelectorAll('#grid .tile[data-id]')].map(tile => tile.dataset.id),['video-published']);
@@ -361,7 +361,7 @@ test('videos in Review stay out of Videos and can be promoted from the video Rev
     f.root.getElementById('naiReviewNext270').click();
     await delay(220);
     assert.equal(f.library.media.find(m => m.id === 'video-review').in_review,false);
-    assert.equal([...f.root.querySelectorAll('#categories .cat:not(.naiSetsCat)')][2].textContent,'▶ Videos 2');
+    assert.equal([...f.root.querySelectorAll('#categories .cat:not(.naiSetsCat)')][2].textContent,'All 2');
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
