@@ -798,10 +798,10 @@ class LibraryStore:
                     raise ValueError("Upload is already complete")
                 offset = body.get("offset")
                 encoded = body.get("data")
-                if type(offset) is not int or offset < 0 or not isinstance(encoded, str) or len(encoded) > 2800000:
+                if type(offset) is not int or offset < 0 or not isinstance(encoded, str) or len(encoded) > 11200000:
                     raise ValueError("Invalid upload chunk")
                 data = base64.b64decode(encoded, validate=True)
-                if not data or len(data) > 2 * 1024**2 or hashlib.sha256(data).hexdigest() != body.get("sha256"):
+                if not data or len(data) > 8 * 1024**2 or hashlib.sha256(data).hexdigest() != body.get("sha256"):
                     raise ValueError("Upload chunk integrity check failed")
                 end = offset + len(data)
                 if end > job["meta"]["size"] or offset > job["offset"]:
@@ -1491,7 +1491,7 @@ class MediaHandler(BaseHTTPRequestHandler):
 
     def _read_json(self) -> Any:
         length = int(self.headers.get("Content-Length", "0") or "0")
-        if length > 10 * 1024 * 1024:
+        if length > 12 * 1024 * 1024:
             raise ValueError("JSON request is too large")
         raw = self.rfile.read(length)
         return json.loads(raw.decode("utf-8") or "{}")
