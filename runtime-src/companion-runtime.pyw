@@ -33,7 +33,7 @@ except Exception:
 HOST = "127.0.0.1"
 PORT = 8765
 APP_NAME = "NovelAI Media Library"
-API_VERSION = 6
+API_VERSION = 7
 
 
 def now_iso() -> str:
@@ -118,6 +118,16 @@ class LibraryStore:
                 for media_id in (item.get("media_ids", []) if isinstance(item.get("media_ids", []), list) else [])
             }
             changed = False
+            # Categories are media-type specific. Existing categories predate
+            # video categories, so they retain their established image-only type.
+            for character in data.get("characters", []):
+                if not isinstance(character.get("categories"), list):
+                    character["categories"] = []
+                    changed = True
+                for category in character["categories"]:
+                    if category.get("media_type") not in ("image", "video"):
+                        category["media_type"] = "image"
+                        changed = True
             for m in data.get("media", []):
                 if "favorite" not in m:
                     m["favorite"] = False
@@ -156,9 +166,6 @@ class LibraryStore:
                     m["in_all"] = False if m.get("media_type") == "video" else (False if m.get("id") in set_member_ids and not m.get("categories") else True)
                     changed = True
                 if m.get("media_type") == "video":
-                    if m.get("categories"):
-                        m["categories"] = []
-                        changed = True
                     if m.get("in_all"):
                         m["in_all"] = False
                         changed = True
@@ -304,7 +311,7 @@ class LibraryStore:
                     raise ValueError("This item changed after that action; it cannot be safely undone.")
                 old = copy.deepcopy(media)
                 restored_categories = entry["before"].get("categories")
-                if restored_categories is not None and self._validate_categories(media["character_id"], restored_categories) != restored_categories:
+                if restored_categories is not None and self._validate_categories(media["character_id"], restored_categories, media.get("media_type", "image")) != restored_categories:
                     raise ValueError("A category needed by this action no longer exists.")
                 media.update(copy.deepcopy(entry["before"]))
                 for k in entry.get("missing", []):
@@ -324,7 +331,7 @@ class LibraryStore:
                     raise ValueError("The retained original file is missing; deletion cannot be undone.")
                 if any(m.get("character_id") == media["character_id"] and m.get("sha256") == media.get("sha256") for m in self.data["media"]):
                     raise ValueError("This source has already been imported again; undo would create a duplicate.")
-                if self._validate_categories(media["character_id"], media.get("categories", [])) != media.get("categories", []):
+                if self._validate_categories(media["character_id"], media.get("categories", []), media.get("media_type", "image")) != media.get("categories", []):
                     raise ValueError("A category needed by this image no longer exists.")
                 for change in entry.get("sets", []):
                     if self.set_item(change["id"]) != change["after"]:
@@ -413,20 +420,23 @@ class LibraryStore:
             self.save()
             return {"ok": True, "character_id": character_id}
 
-    def add_category(self, character_id: str, name: str) -> dict[str, Any]:
+    def add_category(self, character_id: str, name: str, media_type: str = "image") -> dict[str, Any]:
         name = name.strip()
         if not name:
             raise ValueError("Category name cannot be empty")
         if name.casefold() == "all":
             raise ValueError("All is automatic and cannot be created as a category")
+        media_type = str(media_type or "image").strip().lower()
+        if media_type not in ("image", "video"):
+            raise ValueError("Category type must be image or video")
         with self.lock:
             c = self.character(character_id)
             if not c:
                 raise KeyError("Character not found")
             for cat in c["categories"]:
-                if cat["name"].casefold() == name.casefold():
+                if cat["name"].casefold() == name.casefold() and cat.get("media_type", "image") == media_type:
                     return cat
-            cat = {"id": uuid.uuid4().hex, "name": name, "created_at": now_iso()}
+            cat = {"id": uuid.uuid4().hex, "name": name, "media_type": media_type, "created_at": now_iso()}
             c["categories"].append(cat)
             self.save()
             return cat
@@ -464,11 +474,14 @@ class LibraryStore:
                 "media_updated": affected,
             }
 
-    def _validate_categories(self, character_id: str, categories: list[str]) -> list[str]:
+    def _validate_categories(self, character_id: str, categories: list[str], media_type: str | None = None) -> list[str]:
         c = self.character(character_id)
         if not c:
             raise KeyError("Character not found")
-        valid = {cat["id"] for cat in c["categories"]}
+        valid = {
+            cat["id"] for cat in c["categories"]
+            if media_type is None or cat.get("media_type", "image") == media_type
+        }
         return [x for x in dict.fromkeys(categories) if x in valid]
 
     def _hash_file(self, path: Path) -> str:
@@ -616,18 +629,23 @@ class LibraryStore:
         # responsive while duplicate detection is in progress. The final duplicate
         # check and registration still happen under the lock, so concurrent imports
         # cannot register the same file twice.
+        if not content_type:
+            guessed_type, _ = mimetypes.guess_type(original_name)
+            content_type = guessed_type or "application/octet-stream"
+        media_type = "video" if content_type.startswith("video/") else "image"
         sha = self._hash_file(temp_path)
         with self.lock:
             c = self.character(character_id)
             if not c:
                 raise KeyError("Character not found")
-            categories = self._validate_categories(character_id, categories)
+            categories = self._validate_categories(character_id, categories, media_type)
             for existing in self.data["media"]:
                 if existing.get("character_id") == character_id and existing.get("sha256") == sha:
                     changed = False
                     if existing.get("media_type") == "video":
-                        if existing.get("categories"):
-                            existing["categories"] = []
+                        merged = list(dict.fromkeys(existing.get("categories", []) + categories))
+                        if merged != existing.get("categories", []):
+                            existing["categories"] = merged
                             changed = True
                         if not isinstance(existing.get("video_markers"), list) or len(existing.get("video_markers")) != 3:
                             existing["video_markers"] = [None, None, None]
@@ -655,14 +673,6 @@ class LibraryStore:
                 guessed = mimetypes.guess_extension((content_type or "").split(";")[0].strip()) or ""
                 suffix = guessed
                 original_name += suffix
-
-            media_type = "video" if (content_type or "").startswith("video/") else "image"
-            if not content_type:
-                guessed_type, _ = mimetypes.guess_type(original_name)
-                content_type = guessed_type or "application/octet-stream"
-                media_type = "video" if content_type.startswith("video/") else "image"
-            if media_type == "video":
-                categories = []
 
             char_folder = self.media_dir / safe_component(c["name"], "Character")
             char_folder.mkdir(parents=True, exist_ok=True)
@@ -1047,7 +1057,7 @@ class LibraryStore:
             m = self.media_item(media_id)
             if not m:
                 raise KeyError("Media not found")
-            categories = self._validate_categories(m["character_id"], categories)
+            categories = self._validate_categories(m["character_id"], categories, m.get("media_type", "image"))
             next_in_all = bool(m.get("in_all", True)) if in_all is None else bool(in_all)
             if m.get("media_type") == "video":
                 next_in_all = False
@@ -1589,7 +1599,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/categories":
                 body = self._read_json()
-                self._send_json(200, self.store.add_category(str(body.get("character_id", "")), str(body.get("name", ""))))
+                self._send_json(200, self.store.add_category(str(body.get("character_id", "")), str(body.get("name", "")), str(body.get("media_type", "image"))))
                 return
             if path == "/api/sets":
                 body = self._read_json()

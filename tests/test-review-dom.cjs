@@ -180,11 +180,11 @@ test('viewer edit button assigns categories and replaces an image without changi
     assert.equal(editButton.disabled, false);
     editButton.click();
     await delay(20);
-    const category = f.root.querySelector('#editImageCats input[data-catid="dress"]');
+    const category = f.root.querySelector('#editMediaCats input[data-catid="dress"]');
     assert.ok(category);
     assert.equal(f.root.getElementById('editAllMedia').checked, true);
     category.click();
-    f.root.getElementById('saveImageCats').click();
+    f.root.getElementById('saveMediaCats').click();
     await delay(170);
     assert.deepEqual(item.categories, ['dress']);
     f.library.media.push({id:'saved-other',character_id:'character',original_name:'other.png',media_type:'image',categories:[],in_review:false,in_all:false});
@@ -384,7 +384,7 @@ test('a set-only image can be promoted directly into All without exposing its wh
     const all = f.root.getElementById('editAllMedia');
     assert.equal(all.checked, false);
     all.click();
-    f.root.getElementById('saveImageCats').click();
+    f.root.getElementById('saveMediaCats').click();
     await delay(220);
     assert.equal(f.library.media.find(m=>m.id==='all-member1').in_all, true);
     assert.equal(f.library.media.find(m=>m.id==='all-member2').in_all, false);
@@ -787,6 +787,57 @@ test('Rapid Review saves Favorite, Featured, and replacement flags, and Featured
     f.root.getElementById('naiReviewNext270').click(); await delay(180);
     const saved=f.library.media.find(m=>m.original_name==='rapid.png');
     assert.equal(saved.favorite,true); assert.equal(saved.featured,true); assert.equal(saved.needs_replacement,true);
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
+
+test('video categories stay separate in navigation, import, and Rapid Review saves', async () => {
+  const f = await fixture();
+  try {
+    f.library.characters[0].categories.push({id:'clips',name:'Clips',media_type:'video'});
+    f.library.media.push({id:'clip',character_id:'character',original_name:'clip.mp4',media_type:'video',categories:[],in_review:true});
+    f.root.getElementById('refreshBtn').click();
+    await delay(220);
+    assert.equal(f.root.querySelector('#categories [data-cat-id="clips"]'),null);
+    f.root.getElementById('addMediaBtn').click();
+    await delay(50);
+    assert.equal(f.root.querySelector('#importImageCats [data-catid="clips"]'),null);
+    assert.ok(f.root.querySelector('#importImageCats [data-catid="dress"]'));
+    assert.ok(f.root.querySelector('#importVideoCats [data-catid="clips"]'));
+    assert.equal(f.root.querySelector('#importVideoCats [data-catid="dress"]'),null);
+    f.root.querySelector('#importCancelBtn').click();
+    [...f.root.querySelectorAll('#categories .cat:not(.naiSetsCat)')][2].click();
+    await delay(100);
+    f.root.getElementById('naiReviewVideoFilter270').click();
+    await delay(100);
+    assert.equal(f.root.querySelector('#reviewCats [data-catid="dress"]'),null);
+    f.root.querySelector('#reviewCats [data-catid="clips"]').checked = true;
+    f.root.getElementById('naiReviewNext270').click();
+    await delay(220);
+    assert.deepEqual(f.library.media.find(m => m.id === 'clip').categories,['clips']);
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});
+
+test('mixed review imports retain only the categories matching each file type', async () => {
+  const f = await fixture();
+  try {
+    f.library.characters[0].categories.push({id:'clips',name:'Clips',media_type:'video'});
+    f.root.getElementById('refreshBtn').click();
+    await delay(220);
+    f.root.getElementById('addMediaBtn').click();
+    await delay(40);
+    f.root.querySelector('#importCats [data-catid="dress"]').checked = true;
+    f.root.querySelector('#importCats [data-catid="clips"]').checked = true;
+    const input = f.root.getElementById('fileInput');
+    Object.defineProperty(input,'files',{value:[new f.w.File(['image'],'1.png',{type:'image/png'}),new f.w.File(['video'],'2.mp4',{type:'video/mp4'})]});
+    input.dispatchEvent(new f.w.Event('change',{bubbles:true}));
+    f.root.getElementById('importReview').click();
+    await delay(100);
+    const drafts = [...f.root.naiReviewDrafts.values()];
+    assert.equal(drafts.length,2);
+    assert.deepEqual(Array.from(drafts.find(d=>d.media.media_type==='video').media.categories),['clips']);
+    assert.deepEqual(Array.from(drafts.find(d=>d.media.media_type==='image').media.categories),['dress']);
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
