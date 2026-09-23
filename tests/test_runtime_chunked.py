@@ -90,15 +90,15 @@ class ChunkedTests(unittest.TestCase):
         base = f'http://127.0.0.1:{server.server_port}/api/import/chunked/{self.token}/'
         def post(action, body):
             raw = json.dumps(body).encode()
-            self.assertLess(len(raw),12*1024*1024)
+            self.assertLess(len(raw),24*1024*1024)
             req=urllib.request.Request(base+action,data=raw,headers={'Content-Type':'application/json','Origin':'https://novelai.net'})
             with urllib.request.urlopen(req,timeout=10) as res: return json.load(res)
         try:
-            data = bytes(range(256))*32768
-            size = len(data)*9  # 72 MiB file, while every request stays under 12 MiB.
+            data = bytes(range(256))*65536
+            size = len(data)*5  # 80 MiB file, while every request stays under 24 MiB.
             post('start', {'character_id':self.char['id'],'filename':'large.mp4','size':size,'content_type':'video/mp4','categories':[],'source_url':''})
             expected=hashlib.sha256()
-            for i in range(9):
+            for i in range(5):
                 expected.update(data)
                 self.assertEqual(post('chunk',self.chunk(data,i*len(data)))['offset'],(i+1)*len(data))
             result=post('finish',{})

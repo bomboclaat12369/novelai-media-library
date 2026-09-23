@@ -254,6 +254,24 @@ class RuntimeStabilityTests(unittest.TestCase):
         self.assertEqual(quality['media_type'], 'image')
         self.assertEqual(quality['file_bytes'], len(b'fixture-2'))
 
+    def test_rename_category_preserves_id_assignments_and_media_type(self):
+        image_category = self.store.add_category(self.character['id'], 'Dres')
+        video_category = self.store.add_category(self.character['id'], 'Dres', 'video')
+        other_image_category = self.store.add_category(self.character['id'], 'Other')
+        with patch.object(self.store, '_queue_image_thumbnail'):
+            image = self.import_image(1)
+        image['categories'] = [image_category['id']]
+        renamed = self.store.rename_category(image_category['id'], 'Dress')
+        self.assertEqual(renamed['id'], image_category['id'])
+        self.assertEqual(renamed['name'], 'Dress')
+        self.assertEqual(renamed['media_type'], 'image')
+        self.assertEqual(image['categories'], [image_category['id']])
+        self.assertEqual(video_category['name'], 'Dres')
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            self.store.rename_category(image_category['id'], other_image_category['name'])
+        with self.assertRaisesRegex(ValueError, 'automatic'):
+            self.store.rename_category(image_category['id'], 'All')
+
     def test_deleted_queued_media_is_not_decoded_or_resurrected(self):
         entered = threading.Event()
         decoded = []

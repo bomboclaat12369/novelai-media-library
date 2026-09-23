@@ -34,7 +34,7 @@ except Exception:
 HOST = "127.0.0.1"
 PORT = 8765
 APP_NAME = "NovelAI Media Library"
-API_VERSION = 7
+API_VERSION = 8
 
 
 def now_iso() -> str:
@@ -445,6 +445,33 @@ class LibraryStore:
             self.save()
             return cat
 
+    def rename_category(self, category_id: str, name: str) -> dict[str, Any]:
+        name = name.strip()
+        if not name:
+            raise ValueError("Category name cannot be empty")
+        if name.casefold() == "all":
+            raise ValueError("All is automatic and cannot be used as a category name")
+        with self.lock:
+            owner = None
+            category = None
+            for character in self.data["characters"]:
+                for candidate in character.get("categories", []):
+                    if candidate.get("id") == category_id:
+                        owner = character
+                        category = candidate
+                        break
+                if category:
+                    break
+            if not owner or not category:
+                raise KeyError("Category not found")
+            media_type = category.get("media_type", "image")
+            for candidate in owner.get("categories", []):
+                if candidate.get("id") != category_id and candidate.get("media_type", "image") == media_type and candidate.get("name", "").casefold() == name.casefold():
+                    raise ValueError(f"A {media_type} category with that name already exists")
+            category["name"] = name
+            self.save()
+            return category
+
     def delete_category(self, category_id: str) -> dict[str, Any]:
         with self.lock:
             owner = None
@@ -798,10 +825,10 @@ class LibraryStore:
                     raise ValueError("Upload is already complete")
                 offset = body.get("offset")
                 encoded = body.get("data")
-                if type(offset) is not int or offset < 0 or not isinstance(encoded, str) or len(encoded) > 11200000:
+                if type(offset) is not int or offset < 0 or not isinstance(encoded, str) or len(encoded) > 22400000:
                     raise ValueError("Invalid upload chunk")
                 data = base64.b64decode(encoded, validate=True)
-                if not data or len(data) > 8 * 1024**2 or hashlib.sha256(data).hexdigest() != body.get("sha256"):
+                if not data or len(data) > 16 * 1024**2 or hashlib.sha256(data).hexdigest() != body.get("sha256"):
                     raise ValueError("Upload chunk integrity check failed")
                 end = offset + len(data)
                 if end > job["meta"]["size"] or offset > job["offset"]:
@@ -1491,12 +1518,12 @@ class MediaHandler(BaseHTTPRequestHandler):
 
     def _read_json(self) -> Any:
         length = int(self.headers.get("Content-Length", "0") or "0")
-        if length > 12 * 1024 * 1024:
+        if length > 24 * 1024 * 1024:
             raise ValueError("JSON request is too large")
         raw = self.rfile.read(length)
         return json.loads(raw.decode("utf-8") or "{}")
 
-    def _read_raw(self, max_bytes: int = 12 * 1024 * 1024) -> bytes:
+    def _read_raw(self, max_bytes: int = 24 * 1024 * 1024) -> bytes:
         length = int(self.headers.get("Content-Length", "0") or "0")
         if length <= 0 or length > max_bytes:
             raise ValueError("Request body is empty or too large")
@@ -1712,6 +1739,11 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/categories":
                 body = self._read_json()
                 self._send_json(200, self.store.add_category(str(body.get("character_id", "")), str(body.get("name", "")), str(body.get("media_type", "image"))))
+                return
+            match = re.fullmatch(r"/api/categories/([0-9a-f]+)", path)
+            if match:
+                body = self._read_json()
+                self._send_json(200, self.store.rename_category(match.group(1), str(body.get("name", ""))))
                 return
             if path == "/api/sets":
                 body = self._read_json()

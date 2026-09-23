@@ -21,7 +21,7 @@ function fixture({stall=false, retry=false}={}) {
     GM_xmlhttpRequest:options=>{
       const action=options.url.split('/').at(-1), body=options.data ? JSON.parse(options.data) : null;
       events.push({action,body});
-      assert.ok(!options.data || Buffer.byteLength(options.data)<12*1024*1024);
+      assert.ok(!options.data || Buffer.byteLength(options.data)<24*1024*1024);
       let aborted=false;
       setImmediate(()=>{
         if (aborted || (stall && action==='chunk')) return;
@@ -55,13 +55,13 @@ test('file over 64 MiB is transported as bounded verified chunks without changin
   const result=await f.context.upload(blob,'character',[], '');
   assert.equal(result.item.id,'saved');
   assert.deepEqual(Buffer.concat(f.received),bytes);
-  assert.equal(f.events.filter(e=>e.action==='chunk').length,9);
+  assert.equal(f.events.filter(e=>e.action==='chunk').length,5);
   assert.equal(f.events.filter(e=>e.action==='finish').length,1);
   assert.equal(f.context.activeUploadHandle,null);
 });
 
 test('a lost chunk acknowledgment retries identical bytes at the same offset',async()=>{
-  const f=fixture({retry:true}), {blob,bytes}=file(9*1024*1024);
+  const f=fixture({retry:true}), {blob,bytes}=file(17*1024*1024);
   await f.context.upload(blob,'character',[]);
   assert.deepEqual(Buffer.concat(f.received),bytes);
   const chunks=f.events.filter(e=>e.action==='chunk');
@@ -69,7 +69,7 @@ test('a lost chunk acknowledgment retries identical bytes at the same offset',as
 });
 
 test('X cancels pending chunk, requests cleanup and does not finish the file',async()=>{
-  const f=fixture({stall:true}), {blob}=file(9*1024*1024);
+  const f=fixture({stall:true}), {blob}=file(17*1024*1024);
   const pending=f.context.upload(blob,'character',[]);
   const rejection=assert.rejects(pending,/Import canceled/);
   while(!f.events.some(e=>e.action==='chunk')) await new Promise(r=>setImmediate(r));
@@ -81,7 +81,7 @@ test('X cancels pending chunk, requests cleanup and does not finish the file',as
 });
 
 test('missing extension callbacks eventually reject and clean up without requiring X',async()=>{
-  const f=fixture({stall:true}), {blob}=file(9*1024*1024);
+  const f=fixture({stall:true}), {blob}=file(17*1024*1024);
   await assert.rejects(f.context.upload(blob,'character',[]),/stopped responding/);
   assert.equal(f.events.filter(e=>e.action==='chunk').length,2);
   assert.equal(f.events.filter(e=>e.action==='cleanup').length,1);
