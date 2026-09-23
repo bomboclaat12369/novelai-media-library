@@ -841,3 +841,39 @@ test('mixed review imports retain only the categories matching each file type', 
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
+
+
+test('canceling a stalled chunked video keeps the remaining Rapid Review queue usable', async () => {
+  const f = await fixture({configure:w => {
+    const normal = w.GM_xmlhttpRequest;
+    w.GM_xmlhttpRequest = options => {
+      if (options.url.endsWith('/api/health')) {
+        setTimeout(()=>options.onload({status:200,responseText:JSON.stringify({ok:true,version:7,chunked_uploads:true})}),0);
+        return {abort(){options.onabort?.();}};
+      }
+      if (options.url.includes('/api/import/chunked/')) {
+        // A lost extension callback during upload initialization must not trap X.
+        return {abort(){options.onabort?.();}};
+      }
+      return normal(options);
+    };
+  }});
+  try {
+    const large = new f.w.File([new Uint8Array(9*1024*1024)], '2-large.mp4', {type:'video/mp4'});
+    await f.open([large, {name:'1-small.png'}]);
+    assert.ok(f.root.querySelector('#reviewStage video'));
+    f.root.getElementById('naiReviewNext270').click();
+    await delay(50);
+    assert.equal(f.root.getElementById('naiReviewNext270').disabled,true);
+    assert.equal(f.root.getElementById('naiReviewClose270').disabled,false);
+    f.root.getElementById('naiReviewClose270').click();
+    await delay(100);
+    assert.ok(f.root.querySelector('#reviewStage img'));
+    assert.equal(f.root.getElementById('naiReviewNext270').disabled,false);
+    assert.equal(f.root.naiReviewDrafts.size,1);
+    f.root.getElementById('naiReviewNext270').click();
+    await delay(220);
+    assert.equal(f.library.media.length,1);
+    assert.deepEqual(f.errors,[]);
+  } finally { f.dom.window.close(); }
+});

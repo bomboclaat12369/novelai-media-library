@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import copy
 import hashlib
 import json
@@ -85,6 +86,9 @@ class LibraryStore:
         self.thumb_dir.mkdir(parents=True, exist_ok=True)
         self.backup_dir.mkdir(parents=True, exist_ok=True)
         self.data = self._load()
+        self._upload_lock = threading.RLock()
+        self._uploads: dict[str, dict[str, Any]] = {}
+        self._upload_dir = self.root / ".incoming" / "chunked-uploads"
 
     def _empty(self) -> dict[str, Any]:
         return {
@@ -723,6 +727,114 @@ class LibraryStore:
             if media_type == "image":
                 self._queue_image_thumbnail(destination, media_id, c["name"])
             return item, False
+
+    def cleanup_upload_orphans(self) -> None:
+        # Called only after binding the port: a second companion must not remove
+        # uploads belonging to the instance that is already running.
+        for orphan in self._upload_dir.glob("*.part"):
+            orphan.unlink(missing_ok=True)
+
+    def _expire_uploads(self) -> None:
+        # On-demand cleanup only: no idle polling or network activity.
+        cutoff = time.monotonic() - 3600
+        for token, job in list(self._uploads.items()):
+            if job["touched"] < cutoff:
+                (self._upload_dir / f"{token}.part").unlink(missing_ok=True)
+                del self._uploads[token]
+
+    def chunk_upload(self, token: str, action: str, body: dict[str, Any]) -> dict[str, Any]:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{16,96}", token):
+            raise ValueError("Invalid upload ID")
+        with self._upload_lock:
+            self._expire_uploads()
+            temp = self._upload_dir / f"{token}.part"
+            job = self._uploads.get(token)
+            if action == "cancel":
+                if job and job["state"] == "done":
+                    return {"state": "done"}
+                temp.unlink(missing_ok=True)
+                # A cancellation may arrive before a delayed start request.
+                self._uploads[token] = {"state": "canceled", "touched": time.monotonic()}
+                return {"state": "canceled"}
+            if job and job["state"] == "canceled":
+                raise ValueError("Import canceled")
+            if action == "start":
+                size = body.get("size")
+                if type(size) is not int or size <= 0 or size > 16 * 1024**3:
+                    raise ValueError("File must be between 1 byte and 16 GiB")
+                meta = {k: body.get(k) for k in ("character_id", "filename", "size", "content_type", "categories", "source_url")}
+                if job:
+                    if job["meta"] != meta:
+                        raise ValueError("Upload ID already belongs to another file")
+                    job["touched"] = time.monotonic()
+                    return {"offset": job["offset"], "state": job["state"]}
+                if sum(j["state"] == "receiving" for j in self._uploads.values()) >= 32:
+                    raise ValueError("Too many unfinished uploads; cancel or restart the companion")
+                if not isinstance(meta["filename"], str) or not meta["filename"]:
+                    raise ValueError("Uploaded file has no filename")
+                content_type = str(meta["content_type"] or "")
+                if not content_type.startswith(("image/", "video/")):
+                    content_type = mimetypes.guess_type(meta["filename"])[0] or ""
+                if not content_type.startswith(("image/", "video/")):
+                    raise ValueError("Only image and video files are supported")
+                source_url = str(meta["source_url"] or "")
+                if source_url and urllib.parse.urlparse(source_url).scheme not in ("http", "https"):
+                    raise ValueError("Only http:// and https:// source URLs are supported")
+                with self.lock:
+                    if not self.character(str(meta["character_id"])):
+                        raise KeyError("Character not found")
+                self._upload_dir.mkdir(parents=True, exist_ok=True)
+                temp.touch(exist_ok=False)
+                job = {"state": "receiving", "meta": meta, "content_type": content_type,
+                       "offset": 0, "touched": time.monotonic(), "started": time.perf_counter()}
+                self._uploads[token] = job
+                self.last_import_debug = {"state": "receiving", "filename": meta["filename"], "received_bytes": 0, "file_bytes": size}
+                return {"offset": 0, "state": "receiving"}
+            if not job:
+                raise ValueError("Upload expired or companion restarted; please retry saving")
+            job["touched"] = time.monotonic()
+            if action == "chunk":
+                if job["state"] != "receiving":
+                    raise ValueError("Upload is already complete")
+                offset = body.get("offset")
+                encoded = body.get("data")
+                if type(offset) is not int or offset < 0 or not isinstance(encoded, str) or len(encoded) > 2800000:
+                    raise ValueError("Invalid upload chunk")
+                data = base64.b64decode(encoded, validate=True)
+                if not data or len(data) > 2 * 1024**2 or hashlib.sha256(data).hexdigest() != body.get("sha256"):
+                    raise ValueError("Upload chunk integrity check failed")
+                end = offset + len(data)
+                if end > job["meta"]["size"] or offset > job["offset"]:
+                    raise ValueError("Upload chunk is out of order or exceeds file size")
+                with temp.open("r+b") as output:
+                    output.seek(offset)
+                    if offset < job["offset"]:
+                        # Lost acknowledgments can safely retry an identical chunk.
+                        if end > job["offset"] or output.read(len(data)) != data:
+                            raise ValueError("Retry does not match previously received bytes")
+                    else:
+                        output.write(data)
+                        job["offset"] = end
+                self.last_import_debug = {"state": "receiving", "filename": job["meta"]["filename"],
+                                          "received_bytes": job["offset"], "file_bytes": job["meta"]["size"]}
+                return {"offset": job["offset"]}
+            if action == "finish":
+                if job["state"] == "done":
+                    return job["result"]
+                if job["offset"] != job["meta"]["size"] or temp.stat().st_size != job["offset"]:
+                    raise ValueError("Upload is incomplete")
+                meta = job["meta"]
+                self.last_import_debug = {"state": "registering", "filename": meta["filename"], "file_bytes": job["offset"]}
+                source = {"kind": "url", "url": meta["source_url"]} if meta["source_url"] else {"kind": "local", "original_name": meta["filename"]}
+                item, duplicate = self._register_file(temp, meta["filename"], str(meta["character_id"]),
+                    meta["categories"] if isinstance(meta["categories"], list) else [], source, job["content_type"])
+                job["result"] = {"item": item, "duplicate": duplicate}
+                job["state"] = "done"
+                self.last_import_debug = {"state": "done", "recorded_at_epoch_ms": int(time.time()*1000),
+                    "filename": meta["filename"], "file_bytes": job["offset"], "duplicate": duplicate,
+                    "debug_timing_ms": {"chunked_total": round((time.perf_counter()-job["started"])*1000, 1)}}
+                return job["result"]
+            raise ValueError("Unknown upload action")
 
     def import_bytes(
         self,
@@ -1532,7 +1644,7 @@ class MediaHandler(BaseHTTPRequestHandler):
         try:
             path = urllib.parse.urlparse(self.path).path
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/diagnostics/last-import":
                 payload = dict(self.store.last_import_debug) if self.store.last_import_debug else {"state": "none"}
@@ -1629,6 +1741,13 @@ class MediaHandler(BaseHTTPRequestHandler):
                     self._send_file_with_range(temp, content_type, preview_name=filename)
                 finally:
                     temp.unlink(missing_ok=True)
+                return
+            upload = re.fullmatch(r"/api/import/chunked/([A-Za-z0-9_-]{16,96})/(start|chunk|finish|cancel)", path)
+            if upload:
+                body = self._read_json()
+                if not isinstance(body, dict):
+                    raise ValueError("Expected upload object")
+                self._send_json(200, self.store.chunk_upload(upload.group(1), upload.group(2), body))
                 return
             if path == "/api/import/file":
                 import_started = time.perf_counter()
@@ -1807,6 +1926,7 @@ class MediaHTTPServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], store: LibraryStore):
         super().__init__(address, MediaHandler)
         self.store = store
+        store.cleanup_upload_orphans()
 
 
 def open_folder(path: Path) -> None:
