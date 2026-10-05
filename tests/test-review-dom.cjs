@@ -38,7 +38,7 @@ async function fixture({media = [], configure = null} = {}) {
       try {
         let value, status = 200;
         if (method !== 'GET') writes.push({route,method});
-        if (route === '/api/health') value = {ok:true,version:6,replacement_flags:true,featured_flags:true,undo_history:true};
+        if (route === '/api/health') value = {ok:true,version:8,mixed_collections:true,replacement_flags:true,featured_flags:true,undo_history:true};
         else if (route === '/api/library') value = library;
         else if (route === '/api/undo' && method === 'GET') value = {entries:[...history].reverse(),limit:20};
         else if (route === '/api/undo' && method === 'POST') {
@@ -85,7 +85,10 @@ async function fixture({media = [], configure = null} = {}) {
         } else if (route === '/api/sets' && method === 'POST') {
           value = {id:`set${library.sets.length+1}`,...JSON.parse(options.data)}; library.sets.push(value);
         } else if (route.startsWith('/api/sets/') && method === 'POST') {
-          value = library.sets.find(s => s.id === route.split('/')[3]); Object.assign(value,JSON.parse(options.data));
+          value = library.sets.find(s => s.id === route.split('/')[3]);
+          const body=JSON.parse(options.data);
+          if(body.add_media_ids) body.media_ids=[...new Set([...value.media_ids,...body.add_media_ids])];
+          Object.assign(value,body);
         } else if (options.responseType === 'blob') {
           options.onload({status:200,response:new w.Blob(['fixture'],{type:'image/png'})}); return;
         } else { value = {error:`Unhandled fixture route: ${method} ${route}`}; status = 404; }
@@ -111,6 +114,95 @@ async function fixture({media = [], configure = null} = {}) {
   }
   return {dom,w,root,library,writes,errors,revoked,history,open,get frames(){return frames;}};
 }
+
+test('mixed connections show one name, badges, filters and a playable video alongside set links', async () => {
+  const media=[{id:'v',character_id:'character',media_type:'video',original_name:'Nikki Video 4.mp4',categories:[],in_all:false},
+    ...[59,60,61].map(i=>({id:'i'+i,character_id:'character',media_type:'image',original_name:'Nikki Image '+i+'.png',categories:[],in_all:i!==61}))];
+  const f=await fixture({media});
+  try{
+    f.library.sets.push({id:'pink',kind:'connection',character_id:'character',name:'Pink bikini',media_ids:media.map(m=>m.id),cover_media_id:'i59'},
+      {id:'album',character_id:'character',name:'Beach album',media_ids:['i59'],cover_media_id:'i59'});
+    f.root.getElementById('refreshBtn').click();await delay(600);
+    f.root.getElementById('videosModeBtn').click();await delay(100);
+    assert.ok(!f.root.getElementById('naiSetsCat').classList.contains('hidden'));
+    assert.match(f.root.querySelector('.tile[data-id="v"] .naiGroupBadge').title,/Pink bikini/);
+    f.root.querySelector('.tile[data-id="v"]').click();await delay(100);
+    const panel=f.root.getElementById('naiMemberships');
+    assert.match(panel.textContent,/Connection: Pink bikini/);
+    assert.equal(panel.querySelectorAll('[data-group-id]').length,1);
+    assert.equal(panel.querySelectorAll('img').length,0);
+    assert.ok(panel.parentElement===f.root.getElementById('qualityInfo').parentElement);
+    panel.querySelector('[data-group-id="pink"]').click();await delay(200);
+    assert.equal(f.root.querySelectorAll('#grid .tile').length,4);
+    f.root.querySelector('.tile[data-id="i59"]').click();await delay(120);
+    assert.equal(panel.querySelectorAll('[data-group-id]').length,2);
+    assert.ok(f.root.querySelector('.tile[data-id="i59"] .naiMainBadge'));
+    assert.equal(f.root.querySelector('.tile[data-id="i61"] .naiMainBadge'),null);
+    assert.equal(f.root.querySelector('.naiSetCover216').textContent,'▣');
+    f.root.querySelector('.tile[data-id="v"]').click();await delay(100);
+    assert.ok(f.root.querySelector('#stages video'));
+    f.root.getElementById('naiSetsCat').click();await delay(50);
+    f.root.querySelector('[data-group-filter="connection"]').click();
+    assert.equal(f.root.querySelectorAll('.naiSetTile').length,1);
+    assert.equal(f.root.querySelector('.naiSetTile').dataset.setId,'pink');
+    f.root.querySelector('[data-group-filter="set"]').click();
+    assert.equal(f.root.querySelector('.naiSetTile').dataset.setId,'album');
+    await f.root.naiOpenGroup('pink');
+    f.root.getElementById('imagesModeBtn').click();await delay(150);
+    assert.equal(f.root.naiOpenGroupId(),null);
+    assert.equal(f.root.querySelector('.naiSetBreadcrumb'),null);
+    await f.root.naiOpenGroup('pink');
+    f.root.querySelector('[data-cat="dress"]').click();await delay(150);
+    assert.equal(f.root.naiOpenGroupId(),null);
+    assert.equal(f.root.querySelector('.naiSetBreadcrumb'),null);
+    assert.equal(f.root.querySelectorAll('#grid .tile[data-id]').length,0);
+    assert.deepEqual(f.errors,[]);
+  }finally{f.dom.window.close();}
+});
+
+test('Connect creates a named collection with preselected video and chosen images', async()=>{
+  const media=[{id:'v',character_id:'character',media_type:'video',original_name:'Video.mp4',categories:[],in_all:false},
+    {id:'i',character_id:'character',media_type:'image',original_name:'Pink.png',categories:[],in_all:true}];
+  const f=await fixture({media});
+  try{
+    await f.root.naiSelectMedia('v');
+    f.root.getElementById('naiConnectMedia').click();await delay(40);
+    f.root.getElementById('naiAssignNew').click();await delay(40);
+    assert.equal(f.root.getElementById('naiGroupKind').value,'connection');
+    assert.ok(f.root.querySelector('.naiSetPick[data-media-id="v"]').classList.contains('selected'));
+    f.root.querySelector('.naiSetPick[data-media-id="i"]').click();
+    f.root.getElementById('naiSetNameInput').value='Pink bikini';
+    f.root.getElementById('naiSaveSetBtn').click();await delay(150);
+    assert.equal(f.library.sets[0].kind,'connection');
+    assert.deepEqual(f.library.sets[0].media_ids,['v','i']);
+    assert.match(f.root.getElementById('naiMemberships').textContent,/Pink bikini/);
+    assert.equal(media[1].in_all,true);
+    assert.deepEqual(f.errors,[]);
+  }finally{f.dom.window.close();}
+});
+
+test('Edit Library assigns selected images to an existing set and independently edits main Images membership',async()=>{
+  const f=await fixture({media:[{id:'i',character_id:'character',media_type:'image',original_name:'Image.png',categories:[],in_all:true}]});
+  try{
+    f.library.sets.push({id:'album',character_id:'character',name:'Album',media_ids:[]});
+    f.root.getElementById('addMediaBtn').click();await delay(20);
+    f.root.getElementById('modalEditImages').click();await delay(60);
+    const check=f.root.querySelector('[data-bulk-id="i"]');check.checked=true;check.dispatchEvent(new f.w.Event('change',{bubbles:true}));
+    assert.equal(f.root.getElementById('naiBulkInAll').checked,true);
+    f.root.getElementById('naiBulkAssignGroup').click();await delay(40);
+    f.root.getElementById('naiAssignAdd').click();await delay(100);
+    assert.deepEqual(f.library.sets[0].media_ids,['i']);
+    assert.equal(f.library.media[0].in_all,true);
+    f.root.getElementById('addMediaBtn').click();await delay(20);
+    f.root.getElementById('modalEditImages').click();await delay(60);
+    const again=f.root.querySelector('[data-bulk-id="i"]');again.checked=true;again.dispatchEvent(new f.w.Event('change',{bubbles:true}));
+    f.root.getElementById('naiBulkInAll').checked=false;
+    f.root.getElementById('naiBulkSaveCats285').click();await delay(40);
+    assert.equal(f.library.media[0].in_all,false);
+    assert.deepEqual(f.library.sets[0].media_ids,['i']);
+    assert.deepEqual(f.errors,[]);
+  }finally{f.dom.window.close();}
+});
 
 test('assembled UI opens ordered previews without importing, navigates, and discards on X', async () => {
   const f = await fixture();

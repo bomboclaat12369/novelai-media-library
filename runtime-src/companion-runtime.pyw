@@ -119,6 +119,7 @@ class LibraryStore:
             set_member_ids = {
                 str(media_id)
                 for item in data.get("sets", [])
+                if item.get("kind", "set") == "set"
                 for media_id in (item.get("media_ids", []) if isinstance(item.get("media_ids", []), list) else [])
             }
             changed = False
@@ -1092,9 +1093,7 @@ class LibraryStore:
             if not m:
                 raise KeyError("Media not found")
             if m.get("character_id") != character_id:
-                raise ValueError("All set images must belong to the selected character")
-            if m.get("media_type") != "image":
-                raise ValueError("Sets currently support images only")
+                raise ValueError("All collection media must belong to the selected character")
             seen.add(media_id)
             result.append(media_id)
         return result
@@ -1103,7 +1102,7 @@ class LibraryStore:
         member_ids = set(media_ids)
         kept_sets = []
         for item in self.data.get("sets", []):
-            if item.get("character_id") != character_id or item.get("id") == except_set_id:
+            if item.get("kind", "set") != "set" or item.get("character_id") != character_id or item.get("id") == except_set_id:
                 kept_sets.append(item)
                 continue
             old_members = list(item.get("media_ids", []))
@@ -1116,7 +1115,9 @@ class LibraryStore:
             kept_sets.append(item)
         self.data["sets"] = kept_sets
 
-    def create_set(self, character_id: str, name: str, media_ids: list[Any], cover_media_id: Any = None) -> dict[str, Any]:
+    def create_set(self, character_id: str, name: str, media_ids: list[Any], cover_media_id: Any = None, kind: str = "set", preserve_placement: bool = False) -> dict[str, Any]:
+        if kind not in ("set", "connection"):
+            raise ValueError("Choose Set or Connection")
         name = str(name or "").strip()
         if not name:
             raise ValueError("Set name cannot be empty")
@@ -1124,13 +1125,14 @@ class LibraryStore:
             if not self.character(character_id):
                 raise KeyError("Character not found")
             for existing in self.data.get("sets", []):
-                if existing.get("character_id") == character_id and str(existing.get("name", "")).casefold() == name.casefold():
+                if existing.get("kind", "set") == kind and existing.get("character_id") == character_id and str(existing.get("name", "")).casefold() == name.casefold():
                     raise ValueError("A set with that name already exists for this character")
             members = self._validate_set_media(character_id, list(media_ids or []))
-            self._detach_set_members(character_id, members)
+            if kind == "set":
+                self._detach_set_members(character_id, members)
             for media_id in members:
                 media = self.media_item(media_id)
-                if media and media.get("media_type") == "image" and not media.get("categories"):
+                if kind == "set" and not preserve_placement and media and media.get("media_type") == "image" and not media.get("categories"):
                     media["in_all"] = False
             cover = str(cover_media_id or "")
             if cover not in members:
@@ -1141,6 +1143,7 @@ class LibraryStore:
                 "character_id": character_id,
                 "name": name,
                 "media_ids": members,
+                "kind": kind,
                 "cover_media_id": cover,
                 "created_at": stamp,
                 "updated_at": stamp,
@@ -1149,28 +1152,34 @@ class LibraryStore:
             self.save()
             return item
 
-    def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None) -> dict[str, Any]:
+    def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None) -> dict[str, Any]:
         with self.lock:
             item = self.set_item(set_id)
             if not item:
                 raise KeyError("Set not found")
             character_id = str(item.get("character_id", ""))
+            kind = item.get("kind", "set")
             next_name = str(item.get("name", "")) if name is None else str(name or "").strip()
             if not next_name:
                 raise ValueError("Set name cannot be empty")
             for other in self.data.get("sets", []):
                 if other.get("id") == set_id:
                     continue
-                if other.get("character_id") == character_id and str(other.get("name", "")).casefold() == next_name.casefold():
+                if other.get("kind", "set") == kind and other.get("character_id") == character_id and str(other.get("name", "")).casefold() == next_name.casefold():
                     raise ValueError("A set with that name already exists for this character")
             previous_members = list(item.get("media_ids", []))
+            if add_media_ids is not None:
+                if media_ids is not None or not isinstance(add_media_ids, list):
+                    raise ValueError("Invalid collection assignment")
+                media_ids = previous_members + add_media_ids
             members = previous_members if media_ids is None else self._validate_set_media(character_id, list(media_ids or []))
             if media_ids is None:
                 members = self._validate_set_media(character_id, members)
-            self._detach_set_members(character_id, members, except_set_id=set_id)
+            if kind == "set":
+                self._detach_set_members(character_id, members, except_set_id=set_id)
             for media_id in set(members) - set(previous_members):
                 media = self.media_item(media_id)
-                if media and media.get("media_type") == "image" and not media.get("categories"):
+                if kind == "set" and not preserve_placement and media and media.get("media_type") == "image" and not media.get("categories"):
                     media["in_all"] = False
             cover = str(item.get("cover_media_id", "")) if cover_media_id is None else str(cover_media_id or "")
             if cover not in members:
@@ -1671,7 +1680,7 @@ class MediaHandler(BaseHTTPRequestHandler):
         try:
             path = urllib.parse.urlparse(self.path).path
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "mixed_collections": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/diagnostics/last-import":
                 payload = dict(self.store.last_import_debug) if self.store.last_import_debug else {"state": "none"}
@@ -1752,6 +1761,8 @@ class MediaHandler(BaseHTTPRequestHandler):
                     str(body.get("name", "")),
                     list(body.get("media_ids", [])) if isinstance(body.get("media_ids", []), list) else [],
                     body.get("cover_media_id"),
+                    str(body.get("kind", "set")),
+                    bool(body.get("preserve_placement", False)),
                 )
                 self._send_json(200, item)
                 return
@@ -1763,6 +1774,8 @@ class MediaHandler(BaseHTTPRequestHandler):
                     body.get("name") if "name" in body else None,
                     body.get("media_ids") if "media_ids" in body else None,
                     body.get("cover_media_id") if "cover_media_id" in body else None,
+                    bool(body.get("preserve_placement", False)),
+                    body.get("add_media_ids"),
                 )
                 self._send_json(200, item)
                 return
