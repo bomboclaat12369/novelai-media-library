@@ -1,0 +1,62 @@
+// Compact single-video controls; image and split layouts retain their placement.
+(() => {
+  'use strict';
+  const root=document.getElementById('nai-media-host')?.shadowRoot;
+  if(!root)return;
+  const panel=root.querySelector('.panel.left'),viewer=panel.querySelector('.viewer');
+  const style=document.createElement('style');
+  style.textContent=`
+    .naiCompactVideo .viewer{gap:3px;padding-bottom:3px}
+    #naiCompactFooter{flex:0 0 auto;min-width:0;display:flex;align-items:center;gap:6px;padding:0 5px;overflow-x:auto;scrollbar-width:thin}
+    #naiCompactFooter .viewerNav{flex:0 0 auto;gap:4px;flex-wrap:nowrap;margin:0}
+    #naiCompactFooter .viewerNav button.icon{width:30px;height:30px;flex:0 0 30px}
+    #naiCompactFooter .viewerNav .counter{min-width:42px;font-size:11px}
+    #naiCompactFooter #selectedName{flex:1 1 120px;min-width:45px;font-size:11px;line-height:15px}
+    #naiCompactFooter #qualityInfo{flex:0 0 auto;white-space:nowrap;font-size:10px;line-height:15px}
+    #naiCompactFooter .naiVideoLinkLine{display:flex;align-items:center;gap:5px;flex:0 1 auto;max-width:35%;overflow-x:auto;scrollbar-width:thin;min-width:70px}
+    #naiCompactFooter #selectedBadges{flex:0 0 auto;flex-wrap:nowrap;min-height:0;gap:4px}
+    #naiCompactFooter #selectedBadges:empty,#naiCompactFooter .naiFlagBadge{display:none}
+    #naiCompactFooter #naiMemberships{flex:0 0 auto;flex-wrap:nowrap;padding:0;gap:4px}
+    #naiCompactFooter #naiMemberships button{white-space:nowrap;padding:3px 6px;font-size:10px}
+    #naiCompactFooter #naiConnectMedia{order:-1}
+    .naiCompactVideo .stage > #videoTools.naiVideoSideRail{width:var(--nai-rail-width,64px)!important;left:var(--nai-rail-x,auto)!important;right:var(--nai-rail-right,4px)!important;top:var(--nai-rail-y,4px)!important}
+    .naiCompactVideo .stage > #videoTools.naiVideoSideRail .videoToolRow:not(:first-child){grid-template-columns:12px var(--nai-marker-width,40px)!important}
+    .naiCompactVideo .stage > #videoTools.naiVideoSideRail [data-seek-marker]{width:var(--nai-marker-width,40px)!important;min-width:var(--nai-marker-width,40px)!important;max-width:var(--nai-marker-width,40px)!important}
+    .naiCompactVideo .stage > #videoTools.naiVideoSideRail [data-seek-marker].naiMarkerPreview{height:var(--nai-marker-height,74px)!important}
+    .naiCompactVideo .naiMarkerPreview img{height:var(--nai-marker-image-height,52px);min-height:var(--nai-marker-image-height,52px)}
+  `;
+  root.appendChild(style);
+  let compact=false,footer=null,original=[];
+  root.naiCompactVideoFooter=enabled=>{
+    if(compact===enabled)return;
+    compact=enabled;panel.classList.toggle('naiCompactVideo',enabled);
+    if(enabled){
+      footer=document.createElement('div');footer.id='naiCompactFooter';
+      const links=document.createElement('div');links.className='naiVideoLinkLine';
+      const move=(node,parent)=>{if(!node)return;const anchor=document.createComment('viewer placement');node.before(anchor);original.push([node,anchor]);parent.appendChild(node);};
+      move(viewer.querySelector('.viewerNav'),footer);
+      move(root.getElementById('qualityInfo'),footer);
+      move(root.getElementById('naiMemberships'),links);move(root.getElementById('selectedBadges'),links);
+      footer.appendChild(links);move(root.getElementById('selectedName'),footer);viewer.appendChild(footer);
+    }else{
+      for(const [node,anchor] of original)anchor.replaceWith(node);
+      original=[];footer?.remove();footer=null;
+    }
+  };
+  root.naiPositionVideoRail=(rail,video,stage,r)=>{
+    if(!compact||!video.videoWidth||!video.videoHeight)return;
+    const gap=Math.max(r.left,stage.clientWidth-r.left-r.width);
+    const width=gap>=72?Math.min(100,Math.floor(gap-8)):64;
+    const markerWidth=width-24;
+    const imageHeight=width>64?Math.min(100,Math.round(markerWidth*1.4)):52;
+    const onRight=stage.clientWidth-r.left-r.width>=r.left;
+    const x=gap>=72?(onRight?r.left+r.width+4:r.left-width-4):Math.max(4,stage.clientWidth-width-4);
+    const vars={'--nai-rail-width':width+'px','--nai-marker-width':markerWidth+'px','--nai-marker-height':(imageHeight+22)+'px','--nai-marker-image-height':imageHeight+'px','--nai-rail-x':x+'px','--nai-rail-right':'auto','--nai-rail-y':Math.max(4,Math.min(r.top+4,stage.clientHeight-rail.offsetHeight-4))+'px'};
+    for(const [key,value] of Object.entries(vars))if(rail.style.getPropertyValue(key)!==value)rail.style.setProperty(key,value);
+  };
+  // Reposition after the compact footer changes the playback area's dimensions.
+  const resize=new ResizeObserver(()=>{const rail=root.getElementById('videoTools'),stage=rail?.closest('.stage'),v=stage?.querySelector('video');if(!compact||!v?.videoWidth)return;const scale=Math.min(stage.clientWidth/v.videoWidth,stage.clientHeight/v.videoHeight),width=v.videoWidth*scale,height=v.videoHeight*scale;root.naiPositionVideoRail(rail,v,stage,{left:(stage.clientWidth-width)/2,top:(stage.clientHeight-height)/2,width,height});});
+  resize.observe(root.getElementById('stages'));
+  window.addEventListener('pagehide',()=>resize.disconnect(),{once:true});
+  root.naiRefreshSelectedMetadata?.();
+})();

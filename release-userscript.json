@@ -28,9 +28,9 @@
     "payload/userscript-2.8.10.review-height.txt",
     "payload/userscript-2.8.58.groups.txt",
     "payload/userscript-2.8.57.marker-previews.txt",
-    "payload/userscript-2.8.59.video-layout.txt",
+    "payload/userscript-2.8.60.video-layout.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 114,
-  "version": "2.8.59"
+  "release_build": 115,
+  "version": "2.8.60"
 }
