@@ -1,0 +1,87 @@
+// Shared membership indicators and explicit collection assignment. No polling.
+(() => {
+  'use strict';
+  const root=document.getElementById('nai-media-host')?.shadowRoot;
+  if(!root)return;
+  const kind=s=>s.kind==='connection'?'Connection':'Set';
+  const icons={
+    pin:'<path d="m9 3 6 0-1 6 4 4v2H6v-2l4-4-1-6Zm3 12v6"/>',
+    home:'<path d="m3 10 9-7 9 7M5 9v12h5v-7h4v7h5V9"/>',
+    link:'<path d="m10 13 4-4m-6 6-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 3 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/>',
+    play:'<path d="m7 4 13 8-13 8Z" fill="currentColor" stroke="none"/>'
+  };
+  root.naiIconSvg=name=>`<svg class="naiSmallIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]||icons.link}</svg>`;
+  const style=document.createElement('style');
+  style.textContent=`
+    #naiMemberships{display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:5px 10px;font:11px system-ui}
+    #naiMemberships[hidden],#naiMemberships.hidden{display:none}
+    #naiMemberships button{font-size:11px;padding:4px 7px;max-width:100%;overflow-wrap:anywhere}
+    .naiSmallIcon{width:14px;height:14px;display:inline-block;vertical-align:middle;flex-shrink:0;pointer-events:none;filter:drop-shadow(0 1px 2px #000) drop-shadow(0 0 1px #000)}
+    .naiGroupBadge,.naiMainBadge,.naiVideoBadge{position:absolute;z-index:3;display:grid;place-items:center;width:16px;height:16px;padding:0;background:none;color:#eeeaff;line-height:1;pointer-events:none}
+    .naiGroupBadge{bottom:4px;right:4px}.naiMainBadge{top:5px;left:27px;color:#a1e1d0}.naiVideoBadge{bottom:4px;left:4px;color:#fff}
+    .naiCollectionVideo .videoMark{display:none!important}
+    .naiSetCover216,.naiSetPick .naiSetCoverBtn{display:grid!important;place-items:center!important;width:20px!important;height:20px!important;min-width:20px!important;padding:2px!important;border:0!important;background:rgba(8,10,25,.18)!important;border-radius:50%!important;color:#fff}
+    .naiSetCover216:hover,.naiSetPick .naiSetCoverBtn:hover{background:rgba(8,10,25,.65)!important}
+    .naiSetStack{width:18px!important;height:18px!important;padding:1px!important;background:none!important}
+    .naiSetCount{font-size:9px!important}.naiSetCoverBtn[aria-pressed="true"]{color:#ffdb66}
+    .naiGroupAssign{display:flex;flex-direction:column;gap:12px}
+  `;
+  root.appendChild(style);
+  let snapshot=null, index=new Map();
+  function memberships(id,lib){
+    if(lib!==snapshot){snapshot=lib;index=new Map();for(const s of lib?.sets || [])for(const mid of s.media_ids || []){if(!index.has(mid))index.set(mid,[]);index.get(mid).push(s);}}
+    return index.get(id)||[];
+  }
+  root.naiPaintGroupBadge=(tile,m,lib)=>{
+    const groups=memberships(m.id,lib);
+    if(!groups.length)return;
+    const badge=document.createElement('span');badge.className='naiGroupBadge';badge.innerHTML=root.naiIconSvg('link');
+    badge.title=groups.map(s=>`${kind(s)}: ${s.name}`).join('\n');badge.setAttribute('aria-label',badge.title);tile.appendChild(badge);
+  };
+  root.naiRenderMemberships=(m,lib)=>{
+    let panel=root.getElementById('naiMemberships');
+    if(!panel){panel=document.createElement('div');panel.id='naiMemberships';root.getElementById('qualityInfo').after(panel);}
+    panel.replaceChildren();panel.hidden=!m;
+    if(!m)return;
+    for(const s of memberships(m.id,lib)){
+      const b=document.createElement('button');b.innerHTML=root.naiIconSvg('link');b.append(document.createTextNode(` ${kind(s)}: ${s.name}`));b.dataset.groupId=s.id;
+      b.title=`Open ${kind(s).toLowerCase()} “${s.name}”`;b.onclick=()=>root.naiOpenGroup(s.id);panel.appendChild(b);
+    }
+    const connect=document.createElement('button');connect.textContent='Connect…';connect.id='naiConnectMedia';
+    connect.onclick=()=>root.naiAssignGroups([m.id],'connection');panel.appendChild(connect);
+  };
+  function request(path,body){return new Promise((resolve,reject)=>GM_xmlhttpRequest({method:body?'POST':'GET',url:'http://127.0.0.1:8765'+path,
+    headers:{Origin:'https://novelai.net','Content-Type':'application/json'},data:body?JSON.stringify(body):null,timeout:30000,
+    onload:r=>{let v;try{v=JSON.parse(r.responseText);}catch(_){reject(Error('Invalid companion response'));return;}if(r.status>=200&&r.status<300)resolve(v);else reject(Error(v.error||'Could not save collection'));},
+    onerror:()=>reject(Error('Could not connect to the local companion.')),ontimeout:()=>reject(Error('The companion did not respond.'))}));}
+  root.naiRequireCollections=async()=>{
+    const health=await request('/api/health');
+    if(!health.mixed_collections)throw Error('Restart the companion to install Sets & Connections support, then try again.');
+  };
+  root.naiAssignGroups=async(ids,preferred='set')=>{
+    try{
+      await root.naiRequireCollections();
+      const lib=await request('/api/library');
+      const media=ids.map(id=>lib.media.find(m=>m.id===id)).filter(Boolean);
+      if(!media.length)throw Error('Select saved media first.');
+      const characterId=media[0].character_id;
+      root.naiPrepareGroupOwner(lib,characterId);
+      if(media.some(m=>m.character_id!==characterId))throw Error('Choose media from one character.');
+      const wrap=document.createElement('div');wrap.className='modalWrap';
+      wrap.innerHTML='<div class="modal"><div class="modalHead"><div class="modalTitle">Add to Set / Connection</div><button data-close>×</button></div><div class="modalBody naiGroupAssign"><div class="muted">Adding to a Set preserves main Images placement and moves membership from any previous Set. Connections preserve all existing memberships.</div><select id="naiAssignKind" aria-label="Collection type"><option value="set">Set</option><option value="connection">Connection</option></select><select id="naiAssignExisting" aria-label="Existing collection"></select><button id="naiAssignAdd" class="primary">Add to selected</button><button id="naiAssignNew">Create new and choose media…</button><div id="naiAssignStatus" role="status"></div></div></div>';
+      const modal=root.getElementById('modalRoot');modal.replaceChildren(wrap);
+      const type=wrap.querySelector('#naiAssignKind'),select=wrap.querySelector('#naiAssignExisting'),add=wrap.querySelector('#naiAssignAdd');
+      const paint=()=>{select.replaceChildren();for(const s of lib.sets||[])if(s.character_id===characterId&&(s.kind||'set')===type.value){const o=document.createElement('option');o.value=s.id;o.textContent=s.name;select.appendChild(o);}add.disabled=!select.options.length;};
+      type.value=preferred;type.onchange=paint;paint();
+      const close=()=>wrap.remove();wrap.querySelector('[data-close]').onclick=close;wrap.onclick=e=>{if(e.target===wrap)close();};
+      wrap.querySelector('#naiAssignNew').onclick=()=>root.naiOpenGroupManager(null,ids,type.value);
+      add.onclick=async()=>{add.disabled=true;try{
+        await request('/api/sets/'+encodeURIComponent(select.value),{add_media_ids:ids,preserve_placement:true});
+        const updated=await request('/api/library');
+        close();root.naiRenderNormalGrid(updated);root.naiSetsApplyLibrary216(updated);root.naiRefreshSelectedMetadata();
+      }catch(e){wrap.querySelector('#naiAssignStatus').textContent=e.message;add.disabled=false;}};
+    }catch(e){alert(e.message);}
+  };
+  root.naiRefreshSelectedMetadata?.();
+  root.naiRefreshGrid?.();
+})();
