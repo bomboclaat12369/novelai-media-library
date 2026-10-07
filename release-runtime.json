@@ -1,5 +1,5 @@
 {
-  "version": "2.7.29",
+  "version": "2.7.30",
   "source": "runtime-src/companion-runtime.pyw",
-  "release_build": 37
+  "release_build": 38
 }

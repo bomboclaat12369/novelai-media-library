@@ -171,6 +171,9 @@ class LibraryStore:
                     m["in_all"] = False if m.get("media_type") == "video" else (False if m.get("id") in set_member_ids and not m.get("categories") else True)
                     changed = True
                 if m.get("media_type") == "video":
+                    if "in_videos" not in m:
+                        m["in_videos"] = True
+                        changed = True
                     if m.get("in_all"):
                         m["in_all"] = False
                         changed = True
@@ -735,7 +738,8 @@ class LibraryStore:
                 "media_type": media_type,
                 "content_type": content_type,
                 "categories": categories,
-                "in_all": True,
+                "in_all": media_type != "video",
+                "in_videos": True,
                 "favorite": False,
                 "featured": False,
                 "in_review": False,
@@ -1132,8 +1136,8 @@ class LibraryStore:
                 self._detach_set_members(character_id, members)
             for media_id in members:
                 media = self.media_item(media_id)
-                if kind == "set" and not preserve_placement and media and media.get("media_type") == "image" and not media.get("categories"):
-                    media["in_all"] = False
+                if kind == "set" and not preserve_placement and media and not media.get("categories"):
+                    media["in_videos" if media.get("media_type") == "video" else "in_all"] = False
             cover = str(cover_media_id or "")
             if cover not in members:
                 cover = members[0] if members else None
@@ -1179,8 +1183,8 @@ class LibraryStore:
                 self._detach_set_members(character_id, members, except_set_id=set_id)
             for media_id in set(members) - set(previous_members):
                 media = self.media_item(media_id)
-                if kind == "set" and not preserve_placement and media and media.get("media_type") == "image" and not media.get("categories"):
-                    media["in_all"] = False
+                if kind == "set" and not preserve_placement and media and not media.get("categories"):
+                    media["in_videos" if media.get("media_type") == "video" else "in_all"] = False
             cover = str(item.get("cover_media_id", "")) if cover_media_id is None else str(cover_media_id or "")
             if cover not in members:
                 cover = members[0] if members else None
@@ -1200,7 +1204,7 @@ class LibraryStore:
             self.save()
             return {"ok": True, "set_id": set_id}
 
-    def set_categories(self, media_id: str, categories: list[str], in_all: Any = None) -> dict[str, Any]:
+    def set_categories(self, media_id: str, categories: list[str], in_all: Any = None, in_videos: Any = None) -> dict[str, Any]:
         with self.lock:
             m = self.media_item(media_id)
             if not m:
@@ -1208,7 +1212,13 @@ class LibraryStore:
             categories = self._validate_categories(m["character_id"], categories, m.get("media_type", "image"))
             next_in_all = bool(m.get("in_all", True)) if in_all is None else bool(in_all)
             if m.get("media_type") == "video":
-                next_in_all = False
+                next_in_videos = bool(m.get("in_videos", True)) if in_videos is None else bool(in_videos)
+                if in_videos is None and categories and not m.get("in_purgatory"):
+                    next_in_videos = True
+                changes = {"categories": categories, "in_all": False, "in_videos": next_in_videos}
+                if all(m.get(key, True if key == "in_videos" else None) == value for key, value in changes.items()):
+                    return m
+                return self._change_media(m, changes, "Change video categories / All")
             elif in_all is None and categories and not next_in_all and not m.get("in_purgatory"):
                 # Keep the long-standing behavior: assigning a custom category to a
                 # set-only image also promotes it into the main All image view.
@@ -1237,7 +1247,7 @@ class LibraryStore:
                 return self._change_media(m, {"in_review": True, "in_purgatory": False}, "Change Review status")
             # Promotion is the moment an item enters the normal library. Date-imported
             # sorting should therefore use this time rather than its earlier Review import.
-            return self._change_media(m, {"in_review": False, "in_purgatory": False, "in_all": True, "created_at": now_iso()}, "Promote from Review")
+            return self._change_media(m, {"in_review": False, "in_purgatory": False, "in_all": m.get("media_type") != "video", "in_videos": True, "created_at": now_iso()}, "Promote from Review")
 
     def set_purgatory(self, media_id: str, in_purgatory: bool) -> dict[str, Any]:
         with self.lock:
@@ -1680,7 +1690,7 @@ class MediaHandler(BaseHTTPRequestHandler):
         try:
             path = urllib.parse.urlparse(self.path).path
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "mixed_collections": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/diagnostics/last-import":
                 payload = dict(self.store.last_import_debug) if self.store.last_import_debug else {"state": "none"}
@@ -1876,7 +1886,7 @@ class MediaHandler(BaseHTTPRequestHandler):
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/categories", path)
             if match:
                 body = self._read_json()
-                item = self.store.set_categories(match.group(1), list(body.get("categories", [])), body.get("in_all") if "in_all" in body else None)
+                item = self.store.set_categories(match.group(1), list(body.get("categories", [])), body.get("in_all") if "in_all" in body else None, body.get("in_videos") if "in_videos" in body else None)
                 self._send_json(200, item)
                 return
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/favorite", path)
