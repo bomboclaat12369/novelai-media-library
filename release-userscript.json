@@ -2,7 +2,7 @@
   "parts": [
     "payload/userscript-2.8.61.transport-start.txt",
     "payload/userscript-2.8.5.reset-state.txt",
-    "payload/userscript-2.8.61.part01.txt",
+    "payload/userscript-2.8.62.part01.txt",
     "payload/userscript-2.8.61.virtual-grid.txt",
     "payload/userscript-2.3.0.patch01.txt",
     "payload/userscript-2.3.0.patch02.txt",
@@ -17,7 +17,7 @@
     "payload/userscript-2.4.5.patch01.txt",
     "payload/userscript-2.4.7.patch01.txt",
     "payload/userscript-2.8.57.video-labels.txt",
-    "payload/userscript-2.8.61.sets.txt",
+    "payload/userscript-2.8.62.sets.txt",
     "payload/userscript-2.8.56.set-import.txt",
     "payload/userscript-2.8.8.crop-bridge.txt",
     "payload/userscript-2.8.4.drag-safety.txt",
@@ -31,6 +31,6 @@
     "payload/userscript-2.8.61.video-layout.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 116,
-  "version": "2.8.61"
+  "release_build": 117,
+  "version": "2.8.62"
 }

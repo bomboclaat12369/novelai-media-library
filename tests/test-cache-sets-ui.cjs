@@ -43,7 +43,9 @@ await page.evaluate(async()=>{const r=document.getElementById('nai-media-host').
 assert.equal(await page.evaluate(()=>requests.filter(r=>r.route==='/api/media/img0/thumb').length),before);
 await page.locator('#editBtn').click();
 const oldSrc=await page.locator('#stage1 img').getAttribute('src');
-await page.evaluate(()=>{const b=document.getElementById('nai-media-host').shadowRoot.getElementById('replaceSourceBtn'),data=new DataTransfer();data.items.add(new File(['replacement'],'new.png',{type:'image/png'}));b.dispatchEvent(new DragEvent('drop',{dataTransfer:data,bubbles:true,composed:true,cancelable:true}));});
+await page.locator('#replaceSourceBtn').click();
+await page.evaluate(()=>{const b=document.getElementById('nai-media-host').shadowRoot.getElementById('naiReplacementDrop'),data=new DataTransfer();data.items.add(new File(['replacement'],'new.png',{type:'image/png'}));b.dispatchEvent(new DragEvent('drop',{dataTransfer:data,bubbles:true,composed:true,cancelable:true}));});
+await page.locator('#naiReplacementSave').click();
 await page.waitForFunction(()=>document.getElementById('nai-media-host').shadowRoot.getElementById('selectedName').textContent==='new.png');
 assert.notEqual(await page.locator('#stage1 img').getAttribute('src'),oldSrc);
 assert.ok(await page.evaluate(()=>requests.some(r=>r.route==='/api/media/img0/original'&&r.url.includes('source=replacement'))));
