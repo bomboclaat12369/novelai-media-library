@@ -2,7 +2,7 @@
   "parts": [
     "payload/userscript-2.8.61.transport-start.txt",
     "payload/userscript-2.8.5.reset-state.txt",
-    "payload/userscript-2.8.62.part01.txt",
+    "payload/userscript-2.8.63.part01.txt",
     "payload/userscript-2.8.61.virtual-grid.txt",
     "payload/userscript-2.3.0.patch01.txt",
     "payload/userscript-2.3.0.patch02.txt",
@@ -17,20 +17,21 @@
     "payload/userscript-2.4.5.patch01.txt",
     "payload/userscript-2.4.7.patch01.txt",
     "payload/userscript-2.8.57.video-labels.txt",
-    "payload/userscript-2.8.62.sets.txt",
-    "payload/userscript-2.8.56.set-import.txt",
+    "payload/userscript-2.8.63.sets.txt",
+    "payload/userscript-2.8.63.set-import.txt",
     "payload/userscript-2.8.8.crop-bridge.txt",
     "payload/userscript-2.8.4.drag-safety.txt",
     "payload/userscript-2.8.51.thumbnail-picker.txt",
-    "payload/userscript-2.8.61.review-core.txt",
+    "payload/userscript-2.8.63.review-core.txt",
     "payload/userscript-2.8.61.ui-updates.txt",
     "payload/userscript-2.8.8.update-status.txt",
     "payload/userscript-2.8.10.review-height.txt",
     "payload/userscript-2.8.61.groups.txt",
     "payload/userscript-2.8.57.marker-previews.txt",
     "payload/userscript-2.8.61.video-layout.txt",
+    "payload/userscript-2.8.63.filters.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 117,
-  "version": "2.8.62"
+  "release_build": 118,
+  "version": "2.8.63"
 }

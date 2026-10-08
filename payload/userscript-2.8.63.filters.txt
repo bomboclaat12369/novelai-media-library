@@ -1,0 +1,69 @@
+// Combined filters intersect the current category/collection; no background requests.
+(() => {
+  'use strict';
+  const root=document.getElementById('nai-media-host')?.shadowRoot;
+  if(!root)return;
+  const toolbar=root.querySelector('.right .toolbar'),character=root.getElementById('characterSelect');
+  const blank=()=>({favorite:'any',featured:'any',replacement:'any',set:'any',connection:'any',categories:[]});
+  let filters=blank(),context='',browserMode=false,panel=null,membershipSource=null,membershipLength=0,sets=new Set(),connections=new Set();
+  const button=document.createElement('button');button.id='naiCombinedFilters';button.textContent='Filters';button.title='Combine filters within this category or collection';button.setAttribute('aria-expanded','false');
+  toolbar.insertBefore(button,root.getElementById('sortSelect'));
+  const style=document.createElement('style');style.textContent=`
+    .toolbar #search{flex:1 1 160px;min-width:140px}
+    #naiCombinedFilters{flex:0 0 auto;white-space:nowrap}
+    #naiCombinedFilters.active{background:#494071;border-color:#9283df}
+    #naiFilterPanel{position:fixed;z-index:2147483500;box-sizing:border-box;width:310px;max-width:calc(100vw - 24px);padding:14px;border:1px solid #55547a;border-radius:10px;background:#191c35;color:#eeeaff;box-shadow:0 12px 35px #0008;overflow:auto;font:12px system-ui}
+    #naiFilterPanel .filterHead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+    #naiFilterPanel .filterRow{display:grid;grid-template-columns:1fr 150px;align-items:center;gap:8px;margin:8px 0}
+    #naiFilterPanel select{min-width:0;width:100%;padding:6px;font-size:12px}
+    #naiFilterPanel .filterCats{max-height:130px;overflow:auto;margin-top:7px;padding-right:4px}
+    #naiFilterPanel .filterCats label{display:flex;align-items:center;gap:7px;padding:5px 0;overflow-wrap:anywhere}
+    #naiFilterPanel .filterFoot{display:flex;justify-content:space-between;gap:8px;margin-top:12px}
+    #naiFilterPanel button{font-size:11px;padding:5px 9px}
+  `;root.appendChild(style);
+  const count=()=>Object.entries(filters).filter(([key,value])=>key!=='categories'&&value!=='any').length+filters.categories.length;
+  function label(){const n=count();button.textContent=n?`Filters · ${n}`:'Filters';button.classList.toggle('active',!!n);}
+  function close(){panel?.remove();panel=null;button.setAttribute('aria-expanded','false');}
+  function syncContext(){
+    const mode=root.getElementById('videosModeBtn').classList.contains('active')?'videos':'images';
+    const next=`${character.value}:${mode}`;
+    if(next!==context){context=next;filters=blank();close();label();}
+  }
+  root.naiSyncFilterContext=syncContext;
+  root.naiSetFilterBrowserMode=on=>{browserMode=on;button.classList.toggle('hidden',on);if(on)close();};
+  root.naiCombinedFilterKey=()=>JSON.stringify(filters);
+  root.naiApplyCombinedFilters=(items,library)=>{
+    syncContext();if(!count())return items;
+    if(membershipSource!==library?.sets || membershipLength!==(library?.sets?.length||0)){
+      membershipSource=library?.sets;membershipLength=membershipSource?.length||0;sets=new Set();connections=new Set();
+      for(const group of membershipSource || [])for(const id of group.media_ids || [])(group.kind==='connection'?connections:sets).add(id);
+    }
+    const flag=(value,wanted)=>wanted==='any'||!!value===(wanted==='yes');
+    return items.filter(m=>flag(m.favorite,filters.favorite)&&flag(m.featured,filters.featured)&&flag(m.needs_replacement,filters.replacement)&&flag(sets.has(m.id),filters.set)&&flag(connections.has(m.id),filters.connection)&&filters.categories.every(id=>(m.categories||[]).includes(id)));
+  };
+  function changed(){label();root.naiReapplyCombinedFilters();}
+  button.onclick=()=>{
+    if(panel){close();return;}syncContext();if(browserMode)return;
+    panel=document.createElement('div');panel.id='naiFilterPanel';panel.setAttribute('role','dialog');panel.setAttribute('aria-label','Combined filters');
+    const head=document.createElement('div');head.className='filterHead';head.innerHTML='<strong>Combine filters</strong>';const x=document.createElement('button');x.textContent='×';x.setAttribute('aria-label','Close filters');x.onclick=close;head.appendChild(x);panel.appendChild(head);
+    const note=document.createElement('div');note.className='muted';note.textContent='Matches all selected conditions within this view.';panel.appendChild(note);
+    for(const [key,title,yes,no] of [['favorite','Favorite','Favorites only','Not favorites'],['featured','Featured','Featured only','Not featured'],['replacement','Replacement','Needs replacement','Not flagged'],['set','Set membership','In a set','Not in a set'],['connection','Connections','Has connections','No connections']]){
+      const row=document.createElement('label');row.className='filterRow';row.appendChild(document.createTextNode(title));const select=document.createElement('select');select.dataset.filter=key;select.setAttribute('aria-label',title);
+      for(const [value,text] of [['any','Any'],['yes',yes],['no',no]]){const option=document.createElement('option');option.value=value;option.textContent=text;select.appendChild(option);}select.value=filters[key];select.onchange=()=>{filters[key]=select.value;changed();};row.appendChild(select);panel.appendChild(row);
+    }
+    const library=root.naiGetLibrary(),owner=library?.characters?.find(c=>c.id===character.value);
+    const mixed=!!root.naiOpenGroupId?.(),type=root.getElementById('videosModeBtn').classList.contains('active')?'video':'image';
+    const categories=(owner?.categories || []).filter(c=>mixed || (c.media_type||'image')===type);
+    if(categories.length){
+      const title=document.createElement('div');title.textContent='Categories — match every checked category';title.style.marginTop='12px';panel.appendChild(title);
+      const list=document.createElement('div');list.className='filterCats';
+      for(const category of categories){const row=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.dataset.filterCategory=category.id;input.checked=filters.categories.includes(category.id);input.onchange=()=>{filters.categories=filters.categories.filter(id=>id!==category.id);if(input.checked)filters.categories.push(category.id);changed();};row.append(input,document.createTextNode(category.name+(mixed?` (${category.media_type||'image'})`:'')));list.appendChild(row);}panel.appendChild(list);
+    }
+    const foot=document.createElement('div');foot.className='filterFoot';const clear=document.createElement('button'),done=document.createElement('button');clear.textContent='Clear filters';clear.id='naiClearCombinedFilters';clear.onclick=()=>{filters=blank();panel.querySelectorAll('select').forEach(el=>el.value='any');panel.querySelectorAll('input').forEach(el=>el.checked=false);changed();};done.textContent='Done';done.className='primary';done.onclick=close;foot.append(clear,done);panel.appendChild(foot);root.appendChild(panel);
+    const rect=button.getBoundingClientRect();panel.style.left=Math.max(12,Math.min(rect.left,window.innerWidth-322))+'px';panel.style.top=(rect.bottom+6)+'px';panel.style.maxHeight=Math.max(100,window.innerHeight-rect.bottom-18)+'px';button.setAttribute('aria-expanded','true');x.focus();
+  };
+  window.addEventListener('pointerdown',e=>{if(panel&&!e.composedPath().includes(panel)&&!e.composedPath().includes(button))close();},true);
+  window.addEventListener('keydown',e=>{if(panel&&e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();close();button.focus();}},true);
+  window.addEventListener('resize',close);
+  syncContext();root.naiSyncSetsVisibility?.();
+})();
