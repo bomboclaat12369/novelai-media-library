@@ -3,11 +3,11 @@
   "launcher_version": "1.0.0",
   "launcher_url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/companion.pyw",
   "launcher_sha256": "39538ee93f2469bf761291cbdaabf678d8e0234e7de19a285954a85c622ee998",
-  "userscript_payload_version": "2.8.62",
+  "userscript_payload_version": "2.8.63",
   "userscript_parts": [
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.61.transport-start.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.5.reset-state.txt",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.62.part01.txt",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.63.part01.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.61.virtual-grid.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.3.0.patch01.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.3.0.patch02.txt",
@@ -22,18 +22,19 @@
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.4.5.patch01.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.4.7.patch01.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.57.video-labels.txt",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.62.sets.txt",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.56.set-import.txt",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.63.sets.txt",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.63.set-import.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.8.crop-bridge.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.4.drag-safety.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.51.thumbnail-picker.txt",
-    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.61.review-core.txt",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.63.review-core.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.61.ui-updates.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.8.update-status.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.10.review-height.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.61.groups.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.57.marker-previews.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.61.video-layout.txt",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.63.filters.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.3.transport-end.txt"
   ],
   "runtime_version": "2.7.30",
@@ -55,5 +56,5 @@
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.30.part13.b64",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.30.part14.b64"
   ],
-  "userscript_sha256": "ba118f21c622cb4752548ea44c087bc02271a207dfe616dbafa4c5fb65e8485f"
+  "userscript_sha256": "b690d92434a80e4630f8a95838c5e5ca3ef1d4484b8e7e3eb842cc7445ca3fde"
 }
