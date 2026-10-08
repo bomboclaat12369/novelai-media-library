@@ -1,0 +1,43 @@
+"""Isolated real companion for the standalone browser integration check."""
+import base64
+import hashlib
+import io
+import json
+import runpy
+import subprocess
+import tempfile
+from pathlib import Path
+from PIL import Image
+
+root = Path(__file__).resolve().parent.parent
+runtime = runpy.run_path(str(root / 'runtime-src/companion-runtime.pyw'))
+with tempfile.TemporaryDirectory(prefix='nai-standalone-') as directory:
+    store = runtime['LibraryStore'](Path(directory))
+    c = store.add_character('Standalone fixture')
+    cat = store.add_category(c['id'], 'Dress')
+    items = []
+    for i, size in enumerate([(800,1000),(900,1200),(1200,800),(1000,1000),(800,1000),(800,1000)]):
+        data = io.BytesIO()
+        Image.new('RGB', size, ['#ab708b','#536ea4','#4c9188','#988052','#796391','#4c6670'][i]).save(data, format='JPEG')
+        m, _ = store.import_bytes(data.getvalue(), f'Portrait {i+1}.jpg', c['id'], [cat['id']], {'kind':'local'}, 'image/jpeg')
+        items.append(m)
+    video_path = Path(directory)/'fixture.mp4'
+    subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','color=c=navy:s=320x480:d=2','-c:v','libx264','-pix_fmt','yuv420p',str(video_path)],check=True)
+    video,_=store.import_bytes(video_path.read_bytes(),'Video.mp4',c['id'],[],{'kind':'local'},'video/mp4')
+    store.create_set(c['id'],'Mixed set',[items[0]['id'],video['id']],preserve_placement=True)
+    server=runtime['MediaHTTPServer'](('127.0.0.1',8765),store)
+    html=(root/'payload/standalone-2.8.64.html').read_bytes()
+    manifest={'standalone_url':server.standalone.BASE+'payload/standalone-2.8.64.html','standalone_sha256':hashlib.sha256(html).hexdigest()}
+    server.standalone._download=lambda url,*args:json.dumps(manifest).encode() if url.endswith('manifest.json') else html
+    # Exercise verified download, persistent offline fallback, and tamper rejection.
+    assert server.standalone.document()==html
+    offline=runtime['StandaloneUI'](store.root)
+    def fail(*args):raise OSError('offline')
+    offline._download=fail
+    assert offline.document()==html
+    bad=runtime['StandaloneUI'](Path(directory)/'bad-cache')
+    bad._download=lambda url,*args:json.dumps(manifest).encode() if url.endswith('manifest.json') else b'bad'
+    try:bad.document();raise AssertionError('invalid digest accepted')
+    except ValueError:pass
+    print(json.dumps({'ready':True,'character':c['id'],'images':[m['id'] for m in items],'video':video['id']}),flush=True)
+    server.serve_forever()

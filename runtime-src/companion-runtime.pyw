@@ -18,6 +18,7 @@ import traceback
 import urllib.parse
 import urllib.request
 import uuid
+import webbrowser
 from datetime import datetime, timezone
 from email.parser import BytesParser
 from email.policy import default as email_policy
@@ -76,6 +77,7 @@ class LibraryStore:
         self.backup_dir = root / "backups"
         self.db_path = root / "library.json"
         self.lock = threading.RLock()
+        self.revision = uuid.uuid4().hex
         self.last_import_debug: dict[str, Any] = {}
         self._thumbnail_queue = queue.Queue()
         self._thumbnail_worker = None
@@ -224,6 +226,7 @@ class LibraryStore:
         with self.lock:
             self.data["updated_at"] = now_iso()
             self._write_atomic(self.data)
+            self.revision = uuid.uuid4().hex
 
     def undo_history(self) -> dict[str, Any]:
         with self.lock:
@@ -389,7 +392,7 @@ class LibraryStore:
 
     def public_library(self) -> dict[str, Any]:
         with self.lock:
-            return json.loads(json.dumps({k: v for k, v in self.data.items() if k != "undo_history"}))
+            return json.loads(json.dumps({**{k: v for k, v in self.data.items() if k != "undo_history"}, "revision": self.revision}))
 
     def character(self, character_id: str) -> dict[str, Any] | None:
         return next((c for c in self.data["characters"] if c["id"] == character_id), None)
@@ -1494,6 +1497,60 @@ class LibraryStore:
                 self._metadata_index["running"] = False
 
 
+class StandaloneUI:
+    """Download the verified standalone document on demand; keep an offline copy."""
+    BASE = "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/"
+
+    def __init__(self, root: Path):
+        self.directory = root / ".ui-cache"
+        self.lock = threading.Lock()
+        self.checked_at = 0.0
+        self.cached: bytes | None = None
+
+    def _download(self, url: str, limit: int, timeout: int = 20) -> bytes:
+        if not url.startswith(self.BASE):
+            raise ValueError("Untrusted standalone payload URL")
+        request = urllib.request.Request(url, headers={"User-Agent": "NovelAI-Media-Library", "Cache-Control": "no-cache"})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = response.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError("Standalone payload is too large")
+        return data
+
+    def document(self) -> bytes:
+        with self.lock:
+            cached_path = self.directory / "standalone.json"
+            if self.cached is None and cached_path.exists():
+                try:
+                    saved = json.loads(cached_path.read_text(encoding="utf-8"))
+                    body = base64.b64decode(saved["body"], validate=True)
+                    if hashlib.sha256(body).hexdigest() == saved["sha256"]:
+                        self.cached = body
+                except Exception:
+                    pass
+            if self.cached is not None and time.monotonic() - self.checked_at < 60:
+                return self.cached
+            try:
+                manifest = json.loads(self._download(self.BASE + "manifest.json", 256 * 1024, 8))
+                url, digest = manifest.get("standalone_url", ""), manifest.get("standalone_sha256", "")
+                if not re.fullmatch(r"[0-9a-f]{64}", digest):
+                    raise ValueError("The standalone update is not available yet. Please retry shortly.")
+                if self.cached is None or hashlib.sha256(self.cached).hexdigest() != digest:
+                    body = self._download(url, 12 * 1024 * 1024)
+                    if hashlib.sha256(body).hexdigest() != digest:
+                        raise ValueError("Standalone download verification failed")
+                    self.directory.mkdir(parents=True, exist_ok=True)
+                    temp = cached_path.with_suffix(".tmp")
+                    temp.write_text(json.dumps({"sha256": digest, "body": base64.b64encode(body).decode("ascii")}), encoding="utf-8")
+                    os.replace(temp, cached_path)
+                    self.cached = body
+            except Exception:
+                if self.cached is None:
+                    raise
+            self.checked_at = time.monotonic()
+            return self.cached
+
+
 class MediaHandler(BaseHTTPRequestHandler):
     server_version = "NovelAIMedia/1.0"
 
@@ -1513,7 +1570,9 @@ class MediaHandler(BaseHTTPRequestHandler):
             parsed = urllib.parse.urlparse(origin)
         except Exception:
             return False
-        return parsed.scheme == "https" and parsed.hostname in {"novelai.net", "www.novelai.net"}
+        return (parsed.scheme == "https" and parsed.hostname in {"novelai.net", "www.novelai.net"}) or origin in {
+            f"http://127.0.0.1:{self.server.server_port}", f"http://localhost:{self.server.server_port}"
+        }
 
     def _cors(self) -> None:
         origin = self.headers.get("Origin")
@@ -1689,8 +1748,43 @@ class MediaHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         try:
             path = urllib.parse.urlparse(self.path).path
+            if path in {"/", "/library", "/library/"}:
+                # Bind the UI to loopback, including its browser Origin. Never serve
+                # executable library pages to arbitrary Host names (DNS rebinding).
+                if self.headers.get("Host") not in {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}:
+                    self._send_json(403, {"error": "Host not allowed"})
+                    return
+                if self.headers.get("Host") == f"localhost:{self.server.server_port}":
+                    self.send_response(302)
+                    self.send_header("Location", f"http://127.0.0.1:{self.server.server_port}/library/")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                try:
+                    body = self.server.standalone.document()
+                    status = 200
+                except Exception:
+                    status = 503
+                    body = b'''<!doctype html><meta charset="utf-8"><title>NovelAI Media Library</title>
+                    <body style="background:#11142c;color:#eee;font:16px system-ui;padding:40px">
+                    <h2>The standalone library could not load yet.</h2>
+                    <p>Keep the companion running. The first launch needs internet access to download the interface.</p>
+                    <p>If the update was just published, wait a moment and retry.</p><a href="/library/" style="color:#bcb5ff">Retry</a></body>'''
+                self.send_response(status)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if path == "/api/library/revision":
+                with self.store.lock:
+                    self._send_json(200, {"revision": self.store.revision})
+                return
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "standalone_library": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/diagnostics/last-import":
                 payload = dict(self.store.last_import_debug) if self.store.last_import_debug else {"state": "none"}
@@ -1981,6 +2075,7 @@ class MediaHTTPServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], store: LibraryStore):
         super().__init__(address, MediaHandler)
         self.store = store
+        self.standalone = StandaloneUI(store.root)
         store.cleanup_upload_orphans()
 
 
@@ -2002,7 +2097,7 @@ def run_gui(server: MediaHTTPServer, store: LibraryStore) -> None:
 
     root = tk.Tk()
     root.title(APP_NAME)
-    root.geometry("520x250")
+    root.geometry("520x290")
     root.resizable(False, False)
 
     frame = tk.Frame(root, padx=18, pady=18)
@@ -2033,6 +2128,8 @@ def run_gui(server: MediaHTTPServer, store: LibraryStore) -> None:
             server.server_close()
         finally:
             root.destroy()
+
+    tk.Button(frame, text="Open Library Tab", width=20, command=lambda: webbrowser.open_new_tab(f"http://{HOST}:{PORT}/library/")).pack(anchor="w", pady=(12, 0))
 
     tk.Button(frame, text="Stop & Exit", width=18, command=close).pack(anchor="e", pady=(22, 0))
     root.protocol("WM_DELETE_WINDOW", close)
