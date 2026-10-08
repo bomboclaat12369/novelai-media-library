@@ -81,6 +81,7 @@ class LibraryStore:
         self.last_import_debug: dict[str, Any] = {}
         self._thumbnail_queue = queue.Queue()
         self._thumbnail_worker = None
+        self._preview_lock = threading.Lock()
         self._metadata_index_worker = None
         self._metadata_index = {"running": False, "total": 0, "processed": 0, "updated": 0}
         self.root.mkdir(parents=True, exist_ok=True)
@@ -1407,6 +1408,59 @@ class LibraryStore:
                 return path, mimetypes.guess_type(path.name)[0] or "image/webp"
             return path, m.get("content_type") or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
+    def grid_preview(self, media_id: str, requested_size: int) -> tuple[Path, str]:
+        """On-demand sharp grid images. Never block metadata on image decoding."""
+        size = next((n for n in (256, 512, 768, 1024) if n >= requested_size), 1024)
+        with self.lock:
+            item = self.media_item(media_id)
+            if not item:
+                raise KeyError("Media not found")
+            # Video thumbnails preserve the chosen frame/crop. Browser captures
+            # already keep full-resolution manual frames; never substitute a frame.
+            video = item.get("media_type") == "video"
+            source, content_type = self.media_path(media_id, thumb=video)
+        if Image is None or not content_type.startswith("image/"):
+            return self.media_path(media_id, thumb=True)
+        info = source.stat()
+        revision = hashlib.sha256(f"{source}:{info.st_mtime_ns}:{info.st_size}".encode()).hexdigest()[:20]
+        folder = self.thumb_dir / "grid-previews" / media_id
+        out = folder / f"{size}-{revision}.webp"
+        if out.is_file():
+            return out, "image/webp"
+        # Only one extra decode at a time across tabs; ordinary originals and
+        # edits keep their own request threads and do not take this lock.
+        with self._preview_lock:
+            if out.is_file():
+                return out, "image/webp"
+            folder.mkdir(parents=True, exist_ok=True)
+            try:
+                with Image.open(source) as im:
+                    width, height = im.size
+                    scale = min(1.0, size / max(1, min(width, height)), 2048 / max(width, height))
+                    target = (max(1, round(width * scale)), max(1, round(height * scale)))
+                    if im.format == "JPEG":
+                        im.draft("RGB", (target[0] * 2, target[1] * 2))
+                    im = ImageOps.exif_transpose(im) if ImageOps is not None else im.copy()
+                    # Rotation may swap axes; preserve the source proportions.
+                    ratio = min(1.0, size / max(1, min(im.size)), 2048 / max(im.size))
+                    bounds = (max(1, round(im.width * ratio)), max(1, round(im.height * ratio)))
+                    im.thumbnail(bounds, Image.Resampling.LANCZOS, reducing_gap=3.0)
+                    if im.mode not in ("RGB", "RGBA"):
+                        im = im.convert("RGBA" if "transparency" in im.info else "RGB")
+                    tmp = out.with_suffix(".tmp")
+                    im.save(tmp, "WEBP", quality=90, method=1)
+                    os.replace(tmp, out)
+                # Replace only obsolete revisions of this regenerable cache.
+                for old in folder.glob("*.webp"):
+                    if not old.name.endswith(f"-{revision}.webp"):
+                        try:
+                            old.unlink()
+                        except OSError:
+                            pass
+                return out, "image/webp"
+            except Exception:
+                return self.media_path(media_id, thumb=True)
+
     def media_quality(self, media_id: str) -> dict[str, Any]:
         """Return lightweight source-size metadata for the selected media item."""
         with self.lock:
@@ -1810,7 +1864,12 @@ class MediaHandler(BaseHTTPRequestHandler):
             if match:
                 media_id = match.group(1)
                 thumb = bool(match.group(2))
-                file_path, content_type = self.store.media_path(media_id, thumb=thumb)
+                requested = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("size", ["0"])[0]
+                size = int(requested) if str(requested).isdigit() else 0
+                if thumb and size > 0:
+                    file_path, content_type = self.store.grid_preview(media_id, size)
+                else:
+                    file_path, content_type = self.store.media_path(media_id, thumb=thumb)
                 self._send_file_with_range(file_path, content_type)
                 return
             self._send_json(404, {"error": "Not found"})

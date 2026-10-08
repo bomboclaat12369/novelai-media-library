@@ -1,0 +1,122 @@
+// Shared standalone entry point, fixed three-column layout, and refresh-on-return.
+(() => {
+  'use strict';
+  const root=document.getElementById('nai-media-host')?.shadowRoot;
+  if(!root)return;
+  const standalone=document.documentElement.dataset.naiStandalone==='1';
+  const host=root.host;
+  if(!standalone){
+    const link=document.createElement('a');
+    link.id='naiOpenStandalone';link.href='http://127.0.0.1:8765/library/';
+    link.target='_blank';link.rel='noopener';link.textContent='Open standalone ↗';
+    link.title='Open the full library in a separate browser tab';
+    link.style.cssText='margin-left:auto;color:#c6c1ff;text-decoration:none;white-space:nowrap;font:11px system-ui';
+    (root.getElementById('naiUpdateStatus') || root.getElementById('status').parentElement).appendChild(link);
+  }else{
+    document.title='NovelAI Media Library';
+    const style=document.createElement('style');
+    style.textContent=`
+      :host {--nai-left-edge:66.6666667vw!important;--nai-right-edge:66.6666667vw!important}
+      :host([data-dual="false"]) {--nai-left-edge:33.3333333vw!important;--nai-right-edge:33.3333333vw!important}
+      .panel {top:0!important;bottom:0!important}
+      .toggle {display:none!important}
+      .left .panel-head {min-height:55px}
+      .left .viewer {min-width:0;gap:4px;padding-top:0}
+      #stages,#stages.split {position:relative!important;inset:auto!important;display:flex!important;flex-direction:row!important;gap:0!important;flex:1 1 0!important;min-height:0!important;min-width:0!important}
+      #stages .stage {flex:1 1 0!important;min-width:0!important;min-height:0!important}
+      #stages .stage.hidden {display:none!important}
+      #stages .stage.slot-active {border-color:#8f85ff;box-shadow:inset 0 0 0 1px #8f85ff}
+      #stages .stage img {cursor:default}
+      #stages ~ .viewerNav {position:static!important;transform:none!important;background:none!important;backdrop-filter:none!important;padding:2px 6px!important}
+      #stages ~ .badgeRow:not(.hidden) {display:flex!important}
+      #stages ~ .viewerMeta:not(.hidden) {display:block!important}
+      #selectedName {max-width:100%;padding:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #qualityInfo,#selectedBadges {padding-left:8px;padding-right:8px}
+      .naiSlotSelectBtnV239 {display:none!important}
+      .naiStandaloneSlot {padding:6px 10px;font-size:11px;white-space:nowrap}
+      .naiStandaloneSlot.active {background:#6155d9;border-color:#958cff}
+      :host([data-dual="false"]) #naiStandaloneSlot2 {display:none}
+      #naiCompactFooter {display:flex;flex-direction:column;align-items:stretch;flex-wrap:nowrap;overflow:hidden;gap:3px;padding:0 8px 2px;height:63px;min-height:63px;box-sizing:border-box}
+      #naiCompactFooter .naiStandaloneMetadata {display:flex;align-items:center;gap:8px;height:26px;min-height:26px;min-width:0;overflow:hidden}
+      #naiCompactFooter .viewerNav {flex:0 0 32px;justify-content:flex-start;flex-wrap:nowrap;gap:8px;overflow-x:auto;scrollbar-width:none}
+      #naiCompactFooter #selectedBadges {flex:0 1 auto;max-width:24%;min-width:0;overflow:hidden;white-space:nowrap;padding:0}
+      #naiCompactFooter #selectedBadges .badge {flex-shrink:0;padding:3px 6px}
+      #naiCompactFooter #selectedName {flex:0 4 80px;min-width:0;max-width:80px;padding:0}
+      #naiCompactFooter #qualityInfo {flex:0 2 auto;min-width:0;max-width:260px;padding:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #naiCompactFooter #naiMemberships {display:flex;flex:1 1 100px;min-width:74px;overflow-x:auto;scrollbar-width:none;white-space:nowrap;padding:0;height:26px}
+      #naiCompactFooter #naiMemberships button {flex-shrink:0;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #naiCompactFooter #naiConnectMedia {order:-1}
+      #naiThumbColumns {width:auto;padding:6px;font-size:11px}
+    `;
+    root.appendChild(style);
+    const header=root.querySelector('.left .panel-head'),split=root.getElementById('splitBtn');
+    header.querySelector('.grow > div').textContent='Active viewer';
+    const slots=[0,1].map(slot=>{
+      const b=document.createElement('button');b.type='button';b.id='naiStandaloneSlot'+(slot+1);b.className='naiStandaloneSlot';
+      b.textContent='Viewer '+(slot+1);b.title='Open thumbnails in viewer '+(slot+1);
+      b.onclick=()=>root.naiSetActiveSlot(slot);header.insertBefore(b,split);return b;
+    });
+    function sync(){
+      slots.forEach((b,i)=>{const active=host.dataset.activeSlot===String(i);b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));});
+    }
+    new MutationObserver(sync).observe(host,{attributes:true,attributeFilter:['data-active-slot','data-dual']});sync();
+    // Select on pointerdown, before video playback handlers. Image clicks select;
+    // Fullscreen remains available through the existing explicit button.
+    root.getElementById('stages').addEventListener('pointerdown',e=>{
+      const stage=e.target.closest('.stage[data-slot]');
+      if(stage && !e.target.closest('#videoTools')){
+        const video=stage.querySelector('video'),slot=Number(stage.dataset.slot);
+        if(video)video._naiSelectionClick=host.dataset.activeSlot!==String(slot);
+        if(host.dataset.activeSlot!==String(slot))root.naiSetActiveSlot(slot);
+      }
+    },true);
+    const grid=root.getElementById('grid');
+    const columns=document.createElement('select');columns.id='naiThumbColumns';
+    columns.title='Thumbnails per row';columns.setAttribute('aria-label','Thumbnails per row');
+    for(let n=4;n<=8;n++){const option=document.createElement('option');option.value=n;option.textContent=n+' per row';columns.appendChild(option);}
+    let saved=5;try{saved=Number(localStorage.getItem('nai-standalone-columns'))||5;}catch(_){}
+    columns.value=String(Math.min(8,Math.max(4,saved)));
+    root.querySelector('.right .toolbar').appendChild(columns);
+    columns.onchange=()=>{root.naiVirtualGrid.setColumns(Number(columns.value));try{localStorage.setItem('nai-standalone-columns',columns.value);}catch(_){}};
+    columns.onchange();
+    root.naiThumbnailSize=()=>{
+      const count=Number(columns.value)||5,cell=(grid.clientWidth-6-4*(count-1))/count;
+      const pixels=Math.ceil(cell*Math.min(window.devicePixelRatio||1,2));
+      return [256,512,768,1024].find(size=>size>=pixels)||1024;
+    };
+    let lastSize=0,thumbFrame=0;
+    const resizeThumbs=new ResizeObserver(()=>{
+      if(thumbFrame)return;
+      thumbFrame=requestAnimationFrame(()=>{
+        thumbFrame=0;const size=root.naiThumbnailSize();if(size===lastSize)return;lastSize=size;
+        for(const img of grid.querySelectorAll('img[data-mid]'))root.naiObserveGridTile?.(img.closest('.tile')||img.parentElement);
+      });
+    });resizeThumbs.observe(grid);
+    // Column changes do not resize the grid itself, so explicitly reobserve tiles.
+    columns.addEventListener('change',()=>{lastSize=root.naiThumbnailSize();for(const img of grid.querySelectorAll('img[data-mid]'))root.naiObserveGridTile?.(img.closest('.tile')||img.parentElement);});
+    window.addEventListener('pagehide',()=>{resizeThumbs.disconnect();cancelAnimationFrame(thumbFrame);},{once:true});
+    root.addEventListener('click',e=>{
+      const button=e.target.closest('.naiSlotSelectBtnV239');
+      if(button){e.preventDefault();e.stopImmediatePropagation();root.naiSetActiveSlot(button.id.endsWith('_2')?1:0);}
+    },true);
+  }
+  // One inexpensive revision check when returning to a tab, never a polling loop.
+  let checking=false,lastCheck=0,pending=false;
+  const busy=()=>!!root.querySelector('.modalWrap,.naiCropWrap,.naiSetQueueWrap270,#lightRoot:not(:empty)');
+  async function refreshOnReturn(){
+    if(document.hidden || checking || Date.now()-lastCheck<750)return;
+    if(busy()){pending=true;return;}
+    const library=root.naiGetLibrary?.();if(!library?.revision)return;
+    checking=true;lastCheck=Date.now();pending=false;
+    try{
+      const result=await new Promise((resolve,reject)=>GM_xmlhttpRequest({method:'GET',url:'http://127.0.0.1:8765/api/library/revision',timeout:5000,onload:r=>{try{resolve(JSON.parse(r.responseText));}catch(e){reject(e);}},onerror:reject,ontimeout:reject}));
+      if(result.revision && result.revision!==root.naiGetLibrary()?.revision){
+        if(busy())pending=true;else await root.naiReloadLibrary?.();
+      }
+    }catch(_){}finally{checking=false;}
+  }
+  window.addEventListener('focus',refreshOnReturn);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshOnReturn();});
+  const modal=root.getElementById('modalRoot');
+  if(modal)new MutationObserver(()=>{if(pending&&!busy()){lastCheck=0;refreshOnReturn();}}).observe(modal,{childList:true});
+})();
