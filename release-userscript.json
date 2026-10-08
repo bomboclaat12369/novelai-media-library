@@ -2,8 +2,8 @@
   "parts": [
     "payload/userscript-2.8.61.transport-start.txt",
     "payload/userscript-2.8.5.reset-state.txt",
-    "payload/userscript-2.8.64.part01.txt",
-    "payload/userscript-2.8.61.virtual-grid.txt",
+    "payload/userscript-2.8.65.part01.txt",
+    "payload/userscript-2.8.65.virtual-grid.txt",
     "payload/userscript-2.3.0.patch01.txt",
     "payload/userscript-2.3.0.patch02.txt",
     "payload/userscript-2.8.64.split-fullscreen.txt",
@@ -28,11 +28,11 @@
     "payload/userscript-2.8.10.review-height.txt",
     "payload/userscript-2.8.61.groups.txt",
     "payload/userscript-2.8.57.marker-previews.txt",
-    "payload/userscript-2.8.61.video-layout.txt",
+    "payload/userscript-2.8.65.video-layout.txt",
     "payload/userscript-2.8.63.filters.txt",
-    "payload/userscript-2.8.64.standalone.txt",
+    "payload/userscript-2.8.65.standalone.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 119,
-  "version": "2.8.64"
+  "release_build": 120,
+  "version": "2.8.65"
 }
