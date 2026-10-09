@@ -1,0 +1,1085 @@
+// NovelAI Media Library v2.8.33: stable set-relative viewer numbering and Featured results
+(() => {
+  'use strict';
+
+  const API = 'http://127.0.0.1:8765';
+  const UI_STATE_KEY = 'nai-media-v1-ui';
+  const host = document.getElementById('nai-media-host');
+  const root = host?.shadowRoot;
+  if (!root || document.documentElement.dataset.naiMediaV250 === '1') return;
+  document.documentElement.dataset.naiMediaV250 = '1';
+
+  const catWrap = root.getElementById('categories');
+  const grid = root.getElementById('grid');
+  const charSelect = root.getElementById('characterSelect');
+  const searchInput = root.getElementById('search');
+  const modalRoot = root.getElementById('modalRoot');
+  const lightRoot = root.getElementById('lightRoot');
+  const toolbar = root.querySelector('.right .toolbar');
+  const counter = root.getElementById('counter');
+  const prevBtn = root.getElementById('prevBtn');
+  const nextBtn = root.getElementById('nextBtn');
+  const randomBtn = root.getElementById('randomBtn');
+  if (!catWrap || !grid || !charSelect || !searchInput || !modalRoot || !toolbar || !lightRoot) return;
+
+  let library = null;
+  let setsView = false;
+  let videoPresence='any', collectionSort='default';
+  const labelOf = () => 'Set';
+  function collectionStats(s){
+    let images=0,videos=0;
+    for(const id of new Set(s.media_ids || [])){const m=root.naiFindMedia(id,library);if(!m || m.in_review)continue;if(m.media_type==='video')videos++;else images++;}
+    return {images,videos};
+  }
+  function counts(s){const {images,videos}=collectionStats(s);return `${images} images · ${videos} videos`;}
+
+  let openSetId = null;
+  let internalNavigation = false;
+  let internalSearch = false;
+  let returnView = { categoryKey: 'all', search: '' };
+  let syncQueued = false;
+  let refreshQueued = false;
+  const thumbUrls = new Map();
+  let coverSaving = false;
+
+  const style = document.createElement('style');
+  style.id = 'nai-media-v250-style';
+  style.textContent = `
+    .naiSetCover216{position:absolute;top:5px;left:5px;z-index:3;padding:2px 5px!important;font-size:18px!important;line-height:1.2;background:rgba(8,10,25,.85)!important;color:#fff}
+    .naiSetCover216[aria-pressed="true"]{color:#ffdb66}
+    .naiSetsCat { white-space:nowrap; }
+    #naiManageSetsBtn { white-space:nowrap; }
+
+    .naiSetTile {
+      position:relative;
+      aspect-ratio:1/1;
+      border-radius:8px;
+      overflow:hidden;
+      background:#0e1025;
+      border:1px solid rgba(255,255,255,.10);
+      cursor:pointer;
+    }
+    .naiSetTile:hover { outline:1px solid rgba(124,112,255,.75); }
+    .naiSetTile img { width:100%; height:100%; object-fit:cover; display:block; }
+    .naiSetTile .naiSetFallback {
+      position:absolute; inset:0; display:grid; place-items:center;
+      font:700 22px system-ui; color:#9fa4d3; background:#161a38;
+    }
+    .naiSetTile .naiSetStack {
+      position:absolute; top:4px; left:5px; z-index:2;
+      padding:2px 5px; border-radius:5px; background:rgba(8,10,24,.78);
+      font:700 10px/1.25 system-ui; color:#fff;
+    }
+    .naiSetTile .naiSetCaption {
+      position:absolute; left:0; right:0; bottom:0; z-index:2;
+      padding:16px 5px 5px;
+      background:linear-gradient(transparent,rgba(4,5,14,.94));
+      color:#fff; font:700 9px/1.15 system-ui;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      text-align:center;
+    }
+    .naiSetTile .naiSetCount {
+      position:absolute; top:4px; right:5px; z-index:2;
+      min-width:19px; padding:2px 5px; border-radius:999px;
+      background:rgba(8,10,24,.82); color:#fff; text-align:center;
+      font:700 9px/1.25 system-ui;
+    }
+
+    .naiSetBreadcrumb {
+      grid-column:1/-1;
+      min-height:34px;
+      display:flex; align-items:center; gap:7px;
+      padding:2px 3px 5px;
+    }
+    .naiSetBreadcrumb .naiSetTitle {
+      flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      font:700 12px system-ui; color:#ececff;
+    }
+    .naiSetBreadcrumb button { padding:5px 8px !important; font-size:10px !important; }
+
+    .naiSetManagerBody {
+      flex:1; min-height:0; display:grid;
+      grid-template-columns:220px minmax(0,1fr);
+      gap:12px; padding:12px;
+    }
+    .naiSetList {
+      min-height:0; overflow:auto; border-right:1px solid rgba(255,255,255,.09); padding-right:10px;
+    }
+    .naiSetList button { width:100%; margin-bottom:6px; text-align:left; }
+    .naiSetList button.active { background:#6155d9; border-color:#7268e5; }
+    .naiSetEditor { min-width:0; min-height:0; display:flex; flex-direction:column; gap:9px; }
+    .naiSetEditorTop { display:flex; flex-direction:column; gap:8px; align-items:stretch; flex-shrink:0; }
+    .naiSetEditorTop label { display:flex; flex-direction:column; gap:4px; font:600 12px system-ui; }
+    .naiSetEditorTop input,.naiSetEditorTop select { box-sizing:border-box; width:100%; min-width:0; }
+    .naiSetEditorTop input { padding:9px 11px; border:1px solid rgba(255,255,255,.15); border-radius:7px; background:#101329; color:#fff; font:13px system-ui; }
+    .naiSetEditorTop #naiDeleteSetBtn { align-self:flex-end; }
+    .naiSetSearchRow {position:relative;display:flex;align-items:center;gap:7px;flex-wrap:wrap;flex-shrink:0;}
+    .naiSetSearchRow input,.naiSetSearchRow select {box-sizing:border-box;min-width:0;width:auto;padding:7px 9px;border:1px solid rgba(255,255,255,.15);border-radius:7px;background:#101329;color:#fff;font:12px system-ui;}
+    #naiGroupSearch {flex:1 1 180px;}
+    #naiGroupMediaType {flex:0 1 140px;}
+    #naiGroupCategory {flex:0 1 180px;max-width:210px;}
+    #naiGroupFiltersBtn {padding:7px 9px;white-space:nowrap;}
+    #naiGroupFilterPanel {position:absolute;right:0;top:calc(100% + 6px);z-index:30;width:300px;max-width:100%;box-sizing:border-box;padding:12px;border:1px solid #55547a;border-radius:8px;background:#191c35;box-shadow:0 8px 24px #0008;}
+    #naiGroupFilterPanel[hidden] {display:none;}
+    #naiGroupFilterPanel label {display:flex;align-items:center;justify-content:space-between;gap:8px;font:12px system-ui;margin-bottom:9px;}
+    #naiGroupFilterPanel select {max-width:170px;flex:1 1 150px;}
+    #naiGroupFilterPanel .naiFilterActions {display:flex;justify-content:space-between;gap:8px;}
+    #naiGroupFilterPanel button {font-size:11px;padding:5px 9px;}
+    .naiSetGallery {
+      flex:1; min-height:0; overflow:auto; display:grid;
+      grid-template-columns:repeat(6,minmax(0,1fr)); grid-auto-rows:max-content;
+      gap:6px; align-content:start; padding:3px;
+    }
+    .naiSetPick {
+      position:relative; aspect-ratio:1/1; overflow:hidden; border-radius:7px;
+      border:1px solid rgba(255,255,255,.10); background:#0d1024; cursor:pointer;
+    }
+    .naiSetPick.selected { outline:2px solid #7c70ff; outline-offset:1px; }
+    .naiSetPick.cover { box-shadow:inset 0 0 0 2px #f1ca58; }
+    .naiSetPick img { width:100%; height:100%; object-fit:cover; display:block; }
+    .naiSetPick .naiSetPickName {
+      position:absolute; left:0; right:0; bottom:0; padding:12px 4px 3px;
+      background:linear-gradient(transparent,rgba(3,5,14,.92)); color:#fff;
+      font:600 8px/1.1 system-ui; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      pointer-events:none;
+    }
+    .naiSetPick .naiSetPickCheck {
+      position:absolute; top:4px; left:4px; min-width:18px; height:18px; padding:0 4px;
+      display:grid; place-items:center; border-radius:5px; background:rgba(8,10,24,.82);
+      color:#fff; font:700 10px/1 system-ui; pointer-events:none;
+    }
+    .naiSetPick .naiSetCoverBtn {
+      position:absolute; top:3px; right:3px; width:22px; height:22px; min-width:22px;
+      padding:0 !important; display:grid; place-items:center; border-radius:5px !important;
+      font-size:12px !important; z-index:3;
+    }
+    .naiSetPick .naiOtherSetBadge {
+      position:absolute; left:3px; top:27px; max-width:calc(100% - 6px); padding:2px 4px;
+      border-radius:4px; background:rgba(74,50,29,.88); color:#ffdca8;
+      font:600 7px/1 system-ui; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      pointer-events:none;
+    }
+    .naiSetManagerFoot {
+      display:flex; gap:8px; align-items:center; justify-content:flex-end;
+      padding:10px 12px; border-top:1px solid rgba(255,255,255,.09);
+    }
+
+    .naiFullscreenThumbRow { display:flex !important; justify-content:center !important; }
+    .naiFullscreenMarkerRail .naiFsThumb {
+      width:50px !important; min-width:50px !important; max-width:50px !important;
+      height:22px !important; padding:0 !important; border-radius:4px !important;
+      display:flex !important; align-items:center !important; justify-content:center !important;
+      text-align:center !important; font:700 9px/1 system-ui !important;
+    }
+  `;
+  root.appendChild(style);
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+  }
+
+  function gmRequest({method='GET', path, data=null, headers={}, responseType='text', timeout=120000}) {
+    return new Promise((resolve, reject) => GM_xmlhttpRequest({
+      method,
+      url:`${API}${path}`,
+      data,
+      headers:{Origin:'https://novelai.net', ...headers},
+      responseType,
+      timeout,
+      onload:res => {
+        if (res.status >= 200 && res.status < 300) {
+          if (responseType === 'blob') return resolve(res.response);
+          const text = res.responseText || '';
+          if (!text) return resolve(null);
+          try { return resolve(JSON.parse(text)); } catch (_) { return resolve(text); }
+        }
+        let message = `Request failed (${res.status})`;
+        try { message = JSON.parse(res.responseText || '{}').error || message; } catch (_) {}
+        reject(new Error(message));
+      },
+      onerror:()=>reject(new Error('Could not connect to the local NovelAI Media Library program.')),
+      ontimeout:()=>reject(new Error('The local media request timed out.')),
+    }));
+  }
+
+  async function refreshLibrary() {
+    library = await gmRequest({path:'/api/library'});
+    if (!Array.isArray(library?.sets)) library.sets = [];
+    return library;
+  }
+
+  // Keep set collapsing and set-only navigation in sync with edits made from the
+  // viewer, without waiting for a second manual refresh.
+  root.naiSetsApplyLibrary216 = (snapshot, refresh=true) => {
+    if (!snapshot) return;
+    library = snapshot;
+    if (!Array.isArray(library.sets)) library.sets = [];
+    if(!refresh){ensureControls();return;}
+    if (openSetId) renderOpenSet();
+    else if (setsView) renderSetsView();
+    else {
+      ensureControls();
+      collapseNormalGrid();
+    }
+  };
+
+  function currentCharacter() {
+    const id = charSelect.value || '';
+    return (library?.characters || []).find(c => c.id === id) || null;
+  }
+
+  function mediaById(id) {
+    return root.naiFindMedia(id,library);
+  }
+
+  function setsForCurrentCharacter() {
+    const id = charSelect.value || '';
+    return (library?.sets || []).filter(s => s.character_id === id && (s.kind || 'set') === 'set');
+  }
+
+  function setById(id) {
+    const set=root.naiFindSet(id,library);return set && (set.kind || 'set')==='set' ? set : null;
+  }
+
+  root.naiViewerCollectionIds=()=>openSetId ? visibleSetIds(setById(openSetId)) : null;
+
+  function availableSetIds(set) {
+    const ids = (set?.media_ids || []).filter(id => {
+      const m = mediaById(id);
+      return m && m.character_id === set.character_id && !m.in_review;
+    });
+    const cover = ids.indexOf(set?.cover_media_id);
+    if (cover > 0) ids.unshift(ids.splice(cover, 1)[0]);
+    return ids;
+  }
+
+  function visibleSetIds(set){
+    const q=String(searchInput.value || '').trim().toLowerCase();
+    let items=availableSetIds(set).map(mediaById).filter(m=>!q || String(m.original_name || '').toLowerCase().includes(q));
+    return (root.naiApplyCombinedFilters?.(items,library) || items).map(m=>m.id);
+  }
+  root.naiRefreshCollectionView=()=>{if(openSetId){renderOpenSet();return true;}if(setsView){renderSetsView();return true;}return false;};
+
+  function baseCatButtons() {
+    return [...catWrap.querySelectorAll('.cat:not(.naiSetsCat):not(.naiReviewCat270)')];
+  }
+
+  function currentCategoryKey() {
+    return uiState().categoryId || 'all';
+  }
+
+  function buttonForCategoryKey(key) {
+    const buttons = baseCatButtons();
+    if (key === 'all') return buttons[0] || null;
+    if (key === 'favorites') return buttons[1] || null;
+    if (key === 'videos') return buttons[2] || null;
+    return [...root.querySelectorAll('.cat[data-cat]')].find(b=>b.dataset.cat===key) || buttons[0] || null;
+  }
+
+  function uiState() {
+    try { return JSON.parse(localStorage.getItem(UI_STATE_KEY) || '{}') || {}; }
+    catch (_) { return {}; }
+  }
+
+  function activeSelectedMediaId() {
+    const state = uiState();
+    const activeSlot = state.activeSlot === 1 ? 1 : 0;
+    const ids = Array.isArray(state.slotMediaIds) ? state.slotMediaIds : [];
+    return ids[activeSlot] || state.selectedMediaId || null;
+  }
+
+  function revokeThumb(mediaId) {
+    root.naiInvalidateThumbnail?.(mediaId);
+    const old = thumbUrls.get(mediaId);
+    if (old) URL.revokeObjectURL(old);
+    thumbUrls.delete(mediaId);
+  }
+  root.naiInvalidateSetThumb = revokeThumb;
+
+  async function loadThumb(mediaId,img,force=false){
+    if(force)revokeThumb(mediaId);
+    return root.naiLoadThumbnail(mediaId,img);
+  }
+
+  function createSetTile(set) {
+    const tile = document.createElement('div');
+    tile.className = 'naiSetTile';
+    tile.dataset.setId = set.id;
+    const published = availableSetIds(set);
+    tile.dataset.coverId = published.includes(set.cover_media_id) ? set.cover_media_id : (published[0] || '');
+    tile.title = `${labelOf(set)}: ${set.name} — ${counts(set)}`;
+
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.alt = '';
+    if (tile.dataset.coverId) {
+      tile.appendChild(img);
+      img.dataset.mid=tile.dataset.coverId;
+      const cached=root.naiCachedThumbnail?.(tile.dataset.coverId);
+      if(cached)img.src=cached;else root.naiObserveGridTile(tile);
+    } else {
+      const empty = document.createElement('div');
+      empty.textContent = 'Empty set';
+      empty.style.cssText = 'display:grid;place-items:center;height:100%;color:#a8abc4';
+      tile.appendChild(empty);
+    }
+
+    const stack = document.createElement('div');
+    stack.className = 'naiSetStack';
+    stack.innerHTML = root.naiIconSvg('link');
+    tile.appendChild(stack);
+
+    const count = document.createElement('div');
+    count.className = 'naiSetCount';
+    count.textContent = counts(set);
+    tile.appendChild(count);
+
+    const caption = document.createElement('div');
+    caption.className = 'naiSetCaption';
+    caption.textContent = `${labelOf(set)}: ${set.name || 'Untitled'}`;
+    tile.appendChild(caption);
+
+    tile.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      openSet(set.id);
+    });
+    return tile;
+  }
+
+  function ensureControls() {
+    root.naiSetFilterBrowserMode?.(setsView && !openSetId);
+    for(const id of ['sortSelect','sortDirectionBtn'])root.getElementById(id)?.classList.toggle('hidden',setsView && !openSetId);
+    if (!library) return;
+    // Both media modes share the same collection browser.
+    const selectedCharacter = charSelect.value;
+    const suppressSets = selectedCharacter === '__nai_featured__' || selectedCharacter === '__nai_featured_videos__';
+
+    let setsButton = root.getElementById('naiSetsCat');
+    if (!setsButton) {
+      setsButton = document.createElement('button');
+      setsButton.type = 'button';
+      setsButton.id = 'naiSetsCat';
+      setsButton.className = 'cat naiSetsCat';
+      setsButton.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        openSetId = null;
+        setsView = true;
+        renderSetsView();
+      });
+      const buttons = baseCatButtons();
+      const anchor = buttons[2]?.nextSibling || null;
+      catWrap.insertBefore(setsButton, anchor);
+    }
+    setsButton.innerHTML = `${root.naiIconSvg?.('link') || ''} Sets ${setsForCurrentCharacter().length}`;
+    setsButton.classList.toggle('hidden', suppressSets);
+    setsButton.classList.toggle('active', setsView && !openSetId);
+    if (setsView && !openSetId) baseCatButtons().forEach(b => b.classList.remove('active'));
+
+    if (!root.getElementById('naiManageSetsBtn')) {
+      const manage = document.createElement('button');
+      manage.type = 'button';
+      manage.id = 'naiManageSetsBtn';
+      manage.textContent = 'Sets';
+      manage.title = 'Create or edit sets';
+      manage.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        openSetManager();
+      });
+      const random = root.getElementById('randomBtn');
+      if (random) toolbar.insertBefore(manage, random);
+      else toolbar.appendChild(manage);
+    }
+    root.getElementById('naiManageSetsBtn')?.classList.toggle('hidden', suppressSets);
+  }
+  root.naiSyncSetsVisibility = ensureControls;
+
+  function visibleCollections() {
+    const q=String(searchInput.value || '').trim().toLowerCase(),stats=new Map();
+    let sets=setsForCurrentCharacter().filter(s=>{
+      const count=collectionStats(s);stats.set(s.id,count);
+      if(videoPresence==='yes' && !count.videos || videoPresence==='no' && count.videos)return false;
+      return !q || String(s.name || '').toLowerCase().includes(q) || (s.media_ids || []).some(id=>String(mediaById(id)?.original_name || '').toLowerCase().includes(q));
+    });
+    const name=(a,b)=>String(a.name||'').localeCompare(String(b.name||''),undefined,{numeric:true,sensitivity:'base'});
+    if(collectionSort==='images-desc')sets.sort((a,b)=>stats.get(b.id).images-stats.get(a.id).images || name(a,b));
+    if(collectionSort==='images-asc')sets.sort((a,b)=>stats.get(a.id).images-stats.get(b.id).images || name(a,b));
+    if(collectionSort==='name')sets.sort(name);
+    return sets;
+  }
+
+  function renderSetsView() {
+    if (!library) return;
+    openSetId = null;
+    setsView = true;
+    ensureControls();
+    baseCatButtons().forEach(b => b.classList.remove('active'));
+    root.getElementById('naiSetsCat')?.classList.add('active');
+
+    const q = String(searchInput.value || '').trim().toLowerCase();
+    const sets = visibleCollections();
+
+    const head=document.createElement('div'); head.className='naiSetBreadcrumb';head.style.flexWrap='wrap';
+    const controls=document.createElement('div');controls.style.cssText='display:flex;gap:6px;flex:1 0 100%;min-width:0';
+    const addSelect=(id,label,choices,value,change)=>{
+      const select=document.createElement('select');select.id=id;select.setAttribute('aria-label',label);select.title=label;select.style.cssText='flex:1;min-width:0;font-size:11px;padding:5px 7px';
+      for(const [v,text] of choices){const o=document.createElement('option');o.value=v;o.textContent=text;select.appendChild(o);}select.value=value;select.onchange=()=>{change(select.value);renderSetsView();};controls.appendChild(select);
+    };
+    addSelect('naiSetVideoPresence','Filter collections by videos',[['any','Any media'],['yes','With videos'],['no','Without videos']],videoPresence,value=>videoPresence=value);
+    addSelect('naiSetSort','Sort collections',[['default','Default order'],['images-desc','Most images first'],['images-asc','Fewest images first'],['name','Name A–Z']],collectionSort,value=>collectionSort=value);
+    head.appendChild(controls);
+    const empty=document.createElement('div'); empty.className='empty';
+    empty.textContent='No collections match this view.';
+    root.naiVirtualGrid.render(`sets:${charSelect.value}:${videoPresence}:${collectionSort}:${q}`,sets.map(set=>({key:'set:'+set.id,value:set})),{create:entry=>createSetTile(entry.value),empty,header:head,headerKey:`${videoPresence}:${collectionSort}`});
+  }
+
+  root.naiCreateSetTile = createSetTile;
+  // Normal categories always show individual files; collection cards belong
+  // exclusively to the Sets browser.
+  root.naiGroupGridItems = items => items.map(m=>({key:'media:'+m.id,value:m,type:'media'}));
+
+  function collapseNormalGrid() {
+    if (!library || setsView || openSetId) return;
+    ensureControls();
+    root.naiRenderNormalGrid(library);
+  }
+
+  function renderOpenSet() {
+    if (!library || !openSetId) return;
+    const set = setById(openSetId);
+    if (!set) {
+      openSetId = null;
+      returnToPreviousView();
+      return;
+    }
+
+    ensureControls();
+    root.getElementById('naiSetsCat')?.classList.remove('active');
+
+    const ids = visibleSetIds(set);
+    const head = document.createElement('div');
+    head.className = 'naiSetBreadcrumb';
+    head.innerHTML = `
+      <button type="button" id="naiSetBackBtn">← Back</button>
+      <div class="naiSetTitle">${labelOf(set)}: ${escapeHtml(set.name || 'Untitled')} · ${counts(set)}</div>
+      <button type="button" id="naiSetEditBtn">Edit ${labelOf(set)}</button>
+    `;
+    head.querySelector('#naiSetBackBtn')?.addEventListener('click', event => {
+      event.preventDefault(); event.stopPropagation(); returnToPreviousView();
+    });
+    head.querySelector('#naiSetEditBtn')?.addEventListener('click', event => {
+      event.preventDefault(); event.stopPropagation(); openSetManager(set.id);
+    });
+    const decorate = tile => {
+      let cover = tile.querySelector('.naiSetCover216');
+      if (!cover) {
+        cover = document.createElement('button');
+        cover.type = 'button';
+        cover.className = 'naiSetCover216';
+        cover.addEventListener('click', async event => {
+          event.preventDefault(); event.stopPropagation();
+          if (coverSaving) return;
+          coverSaving = true;
+          grid.querySelectorAll('.naiSetCover216').forEach(button => button.disabled = true);
+          try {
+            const updated = await gmRequest({method:'POST',path:`/api/sets/${encodeURIComponent(set.id)}`,
+              headers:{'Content-Type':'application/json'},data:JSON.stringify({cover_media_id:tile.dataset.id})});
+            library.sets = library.sets.map(item => item.id === updated.id ? updated : item);
+          } catch (err) { alert(err?.message || String(err)); }
+          finally {
+            coverSaving = false;
+            if (openSetId === set.id) renderOpenSet();
+          }
+        });
+        tile.appendChild(cover);
+      }
+      const chosen = tile.dataset.id === set.cover_media_id;
+      cover.innerHTML = root.naiIconSvg('pin');
+      let main=tile.querySelector('.naiMainBadge');
+      const m=mediaById(tile.dataset.id);
+      if(m && (m.media_type==='video' ? m.in_videos!==false : m.in_all!==false)) { if(!main){main=document.createElement('span');main.className='naiMainBadge';main.innerHTML=root.naiIconSvg('home');main.title=m.media_type==='video'?'Also in main Videos':'Also in main Images';tile.appendChild(main);} } else main?.remove();
+      if(m?.media_type==='video') {
+        tile.classList.add('naiCollectionVideo');
+        if(!tile.querySelector('.naiVideoBadge')){const badge=document.createElement('span');badge.className='naiVideoBadge';badge.innerHTML=root.naiIconSvg('play');badge.title='Video';badge.setAttribute('aria-label','Video');tile.appendChild(badge);}
+      }
+      cover.title = chosen ? 'Current set thumbnail' : 'Use as set thumbnail';
+      cover.setAttribute('aria-label', cover.title);
+      cover.setAttribute('aria-pressed', String(chosen));
+      cover.disabled = coverSaving;
+    };
+    const q=String(searchInput.value || '').trim().toLowerCase();
+    const shown=ids;
+    const empty=document.createElement('div'); empty.className='empty';
+    empty.textContent=q ? 'No matching media in this collection.' : 'This collection has no media.';
+    root.naiRenderSetMedia216(library,shown,{
+      key:`set:${set.id}:${q}:${root.naiCombinedFilterKey?.() || ''}`, header:head, headerKey:`${set.id}:${set.name}:${ids.length}`,
+      decorationKey:`${set.id}:${set.cover_media_id}:${coverSaving}`,decorate,empty,
+    });
+    updateSetCounter();
+  }
+
+  function filterOpenSetBySearch() { renderOpenSet(); }
+
+  function updateSetCounter() {
+    if (!openSetId || !counter) return;
+    const set = setById(openSetId);
+    if (!set) return;
+    const id = activeSelectedMediaId();
+    const ids = visibleSetIds(set);
+    const idx = ids.indexOf(id);
+    counter.textContent = idx >= 0 ? `${idx + 1} / ${ids.length}` : `— / ${ids.length}`;
+  }
+
+  // The base viewer updates its category-relative counter again after an original
+  // finishes loading. Keep the counter set-relative while a set is open. This is
+  // deliberately scoped to the one counter node, not the page or media grid.
+  const setCounterObserver = counter ? new MutationObserver(() => {
+    if (!openSetId) return;
+    const set = setById(openSetId);
+    if (!set) return;
+    const ids = visibleSetIds(set);
+    const idx = ids.indexOf(activeSelectedMediaId());
+    const expected = idx >= 0 ? `${idx + 1} / ${ids.length}` : `— / ${ids.length}`;
+    if (counter.textContent !== expected) counter.textContent = expected;
+  }) : null;
+  setCounterObserver?.observe(counter, {childList:true, characterData:true, subtree:true});
+
+  function clickCategoryKey(key) {
+    const button = buttonForCategoryKey(key);
+    if (!button) return;
+    internalNavigation = true;
+    try { button.click(); }
+    finally { internalNavigation = false; }
+  }
+
+  root.naiOpenGroup = openSet;
+  root.naiOpenGroupManager = openSetManager;
+  root.naiOpenGroupId = () => openSetId;
+  async function openSet(setId) {
+    const characterId = charSelect.value;
+    try { await refreshLibrary(); } catch (err) { alert(err?.message || String(err)); return; }
+    if (charSelect.value !== characterId) return;
+    const set = setById(setId);
+    if (!set) return;
+    root.naiPrepareGroupOwner?.(library,set.character_id);
+    returnView = {
+      categoryKey: setsView ? 'sets' : currentCategoryKey(),
+      search: String(searchInput.value || ''),
+    };
+    openSetId = setId;
+    setsView = false;
+
+    internalSearch = true;
+    try {
+      searchInput.value = '';
+      searchInput.dispatchEvent(new Event('input', {bubbles:true, composed:true}));
+    } finally {
+      internalSearch = false;
+    }
+    renderOpenSet();
+
+  }
+
+  function returnToPreviousView() {
+    const previous = returnView || {categoryKey:'all', search:''};
+    openSetId = null;
+    if (previous.categoryKey === 'sets') {
+      setsView = true;
+      searchInput.value = previous.search || '';
+      renderSetsView();
+      return;
+    }
+    setsView = false;
+    clickCategoryKey(previous.categoryKey || 'all');
+    searchInput.value = previous.search || '';
+    searchInput.dispatchEvent(new Event('input', {bubbles:true, composed:true}));
+    scheduleSync(false, 0);
+  }
+
+  function selectSetRelative(delta) {
+    const set = setById(openSetId);
+    const ids = visibleSetIds(set);
+    if (!ids.length) return;
+    const current = activeSelectedMediaId();
+    let idx = ids.indexOf(current);
+    if (idx < 0) idx = 0;
+    idx = (idx + delta + ids.length) % ids.length;
+    root.naiSelectMedia(ids[idx]);
+    updateSetCounter();
+  }
+
+  function selectRandomSetMember() {
+    const set = setById(openSetId);
+    const ids = visibleSetIds(set);
+    if (!ids.length) return;
+    const id = ids[Math.floor(Math.random() * ids.length)];
+    root.naiSelectMedia(id);
+    updateSetCounter();
+  }
+
+  function selectRandomCollectionMember() {
+    let ids = [...new Set(visibleCollections().flatMap(availableSetIds))];
+    if (ids.length > 1) ids = ids.filter(id => id !== activeSelectedMediaId());
+    if (!ids.length) return;
+    root.naiPrepareGroupOwner(library, charSelect.value);
+    root.naiSelectMedia(ids[Math.floor(Math.random() * ids.length)]);
+    // Keep the collection browser open so another Random uses the same pool.
+  }
+
+  async function syncUI(forceRefresh=false) {
+    syncQueued = false;
+    try {
+      if (forceRefresh || !library) await refreshLibrary();
+    } catch (_) {
+      return;
+    }
+    ensureControls();
+    if (openSetId) renderOpenSet();
+    else if (setsView) renderSetsView();
+    else collapseNormalGrid();
+  }
+
+  function scheduleSync(forceRefresh=false, delay=0) {
+    refreshQueued = refreshQueued || forceRefresh;
+    if (syncQueued && delay === 0) return;
+    syncQueued = true;
+    setTimeout(() => {
+      const refresh = refreshQueued;
+      refreshQueued = false;
+      syncUI(refresh);
+    }, delay);
+  }
+
+  function setMembershipMap() {
+    const map = new Map();
+    for (const set of setsForCurrentCharacter()) {
+      for (const id of (set.media_ids || [])) map.set(id, set);
+    }
+    return map;
+  }
+
+  async function openSetManager(initialSetId=null, initialIds=[]) {
+    try { await root.naiRequireCollections?.(); await refreshLibrary(); } catch (err) { alert(err?.message || String(err)); return; }
+    const character = currentCharacter();
+    if (!character) { alert('Choose a character first.'); return; }
+    const images = (library.media || []).filter(m => m.character_id === character.id);
+    const sets = setsForCurrentCharacter();
+
+    let editingId = initialSetId && sets.some(s => s.id === initialSetId) ? initialSetId : null;
+    let selected = new Set();
+    let coverId = null;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'modalWrap';
+    wrap.innerHTML = `
+      <div class="modal large" style="width:min(1180px,96vw);height:min(850px,92vh)">
+        <div class="modalHead">
+          <div class="modalTitle">Manage Sets — ${escapeHtml(character.name)}</div>
+          <button type="button" data-close>✕</button>
+        </div>
+        <div class="naiSetManagerBody">
+          <div class="naiSetList">
+            <button type="button" class="primary" id="naiNewSetBtn">+ New Set</button>
+            <div id="naiExistingSets"></div>
+          </div>
+          <div class="naiSetEditor">
+            <div class="naiSetEditorTop">
+              <label for="naiSetNameInput">Name<input type="text" id="naiSetNameInput" placeholder="e.g. Pink bikini" /></label>
+              <button type="button" class="danger" id="naiDeleteSetBtn">Delete set</button>
+            </div>
+            <div class="muted">Select images or videos. Use the pin to choose the cover. Media can belong to one Set. Adding to a Set moves membership from any previous Set and preserves main Images placement.</div>
+            <div class="naiSetSearchRow">
+              <input type="search" id="naiGroupSearch" placeholder="Search filenames…" aria-label="Search media">
+              <select id="naiGroupMediaType" aria-label="Media type"><option value="all">Images & videos</option><option value="image">Images</option><option value="video">Videos</option></select>
+              <select id="naiGroupCategory" aria-label="Filter by category"></select>
+              <button id="naiGroupFiltersBtn" type="button" aria-expanded="false" aria-controls="naiGroupFilterPanel">Filters</button>
+              <div id="naiGroupFilterPanel" role="group" aria-label="Set media filters" hidden>
+                <label>Favorites<select id="naiGroupFavorite"><option value="any">Any</option><option value="yes">Favorites only</option><option value="no">Not favorites</option></select></label>
+                <label>Featured<select id="naiGroupFeatured"><option value="any">Any</option><option value="yes">Featured only</option><option value="no">Not featured</option></select></label>
+                <label>Replacement<select id="naiGroupReplacement"><option value="any">Any</option><option value="yes">Needs replacement</option><option value="no">Not flagged</option></select></label>
+                <label>Set membership<select id="naiGroupMembership"><option value="any">Any</option><option value="none">Not in any set</option><option value="in">In a set</option><option value="other">In another set</option></select></label>
+                <label><span>Selected files only</span><input type="checkbox" id="naiGroupSelectedOnly"></label>
+                <div class="naiFilterActions"><button type="button" id="naiGroupClearFilters">Clear all</button><button type="button" id="naiGroupFiltersDone">Done</button></div>
+              </div>
+            </div>
+            <div class="naiSetGallery" id="naiSetGallery"></div>
+          </div>
+        </div>
+        <div class="naiSetManagerFoot">
+          <div class="muted grow" id="naiSetSelectionSummary"></div>
+          <button type="button" data-close>Cancel</button>
+          <button type="button" class="primary" id="naiSaveSetBtn">Save set</button>
+        </div>
+      </div>
+    `;
+    modalRoot.innerHTML = '';
+    modalRoot.appendChild(wrap);
+
+    const close = () => { io?.disconnect(); modalRoot.innerHTML = ''; root.naiGroupManagerSelection=null; };
+    wrap.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', close));
+    wrap.addEventListener('click', e => { if (e.target === wrap) close(); });
+
+    const listEl = wrap.querySelector('#naiExistingSets');
+    const gallery = wrap.querySelector('#naiSetGallery');
+    const nameInput = wrap.querySelector('#naiSetNameInput');
+    const deleteBtn = wrap.querySelector('#naiDeleteSetBtn');
+    const summary = wrap.querySelector('#naiSetSelectionSummary');
+    const membership = setMembershipMap();
+    root.naiGroupManagerSelection=()=>({setId:editingId,baseMediaIds:[...selected],coverId,kind:'set'});
+    const search=wrap.querySelector('#naiGroupSearch'), mediaType=wrap.querySelector('#naiGroupMediaType');
+    const category=wrap.querySelector('#naiGroupCategory'),filterButton=wrap.querySelector('#naiGroupFiltersBtn'),filterPanel=wrap.querySelector('#naiGroupFilterPanel');
+    const favorite=wrap.querySelector('#naiGroupFavorite'),featured=wrap.querySelector('#naiGroupFeatured'),replacement=wrap.querySelector('#naiGroupReplacement'),setFilter=wrap.querySelector('#naiGroupMembership'),selectedOnly=wrap.querySelector('#naiGroupSelectedOnly');
+    let shownCount=0;
+    function categoryOptions(){
+      const previous=category.value;category.replaceChildren();
+      const add=(value,text)=>{const o=document.createElement('option');o.value=value;o.textContent=text;category.appendChild(o);};
+      add('','All categories');add('__none','No category');
+      for(const cat of character.categories || [])if(mediaType.value==='all' || (cat.media_type||'image')===mediaType.value)add(cat.id,cat.name+(mediaType.value==='all'?` (${cat.media_type||'image'})`:''));
+      category.value=[...category.options].some(o=>o.value===previous)?previous:'';
+    }
+    function filterLabel(){
+      const n=Number(!!search.value.trim())+Number(mediaType.value!=='all')+Number(!!category.value)+[favorite,featured,replacement,setFilter].filter(el=>el.value!=='any').length+Number(selectedOnly.checked);
+      filterButton.textContent=n?`Filters · ${n}`:'Filters';filterButton.classList.toggle('primary',!!n);
+    }
+    const closeFilters=()=>{filterPanel.hidden=true;filterButton.setAttribute('aria-expanded','false');};
+    filterButton.onclick=()=>{filterPanel.hidden=!filterPanel.hidden;filterButton.setAttribute('aria-expanded',String(!filterPanel.hidden));};
+    wrap.querySelector('#naiGroupFiltersDone').onclick=closeFilters;
+    wrap.addEventListener('click',e=>{if(!filterPanel.hidden && !filterPanel.contains(e.target) && !filterButton.contains(e.target))closeFilters();});
+    wrap.addEventListener('keydown',e=>{if(e.key==='Escape'&&!filterPanel.hidden){e.preventDefault();e.stopPropagation();closeFilters();filterButton.focus();}});
+    const refilter=()=>{gallery.scrollTop=0;paintGallery();};
+    search.oninput=refilter;category.onchange=refilter;
+    mediaType.onchange=()=>{categoryOptions();refilter();};
+    for(const el of [favorite,featured,replacement,setFilter,selectedOnly])el.onchange=refilter;
+    wrap.querySelector('#naiGroupClearFilters').onclick=()=>{search.value='';mediaType.value='all';categoryOptions();category.value='';for(const el of [favorite,featured,replacement,setFilter])el.value='any';selectedOnly.checked=false;refilter();};
+    categoryOptions();
+
+    const io = typeof IntersectionObserver === 'function'
+      ? new IntersectionObserver(entries => entries.forEach(entry => {
+          if (!entry.isIntersecting) return;
+          const img = entry.target;
+          io.unobserve(img);
+          loadThumb(img.dataset.mediaId, img);
+        }), {root:gallery, rootMargin:'150px'})
+      : null;
+
+    function chooseSet(id) {
+      editingId = id || null;
+      const set = editingId ? setsForCurrentCharacter().find(s => s.id === editingId) : null;
+      selected = new Set(set?.media_ids || initialIds);
+      coverId = set?.cover_media_id || set?.media_ids?.[0] || initialIds[0] || null;
+      nameInput.value = set?.name || '';
+      deleteBtn.style.display = set ? '' : 'none';
+      paintList();
+      paintGallery();
+    }
+
+    function paintList() {
+      listEl.innerHTML = '';
+      for (const set of setsForCurrentCharacter()) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = set.id === editingId ? 'active' : '';
+        btn.textContent = `${labelOf(set)}: ${set.name || 'Untitled'} (${(set.media_ids || []).length})`;
+        btn.addEventListener('click', () => chooseSet(set.id));
+        listEl.appendChild(btn);
+      }
+      if (!setsForCurrentCharacter().length) {
+        const p = document.createElement('div');
+        p.className = 'muted';
+        p.style.padding = '8px 2px';
+        p.textContent = 'No sets yet.';
+        listEl.appendChild(p);
+      }
+    }
+
+    function paintSummary() {
+      summary.textContent = `${shownCount} of ${images.length} shown · ${selected.size} files selected${coverId ? ' · cover chosen' : ''}`;
+    }
+
+    function paintGallery() {
+      io?.disconnect();
+      gallery.innerHTML = '';
+      const flag=(value,filter)=>filter==='any'||!!value===(filter==='yes');
+      const query=search.value.trim().toLowerCase();
+      const matches=images.filter(m=>{
+        const owner=membership.get(m.id);
+        return (mediaType.value==='all'||m.media_type===mediaType.value)
+          && (m.original_name||'').toLowerCase().includes(query)
+          && (!category.value||(category.value==='__none' ? !(m.categories||[]).length : (m.categories||[]).includes(category.value)))
+          && flag(m.favorite,favorite.value)&&flag(m.featured,featured.value)&&flag(m.needs_replacement,replacement.value)
+          && (setFilter.value==='any'||(setFilter.value==='none' ? !owner : setFilter.value==='other' ? !!owner&&owner.id!==editingId : !!owner))
+          && (!selectedOnly.checked||selected.has(m.id));
+      });
+      shownCount=matches.length;filterLabel();
+      if (!matches.length) {
+        const note = document.createElement('div');note.className='empty';
+        note.textContent=images.length?'No media matches these filters. Clear or change a filter to see more.':'No saved media yet. Create an empty set and add media later.';
+        gallery.appendChild(note);
+      }
+      const frag = document.createDocumentFragment();
+      for (const m of matches) {
+        const card = document.createElement('div');
+        card.className = `naiSetPick${selected.has(m.id) ? ' selected' : ''}${coverId === m.id ? ' cover' : ''}`;
+        card.dataset.mediaId = m.id;
+
+        const img = document.createElement('img');
+        img.alt = '';
+        img.dataset.mediaId = m.id;
+        card.appendChild(img);
+        if (io) io.observe(img); else loadThumb(m.id, img);
+
+        const check = document.createElement('div');
+        check.className = 'naiSetPickCheck';
+        check.textContent = selected.has(m.id) ? '✓' : '';
+        card.appendChild(check);
+
+        const cover = document.createElement('button');
+        cover.type = 'button';
+        cover.className = 'naiSetCoverBtn';
+        cover.innerHTML = root.naiIconSvg('pin');
+        cover.setAttribute('aria-pressed',String(coverId===m.id));
+        cover.title = 'Use as collection cover';
+        cover.addEventListener('click', event => {
+          event.preventDefault(); event.stopPropagation();
+          selected.add(m.id);
+          coverId = m.id;
+          paintGallery();
+        });
+        card.appendChild(cover);
+
+        const otherSet = membership.get(m.id);
+        if (otherSet && otherSet.id !== editingId) {
+          const badge = document.createElement('div');
+          badge.className = 'naiOtherSetBadge';
+          badge.textContent = otherSet.name || 'Another set';
+          badge.title = 'Saving will move this media from that set';
+          card.appendChild(badge);
+        }
+
+        const name = document.createElement('div');
+        name.className = 'naiSetPickName';
+        name.textContent = `${m.media_type==='video'?'▶ Video · ':''}${m.original_name || ''}`;
+        card.appendChild(name);
+
+        card.addEventListener('click', () => {
+          if (selected.has(m.id)) {
+            selected.delete(m.id);
+            if (coverId === m.id) coverId = [...selected][0] || null;
+          } else {
+            selected.add(m.id);
+            if (!coverId) coverId = m.id;
+          }
+          paintGallery();
+        });
+        frag.appendChild(card);
+        root.naiPaintGroupBadge?.(card,m,library);
+      }
+      gallery.appendChild(frag);
+      paintSummary();
+    }
+
+    wrap.querySelector('#naiNewSetBtn')?.addEventListener('click', () => chooseSet(null));
+
+    deleteBtn.addEventListener('click', async () => {
+      if (!editingId) return;
+      const set = setsForCurrentCharacter().find(s => s.id === editingId);
+      if (!set) return;
+      if (!confirm(`Delete ${labelOf(set).toLowerCase()} “${set.name}”?\n\nThe media will stay in your library; only this collection will be removed.`)) return;
+      deleteBtn.disabled = true;
+      try {
+        await gmRequest({method:'DELETE', path:`/api/sets/${encodeURIComponent(editingId)}`});
+        await refreshLibrary();
+        chooseSet(null);
+        root.naiRenderNormalGrid(library);
+        root.naiRefreshSelectedMetadata?.();
+        scheduleSync(false, 0);
+      } catch (err) {
+        alert(err?.message || String(err));
+      } finally {
+        deleteBtn.disabled = false;
+      }
+    });
+
+    wrap.querySelector('#naiSaveSetBtn')?.addEventListener('click', async event => {
+      const save = event.currentTarget;
+      const name = String(nameInput.value || '').trim();
+      if (!name) { nameInput.focus(); alert('Enter a collection name.'); return; }
+      if (!coverId || !selected.has(coverId)) coverId = [...selected][0] || null;
+      save.disabled = true;
+      try {
+        const payload = {
+          name, kind:'set', preserve_placement:true,
+          media_ids:[...selected],
+          cover_media_id:coverId,
+        };
+        if (!editingId) payload.character_id = character.id;
+        const path = editingId ? `/api/sets/${encodeURIComponent(editingId)}` : '/api/sets';
+        await gmRequest({
+          method:'POST', path,
+          headers:{'Content-Type':'application/json'},
+          data:JSON.stringify(payload),
+        });
+        await refreshLibrary();
+        close();
+        root.naiRenderNormalGrid(library);
+        root.naiRefreshSelectedMetadata?.();
+        scheduleSync(false, 0);
+      } catch (err) {
+        alert(err?.message || String(err));
+      } finally {
+        save.disabled = false;
+      }
+    });
+
+    chooseSet(editingId);
+  }
+
+  async function captureDisplayedVideoFrame(video) {
+    if (!video?.videoWidth || !video?.videoHeight) throw new Error('Video frame is not ready yet.');
+    const maxSide = 960;
+    const scale = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not capture this video frame.');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return await new Promise((resolve, reject) => canvas.toBlob(
+      blob => blob ? resolve(blob) : reject(new Error('Could not create thumbnail image.')),
+      'image/jpeg', 0.9
+    ));
+  }
+
+  function rememberThumbBlob(mediaId, blob) {
+    revokeThumb(mediaId);
+    const url = root.naiStoreThumbnail(mediaId,blob);
+    root.querySelectorAll(`img[data-mid="${mediaId}"]`).forEach(img => { img.src = url; });
+    root.querySelectorAll(`.naiSetTile[data-cover-id="${mediaId}"] img`).forEach(img => { img.src = url; });
+  }
+
+  function ensureFullscreenThumbButtons() {
+    root.querySelectorAll('.naiFullscreenMarkerRail').forEach(rail => {
+      if (rail.querySelector(':scope > .naiFullscreenThumbRow')) return;
+      const container = rail.parentElement;
+      const video = container?.querySelector(':scope > video');
+      const mediaId = rail.dataset.mediaId;
+      if (!video || !mediaId) return;
+
+      const row = document.createElement('div');
+      row.className = 'naiFullscreenThumbRow';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'naiFsThumb';
+      button.textContent = 'Thumb';
+      button.title = 'Set thumbnail to current frame';
+      button.addEventListener('click', async event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (button.disabled) return;
+        button.disabled = true;
+        try {
+          const seconds = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+          const blob = await captureDisplayedVideoFrame(video);
+          await gmRequest({
+            method:'POST',
+            path:`/api/media/${encodeURIComponent(mediaId)}/thumbnail?seconds=${encodeURIComponent(seconds)}`,
+            headers:{'Content-Type':'image/jpeg'},
+            data:blob,
+          });
+          rememberThumbBlob(mediaId, blob);
+          button.textContent = '✓';
+          setTimeout(() => { if (button.isConnected) button.textContent = 'Thumb'; }, 650);
+        } catch (err) {
+          alert(err?.message || String(err));
+        } finally {
+          button.disabled = false;
+        }
+      });
+      row.appendChild(button);
+      rail.insertBefore(row, rail.firstChild);
+    });
+  }
+
+  const fullscreenObserver = new MutationObserver(() => queueMicrotask(ensureFullscreenThumbButtons));
+  fullscreenObserver.observe(lightRoot, {childList:true, subtree:true});
+
+  window.addEventListener('click', event => {
+    if (!openSetId && !setsView) return;
+    const path = event.composedPath?.() || [];
+    if (!path.includes(host)) return;
+    const prev = path.includes(prevBtn);
+    const next = path.includes(nextBtn);
+    const random = path.includes(randomBtn);
+    if (!openSetId) {
+      if (random) { event.preventDefault(); event.stopImmediatePropagation(); selectRandomCollectionMember(); }
+      return;
+    }
+    if (!prev && !next && !random) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (random) selectRandomSetMember();
+    else selectSetRelative(prev ? -1 : 1);
+  }, true);
+
+  root.addEventListener('click', event => {
+    const cat = event.target.closest?.('.cat, #imagesModeBtn, #videosModeBtn');
+    if (!cat || cat.id === 'naiSetsCat' || internalNavigation) return;
+    const wasSetsView = setsView;
+    setsView = false;
+    openSetId = null;
+    scheduleSync(false, 0);
+    if (wasSetsView) {
+      setTimeout(() => {
+        internalSearch = true;
+        try { searchInput.dispatchEvent(new Event('input', {bubbles:true, composed:true})); }
+        finally { internalSearch = false; }
+        scheduleSync(false, 0);
+      }, 0);
+    }
+  }, true);
+
+  searchInput.addEventListener('input', event => {
+    if (internalSearch) return;
+    if (openSetId) {
+      event.stopImmediatePropagation();
+      filterOpenSetBySearch();
+      return;
+    }
+    if (setsView) {
+      event.stopImmediatePropagation();
+      renderSetsView();
+      return;
+    }
+    scheduleSync(false, 0);
+  }, true);
+
+  charSelect.addEventListener('change', () => {
+    setsView = false;
+    openSetId = null;
+    library=root.naiGetLibrary() || library;
+    scheduleSync(false,0);
+  });
+
+  root.addEventListener('click', event => {
+    const target = event.target;
+    if(openSetId && target?.closest?.('.tile[data-id]')){updateSetCounter();return;}
+    // Mutations/Refresh publish their completed snapshot through naiSetsApplyLibrary216.
+    // Ordinary clicks do not need delayed refetches or repeated grid reconstruction.
+    setTimeout(ensureFullscreenThumbButtons, 0);
+  });
+
+  window.addEventListener('beforeunload', () => {
+    fullscreenObserver.disconnect();
+    setCounterObserver?.disconnect();
+    for (const url of thumbUrls.values()) URL.revokeObjectURL(url);
+    thumbUrls.clear();
+  }, {once:true});
+
+  refreshLibrary().then(() => {
+    ensureControls();
+    collapseNormalGrid();
+    ensureFullscreenThumbButtons();
+  }).catch(() => {});
+})();
