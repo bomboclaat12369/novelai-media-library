@@ -126,6 +126,18 @@ class LibraryStore:
                 for media_id in (item.get("media_ids", []) if isinstance(item.get("media_ids", []), list) else [])
             }
             changed = False
+            retired = [item for item in data["sets"] if item.get("kind") == "connection"]
+            if retired:
+                # Retire only the removed feature's metadata. Keep originals,
+                # placement flags and all existing Sets exactly as they were.
+                backup = self.backup_dir / f"library-before-connections-removal-{uuid.uuid4().hex}.json"
+                shutil.copy2(self.db_path, backup)
+                retired_ids = {item.get("id") for item in retired}
+                data["sets"] = [item for item in data["sets"] if item.get("id") not in retired_ids]
+                for entry in data.get("undo_history", []):
+                    if "sets" in entry:
+                        entry["sets"] = [change for change in entry["sets"] if change.get("id") not in retired_ids]
+                changed = True
             # Categories are media-type specific. Existing categories predate
             # video categories, so they retain their established image-only type.
             for character in data.get("characters", []):
@@ -1124,8 +1136,8 @@ class LibraryStore:
         self.data["sets"] = kept_sets
 
     def create_set(self, character_id: str, name: str, media_ids: list[Any], cover_media_id: Any = None, kind: str = "set", preserve_placement: bool = False) -> dict[str, Any]:
-        if kind not in ("set", "connection"):
-            raise ValueError("Choose Set or Connection")
+        if kind != "set":
+            raise ValueError("Only Sets are supported")
         name = str(name or "").strip()
         if not name:
             raise ValueError("Set name cannot be empty")
