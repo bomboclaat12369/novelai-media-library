@@ -35,7 +35,7 @@ except Exception:
 HOST = "127.0.0.1"
 PORT = 8765
 APP_NAME = "NovelAI Media Library"
-API_VERSION = 8
+API_VERSION = 9
 
 
 def now_iso() -> str:
@@ -309,9 +309,8 @@ class LibraryStore:
                 raise KeyError("Media not found")
             if media.get("media_type") != "image":
                 raise ValueError("Only images can be marked for replacement")
-            if bool(media.get("needs_replacement")) == bool(needed):
-                return media
-            return self._change_media(media, {"needs_replacement": bool(needed)}, "Change replacement flag")
+            return self._change_media(media, {"needs_replacement": bool(needed), "replacement_auto": False,
+                "replacement_override_sha": media.get("sha256")}, "Change replacement flag")
 
     def set_featured(self, media_id: str, featured: bool) -> dict[str, Any]:
         with self.lock:
@@ -626,6 +625,7 @@ class LibraryStore:
                     item["thumb_rel"] = thumb_rel
                     item["width"] = width
                     item["height"] = height
+                    self._apply_resolution_flag(item)
                     try:
                         item["file_bytes"] = original.stat().st_size
                     except Exception:
@@ -685,6 +685,13 @@ class LibraryStore:
             content_type = guessed_type or "application/octet-stream"
         media_type = "video" if content_type.startswith("video/") else "image"
         sha = self._hash_file(temp_path)
+        width = height = None
+        if media_type == "image" and Image is not None:
+            try:
+                with Image.open(temp_path) as image:
+                    width, height = image.size
+            except Exception:
+                pass
         with self.lock:
             c = self.character(character_id)
             if not c:
@@ -766,10 +773,11 @@ class LibraryStore:
                 "video_markers": video_markers,
                 "video_thumb_seconds": video_thumb_seconds,
                 "file_bytes": file_bytes,
-                "width": None,
-                "height": None,
+                "width": width,
+                "height": height,
                 "created_at": now_iso(),
             }
+            self._apply_resolution_flag(item)
             self.data["media"].append(item)
             self.save()
             if media_type == "image":
@@ -1091,6 +1099,17 @@ class LibraryStore:
                 item["source"] = {"kind": "local", "original_name": safe_name}
                 item["in_all"] = bool(item.get("in_all", True))
                 item["needs_replacement"] = False
+                item["replacement_auto"] = False
+                item.pop("replacement_override_sha", None)
+                item["width"] = item["height"] = None
+                item["file_bytes"] = destination.stat().st_size
+                if Image is not None:
+                    try:
+                        with Image.open(destination) as image:
+                            item["width"], item["height"] = image.size
+                    except Exception:
+                        pass
+                self._apply_resolution_flag(item)
                 self.data["undo_history"] = [e for e in self.data.get("undo_history", []) if e.get("media_id") != media_id]
                 self.save()
                 result = item
@@ -1502,7 +1521,7 @@ class LibraryStore:
         with self.lock:
             return dict(self._metadata_index)
 
-    def start_metadata_index(self) -> dict[str, Any]:
+    def start_metadata_index(self, character_id: str | None = None, scan_quality: bool = False) -> dict[str, Any]:
         """Index existing source headers only when the user asks to sort by size."""
         with self.lock:
             if self._metadata_index_worker is not None and self._metadata_index_worker.is_alive():
@@ -1510,8 +1529,8 @@ class LibraryStore:
             jobs = [
                 (str(m.get("id") or ""), str(m.get("stored_rel") or ""), str(m.get("media_type") or "image"))
                 for m in self.data.get("media", [])
-                if m.get("stored_rel") and (
-                    m.get("file_bytes") is None or
+                if m.get("stored_rel") and (not character_id or m.get("character_id") == character_id) and (
+                    scan_quality or m.get("file_bytes") is None or
                     (m.get("media_type") == "image" and (m.get("width") is None or m.get("height") is None))
                 )
             ]
@@ -1542,11 +1561,12 @@ class LibraryStore:
                 with self.lock:
                     item = self.media_item(media_id)
                     changed = False
-                    if item:
+                    if item and item.get("stored_rel") == stored_rel:
                         if file_bytes is not None and item.get("file_bytes") != file_bytes:
                             item["file_bytes"] = file_bytes; changed = True
                         if width and height and (item.get("width") != width or item.get("height") != height):
                             item["width"] = width; item["height"] = height; changed = True
+                        changed = self._apply_resolution_flag(item) or changed
                     dirty = dirty or changed
                     self._metadata_index["processed"] = position
                     if changed:
@@ -1561,6 +1581,59 @@ class LibraryStore:
                 if dirty:
                     self.save()
                 self._metadata_index["running"] = False
+
+    def quality_settings(self) -> dict[str, Any]:
+        with self.lock:
+            return {"enabled": True, "min_pixels": 500000, **self.data.get("quality_settings", {})}
+
+    def set_quality_settings(self, body: dict[str, Any]) -> dict[str, Any]:
+        threshold = body.get("min_pixels", 500000)
+        if isinstance(threshold, bool) or not isinstance(threshold, int) or not 10000 <= threshold <= 100000000:
+            raise ValueError("Threshold must be between 0.01 and 100 megapixels")
+        if not isinstance(body.get("enabled", True), bool):
+            raise ValueError("Enabled must be true or false")
+        with self.lock:
+            self.data["quality_settings"] = {"enabled": body.get("enabled", True), "min_pixels": threshold}
+            self.save()
+            return self.quality_settings()
+
+    def _apply_resolution_flag(self, item: dict[str, Any]) -> bool:
+        if item.get("media_type") != "image" or not item.get("width") or not item.get("height"):
+            return False
+        if item.get("replacement_override_sha") and item.get("replacement_override_sha") == item.get("sha256"):
+            return False
+        settings = self.quality_settings()
+        low = settings["enabled"] and item["width"] * item["height"] < settings["min_pixels"]
+        if low and not item.get("needs_replacement"):
+            item["needs_replacement"] = True
+            item["replacement_auto"] = True
+            return True
+        if not low and item.get("replacement_auto"):
+            item["needs_replacement"] = False
+            item["replacement_auto"] = False
+            return True
+        return False
+
+    def character_stats(self, character_id: str) -> dict[str, Any]:
+        with self.lock:
+            character = self.character(character_id)
+            if not character:
+                raise KeyError("Character not found")
+            media = [m for m in self.data["media"] if m.get("character_id") == character_id]
+            sets = [g for g in self.data.get("sets", []) if g.get("character_id") == character_id and g.get("kind", "set") == "set"]
+            in_sets = {id for group in sets for id in group.get("media_ids", [])}
+            saved = [m for m in media if not m.get("in_review") and not m.get("in_purgatory")]
+            def counts(items):
+                return {"images": sum(m.get("media_type") == "image" for m in items),
+                        "videos": sum(m.get("media_type") == "video" for m in items)}
+            return {"name": character["name"], "saved": counts(saved),
+                    "in_sets": counts([m for m in saved if m["id"] in in_sets]),
+                    "outside_sets": counts([m for m in saved if m["id"] not in in_sets]),
+                    "pending": counts([m for m in media if m.get("in_review") or m.get("in_purgatory")]),
+                    "sets": len(sets), "needs_replacement": sum(bool(m.get("needs_replacement")) for m in saved),
+                    "image_bytes": sum(m.get("file_bytes") or 0 for m in media if m.get("media_type") == "image"),
+                    "video_bytes": sum(m.get("file_bytes") or 0 for m in media if m.get("media_type") == "video"),
+                    "unknown_sizes": sum(m.get("file_bytes") is None for m in media)}
 
 
 class StandaloneUI:
@@ -1615,6 +1688,107 @@ class StandaloneUI:
                     raise
             self.checked_at = time.monotonic()
             return self.cached
+
+
+class UIUpdates:
+    """On-demand verified downloads; idle clients wait on a condition, not GitHub."""
+    def __init__(self, standalone: StandaloneUI):
+        self.standalone = standalone
+        self.condition = threading.Condition()
+        self.check_lock = threading.Lock()
+        self.checked_at = 0.0
+        self.version = ""
+        self.code = ""
+        self.digest = ""
+        self.activation = ""
+        self.cursor = uuid.uuid4().hex
+        self.error = ""
+
+    def status(self, after: str | None = None) -> dict[str, Any]:
+        with self.condition:
+            if after == self.cursor:
+                self.condition.wait_for(lambda: after != self.cursor, timeout=25)
+            return {"version": self.version, "activation": self.activation, "cursor": self.cursor, "error": self.error}
+
+    def _notify(self) -> None:
+        with self.condition:
+            self.cursor = uuid.uuid4().hex
+            self.condition.notify_all()
+
+    def check(self, force: bool = False) -> dict[str, Any]:
+        with self.check_lock:
+            if not force and self.version and time.monotonic() - self.checked_at < 60:
+                return self.status()
+            ui = self.standalone
+            try:
+                manifest = json.loads(ui._download(ui.BASE + "manifest.json?_=" + str(time.time_ns()), 256 * 1024, 10))
+                version = str(manifest.get("userscript_payload_version", ""))
+                digest = str(manifest.get("userscript_sha256", ""))
+                html_digest = str(manifest.get("standalone_sha256", ""))
+                parts = manifest.get("userscript_parts", [])
+                if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){2}", version) or not re.fullmatch(r"[0-9a-f]{64}", digest) or not re.fullmatch(r"[0-9a-f]{64}", html_digest) or not isinstance(parts, list) or not 1 <= len(parts) <= 80:
+                    raise ValueError("Invalid interface release manifest")
+                if version == self.version and digest == self.digest:
+                    self.checked_at = time.monotonic()
+                    return self.status()
+                cache = ui.directory / "coordinated-update.json"
+                code_bytes = None
+                if cache.exists():
+                    try:
+                        saved = json.loads(cache.read_text(encoding="utf-8"))
+                        candidate = saved["code"].encode("utf-8")
+                        if hashlib.sha256(candidate).hexdigest() == digest:
+                            code_bytes = candidate
+                    except Exception:
+                        pass
+                if code_bytes is None:
+                    from concurrent.futures import ThreadPoolExecutor
+                    with ThreadPoolExecutor(max_workers=4) as pool:
+                        code_bytes = b"".join(pool.map(lambda url: ui._download(url, 4 * 1024 * 1024), parts))
+                if hashlib.sha256(code_bytes).hexdigest() != digest:
+                    raise ValueError("Interface verification failed; current version kept")
+                html = ui._download(manifest.get("standalone_url", ""), 12 * 1024 * 1024)
+                if hashlib.sha256(html).hexdigest() != html_digest or f'data-nai-media-payload-version="{version}"'.encode() not in html:
+                    raise ValueError("Standalone verification failed; current version kept")
+                code = code_bytes.decode("utf-8")
+                ui.directory.mkdir(parents=True, exist_ok=True)
+                temp = cache.with_suffix(".tmp")
+                temp.write_text(json.dumps({"code": code}), encoding="utf-8")
+                os.replace(temp, cache)
+                with ui.lock:
+                    path = ui.directory / "standalone.json"
+                    temp = path.with_suffix(".tmp")
+                    temp.write_text(json.dumps({"sha256": html_digest, "body": base64.b64encode(html).decode("ascii")}), encoding="utf-8")
+                    os.replace(temp, path)
+                    ui.cached = html
+                    ui.checked_at = time.monotonic()
+                with self.condition:
+                    self.code, self.digest, self.version = code, digest, version
+                    self.error = ""
+                    # An activation always refers to the version prepared at the time.
+                    self.activation = ""
+                    self.checked_at = time.monotonic()
+                    self._notify()
+            except Exception as error:
+                with self.condition:
+                    self.error = str(error)
+                    self._notify()
+                raise
+            return self.status()
+
+    def activate(self, version: str) -> dict[str, Any]:
+        with self.condition:
+            if not self.code or version != self.version:
+                raise ValueError("The requested update is not prepared. Check for updates again.")
+            self.activation = uuid.uuid4().hex
+            self._notify()
+            return self.status()
+
+    def payload(self) -> dict[str, str]:
+        with self.condition:
+            if not self.code:
+                raise ValueError("No verified update is ready")
+            return {"version": self.version, "code": self.code, "sha256": self.digest}
 
 
 class MediaHandler(BaseHTTPRequestHandler):
@@ -1845,12 +2019,26 @@ class MediaHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            if path == "/api/ui-update/status":
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._send_json(200, self.server.ui_updates.status(query.get("after", [None])[0]))
+                return
+            if path == "/api/ui-update/payload":
+                self._send_json(200, self.server.ui_updates.payload())
+                return
+            if path == "/api/quality/settings":
+                self._send_json(200, self.store.quality_settings())
+                return
+            match = re.fullmatch(r"/api/characters/([0-9a-f]+)/stats", path)
+            if match:
+                self._send_json(200, self.store.character_stats(match.group(1)))
+                return
             if path == "/api/library/revision":
                 with self.store.lock:
                     self._send_json(200, {"revision": self.store.revision})
                 return
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "standalone_library": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "standalone_library": True, "coordinated_updates": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/diagnostics/last-import":
                 payload = dict(self.store.last_import_debug) if self.store.last_import_debug else {"state": "none"}
@@ -1894,6 +2082,24 @@ class MediaHandler(BaseHTTPRequestHandler):
             return
         try:
             path = urllib.parse.urlparse(self.path).path
+            if path == "/api/ui-update/check":
+                body = self._read_json()
+                self._send_json(200, self.server.ui_updates.check(body.get("force") is True))
+                return
+            if path == "/api/ui-update/activate":
+                body = self._read_json()
+                self._send_json(200, self.server.ui_updates.activate(str(body.get("version", ""))))
+                return
+            if path == "/api/quality/settings":
+                self._send_json(200, self.store.set_quality_settings(self._read_json()))
+                return
+            if path == "/api/quality/scan":
+                body = self._read_json()
+                cid = str(body.get("character_id", ""))
+                if not self.store.character(cid):
+                    raise ValueError("Choose a character")
+                self._send_json(200, self.store.start_metadata_index(cid, True))
+                return
             if path == "/api/undo":
                 body = self._read_json()
                 self._send_json(200, self.store.undo_last(str(body.get("entry_id", ""))))
@@ -2147,6 +2353,7 @@ class MediaHTTPServer(ThreadingHTTPServer):
         super().__init__(address, MediaHandler)
         self.store = store
         self.standalone = StandaloneUI(store.root)
+        self.ui_updates = UIUpdates(self.standalone)
         store.cleanup_upload_orphans()
 
 

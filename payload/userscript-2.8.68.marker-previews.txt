@@ -1,0 +1,127 @@
+// Narrow timestamp previews. Only visible saved markers request frames; no polling.
+(() => {
+  'use strict';
+  const root=document.getElementById('nai-media-host')?.shadowRoot;
+  if(!root)return;
+  const style=document.createElement('style');
+  style.textContent=`
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker].naiMarkerPreview,
+    .naiFullscreenMarkerRail .naiFullscreenMarkerRow > button.naiMarkerPreview {
+      height:74px!important; flex-direction:column!important; gap:2px!important;
+      padding:2px!important; overflow:hidden!important; color:#fff!important; font:600 9px/14px system-ui!important;
+    }
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker].naiMarkerPreview::before,
+    .stage > #videoTools.naiVideoSideRail [data-seek-marker].naiMarkerPreview::after,
+    .naiFullscreenMarkerRail .naiFullscreenMarkerRow > button.naiMarkerPreview::after {display:none!important;content:none!important}
+    .naiMarkerPreview img {display:block;width:100%;height:52px;min-height:52px;object-fit:contain;background:#080a17;border-radius:2px;pointer-events:none}
+    .naiMarkerPreview span {display:block;width:100%;text-align:center;pointer-events:none;line-height:14px}
+    .naiFullscreenMarkerRow {align-items:center!important}
+  `;
+  root.appendChild(style);
+  const memory=new Map(), pending=new Map();
+  let tail=Promise.resolve(), database;
+  const decoders=new Set();
+  root.naiReleaseMarkerPreviews=()=>{memory.clear();for(const video of decoders){video.pause();video.removeAttribute('src');video.load();}decoders.clear();};
+  const keyFor=(m,t)=>`${m.id}:${m.sha256||m.original_rel||m.original_name||''}:${Number(t)}`;
+  function remember(key,url){
+    memory.delete(key);memory.set(key,url);
+    while(memory.size>64)memory.delete(memory.keys().next().value);
+  }
+  function db(){
+    if(database)return database;
+    database=new Promise(resolve=>{
+      if(!window.indexedDB){resolve(null);return;}
+      let settled=false;
+      const finish=value=>{if(settled){value?.close();return;}settled=true;clearTimeout(timer);resolve(value);};
+      const timer=setTimeout(()=>finish(null),1500);
+      try{
+        const req=indexedDB.open('nai-marker-previews',1);
+        req.onupgradeneeded=()=>req.result.createObjectStore('frames',{keyPath:'key'}).createIndex('created','created');
+        req.onsuccess=()=>finish(req.result);req.onerror=req.onblocked=()=>finish(null);
+      }catch(_){finish(null);}
+    });
+    return database;
+  }
+  async function cached(key){
+    if(memory.has(key))return memory.get(key);
+    const d=await db();if(!d)return null;
+    return new Promise(resolve=>{
+      try{const tx=d.transaction('frames'),r=tx.objectStore('frames').get(key);
+        r.onsuccess=()=>resolve(r.result?.url||null);r.onerror=tx.onabort=()=>resolve(null);
+      }catch(_){resolve(null);}
+    });
+  }
+  async function persist(key,url){
+    remember(key,url);
+    const d=await db();if(!d)return;
+    try{
+      const tx=d.transaction('frames','readwrite'),s=tx.objectStore('frames');
+      tx.onerror=()=>{};s.put({key,url,created:Date.now()});
+      const count=s.count();count.onsuccess=()=>{
+        let excess=count.result-600;if(excess<=0)return;
+        const cursor=s.index('created').openCursor();cursor.onsuccess=()=>{
+          const c=cursor.result;if(!c||excess--<=0)return;c.delete();c.continue();
+        };
+      };
+    }catch(_){} // Preview cache is optional; timestamp saves never depend on it.
+  }
+  function capture(video){
+    if(video.readyState<2||!video.videoWidth||!video.videoHeight||video.seeking)return null;
+    const scale=Math.min(1,84/video.videoWidth,120/video.videoHeight);
+    const c=document.createElement('canvas');c.width=Math.max(1,Math.round(video.videoWidth*scale));c.height=Math.max(1,Math.round(video.videoHeight*scale));
+    c.getContext('2d',{alpha:false}).drawImage(video,0,0,c.width,c.height);
+    return c.toDataURL('image/jpeg',.72);
+  }
+  root.naiRememberMarkerFrame=(m,time,video)=>{
+    try{if(!m||Math.abs(video.currentTime-time)>.05)return;const url=capture(video);if(url)void persist(keyFor(m,time),url);}catch(_){}
+  };
+  function videoEvent(v,event,start){return new Promise((resolve,reject)=>{
+    const finish=error=>{clearTimeout(timer);v.removeEventListener(event,ready);v.removeEventListener('error',fail);error?reject(error):resolve();};
+    const ready=()=>finish(),fail=()=>finish(Error('Preview unavailable'));
+    const timer=setTimeout(fail,8000);v.addEventListener(event,ready,{once:true});v.addEventListener('error',fail,{once:true});
+    try{start();}catch(e){finish(e);}
+  });}
+  async function extract(m,time,alive){
+    if(root.naiMediaSuspended||!alive())return null;
+    const video=document.createElement('video');video.crossOrigin='anonymous';video.preload='auto';video.muted=true;video.playsInline=true;
+    decoders.add(video);
+    try{
+      await videoEvent(video,'loadeddata',()=>{video.src=`http://127.0.0.1:8765/api/media/${encodeURIComponent(m.id)}/original`;});
+      if(!alive())return null;
+      const target=Number.isFinite(video.duration)?Math.min(time,Math.max(0,video.duration-.001)):time;
+      if(Math.abs(video.currentTime-target)>.001)await videoEvent(video,'seeked',()=>{video.currentTime=target;});
+      if(!alive())return null;
+      return capture(video);
+    }finally{decoders.delete(video);video.pause();video.removeAttribute('src');video.load();}
+  }
+  function preview(m,time,alive){
+    const key=keyFor(m,time);
+    if(pending.has(key)){const job=pending.get(key);job.clients.push(alive);return job.promise;}
+    const job={clients:[alive],promise:null};const wanted=()=>job.clients.some(fn=>fn());
+    job.promise=(async()=>{
+      const saved=await cached(key);if(saved){remember(key,saved);return saved;}
+      const run=tail.then(async()=>{
+        // Skip transient selections before creating a decoder.
+        await new Promise(resolve=>setTimeout(resolve,120));
+        if(!wanted())return null;
+        if(memory.has(key))return memory.get(key);
+        const url=await extract(m,time,wanted);if(url)void persist(key,url);return url;
+      });
+      tail=run.catch(()=>{});return run;
+    })().catch(()=>null).finally(()=>pending.delete(key));
+    pending.set(key,job);return job.promise;
+  }
+  root.naiPaintMarkerPreview=(button,m,time)=>{
+    if(!m||time===null||time===undefined||!Number.isFinite(Number(time)))return;
+    const key=keyFor(m,time);button.dataset.naiMarkerKey=key;
+    button.classList.add('naiMarkerPreview');
+    const img=document.createElement('img');img.alt='';
+    // Transparent placeholder avoids broken-image icons while a frame is decoded.
+    img.src='data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
+    const label=document.createElement('span');const seconds=Math.max(0,Number(time));
+    label.textContent=`${Math.floor(seconds/60)}:${String(Math.floor(seconds%60)).padStart(2,'0')}`;
+    button.replaceChildren(img,label);
+    const alive=()=>!root.naiMediaSuspended&&button.isConnected&&button.dataset.naiMarkerKey===key;
+    preview(m,Number(time),alive).then(url=>{if(url&&alive())img.src=url;});
+  };
+})();

@@ -11,7 +11,7 @@ await page.route('https://novelai.net/**',r=>r.fulfill({contentType:'text/html',
 await page.route('http://127.0.0.1:8765/**',r=>r.fulfill({status:404,body:''}));
 await page.goto('https://novelai.net/stories');
 await page.evaluate(()=>{
- const media=Array.from({length:220},(_,i)=>({id:'img'+i,character_id:'c',media_type:'image',original_name:`Image ${i}.png`,sha256:'source'+i,thumb_rel:'thumb'+i,categories:[],in_all:true,in_review:false,width:64,height:96,file_bytes:1000,created_at:new Date(1700000000000+i*1000).toISOString()}));
+ const media=Array.from({length:5000},(_,i)=>({id:'img'+i,character_id:'c',media_type:'image',original_name:`Image ${i}.png`,sha256:'source'+i,thumb_rel:'thumb'+i,categories:[],in_all:true,in_review:false,width:64,height:96,file_bytes:1000,created_at:new Date(1700000000000+i*1000).toISOString()}));
  window.lib={characters:[{id:'c',name:'Fixture',categories:[{id:'dresscat',name:'Dress',media_type:'image'},{id:'vcat',name:'Video category',media_type:'video'}]}],media,sets:[{id:'beach',character_id:'c',kind:'set',name:'Beach',media_ids:['img0','video'],cover_media_id:'video'},{id:'dress',character_id:'c',kind:'set',name:'Dress',media_ids:[]},{id:'conn',character_id:'c',kind:'connection',name:'Retired link',media_ids:['img0']}]};
  media[0].categories=['dresscat'];media[0].favorite=true;media.push({id:'video',character_id:'c',media_type:'video',sha256:'vid',thumb_rel:'video-thumb',original_name:'Cover.mp4',categories:[],in_videos:true});
  window.requests=[];window.alerts=[];window.alert=m=>alerts.push(m);window.confirm=()=>true;
@@ -45,15 +45,15 @@ if(standalone){
 }
 await page.locator('#naiManageSetsBtn').click();await page.locator('#naiNewSetBtn').click();await page.locator('#naiSetNameInput').fill('Filtered set');
 const cards=page.locator('#naiSetGallery .naiSetPick'),card=id=>page.locator(`#naiSetGallery .naiSetPick[data-media-id="${id}"]`);
-assert((await cards.count())<100);assert.match(await page.locator('#naiSetSelectionSummary').textContent(),/221 of 221 shown/);await card('img0').click();
+assert((await cards.count())<100,'bounded DOM for 5001 media');await card('img0').evaluate(el=>window.firstCard=el);await card('img0').click();assert(await card('img0').evaluate(el=>el===window.firstCard),'selection preserves card node');
 const writes=await page.evaluate(()=>requests.filter(r=>r.method==='POST').length);
 await page.locator('#naiGroupCategory').selectOption('dresscat');assert.equal(await cards.count(),1);
 await page.locator('#naiGroupFiltersBtn').click();await page.locator('#naiGroupFavorite').selectOption('yes');assert.equal(await cards.count(),1);
 await page.locator('#naiGroupFeatured').selectOption('yes');assert.equal(await cards.count(),0);assert.match(await page.locator('#naiSetGallery').textContent(),/No media matches/);
 await page.locator('#naiGroupFeatured').selectOption('any');assert.equal(await cards.count(),1);
 await page.locator('#naiGroupMembership').selectOption('none');assert.equal(await cards.count(),0);
-await page.locator('#naiGroupClearFilters').click();assert((await cards.count())<100);assert.match(await page.locator('#naiSetSelectionSummary').textContent(),/221 of 221 shown/);
-await page.locator('#naiGroupFiltersDone').click();await page.locator('#naiGroupCategory').selectOption('__none');assert((await cards.count())<100);assert.match(await page.locator('#naiSetSelectionSummary').textContent(),/220 of 221 shown/);
+await page.locator('#naiGroupClearFilters').click();assert((await cards.count())<100);
+await page.locator('#naiGroupFiltersDone').click();await page.locator('#naiGroupCategory').selectOption('__none');assert((await cards.count())<100);
 await card('img1').click();
 assert.match(await page.locator('#naiSetSelectionSummary').textContent(),/2 files selected/);
 await page.locator('#naiGroupFiltersBtn').click();await page.locator('#naiGroupSelectedOnly').check();assert.equal(await cards.count(),1);
@@ -63,10 +63,35 @@ await page.locator('#naiGroupCategory').selectOption('vcat');await page.locator(
 await page.locator('#naiGroupSearch').fill('Image 0');assert.equal(await cards.count(),1);
 assert.equal(await page.evaluate(()=>requests.filter(r=>r.method==='POST').length),writes,'filters make no writes');
 await page.locator('#naiGroupSearch').fill('');if(await page.locator('#naiGroupFilterPanel').isHidden())await page.locator('#naiGroupFiltersBtn').click();
-await page.locator('.modal.large').screenshot({path:'/tmp/nai67-manager-'+(standalone?'standalone':'overlay')+'.png'});
+await page.locator('.modal.large').screenshot({path:'/tmp/nai68-manager-'+(standalone?'standalone':'overlay')+'.png'});
 await page.locator('#naiGroupFiltersDone').click();await page.locator('#naiSaveSetBtn').click();await page.locator('.naiSetEditor').waitFor({state:'detached'});
 const saved=await page.evaluate(()=>lib.sets.find(s=>s.name==='Filtered set'));assert.deepEqual(saved.media_ids,['img0','img1']);assert.equal(saved.cover_media_id,'img0');
+
+// Viewport changes preserve far-away selections and cover.
+await page.locator('#naiManageSetsBtn').click();await page.locator('#naiNewSetBtn').click();
+await page.locator('#naiSetGallery').evaluate(el=>el.scrollTop=el.scrollHeight);
+await page.locator('#naiSetGallery .naiSetPick[data-media-id="img4999"]').waitFor();
+await page.locator('#naiSetGallery .naiSetPick[data-media-id="img4999"]').click();
+assert((await cards.count())<100);
+await page.locator('#naiSetGallery').evaluate(el=>el.scrollTop=0);await card('img0').waitFor();
+assert.match(await page.locator('#naiSetSelectionSummary').textContent(),/1 files selected/);
+await page.locator('.modalWrap [data-close]').first().click();
+if(!standalone){
+ await page.locator('#grid .tile').first().click();await page.locator('#stage1 img').waitFor();
+ await page.locator('.toggle').click();
+ assert.equal(await page.locator('#grid img,#stage1 img,#stage2 img,#stage1 video,#stage2 video').count(),0);
+ const n=await page.evaluate(()=>requests.filter(r=>/\/(original|thumb)/.test(r.route)).length);
+ await page.waitForTimeout(500);
+ assert.equal(await page.evaluate(()=>requests.filter(r=>/\/(original|thumb)/.test(r.route)).length),n,'no visual requests while hidden');
+ await page.locator('.toggle').click();await page.locator('#stage1 img').waitFor();await page.locator('#grid .tile').first().waitFor();
+ await page.evaluate(()=>document.getElementById('nai-media-host').shadowRoot.naiSelectMedia('video'));
+ await page.locator('#stage1 video').waitFor();await page.locator('#stage1 video').evaluate(v=>window.previousVideo=v);
+ await page.locator('.toggle').click();await page.waitForTimeout(100);
+ assert(await page.evaluate(()=>previousVideo.paused&&!previousVideo.hasAttribute('src')),'hidden video released');
+ await page.locator('.toggle').click();await page.locator('#stage1 video').waitFor();await page.locator('#videoTools').waitFor();
+
+}
 assert.deepEqual(errors,[]);assert.deepEqual(await page.evaluate(()=>alerts),[]);await page.close();
 }
-console.log('PASS: compact footer buttons above info for images/videos; category/combined manager filters; hidden selections and cover survive saving in both interfaces.');
+console.log('PASS: 5001-item bounded Set gallery, persistent selections, suspend/resume;  compact footer buttons above info for images/videos; category/combined manager filters; hidden selections and cover survive saving in both interfaces.');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1});
