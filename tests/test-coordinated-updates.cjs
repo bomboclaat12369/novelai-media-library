@@ -2,6 +2,7 @@
 const fs=require('fs'),path=require('path'),assert=require('assert/strict'),{spawn}=require('child_process');
 const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwright');
 const dir=path.resolve(__dirname,'..'),config=JSON.parse(fs.readFileSync(path.join(dir,process.env.NAI_RELEASE_CONFIG||'release-userscript.json')));
+const baseVersion=config.version,parts=baseVersion.split('.').map(Number),nextVersion=[parts[0],parts[1],parts[2]+1].join('.'),lastVersion=[parts[0],parts[1],parts[2]+2].join('.');
 const payload=config.parts.map(p=>fs.readFileSync(path.join(dir,p),'utf8')).join('');
 (async()=>{
  const server=spawn('python',['tests/serve_efficiency_fixture.py'],{cwd:dir});let stderr='';server.stderr.on('data',b=>stderr+=b);
@@ -13,10 +14,10 @@ const payload=config.parts.map(p=>fs.readFileSync(path.join(dir,p),'utf8')).join
   const overlay=await context.newPage();overlay.on('pageerror',e=>errors.push(e.message));overlay.on('dialog',d=>d.accept());
   await overlay.route('https://novelai.net/**',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><body><textarea id="story"></textarea></body>'}));
   await overlay.exposeFunction('companionRequest',async o=>{const r=await fetch(o.url,{method:o.method||'GET',headers:o.headers,body:o.data});return {status:r.status,text:o.blob?Buffer.from(await r.arrayBuffer()).toString('base64'):await r.text()};});
-  await overlay.addInitScript(({payload})=>{
+  await overlay.addInitScript(({payload,baseVersion})=>{
     window.GM_xmlhttpRequest=o=>{let aborted=false;window.companionRequest({url:o.url,method:o.method,headers:o.headers,data:o.data,blob:o.responseType==='blob'}).then(r=>{if(aborted)return;const response=o.responseType==='blob'?new Blob([Uint8Array.from(atob(r.text),c=>c.charCodeAt(0))]):r.text;o.onload?.({status:r.status,response,responseText:o.responseType==='blob'?'':r.text});o.onloadend?.({});}).catch(e=>{if(!aborted)o.onerror?.(e);});return {abort:()=>{aborted=true;o.onabort?.({});}};};
-    document.addEventListener('DOMContentLoaded',()=>{document.documentElement.dataset.naiMediaPayloadVersion=localStorage.getItem('nai-media-github-payload-version')||'2.8.68';eval(localStorage.getItem('nai-media-github-payload')||payload);});
-  },{payload});
+    document.addEventListener('DOMContentLoaded',()=>{document.documentElement.dataset.naiMediaPayloadVersion=localStorage.getItem('nai-media-github-payload-version')||baseVersion;eval(localStorage.getItem('nai-media-github-payload')||payload);});
+  },{payload,baseVersion});
   await overlay.goto('https://novelai.net/stories');await overlay.getByText('Local library connected',{exact:true}).waitFor();
   const standalone=await context.newPage();standalone.on('pageerror',e=>errors.push(e.message));standalone.on('dialog',d=>d.accept());
   await standalone.goto('http://127.0.0.1:8765/library/');await standalone.getByText('Local library connected',{exact:true}).waitFor();
@@ -29,22 +30,22 @@ const payload=config.parts.map(p=>fs.readFileSync(path.join(dir,p),'utf8')).join
   await standalone.locator('#naiQualityScan').click();await standalone.getByText('Scan complete. Resolution flags and storage totals updated.',{exact:true}).waitFor();
   await standalone.locator('.modal').screenshot({path:'/tmp/nai68-stats.png'});
   // Overlay requests .69. Standalone defers while statistics/settings modal is open.
-  await context.request.post('http://127.0.0.1:8765/test/advance',{data:{version:'2.8.69'}});
+  await context.request.post('http://127.0.0.1:8765/test/advance',{data:{version:nextVersion}});
   await overlay.getByRole('button',{name:'Check updates',exact:true}).click();
-  await overlay.locator('#naiUpdateStatus').getByText(/v2.8.69 ready/).waitFor();
-  await overlay.getByRole('button',{name:'Update both',exact:true}).click();await ready(overlay,'2.8.69');
+  await overlay.locator('#naiUpdateStatus').getByText(new RegExp('v'+nextVersion+' ready')).waitFor();
+  await overlay.getByRole('button',{name:'Update',exact:true}).click();await ready(overlay,nextVersion);
   await standalone.locator('#naiUpdateStatus').getByText(/Close the editor to update/).waitFor();
-  assert.equal(await standalone.evaluate(()=>document.documentElement.dataset.naiMediaPayloadVersion),'2.8.68');
-  await standalone.locator('.modal [data-close]').click();await ready(standalone,'2.8.69');
+  assert.equal(await standalone.evaluate(()=>document.documentElement.dataset.naiMediaPayloadVersion),baseVersion);
+  await standalone.locator('.modal [data-close]').click();await ready(standalone,nextVersion);
   await overlay.getByText('Local library connected',{exact:true}).waitFor();
   // Standalone requests .70. Edited NovelAI text must survive the remote update.
   await overlay.locator('#story').fill('Unfinished story text');
-  await context.request.post('http://127.0.0.1:8765/test/advance',{data:{version:'2.8.70'}});
+  await context.request.post('http://127.0.0.1:8765/test/advance',{data:{version:lastVersion}});
   await standalone.getByRole('button',{name:'Check updates',exact:true}).click();
-  await standalone.locator('#naiUpdateStatus').getByText(/v2.8.70 ready/).waitFor();
-  await standalone.getByRole('button',{name:'Update both',exact:true}).click();await ready(standalone,'2.8.70');
+  await standalone.locator('#naiUpdateStatus').getByText(new RegExp('v'+lastVersion+' ready')).waitFor();
+  await standalone.getByRole('button',{name:'Update',exact:true}).click();await ready(standalone,lastVersion);
   await overlay.locator('#naiUpdateStatus').getByText(/Story edited/).waitFor();assert.equal(await overlay.locator('#story').inputValue(),'Unfinished story text');
-  await overlay.getByRole('button',{name:'Update both',exact:true}).click();await ready(overlay,'2.8.70');
+  await overlay.getByRole('button',{name:'Update',exact:true}).click();await ready(overlay,lastVersion);
   assert.deepEqual(errors,[]);
   console.log('PASS: real statistics/settings/scan UI; both update directions; modal and story protection; verified loader cache applied.');
  }finally{if(browser)await browser.close();server.kill();}

@@ -1,0 +1,92 @@
+// Shared update coordinator. External downloads are on demand; signals stay on loopback.
+(() => {
+  'use strict';
+  const root=document.getElementById('nai-media-host')?.shadowRoot,status=root?.getElementById('status');
+  if(!status)return;
+  const standalone=document.documentElement.dataset.naiStandalone==='1';
+  const active=document.documentElement.dataset.naiMediaPayloadVersion||'2.8.69';
+  const row=document.createElement('div');row.id='naiUpdateStatus';
+  row.style.cssText='display:flex;align-items:center;gap:7px;padding:2px 12px 6px;color:#b9bdd8;font:10px system-ui;flex-wrap:wrap';
+  const label=document.createElement('span'),apply=document.createElement('button'),check=document.createElement('button');
+  apply.type=check.type='button';apply.textContent='Update';check.textContent='Check updates';
+  for(const b of [apply,check])b.style.cssText='font:10px system-ui;padding:3px 7px';
+  row.append(label,apply,check);status.insertAdjacentElement('afterend',row);
+  let state={},supported=false,working=false,stopped=false,watchStarted=false,storyEdited=false,deferred='',watchTimer=0,lastCheck=0,applying=false;
+  const requests=new Set();
+  function request(path,body,background=false){return new Promise((resolve,reject)=>{
+    let handle;const done=()=>requests.delete(handle);
+    handle=GM_xmlhttpRequest({method:body===undefined?'GET':'POST',url:'http://127.0.0.1:8765'+path,timeout:path==='/api/ui-update/status'?5000:120000,naiBackground:background,
+      headers:body===undefined?{}:{'Content-Type':'application/json'},data:body===undefined?undefined:JSON.stringify(body),
+      onload:r=>{done();try{const v=JSON.parse(r.responseText);if(r.status<200||r.status>=300)throw Error(v.error||'Update request failed');resolve(v);}catch(e){reject(e);}},
+      onerror:()=>{done();reject(Error('Companion unavailable'));},ontimeout:()=>{done();reject(Error('Update request timed out'));},onabort:()=>{done();reject(Error('Request canceled'));}});
+    requests.add(handle);
+  });}
+  const busy=()=>!!root.querySelector('#modalRoot:not(:empty),.naiCropWrap,.naiSetQueueWrap270,#lightRoot:not(:empty)');
+  function render(){
+    const announced=document.documentElement.dataset.naiMediaUpdateReady;
+    const newer=(a,b)=>{const x=(a||'0.0.0').split('.').map(Number),y=(b||'0.0.0').split('.').map(Number);for(let i=0;i<3;i++)if(x[i]!==y[i])return x[i]>y[i];return false;};
+    const ready=newer(announced,state.version)?announced:state.version;
+    const pending=!!ready&&ready!==active;
+    label.textContent=`v${active} active`+(pending?` · v${ready} ready`:'')+(deferred?' · '+deferred:'');
+    apply.hidden=!pending&&!(supported&&state.version);apply.disabled=working||busy();check.disabled=working;
+    apply.textContent=supported?'Update':'Reload to apply';
+  }
+  // NovelAI owns saving its text. Once typing is observed, only an explicit action
+  // in this tab may reload it; a signal from the other tab must never discard text.
+  if(!standalone)document.addEventListener('input',e=>{
+    if(e.composedPath().includes(root.host))return;
+    if(e.target?.closest?.('textarea,input,[contenteditable]'))storyEdited=true;
+  },true);
+  async function prepareAndReload(explicit=false){
+    if(applying||!state.activation||!state.version||state.version===active)return;
+    if(busy()){deferred='Close the editor to update';render();return;}
+    if(storyEdited&&!explicit){deferred='Story edited — update here after saving';render();return;}
+    applying=true;
+    try{
+      const payload=await request('/api/ui-update/payload');
+      if(payload.version!==state.version)throw Error('A newer release is ready. Check updates again.');
+      const bytes=new TextEncoder().encode(payload.code),hash=await crypto.subtle.digest('SHA-256',bytes);
+      const digest=[...new Uint8Array(hash)].map(x=>x.toString(16).padStart(2,'0')).join('');
+      if(digest!==payload.sha256)throw Error('Update verification failed');
+      // Recheck after downloading: the user may have opened an editor meanwhile.
+      if(busy() || (storyEdited&&!explicit)){deferred='Finish your work, then update here';return;}
+      if(!standalone){localStorage.setItem('nai-media-github-payload',payload.code);localStorage.setItem('nai-media-github-payload-version',payload.version);}
+      location.reload();
+    }catch(e){deferred=e.message;}finally{applying=false;render();}
+  }
+  function accept(next){state=next;render();prepareAndReload(false);}
+  // Never hold an extension request open waiting for an event. Extension requests
+  // share a connection pool across NovelAI tabs, independently of our own queue.
+  // Brief background reads yield to thumbnails and leave capacity for the viewer.
+  async function watch(){
+    if(stopped||!supported)return;
+    try{accept(await request('/api/ui-update/status',undefined,true));}catch(_){}
+    if(!stopped)watchTimer=setTimeout(watch,document.hidden?15000:5000);
+  }
+  async function checkNow(force=false){
+    if(working||stopped)return;working=true;deferred='Checking…';render();lastCheck=Date.now();
+    try{
+      const health=await request('/api/health',undefined,!force);
+      if(!health.coordinated_updates){deferred='Restart the companion to enable coordinated updates';return;}
+      supported=true;
+      if(!watchStarted){watchStarted=true;watch();}
+      // Download and verify both interfaces before advertising a release as ready.
+      accept(await request('/api/ui-update/check',{force},!force));deferred=state.version===active?'Up to date':'';
+    }catch(e){deferred=e.message;}finally{working=false;render();}
+  }
+  check.onclick=()=>checkNow(true);
+  apply.onclick=async()=>{
+    if(busy())return;
+    if(!supported){location.reload();return;}
+    if(storyEdited&&!confirm('Save your NovelAI text first. Continue updating and reloading this page?'))return;
+    working=true;render();
+    try{state=await request('/api/ui-update/check',{force:true});state=await request('/api/ui-update/activate',{version:state.version});await prepareAndReload(true);}
+    catch(e){deferred=e.message;}finally{working=false;render();}
+  };
+  const modal=root.getElementById('modalRoot');
+  new MutationObserver(()=>{render();prepareAndReload(false);}).observe(modal,{childList:true});
+  new MutationObserver(render).observe(document.documentElement,{attributes:true,attributeFilter:['data-nai-media-update-ready']});
+  window.addEventListener('focus',()=>{if(!root.naiMediaSuspended&&Date.now()-lastCheck>60000)checkNow();});
+  window.addEventListener('pagehide',()=>{stopped=true;clearTimeout(watchTimer);for(const handle of requests)handle.abort();},{once:true});
+  render();checkNow();
+})();

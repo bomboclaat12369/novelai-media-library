@@ -11,8 +11,9 @@ root=Path(__file__).resolve().parents[1]
 runtime=runpy.run_path(str(root/'runtime-src/companion-runtime.pyw'))
 config=json.loads((root/os.environ.get('NAI_RELEASE_CONFIG','release-userscript.json')).read_text())
 code=b''.join((root/p).read_bytes() for p in config['parts'])
-html=(root/'payload/standalone-2.8.68.html').read_bytes()
-release={'version':'2.8.68'}
+base_version=config['version']
+html=(root/f'payload/standalone-{base_version}.html').read_bytes()
+release={'version':base_version}
 class Handler(runtime['MediaHandler']):
     def do_POST(self):
         if self.path=='/test/advance':
@@ -28,7 +29,7 @@ with tempfile.TemporaryDirectory() as directory:
     store.create_set(owner['id'],'Blue dress',[items[0]['id'],items[1]['id']],preserve_placement=True)
     server=runtime['MediaHTTPServer'](('127.0.0.1',8765),store);server.RequestHandlerClass=Handler
     def download(url,*args):
-        current_html=html.replace(b'data-nai-media-payload-version="2.8.68"',f'data-nai-media-payload-version="{release["version"]}"'.encode())
+        current_html=html.replace(f'data-nai-media-payload-version="{base_version}"'.encode(),f'data-nai-media-payload-version="{release["version"]}"'.encode())
         if 'manifest.json' in url:
             return json.dumps({'userscript_payload_version':release['version'],'userscript_sha256':hashlib.sha256(code).hexdigest(),'userscript_parts':[server.standalone.BASE+'code'], 'standalone_url':server.standalone.BASE+'html','standalone_sha256':hashlib.sha256(current_html).hexdigest()}).encode()
         return code if url.endswith('code') else current_html
