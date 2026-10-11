@@ -1150,11 +1150,23 @@ class LibraryStore:
                 item["media_ids"] = new_members
                 if item.get("cover_media_id") not in new_members:
                     item["cover_media_id"] = new_members[0] if new_members else None
+                    item["cover_source"] = "auto"
                 item["updated_at"] = now_iso()
             kept_sets.append(item)
         self.data["sets"] = kept_sets
 
-    def create_set(self, character_id: str, name: str, media_ids: list[Any], cover_media_id: Any = None, kind: str = "set", preserve_placement: bool = False) -> dict[str, Any]:
+    def _unique_set_name(self, character_id: str, name: str, except_set_id: str | None = None) -> str:
+        names = {str(s.get("name", "")).strip().casefold()
+                 for s in self.data.get("sets", [])
+                 if s.get("character_id") == character_id and s.get("kind", "set") == "set"
+                 and s.get("id") != except_set_id}
+        if name.casefold() not in names:
+            return name
+        pattern = re.compile(re.escape(name.casefold()) + r" ([0-9]+)$")
+        suffix = max((int(m.group(1)) for n in names if (m := pattern.fullmatch(n))), default=0) + 1
+        return f"{name} {suffix}"
+
+    def create_set(self, character_id: str, name: str, media_ids: list[Any], cover_media_id: Any = None, kind: str = "set", preserve_placement: bool = False, cover_source: Any = None) -> dict[str, Any]:
         if kind != "set":
             raise ValueError("Only Sets are supported")
         name = str(name or "").strip()
@@ -1163,9 +1175,7 @@ class LibraryStore:
         with self.lock:
             if not self.character(character_id):
                 raise KeyError("Character not found")
-            for existing in self.data.get("sets", []):
-                if existing.get("kind", "set") == kind and existing.get("character_id") == character_id and str(existing.get("name", "")).casefold() == name.casefold():
-                    raise ValueError("A set with that name already exists for this character")
+            name = self._unique_set_name(character_id, name)
             members = self._validate_set_media(character_id, list(media_ids or []))
             if kind == "set":
                 self._detach_set_members(character_id, members)
@@ -1184,6 +1194,8 @@ class LibraryStore:
                 "media_ids": members,
                 "kind": kind,
                 "cover_media_id": cover,
+                "cover_source": "manual" if cover_source == "manual" and str(cover_media_id or "") in members else "auto",
+                "favorite": False,
                 "created_at": stamp,
                 "updated_at": stamp,
             }
@@ -1191,7 +1203,7 @@ class LibraryStore:
             self.save()
             return item
 
-    def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None) -> dict[str, Any]:
+    def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None, cover_source: Any = None, favorite: Any = None) -> dict[str, Any]:
         with self.lock:
             item = self.set_item(set_id)
             if not item:
@@ -1201,11 +1213,11 @@ class LibraryStore:
             next_name = str(item.get("name", "")) if name is None else str(name or "").strip()
             if not next_name:
                 raise ValueError("Set name cannot be empty")
-            for other in self.data.get("sets", []):
-                if other.get("id") == set_id:
-                    continue
-                if other.get("kind", "set") == kind and other.get("character_id") == character_id and str(other.get("name", "")).casefold() == next_name.casefold():
-                    raise ValueError("A set with that name already exists for this character")
+            next_name = self._unique_set_name(character_id, next_name, set_id)
+            if cover_source is not None and cover_source not in ("manual", "auto", "unknown"):
+                raise ValueError("Invalid cover source")
+            if favorite is not None and not isinstance(favorite, bool):
+                raise ValueError("Invalid set favorite")
             previous_members = list(item.get("media_ids", []))
             if add_media_ids is not None:
                 if media_ids is not None or not isinstance(add_media_ids, list):
@@ -1221,8 +1233,17 @@ class LibraryStore:
                 if kind == "set" and not preserve_placement and media and not media.get("categories"):
                     media["in_videos" if media.get("media_type") == "video" else "in_all"] = False
             cover = str(item.get("cover_media_id", "")) if cover_media_id is None else str(cover_media_id or "")
+            source = item.get("cover_source", "unknown")
             if cover not in members:
                 cover = members[0] if members else None
+                source = "auto"
+            elif cover_source is not None:
+                source = cover_source
+            elif cover_media_id is not None and (cover != item.get("cover_media_id") or media_ids is None):
+                source = "manual"
+            item["cover_source"] = source
+            if favorite is not None:
+                item["favorite"] = favorite
             item["name"] = next_name
             item["media_ids"] = members
             item["cover_media_id"] = cover
@@ -1408,6 +1429,7 @@ class LibraryStore:
                 updated["media_ids"] = [mid for mid in item.get("media_ids", []) if mid != media_id]
                 if updated.get("cover_media_id") not in updated["media_ids"]:
                     updated["cover_media_id"] = next(iter(updated["media_ids"]), None)
+                    updated["cover_source"] = "auto"
                 updated["updated_at"] = now_iso()
                 changes.append({"id": item["id"], "before": copy.deepcopy(item), "after": copy.deepcopy(updated)})
                 next_sets.append(updated)
@@ -2038,7 +2060,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     self._send_json(200, {"revision": self.store.revision})
                 return
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "standalone_library": True, "coordinated_updates": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "standalone_library": True, "coordinated_updates": True, "set_preferences": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/diagnostics/last-import":
                 payload = dict(self.store.last_import_debug) if self.store.last_import_debug else {"state": "none"}
@@ -2144,6 +2166,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     body.get("cover_media_id"),
                     str(body.get("kind", "set")),
                     bool(body.get("preserve_placement", False)),
+                    body.get("cover_source"),
                 )
                 self._send_json(200, item)
                 return
@@ -2157,6 +2180,8 @@ class MediaHandler(BaseHTTPRequestHandler):
                     body.get("cover_media_id") if "cover_media_id" in body else None,
                     bool(body.get("preserve_placement", False)),
                     body.get("add_media_ids"),
+                    body.get("cover_source"),
+                    body.get("favorite"),
                 )
                 self._send_json(200, item)
                 return

@@ -53,3 +53,13 @@ With the companion running, open `http://127.0.0.1:8765/library/`, use **Open st
 The standalone page shares the same files and metadata as the overlay, with independent browsing state. It starts in Dual mode: two viewers and the thumbnail panel each occupy one third of the window. Click a viewer (or its Viewer 1/2 button) to target subsequent thumbnail selections. The existing controls apply to that active viewer. Single mode keeps the first viewer at one third and expands thumbnails to the other two thirds; thumbnails default to five columns, with a remembered **4–8 per row** selector. Enlarged image thumbnails are generated on demand at an appropriate resolution and cached, rather than loading every original. Image and video selection share a compact, fixed-height footer. Selecting an inactive video viewer leaves playback unchanged; subsequent clicks play/pause normally.
 
 The companion verifies and caches the standalone interface on first use. Internet access is needed for that first download; afterward the cached page remains available offline. Opening/reloading the page checks for interface updates, with a short cache interval. Returning to either tab checks for saved library changes; there is no continuous synchronization polling. Edits are not automatically refreshed while an import or editor is open.
+
+## Sets (UI 2.8.70 / companion 2.7.35)
+
+Duplicate names are numbered per character: `White Bikini`, `White Bikini 1`, `White Bikini 2`. Creating or renaming a set uses the next available number after the highest existing suffix; other characters have independent names.
+
+Use the star on a set card or inside an open set to add it to **Favorite Sets**. This section is separate from image/video favorites, and favoriting a set does not change its members' flags.
+
+An **Auto** badge marks an automatically chosen set thumbnail. Use the pin inside the set or Manage Sets to choose or confirm a cover. Older covers without provenance display **?** (Unconfirmed) until selected; their existing image is preserved. If a cover is removed, its automatic replacement receives the Auto badge.
+
+**Update** prepares both interfaces and reloads them after verification. An older status response can no longer cancel the activation. Open editors defer a reload; NovelAI text edited in that tab requires an explicit update there after saving.
