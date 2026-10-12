@@ -100,8 +100,10 @@ class RuntimeStabilityTests(unittest.TestCase):
         self.assertEqual(self.store.set_item(other['id'])['media_ids'], [])
         self.assertIsNone(self.store.set_item(other['id'])['cover_media_id'])
         self.assertEqual(self.store.update_set(empty['id'], name='Renamed')['name'], 'Renamed')
-        with self.assertRaises(ValueError):
-            self.store.create_set(self.character['id'], 'renamed', [])
+        # Since 2.7.35, duplicate names receive a suffix rather than an error.
+        numbered = self.store.create_set(self.character['id'], 'renamed', [])
+        self.assertEqual(numbered['name'], 'renamed 1')
+        self.assertEqual(self.store.set_item(empty['id'])['name'], 'Renamed')
         with self.assertRaises((KeyError, ValueError)):
             self.store.update_set(empty['id'], media_ids=['missing'])
 

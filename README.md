@@ -63,3 +63,20 @@ Use the star on a set card or inside an open set to add it to **Favorite Sets**.
 An **Auto** badge marks an automatically chosen set thumbnail. Use the pin inside the set or Manage Sets to choose or confirm a cover. Older covers without provenance display **?** (Unconfirmed) until selected; their existing image is preserved. If a cover is removed, its automatic replacement receives the Auto badge.
 
 **Update** prepares both interfaces and reloads them after verification. An older status response can no longer cancel the activation. Open editors defer a reload; NovelAI text edited in that tab requires an explicit update there after saving.
+
+## Local Duplicate Review integration (companion 2.7.36)
+
+Local Duplicate Review 1.4 can compare incoming folders against a character's live
+main and Set image records. Deleted originals retained for undo are excluded.
+The local catalog reports imported IDs and Set names; the checker protects those
+files from ordinary duplicate cleanup.
+
+Its explicit replacement endpoint verifies the expected library/source, retains
+the old original under `replacement-originals`, and changes only source fields on
+the stable media record. Categories, favorites, crops and Set references remain.
+A persistent operation ID makes retries idempotent after a lost response. The
+checker verifies the committed library bytes before quarantining the download.
+Undo restores source fields while preserving later metadata edits and rejects
+conflicting source changes. Retained originals are not automatically purged.
+
+This is a runtime-only release; the NovelAI and standalone UI remains 2.8.71.

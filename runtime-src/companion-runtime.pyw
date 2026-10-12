@@ -404,7 +404,159 @@ class LibraryStore:
 
     def public_library(self) -> dict[str, Any]:
         with self.lock:
-            return json.loads(json.dumps({**{k: v for k, v in self.data.items() if k != "undo_history"}, "revision": self.revision}))
+            return json.loads(json.dumps({**{k: v for k, v in self.data.items() if k not in ("undo_history", "duplicate_replacements")}, "revision": self.revision}))
+
+    def duplicate_catalog(self, character_id: str = "") -> dict[str, Any]:
+        """Only live image records; filesystem leftovers are never reference images."""
+        with self.lock:
+            library_id = hashlib.sha256(str(self.db_path.resolve()).encode()).hexdigest()
+            files = []
+            if character_id:
+                if not self.character(character_id):
+                    raise ValueError("Choose an existing character")
+                for item in self.data["media"]:
+                    if item.get("character_id") != character_id or item.get("media_type") != "image":
+                        continue
+                    files.append({"id": item["id"], "path": str((self.root / item["stored_rel"]).resolve()),
+                                  "sha": item["sha256"], "name": item.get("original_name", ""),
+                                  "in_all": item.get("in_all", True),
+                                  "sets": [s["name"] for s in self.data.get("sets", []) if item["id"] in s.get("media_ids", [])]})
+            return {"library_id": library_id, "root": str(self.root.resolve()), "revision": self.revision,
+                    "characters": [{"id": c["id"], "name": c["name"]} for c in self.data["characters"]], "files": files}
+
+    def duplicate_operation(self, operation: str, library_id: str) -> dict[str, Any]:
+        with self.lock:
+            if library_id != self.duplicate_catalog()["library_id"]:
+                raise ValueError("The active library changed. Connect and scan again.")
+            entry = self.data.get("duplicate_replacements", {}).get(operation)
+            if not entry:
+                return {"state": "missing"}
+            item = self.media_item(entry["media_id"])
+            return {"state": entry["state"], "operation": operation, "media_id": entry["media_id"],
+                    "new_sha": entry["after"]["sha256"], "old_sha": entry["before"]["sha256"],
+                    "item": copy.deepcopy(item),
+                    "path": str((self.root / item["stored_rel"]).resolve()) if item else None}
+
+    def duplicate_item(self, media_id: str, library_id: str) -> dict[str, Any]:
+        with self.lock:
+            if self.duplicate_catalog()["library_id"] != library_id:
+                raise ValueError("The active library changed")
+            item = self.media_item(media_id)
+            if not item or item.get("media_type") != "image":
+                raise ValueError("This image is no longer in the library. Scan again.")
+            return {"sha": item["sha256"], "path": str((self.root / item["stored_rel"]).resolve())}
+
+    # These are source properties only. Undo must preserve later edits to categories,
+    # favorites, set membership, crops, and other user metadata.
+    _replacement_fields = ("original_name", "stored_rel", "content_type", "sha256", "source", "width", "height",
+                           "file_bytes", "needs_replacement", "replacement_auto", "replacement_override_sha")
+
+    def duplicate_replace(self, payload: bytes, name: str, media_id: str, expected_sha: str,
+                          operation: str, library_id: str) -> dict[str, Any]:
+        if not re.fullmatch(r"[0-9a-f]{32}", operation):
+            raise ValueError("Invalid replacement operation")
+        if Image is None:
+            raise ValueError("Image support is unavailable. Restart the companion after installing Pillow.")
+        temp = self.root / ".incoming" / (uuid.uuid4().hex + ".replace")
+        temp.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with temp.open("xb") as handle:
+                handle.write(payload); handle.flush(); os.fsync(handle.fileno())
+            digest = self._hash_file(temp)
+            with Image.open(temp) as image:
+                if getattr(image, "n_frames", 1) != 1:
+                    raise ValueError("Choose a still image")
+                width, height = image.size
+                content_type = Image.MIME.get(image.format, "image/png")
+                image.verify()
+            with self.lock:
+                existing = self.duplicate_operation(operation, library_id)
+                if existing["state"] != "missing":
+                    if existing["media_id"] != media_id or existing["new_sha"] != digest or existing["old_sha"] != expected_sha:
+                        raise ValueError("Replacement operation does not match the original request")
+                    return existing
+                item = self.media_item(media_id)
+                if not item or item.get("media_type") != "image" or item.get("sha256") != expected_sha:
+                    raise ValueError("The imported image changed. Scan again before replacing it.")
+                old_path = self.root / item["stored_rel"]
+                if self._hash_file(old_path) != expected_sha:
+                    raise ValueError("The imported original changed on disk. Replacement stopped.")
+                if digest == expected_sha:
+                    raise ValueError("This is already the same source; keep the library copy instead.")
+                if any(m["id"] != media_id and m.get("character_id") == item["character_id"] and m.get("sha256") == digest for m in self.data["media"]):
+                    raise ValueError("That source is already imported for this character")
+                before = {k: copy.deepcopy(item[k]) for k in self._replacement_fields if k in item}
+                retained = self.root / "replacement-originals" / (operation + old_path.suffix)
+                retained.parent.mkdir(parents=True, exist_ok=True)
+                # A separate retained copy cannot be overwritten by a later manual replacement.
+                with old_path.open("rb") as src, retained.open("wb") as dst:
+                    shutil.copyfileobj(src, dst); dst.flush(); os.fsync(dst.fileno())
+                if self._hash_file(retained) != expected_sha:
+                    raise ValueError("Could not verify the retained original")
+                before["stored_rel"] = retained.relative_to(self.root).as_posix()
+                safe_name = safe_component(Path(name).name, "replacement.png")
+                char_folder = self.media_dir / safe_component(self.character(item["character_id"])["name"], "Character")
+                char_folder.mkdir(parents=True, exist_ok=True)
+                destination = char_folder / (media_id + "_" + operation + Path(safe_name).suffix)
+                os.replace(temp, destination)
+                old = copy.deepcopy(item)
+                item.update(original_name=safe_name, stored_rel=destination.relative_to(self.root).as_posix(),
+                            content_type=content_type, sha256=digest, source={"kind": "local", "original_name": safe_name},
+                            width=width, height=height, file_bytes=len(payload), thumb_rel=None,
+                            needs_replacement=False, replacement_auto=False)
+                item.pop("replacement_override_sha", None)
+                self._apply_resolution_flag(item)
+                journal = self.data.setdefault("duplicate_replacements", {})
+                journal[operation] = {"state": "applied", "media_id": media_id, "created_at": now_iso(),
+                                      "before": before, "after": {k: copy.deepcopy(item[k]) for k in self._replacement_fields if k in item}}
+                try:
+                    self.save()
+                except Exception:
+                    item.clear(); item.update(old); journal.pop(operation, None)
+                    # Keep both files on a failed save. Never remove a possibly committed source.
+                    raise
+                # The durable retained copy now owns undo. Avoid keeping a second
+                # redundant original in media; leave older retained backups intact.
+                if old_path.is_relative_to(self.media_dir) and not any(m.get("stored_rel") == old["stored_rel"] for m in self.data["media"]):
+                    try:
+                        old_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass  # Windows may still have the old image open.
+                self._queue_image_thumbnail(destination, media_id, self.character(item["character_id"])["name"])
+                return self.duplicate_operation(operation, library_id)
+        finally:
+            temp.unlink(missing_ok=True)
+
+    def duplicate_undo(self, operation: str, library_id: str) -> dict[str, Any]:
+        with self.lock:
+            current = self.duplicate_operation(operation, library_id)
+            if current["state"] == "undone":
+                return current
+            if current["state"] != "applied":
+                raise ValueError("Replacement not found")
+            entry = self.data["duplicate_replacements"][operation]
+            item = self.media_item(entry["media_id"])
+            if not item or item.get("sha256") != entry["after"]["sha256"]:
+                raise ValueError("The library source changed again. Undo the newer replacement first.")
+            if self._hash_file(self.root / item["stored_rel"]) != entry["after"]["sha256"]:
+                raise ValueError("The library source changed on disk")
+            retained = self.root / entry["before"]["stored_rel"]
+            if self._hash_file(retained) != entry["before"]["sha256"]:
+                raise ValueError("The retained original is missing or changed")
+            if any(m["id"] != item["id"] and m.get("character_id") == item["character_id"] and m.get("sha256") == entry["before"]["sha256"] for m in self.data["media"]):
+                raise ValueError("The old source was imported again. Undo would create a duplicate.")
+            old = copy.deepcopy(item)
+            for key in self._replacement_fields:
+                item.pop(key, None)
+            item.update(copy.deepcopy(entry["before"])); item["thumb_rel"] = None
+            entry["state"] = "undone"
+            try:
+                self.save()
+            except Exception:
+                item.clear(); item.update(old); entry["state"] = "applied"
+                raise
+            self._queue_image_thumbnail(retained, item["id"], self.character(item["character_id"])["name"])
+            return self.duplicate_operation(operation, library_id)
 
     def character(self, character_id: str) -> dict[str, Any] | None:
         return next((c for c in self.data["characters"] if c["id"] == character_id), None)
@@ -2060,7 +2212,19 @@ class MediaHandler(BaseHTTPRequestHandler):
                     self._send_json(200, {"revision": self.store.revision})
                 return
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "standalone_library": True, "coordinated_updates": True, "set_preferences": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "set_preferences": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                return
+            if path == "/api/duplicate-review/catalog":
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._send_json(200, self.store.duplicate_catalog(query.get("character_id", [""])[0]))
+                return
+            if path == "/api/duplicate-review/item":
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._send_json(200, self.store.duplicate_item(query.get("media_id", [""])[0], query.get("library_id", [""])[0]))
+                return
+            if path == "/api/duplicate-review/operation":
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._send_json(200, self.store.duplicate_operation(query.get("operation", [""])[0], query.get("library_id", [""])[0]))
                 return
             if path == "/api/diagnostics/last-import":
                 payload = dict(self.store.last_import_debug) if self.store.last_import_debug else {"state": "none"}
@@ -2104,6 +2268,16 @@ class MediaHandler(BaseHTTPRequestHandler):
             return
         try:
             path = urllib.parse.urlparse(self.path).path
+            if path == "/api/duplicate-review/replace":
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                field = lambda key: query.get(key, [""])[0]
+                self._send_json(200, self.store.duplicate_replace(self._read_raw(256 * 1024 * 1024), field("name"),
+                    field("media_id"), field("expected_sha"), field("operation"), field("library_id")))
+                return
+            if path == "/api/duplicate-review/undo":
+                body = self._read_json()
+                self._send_json(200, self.store.duplicate_undo(str(body.get("operation", "")), str(body.get("library_id", ""))))
+                return
             if path == "/api/ui-update/check":
                 body = self._read_json()
                 self._send_json(200, self.server.ui_updates.check(body.get("force") is True))
