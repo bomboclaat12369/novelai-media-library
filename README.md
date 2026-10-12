@@ -80,3 +80,14 @@ Undo restores source fields while preserving later metadata edits and rejects
 conflicting source changes. Retained originals are not automatically purged.
 
 This is a runtime-only release; the NovelAI and standalone UI remains 2.8.71.
+
+## Set workflow improvements (UI 2.8.72 / companion 2.7.37)
+
+Standalone image viewers have a bottom-right fullscreen icon. NovelAI's existing
+image-click fullscreen behavior is unchanged. Set assignment uses visible live
+search results and up to eight cached preview thumbnails of the selected Set.
+Rapid Review assignment starts with no checked files and offers Select all and
+Unselect all. Set searches are remembered per character for the browser session;
+Recently updated sorts by the latest Set edit, cover/favorite change or membership
+change. Assigning from Purgatory clears that status; uncategorized files remain
+Set-only and categorized files also return to main Images/Videos.

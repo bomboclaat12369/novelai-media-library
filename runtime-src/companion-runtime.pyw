@@ -1333,7 +1333,11 @@ class LibraryStore:
                 self._detach_set_members(character_id, members)
             for media_id in members:
                 media = self.media_item(media_id)
-                if kind == "set" and not preserve_placement and media and not media.get("categories"):
+                if media and media.get("in_purgatory"):
+                    media["in_purgatory"] = False
+                    media["in_review"] = False
+                    media["in_videos" if media.get("media_type") == "video" else "in_all"] = bool(media.get("categories"))
+                elif kind == "set" and not preserve_placement and media and not media.get("categories"):
                     media["in_videos" if media.get("media_type") == "video" else "in_all"] = False
             cover = str(cover_media_id or "")
             if cover not in members:
@@ -1371,6 +1375,7 @@ class LibraryStore:
             if favorite is not None and not isinstance(favorite, bool):
                 raise ValueError("Invalid set favorite")
             previous_members = list(item.get("media_ids", []))
+            previous_member_ids = set(previous_members)
             if add_media_ids is not None:
                 if media_ids is not None or not isinstance(add_media_ids, list):
                     raise ValueError("Invalid collection assignment")
@@ -1378,11 +1383,16 @@ class LibraryStore:
             members = previous_members if media_ids is None else self._validate_set_media(character_id, list(media_ids or []))
             if media_ids is None:
                 members = self._validate_set_media(character_id, members)
+            assigned_ids = set(add_media_ids) if add_media_ids is not None else (set(members) if media_ids is not None else set())
             if kind == "set":
                 self._detach_set_members(character_id, members, except_set_id=set_id)
-            for media_id in set(members) - set(previous_members):
+            for media_id in members:
                 media = self.media_item(media_id)
-                if kind == "set" and not preserve_placement and media and not media.get("categories"):
+                if media_id in assigned_ids and media and media.get("in_purgatory"):
+                    media["in_purgatory"] = False
+                    media["in_review"] = False
+                    media["in_videos" if media.get("media_type") == "video" else "in_all"] = bool(media.get("categories"))
+                elif media_id not in previous_member_ids and kind == "set" and not preserve_placement and media and not media.get("categories"):
                     media["in_videos" if media.get("media_type") == "video" else "in_all"] = False
             cover = str(item.get("cover_media_id", "")) if cover_media_id is None else str(cover_media_id or "")
             source = item.get("cover_source", "unknown")
