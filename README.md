@@ -91,3 +91,12 @@ Unselect all. Set searches are remembered per character for the browser session;
 Recently updated sorts by the latest Set edit, cover/favorite change or membership
 change. Assigning from Purgatory clears that status; uncategorized files remain
 Set-only and categorized files also return to main Images/Videos.
+
+## Duplicate Review coverage (companion 2.7.38 / checker 1.5.0)
+
+The catalog exposes saved Review and Purgatory status alongside Main and Sets,
+and supports All characters. Deleted originals retained for Undo stay excluded.
+Duplicate Review 1.5 adds cached crop/rotation/mirror alignment for manual review,
+scan coverage counts and explicit incomplete-scan notices. Unsaved browser
+import queues must be saved before the companion can compare them.
+The NovelAI and standalone interface remains 2.8.72.

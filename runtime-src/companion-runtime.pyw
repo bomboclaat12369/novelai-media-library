@@ -412,17 +412,22 @@ class LibraryStore:
             library_id = hashlib.sha256(str(self.db_path.resolve()).encode()).hexdigest()
             files = []
             if character_id:
-                if not self.character(character_id):
+                if character_id != "*" and not self.character(character_id):
                     raise ValueError("Choose an existing character")
                 for item in self.data["media"]:
-                    if item.get("character_id") != character_id or item.get("media_type") != "image":
+                    if (character_id != "*" and item.get("character_id") != character_id) or item.get("media_type") != "image":
                         continue
                     files.append({"id": item["id"], "path": str((self.root / item["stored_rel"]).resolve()),
                                   "sha": item["sha256"], "name": item.get("original_name", ""),
                                   "in_all": item.get("in_all", True),
+                                  "in_review": bool(item.get("in_review")),
+                                  "in_purgatory": bool(item.get("in_purgatory")),
+                                  "character_id": item["character_id"],
+                                  "character_name": (self.character(item["character_id"]) or {}).get("name", "Unknown"),
                                   "sets": [s["name"] for s in self.data.get("sets", []) if item["id"] in s.get("media_ids", [])]})
             return {"library_id": library_id, "root": str(self.root.resolve()), "revision": self.revision,
-                    "characters": [{"id": c["id"], "name": c["name"]} for c in self.data["characters"]], "files": files}
+                    "characters": [{"id": c["id"], "name": c["name"]} for c in self.data["characters"]],
+                    "coverage_version": 2, "files": files}
 
     def duplicate_operation(self, operation: str, library_id: str) -> dict[str, Any]:
         with self.lock:

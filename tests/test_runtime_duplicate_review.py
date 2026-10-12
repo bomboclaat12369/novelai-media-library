@@ -47,6 +47,20 @@ class DuplicateReplacementTests(unittest.TestCase):
         self.assertEqual(Path(restored['path']).read_bytes(),self.old)
         self.assertFalse(restored['item']['favorite']);self.assertEqual(self.store.set_item(self.group['id'])['media_ids'],[self.item['id']])
         self.assertEqual(self.store.duplicate_undo(self.op,self.lib)['state'],'undone')
+    def test_catalog_covers_review_purgatory_sets_and_all_characters(self):
+        review=self.store.import_bytes(image_bytes('yellow'),'review.png',self.owner['id'],[],{},'image/png')[0]
+        review.update(in_all=False,in_review=True)
+        purgatory=self.store.import_bytes(image_bytes('purple'),'purgatory.png',self.owner['id'],[],{},'image/png')[0]
+        purgatory.update(in_all=False,in_purgatory=True)
+        other=self.store.add_character('Other')
+        extra=self.store.import_bytes(image_bytes('pink'),'extra.png',other['id'],[],{},'image/png')[0]
+        scoped=self.store.duplicate_catalog(self.owner['id'])
+        self.assertEqual(scoped['coverage_version'],2)
+        self.assertEqual({f['id'] for f in scoped['files']},{self.item['id'],review['id'],purgatory['id']})
+        self.assertTrue(next(f for f in scoped['files'] if f['id']==review['id'])['in_review'])
+        self.assertTrue(next(f for f in scoped['files'] if f['id']==purgatory['id'])['in_purgatory'])
+        self.assertEqual(len(self.store.duplicate_catalog('*')['files']),4)
+
     def test_save_failure_keeps_source_and_does_not_commit_operation(self):
         before=copy.deepcopy(self.item)
         with patch.object(self.store,'save',side_effect=OSError('disk full')):
