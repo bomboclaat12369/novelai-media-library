@@ -600,6 +600,53 @@ class LibraryStore:
             self.save()
             return {"ok": True, "character_id": character_id}
 
+    def add_set_category(self, character_id: str, name: str) -> dict[str, Any]:
+        name = name.strip()
+        if not name:
+            raise ValueError("Set category name cannot be empty")
+        with self.lock:
+            owner = self.character(character_id)
+            if not owner:
+                raise KeyError("Character not found")
+            categories = owner.setdefault("set_categories", [])
+            for category in categories:
+                if category["name"].casefold() == name.casefold():
+                    return category
+            category = {"id": uuid.uuid4().hex, "name": name, "created_at": now_iso()}
+            categories.append(category)
+            self.save()
+            return category
+
+    def edit_set_category(self, category_id: str, name: str | None = None) -> dict[str, Any]:
+        with self.lock:
+            for owner in self.data["characters"]:
+                categories = owner.get("set_categories", [])
+                category = next((c for c in categories if c["id"] == category_id), None)
+                if category is None:
+                    continue
+                if name is None:
+                    owner["set_categories"] = [c for c in categories if c["id"] != category_id]
+                    for item in self.data.get("sets", []):
+                        if item.get("character_id") == owner["id"] and category_id in item.get("categories", []):
+                            item["categories"] = [c for c in item["categories"] if c != category_id]
+                            item["updated_at"] = now_iso()
+                else:
+                    name = name.strip()
+                    if not name:
+                        raise ValueError("Set category name cannot be empty")
+                    if any(c["id"] != category_id and c["name"].casefold() == name.casefold() for c in categories):
+                        raise ValueError("A Set category with that name already exists")
+                    category["name"] = name
+                self.save()
+                return category
+            raise KeyError("Set category not found")
+
+    def _validate_set_categories(self, character_id: str, categories: Any) -> list[str]:
+        valid = {c["id"] for c in (self.character(character_id) or {}).get("set_categories", [])}
+        if not isinstance(categories, list) or any(not isinstance(c, str) or c not in valid for c in categories):
+            raise ValueError("Choose Set categories belonging to this character")
+        return list(dict.fromkeys(categories))
+
     def add_category(self, character_id: str, name: str, media_type: str = "image") -> dict[str, Any]:
         name = name.strip()
         if not name:
@@ -1323,7 +1370,7 @@ class LibraryStore:
         suffix = max((int(m.group(1)) for n in names if (m := pattern.fullmatch(n))), default=0) + 1
         return f"{name} {suffix}"
 
-    def create_set(self, character_id: str, name: str, media_ids: list[Any], cover_media_id: Any = None, kind: str = "set", preserve_placement: bool = False, cover_source: Any = None) -> dict[str, Any]:
+    def create_set(self, character_id: str, name: str, media_ids: list[Any], cover_media_id: Any = None, kind: str = "set", preserve_placement: bool = False, cover_source: Any = None, categories: Any = None) -> dict[str, Any]:
         if kind != "set":
             raise ValueError("Only Sets are supported")
         name = str(name or "").strip()
@@ -1332,6 +1379,7 @@ class LibraryStore:
         with self.lock:
             if not self.character(character_id):
                 raise KeyError("Character not found")
+            categories = self._validate_set_categories(character_id, [] if categories is None else categories)
             name = self._unique_set_name(character_id, name)
             members = self._validate_set_media(character_id, list(media_ids or []))
             if kind == "set":
@@ -1354,6 +1402,7 @@ class LibraryStore:
                 "name": name,
                 "media_ids": members,
                 "kind": kind,
+                "categories": categories,
                 "cover_media_id": cover,
                 "cover_source": "manual" if cover_source == "manual" and str(cover_media_id or "") in members else "auto",
                 "favorite": False,
@@ -1364,7 +1413,7 @@ class LibraryStore:
             self.save()
             return item
 
-    def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None, cover_source: Any = None, favorite: Any = None) -> dict[str, Any]:
+    def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None, cover_source: Any = None, favorite: Any = None, categories: Any = None) -> dict[str, Any]:
         with self.lock:
             item = self.set_item(set_id)
             if not item:
@@ -1379,6 +1428,7 @@ class LibraryStore:
                 raise ValueError("Invalid cover source")
             if favorite is not None and not isinstance(favorite, bool):
                 raise ValueError("Invalid set favorite")
+            next_categories = item.get("categories", []) if categories is None else self._validate_set_categories(character_id, categories)
             previous_members = list(item.get("media_ids", []))
             previous_member_ids = set(previous_members)
             if add_media_ids is not None:
@@ -1408,6 +1458,7 @@ class LibraryStore:
                 source = cover_source
             elif cover_media_id is not None and (cover != item.get("cover_media_id") or media_ids is None):
                 source = "manual"
+            item["categories"] = next_categories
             item["cover_source"] = source
             if favorite is not None:
                 item["favorite"] = favorite
@@ -1845,7 +1896,7 @@ class StandaloneUI:
             raise ValueError("Standalone payload is too large")
         return data
 
-    def document(self) -> bytes:
+    def document(self, force: bool = False) -> bytes:
         with self.lock:
             cached_path = self.directory / "standalone.json"
             if self.cached is None and cached_path.exists():
@@ -1856,10 +1907,10 @@ class StandaloneUI:
                         self.cached = body
                 except Exception:
                     pass
-            if self.cached is not None and time.monotonic() - self.checked_at < 60:
+            if not force and self.cached is not None and time.monotonic() - self.checked_at < 60:
                 return self.cached
             try:
-                manifest = json.loads(self._download(self.BASE + "manifest.json", 256 * 1024, 8))
+                manifest = json.loads(self._download(self.BASE + "manifest.json?_=" + str(time.time_ns()), 256 * 1024, 8))
                 url, digest = manifest.get("standalone_url", ""), manifest.get("standalone_sha256", "")
                 if not re.fullmatch(r"[0-9a-f]{64}", digest):
                     raise ValueError("The standalone update is not available yet. Please retry shortly.")
@@ -1873,7 +1924,7 @@ class StandaloneUI:
                     os.replace(temp, cached_path)
                     self.cached = body
             except Exception:
-                if self.cached is None:
+                if force or self.cached is None:
                     raise
             self.checked_at = time.monotonic()
             return self.cached
@@ -2227,7 +2278,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     self._send_json(200, {"revision": self.store.revision})
                 return
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "set_preferences": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_preferences": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/duplicate-review/catalog":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -2293,6 +2344,22 @@ class MediaHandler(BaseHTTPRequestHandler):
                 body = self._read_json()
                 self._send_json(200, self.store.duplicate_undo(str(body.get("operation", "")), str(body.get("library_id", ""))))
                 return
+            if path == "/api/standalone/check":
+                body = self.server.standalone.document(force=True)
+                version = re.search(rb'data-nai-media-payload-version="([0-9.]+)"', body)
+                if not version:
+                    raise ValueError("Standalone version is missing")
+                self._send_json(200, {"version": version.group(1).decode("ascii")})
+                return
+            if path == "/api/set-categories":
+                body = self._read_json()
+                self._send_json(200, self.store.add_set_category(str(body.get("character_id", "")), str(body.get("name", ""))))
+                return
+            match = re.fullmatch(r"/api/set-categories/([0-9a-f]+)", path)
+            if match:
+                body = self._read_json()
+                self._send_json(200, self.store.edit_set_category(match.group(1), str(body.get("name", ""))))
+                return
             if path == "/api/ui-update/check":
                 body = self._read_json()
                 self._send_json(200, self.server.ui_updates.check(body.get("force") is True))
@@ -2356,6 +2423,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     str(body.get("kind", "set")),
                     bool(body.get("preserve_placement", False)),
                     body.get("cover_source"),
+                    body.get("categories"),
                 )
                 self._send_json(200, item)
                 return
@@ -2371,6 +2439,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     body.get("add_media_ids"),
                     body.get("cover_source"),
                     body.get("favorite"),
+                    body.get("categories"),
                 )
                 self._send_json(200, item)
                 return
@@ -2538,6 +2607,10 @@ class MediaHandler(BaseHTTPRequestHandler):
             if match:
                 result = self.store.delete_category(match.group(1))
                 self._send_json(200, result)
+                return
+            match = re.fullmatch(r"/api/set-categories/([0-9a-f]+)", path)
+            if match:
+                self._send_json(200, self.store.edit_set_category(match.group(1)))
                 return
             match = re.fullmatch(r"/api/sets/([0-9a-f]+)", path)
             if match:

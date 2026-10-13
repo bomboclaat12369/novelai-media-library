@@ -1,0 +1,68 @@
+// Independent updates: prepare once, then reload only the interface clicked.
+(() => {
+  'use strict';
+  const root=document.getElementById('nai-media-host')?.shadowRoot,status=root?.getElementById('status');
+  if(!status)return;
+  const standalone=document.documentElement.dataset.naiStandalone==='1';
+  const active=document.documentElement.dataset.naiMediaPayloadVersion||'2.8.73';
+  const base='https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/';
+  const row=document.createElement('div');row.id='naiUpdateStatus';
+  row.style.cssText='display:flex;align-items:center;gap:7px;padding:2px 12px 6px;color:#b9bdd8;font:10px system-ui;flex-wrap:wrap';
+  const label=document.createElement('span'),apply=document.createElement('button'),check=document.createElement('button');
+  apply.type=check.type='button';apply.textContent='Update';check.textContent='Check updates';
+  for(const button of [apply,check])button.style.cssText='font:10px system-ui;padding:3px 7px';
+  row.append(label,apply,check);status.insertAdjacentElement('afterend',row);
+  let ready='',working=false,message='',storyEdited=false;
+  const newer=(a,b)=>{const x=(a||'0.0.0').split('.').map(Number),y=(b||'0.0.0').split('.').map(Number);for(let i=0;i<3;i++)if(x[i]!==y[i])return x[i]>y[i];return false;};
+  const busy=()=>!!root.querySelector('#modalRoot:not(:empty),.naiCropWrap,.naiSetQueueWrap270,#lightRoot:not(:empty)');
+  function render(){
+    if(!standalone){
+      const cached=localStorage.getItem('nai-media-github-payload-version');
+      if(newer(cached,active)&&localStorage.getItem('nai-media-github-payload'))ready=cached;
+    }
+    const pending=newer(ready,active);
+    label.textContent=`v${active} active`+(pending?` · v${ready} available`:'')+(message?' · '+message:'')+(pending&&busy()?' · Close the editor to update':'');
+    apply.hidden=!pending;apply.disabled=working||busy();check.disabled=working;
+  }
+  function request(url,method='GET'){return new Promise((resolve,reject)=>GM_xmlhttpRequest({method,url,timeout:30000,naiBackground:true,
+    onload:r=>r.status>=200&&r.status<300?resolve(r.responseText):reject(Error(r.status===404?'Restart the companion to enable updates.':`Update check failed (${r.status})`)),
+    onerror:()=>reject(Error('Could not check updates. Try again.')),ontimeout:()=>reject(Error('Update check timed out. Try again.'))}));}
+  async function checkNow(){
+    if(working)return;working=true;message='Checking…';render();
+    try{
+      if(standalone){ready=JSON.parse(await request('http://127.0.0.1:8765/api/standalone/check','POST')).version;}
+      else{
+        const manifest=JSON.parse(await request(base+'manifest.json?_='+Date.now())),version=manifest.userscript_payload_version;
+        if(!/^\d+\.\d+\.\d+$/.test(version))throw Error('Invalid update manifest');
+        if(newer(version,active)&&version!==localStorage.getItem('nai-media-github-payload-version')){
+          const parts=manifest.userscript_parts;
+          if(!Array.isArray(parts)||!parts.length||parts.length>80||parts.some(p=>!p.startsWith(base+'payload/')))throw Error('Invalid update files');
+          message='Downloading update…';render();
+          const contents=new Array(parts.length);let index=0;
+          await Promise.all(Array.from({length:Math.min(6,parts.length)},async()=>{while(index<parts.length){const i=index++;contents[i]=await request(parts[i]);}}));
+          const code=contents.join(''),digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(code));
+          if([...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,'0')).join('')!==manifest.userscript_sha256)throw Error('Update verification failed; current version kept.');
+          localStorage.setItem('nai-media-github-payload',code);localStorage.setItem('nai-media-github-payload-version',version);
+        }
+        ready=version;
+      }
+      message=newer(ready,active)?'':'Up to date';
+      if(newer(ready,active))console.info(`[NovelAI Media] v${ready} available. Click Update to reload this interface.`);
+    }catch(error){message=error.message;}finally{working=false;render();}
+  }
+  if(!standalone)document.addEventListener('input',event=>{
+    if(!event.composedPath().includes(root.host)&&event.target?.closest?.('textarea,input,[contenteditable]'))storyEdited=true;
+  },true);
+  apply.onclick=()=>{
+    if(working||busy()||!newer(ready,active))return;
+    if(storyEdited&&!confirm('Save your NovelAI text first. Reload this page to apply the update?'))return;
+    location.reload();
+  };
+  check.onclick=checkNow;
+  root.getElementById('refreshBtn')?.addEventListener('click',checkNow);
+  new MutationObserver(render).observe(root.getElementById('modalRoot'),{childList:true});
+  new MutationObserver(render).observe(document.documentElement,{attributes:true,attributeFilter:['data-nai-media-update-ready']});
+  render();
+  // The NovelAI loader already checks on page refresh. Standalone has no loader.
+  if(standalone)checkNow();
+})();

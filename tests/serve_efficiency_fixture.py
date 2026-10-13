@@ -15,6 +15,12 @@ base_version=config['version']
 html=(root/f'payload/standalone-{base_version}.html').read_bytes()
 release={'version':base_version}
 class Handler(runtime['MediaHandler']):
+    def do_GET(self):
+        if self.path.startswith('/test/release/'):
+            body=download(self.server.standalone.BASE+self.path.split('/test/release/',1)[1])
+            self.send_response(200);self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body);return
+        super().do_GET()
+
     def do_POST(self):
         if self.path=='/test/advance':
             release['version']=self._read_json()['version'];self.server.ui_updates.checked_at=0
@@ -31,7 +37,7 @@ with tempfile.TemporaryDirectory() as directory:
     def download(url,*args):
         current_html=html.replace(f'data-nai-media-payload-version="{base_version}"'.encode(),f'data-nai-media-payload-version="{release["version"]}"'.encode())
         if 'manifest.json' in url:
-            return json.dumps({'userscript_payload_version':release['version'],'userscript_sha256':hashlib.sha256(code).hexdigest(),'userscript_parts':[server.standalone.BASE+'code'], 'standalone_url':server.standalone.BASE+'html','standalone_sha256':hashlib.sha256(current_html).hexdigest()}).encode()
+            return json.dumps({'userscript_payload_version':release['version'],'userscript_sha256':hashlib.sha256(code).hexdigest(),'userscript_parts':[server.standalone.BASE+'payload/code'], 'standalone_url':server.standalone.BASE+'html','standalone_sha256':hashlib.sha256(current_html).hexdigest()}).encode()
         return code if url.endswith('code') else current_html
     server.standalone._download=download
     print('READY',flush=True);server.serve_forever()

@@ -36,7 +36,7 @@ with tempfile.TemporaryDirectory(prefix='nai-standalone-') as directory:
     version=os.environ.get('NAI_UI_VERSION',json.loads((root/'release-userscript.json').read_text())['version'])
     html=(root/f'payload/standalone-{version}.html').read_bytes()
     manifest={'standalone_url':server.standalone.BASE+f'payload/standalone-{version}.html','standalone_sha256':hashlib.sha256(html).hexdigest()}
-    server.standalone._download=lambda url,*args:json.dumps(manifest).encode() if url.endswith('manifest.json') else html
+    server.standalone._download=lambda url,*args:json.dumps(manifest).encode() if 'manifest.json' in url else html
     # Exercise verified download, persistent offline fallback, and tamper rejection.
     assert server.standalone.document()==html
     offline=runtime['StandaloneUI'](store.root)
@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix='nai-standalone-') as directory:
     offline._download=fail
     assert offline.document()==html
     bad=runtime['StandaloneUI'](Path(directory)/'bad-cache')
-    bad._download=lambda url,*args:json.dumps(manifest).encode() if url.endswith('manifest.json') else b'bad'
+    bad._download=lambda url,*args:json.dumps(manifest).encode() if 'manifest.json' in url else b'bad'
     try:bad.document();raise AssertionError('invalid digest accepted')
     except ValueError:pass
     print(json.dumps({'ready':True,'character':c['id'],'images':[m['id'] for m in items],'video':video['id']}),flush=True)

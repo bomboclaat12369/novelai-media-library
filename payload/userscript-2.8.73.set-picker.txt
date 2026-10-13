@@ -1,0 +1,64 @@
+// Shared live Set search and bounded thumbnail previews for assignment dialogs.
+(() => {
+  const root=document.getElementById('nai-media-host')?.shadowRoot;
+  if(!root)return;
+  const style=document.createElement('style');
+  style.textContent=`
+    select.naiLiveSetResults{display:block;width:100%;height:132px!important;min-height:132px;padding:3px!important}
+    .naiLiveSetResults option{padding:5px 7px}
+    .naiSetPreview{min-height:24px;font:11px/1.4 system-ui}
+    .naiSetPreviewTitle{margin:5px 0;color:#ccc8ee;overflow-wrap:anywhere}
+    .naiSetPreviewGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+    .naiSetPreviewGrid img{width:100%;height:76px;object-fit:contain;background:#090b18;border-radius:4px}
+    .naiGroupAssign .naiSetPreviewGrid img{height:110px}
+    .naiSetQueueSide270 .naiSetPreviewGrid{grid-template-columns:repeat(2,minmax(0,1fr));max-height:240px;overflow:auto}
+    .naiSetQueueSide270 .naiSetPreviewGrid img{height:112px}
+  `;
+  root.appendChild(style);
+  const normalize=value=>String(value||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  root.naiMountSetPicker=({search,select,getSets,getLibrary,onChange=()=>{}})=>{
+    select.size=6;select.classList.add('naiLiveSetResults');
+    const preview=document.createElement('div');preview.className='naiSetPreview';select.after(preview);
+    const category=document.createElement('select');category.className='naiSetPickerCategory';category.setAttribute('aria-label','Filter Sets by category');category.style.cssText='width:100%;margin:5px 0';select.before(category);
+    let previewKey='';
+    function paintPreview(){
+      const set=getSets().find(s=>s.id===select.value),lib=getLibrary();
+      const key=set ? JSON.stringify([set.id,set.updated_at,set.cover_media_id,set.media_ids]) : '';
+      if(key===previewKey && preview.childNodes.length)return;
+      previewKey=key;preview.replaceChildren();
+      const title=document.createElement('div');title.className='naiSetPreviewTitle';preview.appendChild(title);
+      if(!set){title.textContent='Select a result to preview its images.';return;}
+      const ids=[...new Set([set.cover_media_id,...(set.media_ids||[])].filter(Boolean))];
+      const media=ids.map(id=>root.naiFindMedia(id,lib)).filter(Boolean);
+      const images=media.filter(m=>m.media_type==='image').length;
+      title.textContent=`${set.name} · ${images} images · ${media.length-images} videos`;
+      if(!media.length){title.textContent+=' · Empty set';return;}
+      const grid=document.createElement('div');grid.className='naiSetPreviewGrid';preview.appendChild(grid);
+      // Eight cached thumbnails are enough to identify a shoot; never load all originals.
+      for(const m of media.slice(0,8)){
+        const img=document.createElement('img');img.alt=m.original_name||'Set preview';img.title=(m.media_type==='video'?'Video · ':'')+(m.original_name||'');img.decoding='async';grid.appendChild(img);
+        root.naiLoadThumbnail(m.id,img);
+      }
+      if(media.length>8){const more=document.createElement('div');more.className='naiSetPreviewTitle';more.textContent=`Showing 8 of ${media.length} files`;preview.appendChild(more);}
+    }
+    function update(){
+      const previous=select.value,terms=normalize(search.value).trim().split(/\s+/).filter(Boolean);
+      const sets=getSets(),owner=sets[0]?.character_id||root.getElementById('characterSelect')?.value;
+      const categories=(getLibrary()?.characters||[]).find(c=>c.id===owner)?.set_categories||[];
+      const chosen=category.value;category.replaceChildren();
+      for(const [value,name] of [['','All Set categories'],['__none','Uncategorized Sets'],...categories.map(c=>[c.id,c.name])]){const o=document.createElement('option');o.value=value;o.textContent=name;category.append(o);}
+      category.value=[...category.options].some(o=>o.value===chosen)?chosen:'';
+      const matches=sets.filter(s=>(!category.value||(category.value==='__none'?!(s.categories||[]).length:(s.categories||[]).includes(category.value)))&&terms.every(term=>normalize(s.name).includes(term)));
+      select.replaceChildren();
+      const blank=document.createElement('option');blank.value='';blank.textContent=matches.length?'Choose a set…':'No matching sets';select.appendChild(blank);
+      for(const s of matches){const option=document.createElement('option');option.value=s.id;option.textContent=s.name;select.appendChild(option);}
+      select.value=matches.some(s=>s.id===previous)?previous:'';
+      paintPreview();onChange();
+    }
+    category.addEventListener('change',update);
+    search.addEventListener('input',update);
+    select.addEventListener('change',()=>{paintPreview();onChange();});
+    update();
+    return {update,select(id){select.value=id;paintPreview();onChange();}};
+  };
+})();

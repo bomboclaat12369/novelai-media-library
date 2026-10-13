@@ -62,7 +62,7 @@ Use the star on a set card or inside an open set to add it to **Favorite Sets**.
 
 An **Auto** badge marks an automatically chosen set thumbnail. Use the pin inside the set or Manage Sets to choose or confirm a cover. Older covers without provenance display **?** (Unconfirmed) until selected; their existing image is preserved. If a cover is removed, its automatic replacement receives the Auto badge.
 
-**Update** prepares both interfaces and reloads them after verification. An older status response can no longer cancel the activation. Open editors defer a reload; NovelAI text edited in that tab requires an explicit update there after saving.
+**Update** now reloads only the interface where it is clicked, using the update already downloaded during a check. Refreshing checks for updates; the available version is shown beside Update. There is no shared activation or cross-tab reload. Close an open editor before updating and save NovelAI text when prompted.
 
 ## Local Duplicate Review integration (companion 2.7.36)
 
@@ -100,3 +100,20 @@ Duplicate Review 1.5 adds cached crop/rotation/mirror alignment for manual revie
 scan coverage counts and explicit incomplete-scan notices. Unsaved browser
 import queues must be saved before the companion can compare them.
 The NovelAI and standalone interface remains 2.8.72.
+
+## Simple updates and Set categories (UI 2.8.73 / companion 2.7.39)
+
+Restart the companion once to load the new runtime, then refresh each interface.
+If NovelAI initially starts the older cached UI, let its background download finish
+and refresh once more to apply 2.8.73 without using the old Update button.
+
+- Interface updates are independent. Update uses the cached release immediately;
+  it no longer repeats preparation or waits for the other interface.
+- Sets have their own categories per character. In Manage Sets, create/rename/delete
+  categories, check the categories for a Set, and click Save set.
+- Filter Sets, Favorite Sets, Manage Sets, and assignment pickers by category or
+  Uncategorized Sets. Image/video categories and individual media are unchanged.
+- Deleting a Set category removes its assignments and keeps the Sets and files.
+
+Focused verification: category API validation/persistence, independent update
+checks and reloads, and browser checks of the changed flows in both interfaces.
