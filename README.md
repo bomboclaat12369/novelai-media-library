@@ -117,3 +117,22 @@ and refresh once more to apply 2.8.73 without using the old Update button.
 
 Focused verification: category API validation/persistence, independent update
 checks and reloads, and browser checks of the changed flows in both interfaces.
+
+## Library duplicate scan and explicit Set removal (UI 2.8.74 / companion 2.7.40)
+
+Local Duplicate Review 1.6.0 adds a library-only scan using live image records
+from every saved area. Choose All characters or a single character, review the
+matching copies, and keep/remove explicitly. Cleanup is atomic, hash-checked and
+retryable through the companion. Originals and metadata remain available for Undo;
+later conflicting changes block restoration instead of being overwritten.
+
+Set thumbnails now have Remove controls, and the selected media's membership
+row has Remove from Set. Both preserve the file and its metadata. Set-only media
+removed from its final Set returns to main Images/Videos, while Review/Purgatory
+placement stays intact. The Set editor's existing deselect-and-save path now
+explains removal and has the same placement behavior.
+
+Checker source: `duplicate-review/`. Packaged Windows app:
+`downloads/Local-Duplicate-Review-1.6.0.zip`. Quit the older checker, extract the
+new ZIP and launch its batch file. The checker retains its existing state in
+LocalAppData; its package is updated separately from the media-library UI.

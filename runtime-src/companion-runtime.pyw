@@ -256,6 +256,10 @@ class LibraryStore:
         for e in self.data.get("undo_history", []):
             if e["kind"] == "delete":
                 protected.update(e["media"].get(k) for k in ("stored_rel", "thumb_rel"))
+        for operation in self.data.get("duplicate_cleanups", {}).values():
+            if operation["state"] == "removed":
+                for record in operation["records"]:
+                    protected.update(record["media"].get(k) for k in ("stored_rel", "thumb_rel"))
         for e in expired:
             if e["kind"] != "delete":
                 continue
@@ -404,7 +408,7 @@ class LibraryStore:
 
     def public_library(self) -> dict[str, Any]:
         with self.lock:
-            return json.loads(json.dumps({**{k: v for k, v in self.data.items() if k not in ("undo_history", "duplicate_replacements")}, "revision": self.revision}))
+            return json.loads(json.dumps({**{k: v for k, v in self.data.items() if k not in ("undo_history", "duplicate_replacements", "duplicate_cleanups")}, "revision": self.revision}))
 
     def duplicate_catalog(self, character_id: str = "") -> dict[str, Any]:
         """Only live image records; filesystem leftovers are never reference images."""
@@ -420,6 +424,8 @@ class LibraryStore:
                     files.append({"id": item["id"], "path": str((self.root / item["stored_rel"]).resolve()),
                                   "sha": item["sha256"], "name": item.get("original_name", ""),
                                   "in_all": item.get("in_all", True),
+                                  "favorite": bool(item.get("favorite")), "featured": bool(item.get("featured")),
+                                  "categories": [c["name"] for c in (self.character(item["character_id"]) or {}).get("categories", []) if c["id"] in item.get("categories", [])],
                                   "in_review": bool(item.get("in_review")),
                                   "in_purgatory": bool(item.get("in_purgatory")),
                                   "character_id": item["character_id"],
@@ -427,7 +433,104 @@ class LibraryStore:
                                   "sets": [s["name"] for s in self.data.get("sets", []) if item["id"] in s.get("media_ids", [])]})
             return {"library_id": library_id, "root": str(self.root.resolve()), "revision": self.revision,
                     "characters": [{"id": c["id"], "name": c["name"]} for c in self.data["characters"]],
-                    "coverage_version": 2, "files": files}
+                    "coverage_version": 2, "library_cleanup": True, "files": files}
+
+    def duplicate_cleanup_status(self, operation: str, library_id: str) -> dict[str, Any]:
+        with self.lock:
+            if library_id != self.duplicate_catalog()["library_id"]:
+                raise ValueError("The active library changed. Connect and scan again.")
+            entry = self.data.get("duplicate_cleanups", {}).get(operation)
+            return {"operation": operation, "state": entry["state"] if entry else "missing"}
+
+    def duplicate_cleanup(self, operation: str, library_id: str, selection: Any) -> dict[str, Any]:
+        """Atomic metadata removal. Retain originals and snapshots for durable Undo."""
+        if not re.fullmatch(r"[0-9a-f]{32}", operation):
+            raise ValueError("Invalid library cleanup operation")
+        with self.lock:
+            status = self.duplicate_cleanup_status(operation, library_id)
+            if status["state"] != "missing":
+                if self.data["duplicate_cleanups"][operation]["selection"] != selection:
+                    raise ValueError("Cleanup operation does not match its original selection")
+                return status
+            if not isinstance(selection, list) or not 1 <= len(selection) <= 500:
+                raise ValueError("Choose between 1 and 500 library copies to remove")
+            if any(not isinstance(pair, dict) or not isinstance(pair.get("target"), str) or not isinstance(pair.get("keeper"), str) for pair in selection):
+                raise ValueError("Invalid library cleanup selection")
+            targets = {pair["target"] for pair in selection}
+            if len(targets) != len(selection) or any(pair["keeper"] in targets for pair in selection):
+                raise ValueError("Keep at least one copy; a keeper cannot also be removed")
+            checked = set()
+            for pair in selection:
+                for role in ("target", "keeper"):
+                    media = self.media_item(pair[role])
+                    expected = pair.get(role + "_sha")
+                    if not media or media.get("media_type") != "image" or media.get("sha256") != expected:
+                        raise ValueError("A selected library image changed or was removed. Scan again.")
+                    if media["id"] not in checked:
+                        path, _ = self.media_path(media["id"])
+                        if self._hash_file(path) != expected:
+                            raise ValueError("A selected original changed on disk. Scan again.")
+                        checked.add(media["id"])
+            before_media, before_sets = self.data["media"], self.data.get("sets", [])
+            records = [{"index": i, "media": copy.deepcopy(m)} for i, m in enumerate(before_media) if m["id"] in targets]
+            changes, next_sets = [], []
+            for item in before_sets:
+                if not targets.intersection(item.get("media_ids", [])):
+                    next_sets.append(item)
+                    continue
+                updated = copy.deepcopy(item)
+                updated["media_ids"] = [mid for mid in item["media_ids"] if mid not in targets]
+                if updated.get("cover_media_id") not in updated["media_ids"]:
+                    updated["cover_media_id"] = next(iter(updated["media_ids"]), None)
+                    updated["cover_source"] = "auto"
+                updated["updated_at"] = now_iso()
+                changes.append({"id": item["id"], "before": copy.deepcopy(item), "after": copy.deepcopy(updated)})
+                next_sets.append(updated)
+            history = self.data.setdefault("duplicate_cleanups", {})
+            history[operation] = {"state": "removed", "selection": copy.deepcopy(selection), "records": records, "sets": changes}
+            self.data["media"] = [m for m in before_media if m["id"] not in targets]
+            self.data["sets"] = next_sets
+            try:
+                self.save()
+            except Exception:
+                self.data["media"], self.data["sets"] = before_media, before_sets
+                history.pop(operation, None)
+                raise
+            return self.duplicate_cleanup_status(operation, library_id)
+
+    def duplicate_cleanup_undo(self, operation: str, library_id: str) -> dict[str, Any]:
+        with self.lock:
+            status = self.duplicate_cleanup_status(operation, library_id)
+            if status["state"] in ("missing", "restored"):
+                return status
+            entry = self.data["duplicate_cleanups"][operation]
+            for record in entry["records"]:
+                media = record["media"]
+                if self.media_item(media["id"]) or not self.character(media["character_id"]):
+                    raise ValueError("The original character is missing or the image ID already exists")
+                path = self.root / media["stored_rel"]
+                if not path.is_file() or self._hash_file(path) != media["sha256"]:
+                    raise ValueError("A retained original is missing or changed; nothing was restored")
+                if self._validate_categories(media["character_id"], media.get("categories", []), media.get("media_type", "image")) != media.get("categories", []):
+                    raise ValueError("A category needed by this image no longer exists")
+            for change in entry["sets"]:
+                if self.set_item(change["id"]) != change["after"]:
+                    raise ValueError("A Set changed after cleanup. Undo its later changes before restoring this batch.")
+            before_media, before_sets = self.data["media"], self.data.get("sets", [])
+            restored = list(before_media)
+            for record in sorted(entry["records"], key=lambda r: r["index"]):
+                restored.insert(min(record["index"], len(restored)), copy.deepcopy(record["media"]))
+            restores = {change["id"]: copy.deepcopy(change["before"]) for change in entry["sets"]}
+            self.data["media"] = restored
+            self.data["sets"] = [restores.get(item["id"], item) for item in before_sets]
+            entry["state"] = "restored"
+            try:
+                self.save()
+            except Exception:
+                self.data["media"], self.data["sets"] = before_media, before_sets
+                entry["state"] = "removed"
+                raise
+            return self.duplicate_cleanup_status(operation, library_id)
 
     def duplicate_operation(self, operation: str, library_id: str) -> dict[str, Any]:
         with self.lock:
@@ -1413,7 +1516,7 @@ class LibraryStore:
             self.save()
             return item
 
-    def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None, cover_source: Any = None, favorite: Any = None, categories: Any = None) -> dict[str, Any]:
+    def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None, cover_source: Any = None, favorite: Any = None, categories: Any = None, remove_media_ids: Any = None) -> dict[str, Any]:
         with self.lock:
             item = self.set_item(set_id)
             if not item:
@@ -1431,6 +1534,10 @@ class LibraryStore:
             next_categories = item.get("categories", []) if categories is None else self._validate_set_categories(character_id, categories)
             previous_members = list(item.get("media_ids", []))
             previous_member_ids = set(previous_members)
+            if remove_media_ids is not None:
+                if media_ids is not None or add_media_ids is not None or not isinstance(remove_media_ids, list) or any(not isinstance(mid, str) for mid in remove_media_ids):
+                    raise ValueError("Invalid Set removal")
+                media_ids = [mid for mid in previous_members if mid not in remove_media_ids]
             if add_media_ids is not None:
                 if media_ids is not None or not isinstance(add_media_ids, list):
                     raise ValueError("Invalid collection assignment")
@@ -1439,6 +1546,8 @@ class LibraryStore:
             if media_ids is None:
                 members = self._validate_set_media(character_id, members)
             assigned_ids = set(add_media_ids) if add_media_ids is not None else (set(members) if media_ids is not None else set())
+            if remove_media_ids is not None:
+                assigned_ids = set()
             if kind == "set":
                 self._detach_set_members(character_id, members, except_set_id=set_id)
             for media_id in members:
@@ -1466,8 +1575,15 @@ class LibraryStore:
             item["media_ids"] = members
             item["cover_media_id"] = cover
             item["updated_at"] = now_iso()
+            self._release_set_members(previous_member_ids - set(members))
             self.save()
             return item
+
+    def _release_set_members(self, media_ids) -> None:
+        for media_id in media_ids:
+            media = self.media_item(media_id)
+            if media and not media.get("in_review") and not media.get("in_purgatory") and not any(media_id in s.get("media_ids", []) for s in self.data.get("sets", [])):
+                media["in_videos" if media.get("media_type") == "video" else "in_all"] = True
 
     def delete_set(self, set_id: str) -> dict[str, Any]:
         with self.lock:
@@ -1475,6 +1591,7 @@ class LibraryStore:
             if not item:
                 raise KeyError("Set not found")
             self.data["sets"] = [s for s in self.data.get("sets", []) if s.get("id") != set_id]
+            self._release_set_members(item.get("media_ids", []))
             self.save()
             return {"ok": True, "set_id": set_id}
 
@@ -2278,7 +2395,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     self._send_json(200, {"revision": self.store.revision})
                 return
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_preferences": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/duplicate-review/catalog":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -2343,6 +2460,17 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/duplicate-review/undo":
                 body = self._read_json()
                 self._send_json(200, self.store.duplicate_undo(str(body.get("operation", "")), str(body.get("library_id", ""))))
+                return
+            if path in {"/api/duplicate-review/cleanup", "/api/duplicate-review/cleanup-status", "/api/duplicate-review/cleanup-undo"}:
+                body = self._read_json()
+                args = (str(body.get("operation", "")), str(body.get("library_id", "")))
+                if path.endswith("cleanup-status"):
+                    result = self.store.duplicate_cleanup_status(*args)
+                elif path.endswith("cleanup-undo"):
+                    result = self.store.duplicate_cleanup_undo(*args)
+                else:
+                    result = self.store.duplicate_cleanup(*args, body.get("selection"))
+                self._send_json(200, result)
                 return
             if path == "/api/standalone/check":
                 body = self.server.standalone.document(force=True)
@@ -2440,6 +2568,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     body.get("cover_source"),
                     body.get("favorite"),
                     body.get("categories"),
+                    body.get("remove_media_ids"),
                 )
                 self._send_json(200, item)
                 return
