@@ -37,6 +37,10 @@ with tempfile.TemporaryDirectory(prefix='nai-standalone-') as directory:
         first=store.create_set(c['id'],'Overlap One',[items[4]['id']],preserve_placement=True)
         second=store.create_set(c['id'],'Overlap Two',[],preserve_placement=True)
         second['media_ids']=[items[4]['id']];second['cover_media_id']=items[4]['id']
+    if os.environ.get('NAI_FIXTURE_SCROLL_SETS'):
+        for i in range(80):
+            store.create_set(c['id'],f'Scroll Set {i:03d}',[],preserve_placement=True)
+        store.create_set(c['id'],'Large Set',[m['id'] for m in store.data['media'] if m['original_name'].startswith('Grid ')],preserve_placement=True)
     store.save()
     server=runtime['MediaHTTPServer'](('127.0.0.1',8765),store)
     version=os.environ.get('NAI_UI_VERSION',json.loads((root/'release-userscript.json').read_text())['version'])

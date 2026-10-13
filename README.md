@@ -175,3 +175,21 @@ persistence, source verification, and failed-save protection.
 Restart the companion and refresh both interfaces. Focused backend and Chromium
 browser checks cover the changed organization and placement flows in standalone and
 NovelAI; Edge's native Saved info popup still needs confirmation on the user's PC.
+
+## Classic Set thumbnails and stable navigation (UI 2.8.77)
+
+- Restored the earlier full-thumbnail Set cards: the extra category strip and Edit
+  button are removed. Rename, Categories, and Edit contents remain inside open Sets.
+- The toolbar **Sets** button opens a searchable management menu with those same
+  actions, New Set, and category management. The **Sets** category still browses
+  thumbnails. Bulk category assignment remains under Select Sets in that browser.
+- Editing preserves the thumbnail scroll position, including within large Sets.
+  Back from an open Set restores the previous Set-list position. Grid refreshes no
+  longer briefly switch to ordinary media or lose scroll while replacing tiles.
+- The main search defaults to Set names; typing searches Sets directly. Choose
+  **Files** beside it for filename searches. Category navigation defaults back to
+  Sets search without carrying a filename filter into the next view.
+- Add to Set and Set-management dialogs focus their search/name field on opening.
+
+Focused browser checks passed in NovelAI and standalone, including long grids and
+edit/return scroll preservation. Refresh the interfaces; companion 2.7.42 is unchanged.
