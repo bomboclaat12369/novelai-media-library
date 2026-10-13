@@ -23,7 +23,7 @@ from PIL import Image, ImageOps
 from library_bridge import LibraryClient
 import crop_match
 
-VERSION = '1.6.0'
+VERSION = '1.6.1'
 ALGORITHM = 1
 QUARANTINE = '_Duplicate_Review_Quarantine'
 EXTENSIONS = {'.jpg', '.jpeg', '.jpe', '.jfif', '.png', '.webp', '.bmp', '.tif', '.tiff', '.avif', '.gif'}
@@ -714,10 +714,12 @@ class Engine:
         pending = db.execute("SELECT operation FROM replacements WHERE state NOT IN ('complete','undone','cancelled')").fetchall()
         if any(r['operation'] != batch for r in pending):
             raise ValueError('Resume or undo the unfinished replacement before moving other copies.')
-        self.validate(survivor)
+        # Only explicit whole-group quarantine may proceed without a keeper.
+        if survivor is not None:
+            self.validate(survivor)
         source = self.validate(target)
         config = self.config()
-        if target['reference'] or any(inside(source, canonical(p)) for p in config['reference']):
+        if target['reference'] or target.get('library') or any(inside(source, canonical(p)) for p in config['reference']):
             raise ValueError('Reference folders are protected and cannot be moved.')
         root = canonical(target['root'])
         if not inside(source, root) or root not in [canonical(p) for p in config['incoming']]:
@@ -1159,6 +1161,45 @@ class Engine:
             self.exact_plan = None
             self.invalidate_groups()
             return {'message':'Keep choice saved. No files moved.'}
+
+    def quarantine_group(self, group_id, revision):
+        """Explicitly discard every incoming copy in this group, with batch Undo."""
+        with self.lock:
+            if self.config().get('scan_kind') == 'library':
+                raise ValueError('Quarantine all incoming is only available for incoming folder scans.')
+            files = self._group_for_change(group_id, revision)
+            targets = [r for r in files if not r['reference'] and not r.get('library')]
+            if not targets:
+                raise ValueError('This group has no incoming images to quarantine.')
+            self.exact_plan = None
+            self.cancel.clear()
+            self.status.update(running=True, phase='Moving all incoming copies in group', done=0, total=len(targets))
+            self.thread = threading.Thread(target=self._run_quarantine_group, args=(targets, uuid.uuid4().hex), daemon=True)
+            self.thread.start()
+            return {'message': f'Moving all {len(targets)} incoming images in this group to quarantine. Undo restores the batch.'}
+
+    def _run_quarantine_group(self, targets, batch):
+        moved, failed = 0, 0
+        try:
+            for index, approved in enumerate(targets):
+                if self.cancel.is_set():
+                    break
+                try:
+                    with self.lock, self.db() as db:
+                        target = self.record(approved['id'])
+                        if target['sha'] != approved['sha'] or target['path'] != approved['path']:
+                            raise ValueError('The file no longer matches the approved group.')
+                        # Revalidate/hash each original and journal before renaming;
+                        # this explicit action deliberately includes manual Keep choices.
+                        self._move_records(db, target, None, batch=batch)
+                    moved += 1
+                except Exception as e:
+                    failed += 1
+                    self.error(approved['path'], str(e))
+                self.set_status(done=index+1)
+            self.set_status(phase=f'Moved {moved} incoming images to quarantine' + (f' · {failed} skipped (see issues)' if failed else '') + (' · Stopped' if self.cancel.is_set() else '') + ' · Undo last action restores this batch')
+        finally:
+            self.set_status(running=False)
 
     def finish_group(self, group_id, revision):
         with self.lock:

@@ -81,6 +81,19 @@ class LibraryOnlyTests(unittest.TestCase):
         self.engine.undo() # cancel the pending, unapplied operation
         self.assertEqual(self.engine.view()['stats']['pending_cleanups'],0)
 
+    def test_quarantine_group_protects_library_and_rejects_library_only(self):
+        group=self.engine.groups()['groups'][0]
+        self.engine.quarantine_group(group['id'],self.engine.revision);self.engine.thread.join(20)
+        self.assertFalse(self.new.exists())
+        self.assertIsNotNone(self.store.media_item(self.item['id']))
+        self.assertTrue((self.store.root/self.item['stored_rel']).exists())
+        self.engine.undo();self.engine.thread.join(20)
+        self.assertTrue(self.new.exists())
+        group,records,second,third=self.prepare_library()
+        with self.assertRaisesRegex(ValueError,'only available for incoming'):
+            self.engine.quarantine_group(group['id'],self.engine.revision)
+        self.assertEqual(self.engine.view()['stats']['library_removed'],0)
+
     def test_normal_comparison_still_protects_library(self):
         group=self.engine.groups()['groups'][0];files=self.engine.groups(group['id'])['files']
         self.assertTrue(next(r for r in files if r['library'])['protected'])

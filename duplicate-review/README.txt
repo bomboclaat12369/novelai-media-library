@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.6.0
+LOCAL DUPLICATE REVIEW 1.6.1
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -13,6 +13,14 @@ The database is stored separately in %LOCALAPPDATA%\LocalDuplicateReview.
 Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
 Later launches, scans and image processing stay local; no cloud account or GPU.
+
+NEW IN 1.6.1: QUARANTINE A WHOLE INCOMING GROUP
+- Click Quarantine all incoming to move every incoming image in the displayed
+  group, including manual Keep choices. No keeper is required.
+- Imported library images and reference folders stay protected. This action is
+  only available in folder scans, not library-only cleanup.
+- Undo last action restores the whole batch, including after restarting.
+- Existing scans and matching caches carry over; no rescan is required.
 
 NEW IN 1.6.0: DUPLICATES WITHIN YOUR LIBRARY
 1. Restart the media companion to install runtime 2.7.40 or newer.

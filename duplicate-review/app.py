@@ -121,6 +121,8 @@ def make_server(engine, port=0, token=None):
                     result = engine.dismiss_group(int(body['group']), int(body['revision']))
                 elif path == '/api/group/keep':
                     result = engine.mark_keep(int(body['group']),int(body['id']),bool(body['keep']),int(body['revision']))
+                elif path == '/api/group/quarantine':
+                    result = engine.quarantine_group(int(body['group']),int(body['revision']))
                 elif path == '/api/group/finish':
                     result = engine.finish_group(int(body['group']),int(body['revision']))
                 elif path == '/api/group/split':

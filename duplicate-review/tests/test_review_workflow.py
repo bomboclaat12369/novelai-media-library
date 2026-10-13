@@ -42,6 +42,37 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.engine.groups()['groups'],[])
         self.engine.undo();self.engine.thread.join(20)
         self.assertEqual(self.engine.view()['stats']['moved'],0);self.assertTrue(all(Path(r['path']).exists() for r in files))
+    def test_quarantine_entire_group_and_undo_after_restart(self):
+        g,files=self.fixture()
+        self.engine.mark_keep(g['id'],files[0]['id'],True,self.engine.revision)
+        with self.assertRaisesRegex(ValueError,'review changed'):
+            self.engine.quarantine_group(g['id'],self.engine.revision-1)
+        self.engine.quarantine_group(g['id'],self.engine.revision);self.engine.thread.join(20)
+        self.assertFalse(self.engine.status['running'])
+        self.assertEqual(self.engine.view()['stats']['moved'],4)
+        self.assertTrue(all(not Path(r['path']).exists() for r in files))
+        self.assertEqual(self.engine.groups()['groups'],[])
+        self.engine=Engine(self.base/'state')
+        self.engine.undo();self.engine.thread.join(20)
+        self.assertEqual(self.engine.view()['stats']['moved'],0)
+        self.assertTrue(all(Path(r['path']).exists() for r in files))
+        self.assertEqual(self.engine.groups()['groups'][0]['count'],4)
+
+    def test_quarantine_preserves_reference_and_skips_changed_file(self):
+        g,files=self.fixture()
+        reference=self.base/'reference';reference.mkdir()
+        shutil.copyfile(self.source/'a.png',reference/'protected.png')
+        self.engine.start([str(self.source)],[str(reference)],'balanced');self.engine.thread.join(20)
+        g=self.engine.groups()['groups'][0]
+        changed=self.source/'b.png';changed.write_bytes(b'changed after scanning')
+        self.engine.quarantine_group(g['id'],self.engine.revision);self.engine.thread.join(20)
+        self.assertEqual(self.engine.view()['stats']['moved'],3)
+        self.assertEqual(changed.read_bytes(),b'changed after scanning')
+        self.assertTrue((reference/'protected.png').exists())
+        self.assertIn('1 skipped',self.engine.status['phase'])
+        self.engine.undo();self.engine.thread.join(20)
+        self.assertTrue(all(Path(r['path']).exists() for r in files))
+
     def test_automatic_selection_respects_manual_keep(self):
         g,files=self.fixture();chosen=next(r for r in files if Path(r['path']).name=='a-copy.png')
         self.engine.mark_keep(g['id'],chosen['id'],True,self.engine.revision)

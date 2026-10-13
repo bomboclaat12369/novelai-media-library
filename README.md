@@ -193,3 +193,14 @@ NovelAI; Edge's native Saved info popup still needs confirmation on the user's P
 
 Focused browser checks passed in NovelAI and standalone, including long grids and
 edit/return scroll preservation. Refresh the interfaces; companion 2.7.42 is unchanged.
+
+## Quarantine every incoming image in a group (Duplicate Review 1.6.1)
+
+**Quarantine all incoming** discards every incoming copy in the displayed review
+group, including manual Keep choices, without requiring a keeper. Imported library
+images and reference folders stay protected. Undo restores the batch, even after
+restarting. Existing scans and caches carry over; no rescan is required.
+
+Download `downloads/Local-Duplicate-Review-1.6.1.zip`, close the older checker,
+extract the ZIP and run its batch file. This checker update is separate from the
+media-library UI; no companion update is needed.
