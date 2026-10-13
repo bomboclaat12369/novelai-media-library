@@ -2,7 +2,7 @@
   "parts": [
     "payload/userscript-2.8.68.transport-start.txt",
     "payload/userscript-2.8.5.reset-state.txt",
-    "payload/userscript-2.8.75.part01.txt",
+    "payload/userscript-2.8.76.part01.txt",
     "payload/userscript-2.8.68.virtual-grid.txt",
     "payload/userscript-2.3.0.patch01.txt",
     "payload/userscript-2.3.0.patch02.txt",
@@ -18,8 +18,8 @@
     "payload/userscript-2.4.7.patch01.txt",
     "payload/userscript-2.8.57.video-labels.txt",
     "payload/userscript-2.8.73.set-picker.txt",
-    "payload/userscript-2.8.75.sets.txt",
-    "payload/userscript-2.8.70.set-import.txt",
+    "payload/userscript-2.8.76.sets.txt",
+    "payload/userscript-2.8.76.set-import.txt",
     "payload/userscript-2.8.8.crop-bridge.txt",
     "payload/userscript-2.8.4.drag-safety.txt",
     "payload/userscript-2.8.51.thumbnail-picker.txt",
@@ -33,8 +33,9 @@
     "payload/userscript-2.8.66.filters.txt",
     "payload/userscript-2.8.72.standalone.txt",
     "payload/userscript-2.8.68.stats.txt",
+    "payload/userscript-2.8.76.search-fields.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 130,
-  "version": "2.8.75"
+  "release_build": 131,
+  "version": "2.8.76"
 }

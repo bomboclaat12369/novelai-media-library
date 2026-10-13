@@ -27,7 +27,9 @@ with tempfile.TemporaryDirectory(prefix='nai-standalone-') as directory:
     subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','color=c=navy:s=320x480:d=2','-c:v','libx264','-pix_fmt','yuv420p',str(video_path)],check=True)
     video,_=store.import_bytes(video_path.read_bytes(),'Video.mp4',c['id'],[],{'kind':'local'},'video/mp4')
     store.create_set(c['id'],'Mixed set',[items[0]['id'],video['id']],preserve_placement=True)
-    for i,m in enumerate(items):m['created_at']=f'2020-01-01T00:00:{i:02d}Z'
+    for i,m in enumerate(items):
+        m['created_at']=f'2020-01-01T00:00:{i:02d}Z'
+        m['main_added_at']=m['created_at']
     for i in range(int(os.environ.get('NAI_FIXTURE_EXTRA_IMAGES','0'))):
         m=dict(items[i % len(items)]);m['id']=uuid.uuid4().hex;m['original_name']=f'Grid {i}.jpg';m['created_at']=f'2021-01-01T00:{i//60:02d}:{i%60:02d}Z'
         store.data['media'].append(m)

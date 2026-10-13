@@ -1,0 +1,20 @@
+// Keep browser saved-form suggestions out of library fields without changing browser settings.
+(() => {
+  const root=document.getElementById('nai-media-host')?.shadowRoot;
+  if(!root)return;
+  const empty=document.createElement('datalist');empty.id='naiEmptySearchSuggestions';root.append(empty);
+  function prepare(input){
+    if(!(input instanceof HTMLInputElement)||!['text','search'].includes(input.type))return;
+    input.autocomplete='off';
+    // A local empty suggestion list avoids invoking saved-form suggestions.
+    // App-owned live Set search results use their own popup and remain intact.
+    if(!input.hasAttribute('list'))input.setAttribute('list',empty.id);
+    input.form?.setAttribute('autocomplete','off');
+  }
+  function scan(node){if(node.nodeType!==1)return;prepare(node);node.querySelectorAll('input').forEach(prepare);}
+  root.querySelectorAll('input').forEach(prepare);
+  const observer=new MutationObserver(records=>{for(const record of records)for(const node of record.addedNodes)scan(node);});
+  observer.observe(root,{childList:true,subtree:true});
+  root.addEventListener('focusin',event=>prepare(event.target),true);
+  window.addEventListener('beforeunload',()=>observer.disconnect(),{once:true});
+})();

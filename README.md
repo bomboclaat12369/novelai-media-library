@@ -153,3 +153,25 @@ LocalAppData; its package is updated separately from the media-library UI.
 Restart the companion and refresh NovelAI/the standalone tab. Focused checks cover
 both interfaces, multi-Set removal, search scope, replacement/deletion ordering,
 persistence, source verification, and failed-save protection.
+
+## Easier Set organization and Main-entry sorting (UI 2.8.76 / companion 2.7.42)
+
+- The Sets screen keeps its thumbnail grid. Each card shows its name, categories,
+  media counts, and an **Edit** button for quick name/category changes.
+- **Manage categories** opens a separate category editor. **Select Sets → Categories**
+  adds or removes categories across selected Sets while preserving other assignments.
+- Open Sets have **Rename**, **Categories**, and **Edit contents** actions. The content
+  picker shows existing members and unassigned media by default. Enable **Show media
+  in other Sets** to include those files. Existing assignment behavior still moves
+  newly added media out of its previous Set; metadata-only edits preserve memberships.
+- Assigning a main category to an image or video in Purgatory now automatically
+  removes it from Purgatory. This transition and its Main-entry date are undoable.
+- **Date added to Main** sorting defaults to newest first. Main-entry dates are
+  recorded separately from import dates, including Review promotion and Set release.
+  Older records without a recorded Main-entry date fall back to their import date.
+- Library text/search fields suppress browser saved-form suggestions without changing
+  browser-wide settings. App-owned live Set search results remain available.
+
+Restart the companion and refresh both interfaces. Focused backend and Chromium
+browser checks cover the changed organization and placement flows in standalone and
+NovelAI; Edge's native Saved info popup still needs confirmation on the user's PC.

@@ -297,7 +297,18 @@ class LibraryStore:
             raise
         self._purge_undo_files(combined[:-20])
 
+    @staticmethod
+    def _in_main(media: dict[str, Any]) -> bool:
+        return not media.get("in_review") and not media.get("in_purgatory") and bool(
+            media.get("categories") or media.get("in_videos" if media.get("media_type") == "video" else "in_all", True))
+
+    def _stamp_main_entry(self, media: dict[str, Any], was_in_main: bool) -> None:
+        if not was_in_main and self._in_main(media):
+            media["main_added_at"] = now_iso()
+
     def _change_media(self, media: dict[str, Any], changes: dict[str, Any], label: str) -> dict[str, Any]:
+        if not self._in_main(media) and self._in_main({**media, **changes}):
+            changes = {**changes, "main_added_at": now_iso()}
         changes = {k: v for k, v in changes.items() if media.get(k) != v}
         if not changes:
             return media
@@ -1117,6 +1128,7 @@ class LibraryStore:
                 "height": height,
                 "created_at": now_iso(),
             }
+            item["main_added_at"] = item["created_at"]
             self._apply_resolution_flag(item)
             self.data["media"].append(item)
             self.save()
@@ -1527,12 +1539,15 @@ class LibraryStore:
                 self._detach_set_members(character_id, members)
             for media_id in members:
                 media = self.media_item(media_id)
+                was_in_main = self._in_main(media) if media else False
                 if media and media.get("in_purgatory"):
                     media["in_purgatory"] = False
                     media["in_review"] = False
                     media["in_videos" if media.get("media_type") == "video" else "in_all"] = bool(media.get("categories"))
                 elif kind == "set" and not preserve_placement and media and not media.get("categories"):
                     media["in_videos" if media.get("media_type") == "video" else "in_all"] = False
+                if media:
+                    self._stamp_main_entry(media, was_in_main)
             cover = str(cover_media_id or "")
             if cover not in members:
                 cover = members[0] if members else None
@@ -1586,16 +1601,19 @@ class LibraryStore:
             assigned_ids = set(add_media_ids) if add_media_ids is not None else (set(members) if media_ids is not None else set())
             if remove_media_ids is not None:
                 assigned_ids = set()
-            if kind == "set" and remove_media_ids is None:
-                self._detach_set_members(character_id, members, except_set_id=set_id)
+            if kind == "set" and assigned_ids:
+                self._detach_set_members(character_id, list(assigned_ids - previous_member_ids), except_set_id=set_id)
             for media_id in members:
                 media = self.media_item(media_id)
+                was_in_main = self._in_main(media) if media else False
                 if media_id in assigned_ids and media and media.get("in_purgatory"):
                     media["in_purgatory"] = False
                     media["in_review"] = False
                     media["in_videos" if media.get("media_type") == "video" else "in_all"] = bool(media.get("categories"))
                 elif media_id not in previous_member_ids and kind == "set" and not preserve_placement and media and not media.get("categories"):
                     media["in_videos" if media.get("media_type") == "video" else "in_all"] = False
+                if media:
+                    self._stamp_main_entry(media, was_in_main)
             cover = str(item.get("cover_media_id", "")) if cover_media_id is None else str(cover_media_id or "")
             source = item.get("cover_source", "unknown")
             if cover not in members:
@@ -1617,11 +1635,36 @@ class LibraryStore:
             self.save()
             return item
 
+    def bulk_set_categories(self, character_id: str, set_ids: Any, categories: Any, action: str) -> dict[str, Any]:
+        with self.lock:
+            if action not in ("add", "remove") or not isinstance(set_ids, list) or not set_ids or any(not isinstance(i, str) for i in set_ids):
+                raise ValueError("Choose Sets and an add/remove action")
+            categories = self._validate_set_categories(character_id, categories)
+            targets = [self.set_item(i) for i in dict.fromkeys(set_ids)]
+            if any(not s or s.get("character_id") != character_id for s in targets):
+                raise ValueError("All Sets must belong to this character")
+            before = [copy.deepcopy(s) for s in targets]
+            for item in targets:
+                current = item.get("categories", [])
+                updated = list(dict.fromkeys(current + categories)) if action == "add" else [c for c in current if c not in categories]
+                if updated != current:
+                    item["categories"] = updated
+                    item["updated_at"] = now_iso()
+            try:
+                self.save()
+            except Exception:
+                for item, old in zip(targets, before):
+                    item.clear(); item.update(old)
+                raise
+            return {"ok": True, "set_ids": list(dict.fromkeys(set_ids))}
+
     def _release_set_members(self, media_ids) -> None:
         for media_id in media_ids:
             media = self.media_item(media_id)
             if media and not media.get("in_review") and not media.get("in_purgatory") and not any(media_id in s.get("media_ids", []) for s in self.data.get("sets", [])):
+                was_in_main = self._in_main(media)
                 media["in_videos" if media.get("media_type") == "video" else "in_all"] = True
+                self._stamp_main_entry(media, was_in_main)
 
     def delete_set(self, set_id: str) -> dict[str, Any]:
         with self.lock:
@@ -1639,22 +1682,20 @@ class LibraryStore:
             if not m:
                 raise KeyError("Media not found")
             categories = self._validate_categories(m["character_id"], categories, m.get("media_type", "image"))
-            next_in_all = bool(m.get("in_all", True)) if in_all is None else bool(in_all)
-            if m.get("media_type") == "video":
-                next_in_videos = bool(m.get("in_videos", True)) if in_videos is None else bool(in_videos)
-                if in_videos is None and categories and not m.get("in_purgatory"):
-                    next_in_videos = True
-                changes = {"categories": categories, "in_all": False, "in_videos": next_in_videos}
-                if all(m.get(key, True if key == "in_videos" else None) == value for key, value in changes.items()):
-                    return m
-                return self._change_media(m, changes, "Change video categories / All")
-            elif in_all is None and categories and not next_in_all and not m.get("in_purgatory"):
-                # Keep the long-standing behavior: assigning a custom category to a
-                # set-only image also promotes it into the main All image view.
-                next_in_all = True
-            if m.get("categories") == categories and bool(m.get("in_all", True)) == next_in_all:
-                return m
-            return self._change_media(m, {"categories": categories, "in_all": next_in_all}, "Change categories / All")
+            video = m.get("media_type") == "video"
+            flag = "in_videos" if video else "in_all"
+            explicit = in_videos if video else in_all
+            next_main = bool(m.get(flag, True)) if explicit is None else bool(explicit)
+            changes = {"categories": categories, flag: next_main}
+            if video:
+                changes["in_all"] = False
+            if categories and explicit is None:
+                changes[flag] = True
+            # A category assignment or explicit Add to Main exits Purgatory,
+            # including clients that submit the old false placement flag.
+            if m.get("in_purgatory") and (categories or explicit is True):
+                changes.update({"in_purgatory": False, "in_review": False, flag: True})
+            return self._change_media(m, changes, "Change video categories / All" if video else "Change categories / All")
 
     def set_favorite(self, media_id: str, favorite: bool) -> dict[str, Any]:
         with self.lock:
@@ -1674,9 +1715,8 @@ class LibraryStore:
                 return m
             if in_review:
                 return self._change_media(m, {"in_review": True, "in_purgatory": False}, "Change Review status")
-            # Promotion is the moment an item enters the normal library. Date-imported
-            # sorting should therefore use this time rather than its earlier Review import.
-            return self._change_media(m, {"in_review": False, "in_purgatory": False, "in_all": m.get("media_type") != "video", "in_videos": True, "created_at": now_iso()}, "Promote from Review")
+            # Keep the original import date; _change_media records entry into Main.
+            return self._change_media(m, {"in_review": False, "in_purgatory": False, "in_all": m.get("media_type") != "video", "in_videos": True}, "Promote from Review")
 
     def set_purgatory(self, media_id: str, in_purgatory: bool) -> dict[str, Any]:
         with self.lock:
@@ -2578,6 +2618,10 @@ class MediaHandler(BaseHTTPRequestHandler):
             if match:
                 body = self._read_json()
                 self._send_json(200, self.store.rename_category(match.group(1), str(body.get("name", ""))))
+                return
+            if path == "/api/sets/categories-bulk":
+                body = self._read_json()
+                self._send_json(200, self.store.bulk_set_categories(str(body.get("character_id", "")), body.get("set_ids"), body.get("categories"), str(body.get("action", ""))))
                 return
             if path == "/api/sets":
                 body = self._read_json()
