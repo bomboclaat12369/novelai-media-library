@@ -136,3 +136,20 @@ Checker source: `duplicate-review/`. Packaged Windows app:
 `downloads/Local-Duplicate-Review-1.6.0.zip`. Quit the older checker, extract the
 new ZIP and launch its batch file. The checker retains its existing state in
 LocalAppData; its package is updated separately from the media-library UI.
+
+## Confirmed Set removal and replacement Undo (UI 2.8.75 / companion 2.7.41)
+
+- Thumbnail Remove controls are gone. Use **Remove from Set** below the viewer,
+  then confirm. Images in multiple Sets require choosing which Set to remove.
+  Other memberships and the media file stay intact.
+- Set searches are remembered inside Sets only. Leaving Sets for an image/video
+  category or another character clears the search in the normal media browser.
+- **Undo** now includes normal image source replacements. The previous original
+  stays available within the 20-action history, including across restarts.
+  Repeated replacements and subsequent deletions can be undone in order.
+  Relationships, placement, favorites, and crops remain attached to the image.
+- This cannot retroactively restore originals discarded by earlier versions.
+
+Restart the companion and refresh NovelAI/the standalone tab. Focused checks cover
+both interfaces, multi-Set removal, search scope, replacement/deletion ordering,
+persistence, source verification, and failed-save protection.

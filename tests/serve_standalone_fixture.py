@@ -31,6 +31,10 @@ with tempfile.TemporaryDirectory(prefix='nai-standalone-') as directory:
     for i in range(int(os.environ.get('NAI_FIXTURE_EXTRA_IMAGES','0'))):
         m=dict(items[i % len(items)]);m['id']=uuid.uuid4().hex;m['original_name']=f'Grid {i}.jpg';m['created_at']=f'2021-01-01T00:{i//60:02d}:{i%60:02d}Z'
         store.data['media'].append(m)
+    if os.environ.get('NAI_FIXTURE_MULTI_SET'):
+        first=store.create_set(c['id'],'Overlap One',[items[4]['id']],preserve_placement=True)
+        second=store.create_set(c['id'],'Overlap Two',[],preserve_placement=True)
+        second['media_ids']=[items[4]['id']];second['cover_media_id']=items[4]['id']
     store.save()
     server=runtime['MediaHTTPServer'](('127.0.0.1',8765),store)
     version=os.environ.get('NAI_UI_VERSION',json.loads((root/'release-userscript.json').read_text())['version'])

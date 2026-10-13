@@ -202,6 +202,7 @@ class RuntimeStabilityTests(unittest.TestCase):
         self.store.save()
         old_path = self.store.root / first['stored_rel']
         old_path.write_bytes(b'old-source')
+        first['sha256'] = self.store._hash_file(old_path)
         with patch.object(self.store, '_queue_image_thumbnail') as queue:
             status, replaced = self.post_multipart(
                 f"/api/media/{first['id']}/replace", 'higher-quality.png', b'new-source'
@@ -219,7 +220,8 @@ class RuntimeStabilityTests(unittest.TestCase):
         self.assertEqual(self.store.set_item(set_item['id'])['cover_media_id'], first['id'])
         self.assertEqual(replaced['original_name'], 'higher-quality.png')
         self.assertEqual((self.store.root / replaced['stored_rel']).read_bytes(), b'new-source')
-        self.assertFalse(old_path.exists())
+        self.assertTrue(old_path.exists())
+        self.assertEqual(self.store.undo_history()["entries"][0]["label"], "Replace image source")
         self.assertIsNone(replaced['thumb_rel'])
         queue.assert_called_once()
 

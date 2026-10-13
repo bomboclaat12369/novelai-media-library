@@ -250,21 +250,31 @@ class LibraryStore:
                 for e in reversed(entries)
             ]}
 
-    def _purge_undo_files(self, expired: list[dict[str, Any]]) -> None:
-        # Files remain in place while recoverable: deletion/undo never copies a video.
+    def _protected_media_files(self) -> set:
         protected = {m.get(k) for m in self.data["media"] for k in ("stored_rel", "thumb_rel")}
-        for e in self.data.get("undo_history", []):
-            if e["kind"] == "delete":
-                protected.update(e["media"].get(k) for k in ("stored_rel", "thumb_rel"))
+        for entry in self.data.get("undo_history", []):
+            if entry["kind"] == "delete":
+                protected.update(entry["media"].get(k) for k in ("stored_rel", "thumb_rel"))
+            elif entry["kind"] == "replace":
+                protected.update(entry[side].get("stored_rel") for side in ("before", "after"))
+        for operation in self.data.get("duplicate_replacements", {}).values():
+            protected.update(operation[side].get("stored_rel") for side in ("before", "after"))
         for operation in self.data.get("duplicate_cleanups", {}).values():
             if operation["state"] == "removed":
                 for record in operation["records"]:
                     protected.update(record["media"].get(k) for k in ("stored_rel", "thumb_rel"))
-        for e in expired:
-            if e["kind"] != "delete":
+        return protected
+
+    def _purge_undo_files(self, expired: list[dict[str, Any]]) -> None:
+        protected = self._protected_media_files()
+        for entry in expired:
+            if entry["kind"] == "delete":
+                paths = [entry["media"].get(k) for k in ("stored_rel", "thumb_rel")]
+            elif entry["kind"] == "replace":
+                paths = [entry[side].get("stored_rel") for side in ("before", "after")]
+            else:
                 continue
-            for k in ("stored_rel", "thumb_rel"):
-                rel = e["media"].get(k)
+            for rel in paths:
                 if not rel or rel in protected:
                     continue
                 path = (self.root / rel).resolve()
@@ -273,9 +283,7 @@ class LibraryStore:
                 try:
                     path.unlink(missing_ok=True)
                 except OSError:
-                    # A video may still be open on Windows. Never lose an otherwise
-                    # successful metadata write because an expired file is locked.
-                    pass
+                    pass  # Windows may still have the file open.
 
     def _save_undo(self, entry: dict[str, Any]) -> None:
         previous = self.data.get("undo_history", [])
@@ -350,6 +358,31 @@ class LibraryStore:
                     media.clear(); media.update(old)
                     self.data["undo_history"] = history
                     raise
+            elif entry["kind"] == "replace":
+                media = self.media_item(entry["media_id"])
+                if not media or media.get("sha256") != entry["after"]["sha256"]:
+                    raise ValueError("The image source changed again. Undo its newer replacement first.")
+                current = self.root / media["stored_rel"]
+                retained = self.root / entry["before"]["stored_rel"]
+                if not current.is_file() or self._hash_file(current) != entry["after"]["sha256"]:
+                    raise ValueError("The current image source is missing or changed on disk")
+                if not retained.is_file() or self._hash_file(retained) != entry["before"]["sha256"]:
+                    raise ValueError("The retained original is missing or changed; nothing was restored")
+                if any(m["id"] != media["id"] and m.get("character_id") == media["character_id"] and m.get("sha256") == entry["before"]["sha256"] for m in self.data["media"]):
+                    raise ValueError("The old source was imported again. Undo would create a duplicate.")
+                old = copy.deepcopy(media)
+                for key in self._replacement_fields:
+                    media.pop(key, None)
+                media.update(copy.deepcopy(entry["before"]))
+                media["thumb_rel"] = None
+                self.data["undo_history"] = history[:-1]
+                try:
+                    self.save()
+                except Exception:
+                    media.clear(); media.update(old)
+                    self.data["undo_history"] = history
+                    raise
+                self._purge_undo_files([entry])
             elif entry["kind"] == "delete":
                 media = copy.deepcopy(entry["media"])
                 if self.media_item(media["id"]) or not self.character(media["character_id"]):
@@ -380,10 +413,10 @@ class LibraryStore:
                     raise
             else:
                 raise ValueError("Unknown history action")
-            if entry["kind"] == "delete" and media.get("media_type") == "image" and not media.get("thumb_rel"):
+            if entry["kind"] in ("delete", "replace") and media.get("media_type") == "image" and not media.get("thumb_rel"):
                 owner = self.character(media["character_id"])
                 self._queue_image_thumbnail(self.root / media["stored_rel"], media["id"], owner["name"])
-            return {"ok": True, "media_id": entry["media_id"], "label": entry["label"], "item": copy.deepcopy(media)}
+            return {"ok": True, "media_id": entry["media_id"], "label": entry["label"], "kind": entry["kind"], "item": copy.deepcopy(media)}
 
     def clear_undo_history(self, expected_id: str) -> dict[str, Any]:
         with self.lock:
@@ -625,7 +658,7 @@ class LibraryStore:
                     raise
                 # The durable retained copy now owns undo. Avoid keeping a second
                 # redundant original in media; leave older retained backups intact.
-                if old_path.is_relative_to(self.media_dir) and not any(m.get("stored_rel") == old["stored_rel"] for m in self.data["media"]):
+                if old_path.is_relative_to(self.media_dir) and old["stored_rel"] not in self._protected_media_files():
                     try:
                         old_path.unlink(missing_ok=True)
                     except OSError:
@@ -1378,23 +1411,21 @@ class LibraryStore:
                 if not content_type.startswith("image/"):
                     raise ValueError("Only image files are supported for source replacement")
 
+                if sha == item.get("sha256"):
+                    return item
+                old_path = self.root / item["stored_rel"]
+                if not old_path.is_file() or self._hash_file(old_path) != item["sha256"]:
+                    raise ValueError("The current source is missing or changed. Replacement stopped to protect Undo.")
+                old = copy.deepcopy(item)
+                before = {k: copy.deepcopy(item[k]) for k in self._replacement_fields if k in item}
                 safe_name = safe_component(Path(original_name).name, f"image-{media_id}")
                 if not Path(safe_name).suffix:
                     safe_name += mimetypes.guess_extension(content_type) or ".img"
                 char_folder = self.media_dir / safe_component(owner["name"], "Character")
                 char_folder.mkdir(parents=True, exist_ok=True)
-                destination = char_folder / f"{media_id}_{safe_name}"
-                old_path = self.root / str(item.get("stored_rel") or "")
+                # Unique destinations also protect originals when names are identical.
+                destination = char_folder / f"{media_id}_{uuid.uuid4().hex}_{safe_name}"
                 os.replace(temp, destination)
-                if old_path.resolve() != destination.resolve():
-                    old_path.unlink(missing_ok=True)
-
-                old_thumb = item.get("thumb_rel")
-                if old_thumb:
-                    (self.root / str(old_thumb)).unlink(missing_ok=True)
-                thumb_folder = self.thumb_dir / safe_component(owner["name"], "Character")
-                for candidate in thumb_folder.glob(f"{media_id}.*"):
-                    candidate.unlink(missing_ok=True)
 
                 # Update only source-derived fields. All user/library relationships stay
                 # on the same object, so its list position and set membership are stable.
@@ -1417,8 +1448,15 @@ class LibraryStore:
                     except Exception:
                         pass
                 self._apply_resolution_flag(item)
-                self.data["undo_history"] = [e for e in self.data.get("undo_history", []) if e.get("media_id") != media_id]
-                self.save()
+                try:
+                    self._save_undo({"kind": "replace", "label": "Replace image source", "media_id": media_id,
+                                     "filename": str(old.get("original_name", "")) + " → " + safe_name,
+                                     "before": before,
+                                     "after": {k: copy.deepcopy(item[k]) for k in self._replacement_fields if k in item}})
+                except Exception:
+                    item.clear(); item.update(old)
+                    # Both source files remain if persistence fails.
+                    raise
                 result = item
             self._queue_image_thumbnail(destination, media_id, owner["name"])
             return result
@@ -1548,7 +1586,7 @@ class LibraryStore:
             assigned_ids = set(add_media_ids) if add_media_ids is not None else (set(members) if media_ids is not None else set())
             if remove_media_ids is not None:
                 assigned_ids = set()
-            if kind == "set":
+            if kind == "set" and remove_media_ids is None:
                 self._detach_set_members(character_id, members, except_set_id=set_id)
             for media_id in members:
                 media = self.media_item(media_id)
