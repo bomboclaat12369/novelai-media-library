@@ -293,3 +293,22 @@ A 44-image, 12-Set leave-one-out pilot ranked the correct Set first for 37 queri
 in the first three for 41, and in the first five for 43. Exact pixel copies were
 excluded; near-identical poses were not. These pilot results do not establish
 accuracy across a larger library or outfits with no existing Set.
+
+
+## Recent Set items and Main covers (UI 2.8.81 / companion 2.7.46)
+
+- **Recent Set items** is available beside Sets and in the Sets management menu.
+  It shows individual current Set members for the selected character, newest Set
+  additions first, with Images / Videos / both and **Only outside Main** filters.
+  Search Set names or filenames, open images in the existing viewer, or click a
+  tile's Set-name caption to open its Set. Saved Review members are included.
+- Set-entry dates are recorded on real additions, moves and re-additions. Renaming,
+  changing categories or covers, and saving existing membership do not bump them.
+  Earlier additions without a recorded date appear last; no dates are invented.
+- Clicking empty space below an open Set's contents follows its Back action.
+  Tile gaps, dragging, scrollbars and ordinary media categories do not navigate.
+- Automatic Set covers prefer an image also in Main and retain the **Auto** badge.
+  Manual covers and older covers with unknown provenance remain untouched. A
+  current eligible Main cover stays selected when more Main images are added.
+- Focused validation: membership-date persistence and cover precedence checks,
+  plus real-companion browser checks of both standalone and NovelAI interfaces.

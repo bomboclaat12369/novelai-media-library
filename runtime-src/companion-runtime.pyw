@@ -489,6 +489,8 @@ class LibraryStore:
         self.thumb_dir.mkdir(parents=True, exist_ok=True)
         self.backup_dir.mkdir(parents=True, exist_ok=True)
         self.data = self._load()
+        if self._refresh_auto_set_covers():
+            self.save()
         self._upload_lock = threading.RLock()
         self._uploads: dict[str, dict[str, Any]] = {}
         self._upload_dir = self.root / ".incoming" / "chunked-uploads"
@@ -636,8 +638,27 @@ class LibraryStore:
             os.fsync(f.fileno())
         os.replace(temp, self.db_path)
 
+    def _refresh_auto_set_covers(self) -> bool:
+        """Prefer Main images without changing manual or unknown legacy covers."""
+        media = {m["id"]: m for m in self.data.get("media", [])}
+        changed = False
+        for group in self.data.get("sets", []):
+            if group.get("cover_source") != "auto":
+                continue
+            members = [mid for mid in group.get("media_ids", []) if mid in media]
+            preferred = [mid for mid in members if media[mid].get("media_type") != "video" and self._in_main(media[mid])]
+            choices = preferred or members
+            cover = group.get("cover_media_id")
+            if cover not in choices:
+                next_cover = choices[0] if choices else None
+                if cover != next_cover:
+                    group["cover_media_id"] = next_cover
+                    changed = True
+        return changed
+
     def save(self) -> None:
         with self.lock:
+            self._refresh_auto_set_covers()
             self.data["updated_at"] = now_iso()
             self._write_atomic(self.data)
             self.revision = uuid.uuid4().hex
@@ -1938,6 +1959,7 @@ class LibraryStore:
             members = self._validate_set_media(character_id, list(media_ids or []))
             if kind == "set":
                 self._detach_set_members(character_id, members)
+            joined_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             for media_id in members:
                 media = self.media_item(media_id)
                 was_in_main = self._in_main(media) if media else False
@@ -1948,6 +1970,7 @@ class LibraryStore:
                 elif kind == "set" and not preserve_placement and media and not media.get("categories"):
                     media["in_videos" if media.get("media_type") == "video" else "in_all"] = False
                 if media:
+                    media["set_added_at"] = joined_at
                     self._stamp_main_entry(media, was_in_main)
             cover = str(cover_media_id or "")
             if cover not in members:
@@ -2004,6 +2027,7 @@ class LibraryStore:
                 assigned_ids = set()
             if kind == "set" and assigned_ids:
                 self._detach_set_members(character_id, list(assigned_ids - previous_member_ids), except_set_id=set_id)
+            joined_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             for media_id in members:
                 media = self.media_item(media_id)
                 was_in_main = self._in_main(media) if media else False
@@ -2014,6 +2038,8 @@ class LibraryStore:
                 elif media_id not in previous_member_ids and kind == "set" and not preserve_placement and media and not media.get("categories"):
                     media["in_videos" if media.get("media_type") == "video" else "in_all"] = False
                 if media:
+                    if media_id not in previous_member_ids:
+                        media["set_added_at"] = joined_at
                     self._stamp_main_entry(media, was_in_main)
             cover = str(item.get("cover_media_id", "")) if cover_media_id is None else str(cover_media_id or "")
             source = item.get("cover_source", "unknown")
