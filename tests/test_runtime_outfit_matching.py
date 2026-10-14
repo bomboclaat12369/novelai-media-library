@@ -81,3 +81,68 @@ class OutfitTests(unittest.TestCase):
         self.assertEqual(result['results'][0]['score'],1)
         calls=self.calls
         self.run_search(**body);self.assertEqual(self.calls,calls)
+
+    def scan(self):
+        job=self.m.start({'character_id':self.owner['id']},scan=True);self.m.thread.join(10)
+        result=self.m.status(job['id']);self.assertFalse(result['running']);self.assertNotIn('error',result);return result
+
+    def add_ungrouped(self):
+        self.main=self.store.import_bytes(b'ungrouped main','main.jpg',self.owner['id'],[],{},'image/jpeg')[0]
+        self.review=self.store.import_bytes(b'ungrouped review','review.jpg',self.owner['id'],[],{},'image/jpeg')[0];self.review['in_review']=True
+        self.purgatory=self.store.import_bytes(b'ungrouped purgatory','purgatory.jpg',self.owner['id'],[],{},'image/jpeg')[0];self.purgatory['in_purgatory']=True
+        self.foreign=self.store.import_bytes(b'other owner','foreign.jpg',self.other['id'],[],{},'image/jpeg')[0]
+        self.video=self.store.import_bytes(b'video','test.mp4',self.owner['id'],[],{},'video/mp4')[0]
+        self.store.save()
+
+    def test_individual_scope_and_explicit_creation(self):
+        self.add_ungrouped();before=self.store.db_path.read_bytes()
+        result=self.run_search(media_id=self.main['id'])
+        self.assertEqual({r['media_id'] for r in result['individual_results']},{self.review['id'],self.purgatory['id']})
+        self.assertEqual(before,self.store.db_path.read_bytes())
+        item=self.m.create_from_matches({'job_id':result['id'],'media_ids':[self.purgatory['id']],'query_media_id':self.main['id'],'name':'Matching outfit'})
+        self.assertEqual(set(item['media_ids']),{self.purgatory['id'],self.main['id']})
+        self.assertFalse(self.purgatory['in_purgatory']);self.assertFalse(self.purgatory['in_all'])
+        self.assertEqual(self.group['media_ids'],[self.a['id']])
+        with self.assertRaisesRegex(ValueError,'already belongs'):
+            self.m.create_from_matches({'job_id':result['id'],'media_ids':[self.purgatory['id']],'name':'Again'})
+
+    def test_scan_scope_cache_manual_assignment_and_stale_guard(self):
+        self.add_ungrouped();before=self.store.db_path.read_bytes();result=self.scan()
+        self.assertEqual({r['media_id'] for r in result['scan_results']},{self.main['id'],self.review['id'],self.purgatory['id']})
+        self.assertEqual(before,self.store.db_path.read_bytes());calls=self.calls
+        self.scan();self.assertEqual(self.calls,calls)
+        self.m.assign_scan({'job_id':result['id'],'media_id':self.purgatory['id'],'set_id':self.second['id']})
+        self.assertIn(self.purgatory['id'],self.second['media_ids']);self.assertFalse(self.purgatory['in_purgatory'])
+        self.assertEqual(self.m.status(result['id'])['assigned_ids'],[self.purgatory['id']])
+        with self.assertRaisesRegex(ValueError,'already belongs'):
+            self.m.assign_scan({'job_id':result['id'],'media_id':self.purgatory['id'],'set_id':self.group['id']})
+        self.store.update_set(self.group['id'],add_media_ids=[self.main['id']])
+        with self.assertRaisesRegex(ValueError,'already belongs'):
+            self.m.assign_scan({'job_id':result['id'],'media_id':self.main['id'],'set_id':self.second['id']})
+        (self.store.root/self.review['stored_rel']).write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError,'changed'):
+            self.m.assign_scan({'job_id':result['id'],'media_id':self.review['id'],'set_id':self.second['id']})
+
+    def test_draft_creation_and_crop_anchor(self):
+        self.add_ungrouped();count=len(self.store.data['media'])
+        result=self.run_search(image_base64=base64.b64encode(b'unsaved query').decode())
+        item=self.m.create_from_matches({'job_id':result['id'],'media_ids':[self.review['id']],'name':'For queued image'})
+        self.assertEqual(item['media_ids'],[self.review['id']]);self.assertEqual(len(self.store.data['media']),count)
+        result=self.run_search(image_base64=base64.b64encode(b'crop').decode(),source_media_id=self.main['id'])
+        self.assertNotIn(self.main['id'],[r['media_id'] for r in result['individual_results']])
+        item=self.m.create_from_matches({'job_id':result['id'],'query_media_id':self.main['id'],'media_ids':[self.purgatory['id']],'name':'Cropped search'})
+        self.assertEqual(set(item['media_ids']),{self.main['id'],self.purgatory['id']})
+
+    def test_weak_leads_and_stop_do_not_assign(self):
+        self.assertFalse(self.m._stronger_lead([{'score':.85},{'score':.70}]))
+        self.assertFalse(self.m._stronger_lead([{'score':.95},{'score':.94}]))
+        self.assertTrue(self.m._stronger_lead([{'score':.95},{'score':.85}]))
+        self.add_ungrouped();before=self.store.db_path.read_bytes();ready=threading.Event();release=threading.Event();prepare=self.m._prepare
+        def wait(ident):prepare(ident);ready.set();release.wait(5)
+        self.m._prepare=wait
+        job=self.m.start({'character_id':self.owner['id']},scan=True);self.assertTrue(ready.wait(5))
+        self.m.cancel(job['id']);release.set();self.m.thread.join(5)
+        result=self.m.status(job['id']);self.assertTrue(result['cancelled']);self.assertEqual(result['scan_results'],[])
+        self.assertEqual(before,self.store.db_path.read_bytes())
+        with self.assertRaisesRegex(ValueError,'complete search'):
+            self.m.assign_scan({'job_id':job['id'],'media_id':self.main['id'],'set_id':self.second['id']})

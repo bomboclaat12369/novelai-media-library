@@ -46,6 +46,12 @@ with tempfile.TemporaryDirectory(prefix='nai-standalone-') as directory:
         os.link(os.environ['NAI_OUTFIT_MODEL'],store.outfit_matcher.cache/'fashion-siglip.onnx')
         for i,m in enumerate(items[1:]):
             store.create_set(c['id'],f'Outfit {i+1}',[m['id']],preserve_placement=True)
+    ungrouped=[]
+    if os.environ.get('NAI_FIXTURE_OUTFIT_SCAN'):
+        for i in range(6):
+            item=dict(items[i]);item['id']=uuid.uuid4().hex;item['original_name']=f'Ungrouped {i+1}.jpg'
+            item['in_review']=i==1;item['in_purgatory']=i==2;item['in_all']=i not in (1,2)
+            store.data['media'].append(item);ungrouped.append(item['id'])
     store.save()
     server=runtime['MediaHTTPServer'](('127.0.0.1',8765),store)
     version=os.environ.get('NAI_UI_VERSION',json.loads((root/'release-userscript.json').read_text())['version'])
@@ -62,5 +68,5 @@ with tempfile.TemporaryDirectory(prefix='nai-standalone-') as directory:
     bad._download=lambda url,*args:json.dumps(manifest).encode() if 'manifest.json' in url else b'bad'
     try:bad.document();raise AssertionError('invalid digest accepted')
     except ValueError:pass
-    print(json.dumps({'ready':True,'character':c['id'],'images':[m['id'] for m in items],'video':video['id']}),flush=True)
+    print(json.dumps({'ready':True,'character':c['id'],'images':[m['id'] for m in items],'video':video['id'],'ungrouped':ungrouped}),flush=True)
     server.serve_forever()

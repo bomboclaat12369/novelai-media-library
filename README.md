@@ -205,6 +205,40 @@ Download `downloads/Local-Duplicate-Review-1.6.1.zip`, close the older checker,
 extract the ZIP and run its batch file. This checker update is separate from the
 media-library UI; no companion update is needed.
 
+## Individual outfit matching and Scan for Sets (UI 2.8.80 / companion 2.7.45)
+
+- **Find matching Sets** also shows this character's ungrouped images, including
+  Main, Review and Purgatory. The saved query itself is excluded from individual
+  results. Video files and other characters are excluded.
+- Select matching individual images and name a Set to create it explicitly. For
+  a saved query, the new Set includes that query. If the query already belongs to
+  a Set, selected individuals can be added to that Set instead. For an unsaved
+  upload, only selected library images are grouped; the upload stays in its queue
+  until **Assign selected files**. Existing placement rules still apply.
+- Open **Sets → Scan for Sets**, or use **Scan for Sets** in the Sets category.
+  Start the scan to compare all current non-set images against existing Sets.
+  Review the source beside Set examples, then explicitly click **Add to [Set]**.
+  Three alternatives are visible initially, with up to five available. There is
+  no automatic assignment or remembered rejection.
+- The default **Stronger leads** filter requires best cosine similarity >= 0.86
+  and a >= 0.025 gap over the next Set (when a second Set exists). These are
+  conservative review heuristics, not calibrated probabilities. **Other
+  possibilities** and **All remaining images** expose the remaining suggestions.
+  No strong lead does not establish that a matching Set is absent.
+- Indexing and orientation results reuse the existing local cache. The first scan
+  includes additional ungrouped images and their orientation checks, so it can
+  take substantially longer than a single-image search. Progress shows indexing
+  and comparison separately. Stop preserves cached work. Closing the dialog lets
+  the scan continue; reopening it in the same page retrieves the results. Scan
+  sessions expire after companion restart or enough newer searches; no user
+  decisions train or modify the model.
+- Scan approval checks the source and comparison files against the search
+  snapshot, validates character ownership and refuses to move an image that has
+  meanwhile joined another Set. Missing files or incomplete coverage are reported.
+- Focused checks cover placement/owner scope, cache reuse, cancellation, explicit
+  creation/assignment, stale results and both standalone/NovelAI browser flows.
+- Restart the companion, then refresh and apply the UI update.
+
 ## Outfit search and Set manager fixes (UI 2.8.79 / companion 2.7.44)
 
 - Matching result thumbnails now load after their cards are attached. Clicking a

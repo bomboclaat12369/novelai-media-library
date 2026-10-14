@@ -80,6 +80,7 @@ class OutfitMatcher:
         self.cache = store.root / '.outfit-search'
         self.lock = threading.RLock()
         self.jobs = {}
+        self.contexts = {}
         self.session = None
         self.thread = None
         self.vector_cache = {}
@@ -97,13 +98,16 @@ class OutfitMatcher:
         with self.lock:
             self.jobs[ident].update(fields)
 
-    def start(self, body):
+    def start(self, body, scan=False):
         owner = str(body.get('character_id', ''))
         media_id = str(body.get('media_id', ''))
         encoded = body.get('image_base64', '')
+        source_id = str(body.get('source_media_id', ''))
+        if scan and (media_id or encoded or source_id):
+            raise ValueError('Scan uses existing library images only.')
         if not isinstance(encoded, str) or len(encoded) > 6 * 1024 * 1024:
             raise ValueError('Search image is too large.')
-        if bool(media_id) == bool(encoded):
+        if not scan and bool(media_id) == bool(encoded):
             raise ValueError('Choose one image to find matching Sets.')
         query_bytes = base64.b64decode(encoded, validate=True) if encoded else None
         with self.lock, self.store.lock:
@@ -112,18 +116,20 @@ class OutfitMatcher:
             if not any(c['id'] == owner for c in self.store.data['characters']):
                 raise ValueError('Choose a character first.')
             media = {m['id']: m for m in self.store.data['media'] if m.get('character_id') == owner and m.get('media_type', 'image') == 'image'}
-            if media_id and media_id not in media:
+            if (media_id and media_id not in media) or (source_id and source_id not in media):
                 raise ValueError('Choose an image from this character.')
             sets = copy.deepcopy([s for s in self.store.data.get('sets', []) if s.get('character_id') == owner and s.get('kind', 'set') == 'set'])
-            ids = {mid for s in sets for mid in s.get('media_ids', []) if mid in media}
-            candidates = {mid: copy.deepcopy(media[mid]) for mid in ids}
+            candidates = copy.deepcopy(media)
             query = copy.deepcopy(media.get(media_id))
             revision = self.store.revision
             if len(self.jobs) >= 8:
-                self.jobs.pop(next(iter(self.jobs)))
+                expired = next(iter(self.jobs))
+                self.jobs.pop(expired)
+                self.contexts.pop(expired, None)
             ident = uuid.uuid4().hex
-            self.jobs[ident] = {'id': ident, 'running': True, 'phase': 'Preparing Set search', 'done': 0, 'total': len(candidates), 'results': [], 'issues': []}
-            self.thread = threading.Thread(target=self._run, args=(ident, sets, candidates, query, query_bytes, revision), daemon=True)
+            self.jobs[ident] = {'id': ident, 'character_id': owner, 'scan': scan, 'running': True, 'phase': 'Preparing Set scan' if scan else 'Preparing outfit search', 'done': 0, 'total': len(candidates), 'results': [], 'individual_results': [], 'scan_results': [], 'assigned_ids': [], 'issues': []}
+            self.contexts[ident] = {'owner': owner, 'media': candidates, 'stamps': {}, 'query_id': (media_id or source_id) if not scan else ''}
+            self.thread = threading.Thread(target=self._run, args=(ident, sets, candidates, query, query_bytes, revision, owner, scan), daemon=True)
             self.thread.start()
             return self.status(ident)
 
@@ -167,6 +173,7 @@ class OutfitMatcher:
                 digest = hashlib.sha256();received = 0
                 with urllib.request.urlopen(self.MODEL_URL, timeout=45) as response, temp.open('wb') as output:
                     while True:
+                        self._check_cancel(ident)
                         block = response.read(1024 * 1024)
                         if not block:
                             break
@@ -235,85 +242,231 @@ class OutfitMatcher:
         return (sorted((s['id'], s['name'], tuple(sorted(s.get('media_ids', [])))) for s in sets),
                 sorted((m['id'], m.get('stored_rel'), m.get('sha256')) for m in media.values()))
 
-    def _run(self, ident, sets, candidates, query, query_bytes, revision):
+    def cancel(self, ident):
+        with self.lock:
+            if ident not in self.jobs:
+                raise ValueError('Search expired.')
+            self.jobs[ident]['cancel_requested'] = True
+            return self.status(ident)
+
+    def _check_cancel(self, ident):
+        with self.lock:
+            if self.jobs[ident].get('cancel_requested'):
+                raise InterruptedError('Scan stopped. Cached image descriptions are kept.')
+
+    def _orientations(self, db, query, query_bytes, base_vector):
+        import io
+        source_key = self.vector_cache[query['id']][0] if query else hashlib.sha256(query_bytes).hexdigest()
+        key = 'query-orientation-v1:' + self.MODEL_SHA + ':' + source_key
+        row = db.execute('SELECT vector FROM embeddings WHERE key=?', (key,)).fetchone()
+        rotated = self.np.frombuffer(row[0], dtype=self.np.float32).copy() if row else self.np.array([])
+        if rotated.size != 1536 or not self.np.isfinite(rotated).all():
+            source = self.store.root / query['stored_rel'] if query else None
+            rotated = self.np.stack([self._encode(source if query else io.BytesIO(query_bytes), angle) for angle in (90, 270)])
+            if query:
+                stat = source.stat()
+                current_key = hashlib.sha256(json_bytes([self.MODEL_SHA, str(source.resolve()), query.get('sha256'), (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)])).hexdigest()
+                if current_key != source_key:
+                    raise ValueError('Image changed during matching. Retry search.')
+            db.execute('INSERT OR REPLACE INTO embeddings VALUES (?,?)', (key, rotated.astype(self.np.float32).tobytes()))
+        return self.np.vstack([base_vector, rotated.reshape(2, 768)])
+
+    @staticmethod
+    def _rank_sets(sets, scores):
+        results = []
+        for group in sets:
+            ranked = sorted([(scores[mid], mid) for mid in set(group.get('media_ids', [])) if mid in scores], reverse=True)
+            if ranked:
+                results.append({'set_id': group['id'], 'name': group['name'], 'score': ranked[0][0],
+                                'matches': [mid for score, mid in ranked[:3]], 'image_count': len(ranked)})
+        results.sort(key=lambda r: (-r['score'], r['name'].casefold(), r['set_id']))
+        return results
+
+    @staticmethod
+    def _stronger_lead(results):
+        # A conservative review filter, NOT a calibrated probability or absence test.
+        return bool(results and results[0]['score'] >= .86 and
+                    (len(results) == 1 or results[0]['score'] - results[1]['score'] >= .025))
+
+    @staticmethod
+    def _description(media):
+        return {'media_id': media['id'], 'name': media.get('original_name') or 'Library image',
+                'placement': 'Purgatory' if media.get('in_purgatory') else 'Review' if media.get('in_review') else 'Main' if media.get('in_all') else 'Library'}
+
+    def _stamp(self, media):
+        path = (self.store.root / media['stored_rel']).resolve()
+        if not path.is_relative_to(self.store.root.resolve()):
+            raise ValueError('Image is outside the library.')
+        stat = path.stat()
+        return (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+    def _run(self, ident, sets, candidates, query, query_bytes, revision, owner, scan=False):
         import io
         import sqlite3
         started = time.monotonic()
         self.cache_hits = self.encoded_images = 0
+        grouped = {mid for group in sets for mid in group.get('media_ids', [])}
+        ungrouped = [mid for mid in candidates if mid not in grouped]
         try:
-            if not candidates:
-                self.update(ident, phase='No images in this character’s Sets to compare', unsearchable_sets=len(sets), indexed_images=0)
+            if not candidates or (scan and (not ungrouped or not grouped.intersection(candidates))):
+                self.update(ident, phase='No ungrouped images to scan' if scan and not ungrouped else 'No existing Set images to compare' if scan else 'No library images to compare', unsearchable_sets=len(sets), indexed_images=0)
                 return
             self._prepare(ident)
-            self.update(ident, phase='Analyzing query outfit', done=0, total=0)
+            self._check_cancel(ident)
             issues = [];vectors = {}
+            self.vector_cache = {mid: value for mid, value in self.vector_cache.items() if mid in candidates}
             with sqlite3.connect(self.cache / 'embeddings.sqlite') as db:
                 db.execute('CREATE TABLE IF NOT EXISTS embeddings (key TEXT PRIMARY KEY, vector BLOB NOT NULL)')
-                if query:
-                    query_vector = self._vector(db, query)
-                else:
-                    query_key = hashlib.sha256(query_bytes).hexdigest()
-                    query_vector = self.query_cache.get(query_key)
-                    if query_vector is None:
-                        query_vector = self._encode(io.BytesIO(query_bytes))
-                        if len(self.query_cache) >= 16:
-                            self.query_cache.pop(next(iter(self.query_cache)))
-                        self.query_cache[query_key] = query_vector
-                # Sideways poses can hide the clothing signal. Compare upright and
-                # quarter-turn query views; persistent cache avoids repeat inference.
-                source_key = self.vector_cache[query['id']][0] if query else hashlib.sha256(query_bytes).hexdigest()
-                orientation_key = 'query-orientation-v1:' + self.MODEL_SHA + ':' + source_key
-                row = db.execute('SELECT vector FROM embeddings WHERE key=?', (orientation_key,)).fetchone()
-                rotated = self.np.frombuffer(row[0], dtype=self.np.float32).copy() if row else self.np.array([])
-                if rotated.size != 1536 or not self.np.isfinite(rotated).all():
-                    self.update(ident, phase='Checking outfit orientation', done=0, total=0)
-                    source = self.store.root / query['stored_rel'] if query else None
-                    rotated = self.np.stack([self._encode(source if query else io.BytesIO(query_bytes), angle) for angle in (90, 270)])
-                    if query:
-                        stat = source.stat()
-                        current_key = hashlib.sha256(json_bytes([self.MODEL_SHA, str(source.resolve()), query.get('sha256'), (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)])).hexdigest()
-                        if current_key != source_key:
-                            raise ValueError('Image changed during matching. Retry search.')
-                    db.execute('INSERT OR REPLACE INTO embeddings VALUES (?,?)', (orientation_key, rotated.astype(self.np.float32).tobytes()))
-                query_vectors = self.np.vstack([query_vector, rotated.reshape(2, 768)])
-                query_hits, query_encoded = self.cache_hits, self.encoded_images
-                # Remove deleted members from RAM; file stamps still invalidate edits.
-                self.vector_cache = {mid: value for mid, value in self.vector_cache.items() if mid in candidates or (query and mid == query['id'])}
-                self.update(ident, phase='Checking cached Set images; indexing new images', done=0, total=len(candidates))
+                self.update(ident, phase='Checking image cache; indexing new library images', done=0, total=len(candidates))
                 for index, (mid, media) in enumerate(candidates.items()):
+                    self._check_cancel(ident)
                     try:
-                        vectors[mid] = self._vector(db, media)
+                        before = self._stamp(media)
+                        vector = self._vector(db, media)
+                        if before != self._stamp(media):
+                            raise ValueError('Image changed during matching.')
+                        vectors[mid] = vector
+                        self.contexts[ident]['stamps'][mid] = before
                     except Exception as exc:
                         issues.append({'media_id': mid, 'message': str(exc)})
                     if (index + 1) % 32 == 0:
-                        db.commit()  # Checkpoint, without a disk flush for every image.
-                    self.update(ident, done=index+1, cached_images=self.cache_hits-query_hits, new_images=self.encoded_images-query_encoded)
-            self.update(ident, phase='Ranking matching Sets', done=len(candidates), total=len(candidates))
-            results = [];unsearchable = 0
-            for group in sets:
-                ranked = sorted([(float((query_vectors @ vectors[mid]).max()), mid) for mid in set(group.get('media_ids', [])) if mid in vectors], reverse=True)
-                if not ranked:
-                    unsearchable += 1
-                    continue
-                results.append({'set_id': group['id'], 'name': group['name'], 'score': ranked[0][0],
-                                'matches': [mid for score, mid in ranked[:3]], 'image_count': len(ranked)})
-            results.sort(key=lambda r: (-r['score'], r['name'].casefold(), r['set_id']))
+                        db.commit()
+                    self.update(ident, done=index+1, cached_images=self.cache_hits, new_images=self.encoded_images)
+                db.commit()
+                target_ids = [mid for mid in vectors if not scan or mid in grouped]
+                matrix = self.np.stack([vectors[mid] for mid in target_ids]) if target_ids else None
+                def compare(views):
+                    if matrix is None:
+                        return {}
+                    values = (views @ matrix.T).max(axis=0)
+                    return {mid: float(values[i]) for i, mid in enumerate(target_ids)}
+                results = [];individuals = [];scan_results = []
+                if scan:
+                    self.update(ident, phase='Checking non-set images against existing Sets', done=0, total=len(ungrouped))
+                    for index, mid in enumerate(ungrouped):
+                        self._check_cancel(ident)
+                        if mid in vectors:
+                            try:
+                                views = self._orientations(db, candidates[mid], None, vectors[mid])
+                                ranked = self._rank_sets(sets, compare(views))
+                                row = self._description(candidates[mid])
+                                row.update(results=ranked[:5], stronger=self._stronger_lead(ranked))
+                                scan_results.append(row)
+                            except Exception as exc:
+                                issues.append({'media_id': mid, 'message': str(exc)})
+                        if (index + 1) % 16 == 0:
+                            db.commit()
+                        self.update(ident, done=index+1)
+                    scan_results.sort(key=lambda row: (not row['stronger'], -(row['results'][0]['score'] if row['results'] else -1), row['media_id']))
+                else:
+                    self.update(ident, phase='Analyzing query outfit and orientation', done=0, total=0)
+                    if query:
+                        if query['id'] not in vectors:
+                            raise ValueError('Query image could not be read. Check that its original file exists.')
+                        base_vector = vectors[query['id']]
+                    else:
+                        key = hashlib.sha256(query_bytes).hexdigest()
+                        base_vector = self.query_cache.get(key)
+                        if base_vector is None:
+                            base_vector = self._encode(io.BytesIO(query_bytes))
+                            if len(self.query_cache) >= 16:
+                                self.query_cache.pop(next(iter(self.query_cache)))
+                            self.query_cache[key] = base_vector
+                    views = self._orientations(db, query, query_bytes, base_vector)
+                    scores = compare(views)
+                    results = self._rank_sets(sets, scores)
+                    for mid in ungrouped:
+                        if mid in scores and mid != self.contexts[ident]['query_id']:
+                            item = self._description(candidates[mid]);item['score'] = scores[mid];individuals.append(item)
+                    individuals.sort(key=lambda row: (-row['score'], row['media_id']))
+            self._check_cancel(ident)
             with self.store.lock:
                 if self.store.revision != revision:
-                    owner = sets[0]['character_id']
                     live_sets = [s for s in self.store.data.get('sets', []) if s.get('character_id') == owner and s.get('kind', 'set') == 'set']
-                    live_ids = {mid for s in live_sets for mid in s.get('media_ids', [])}
-                    live_media = {m['id']: m for m in self.store.data['media'] if m['id'] in live_ids and m.get('character_id') == owner and m.get('media_type', 'image') == 'image'}
-                    current_query = self.store.media_item(query['id']) if query else None
-                    if (self._catalog_signature(sets, candidates) != self._catalog_signature(live_sets, live_media)
-                            or (query and (not current_query or any(current_query.get(k) != query.get(k) for k in ('stored_rel', 'sha256', 'character_id'))))):
-                        raise ValueError('Set images changed during search. Click Find matching Sets again to refresh results.')
-            self.update(ident, results=results, issues=issues, unsearchable_sets=unsearchable, indexed_images=len(vectors),
-                        phase=f'Compared {len(vectors)} images across {len(results)} Sets')
+                    live_media = {m['id']: m for m in self.store.data['media'] if m.get('character_id') == owner and m.get('media_type', 'image') == 'image'}
+                    if self._catalog_signature(sets, candidates) != self._catalog_signature(live_sets, live_media):
+                        raise ValueError('Set images changed during search. Run the search again to refresh results.')
+            searchable_sets = sum(any(mid in vectors for mid in group.get('media_ids', [])) for group in sets)
+            self.update(ident, results=results, individual_results=individuals, scan_results=scan_results,
+                        query_sets=[{'set_id': group['id'], 'name': group['name']} for group in sets if self.contexts[ident]['query_id'] in group.get('media_ids', [])],
+                        issues=issues, unsearchable_sets=len(sets)-searchable_sets, indexed_images=len(vectors),
+                        phase=f"Scanned {len(scan_results)} non-set images against {searchable_sets} Sets" if scan else f"Compared {len(vectors)} library images across {searchable_sets} Sets and {len(individuals)} ungrouped images")
+        except InterruptedError as exc:
+            self.update(ident, cancelled=True, phase=str(exc))
         except Exception as exc:
             self.update(ident, error=str(exc), phase='Set search could not finish')
         finally:
             self.update(ident, running=False, elapsed_seconds=round(time.monotonic()-started, 2))
+
+    def _completed(self, ident):
+        job = self.jobs.get(ident)
+        if not job or job['running'] or job.get('error') or job.get('cancelled'):
+            raise ValueError('Run a complete search before assigning images.')
+        return job, self.contexts[ident]
+
+    def _validate_match_media(self, context, mid):
+        expected = context['media'].get(mid)
+        current = self.store.media_item(mid)
+        if (not current or not expected or any(current.get(k) != expected.get(k) for k in ('character_id', 'stored_rel', 'sha256', 'media_type'))
+                or self._stamp(current) != context['stamps'].get(mid)):
+            raise ValueError('A matching image changed or was removed. Search again before assigning it.')
+        return current
+
+    def assign_scan(self, body):
+        ident, mid, sid = str(body.get('job_id', '')), str(body.get('media_id', '')), str(body.get('set_id', ''))
+        with self.lock, self.store.lock:
+            job, context = self._completed(ident)
+            row = next((r for r in job['scan_results'] if r['media_id'] == mid), None)
+            result = next((r for r in row['results'] if r['set_id'] == sid), None) if row else None
+            target = self.store.set_item(sid)
+            if not job['scan'] or not result or not target or target.get('character_id') != context['owner']:
+                raise ValueError('This scan suggestion is no longer available.')
+            self._validate_match_media(context, mid)
+            if any(mid in s.get('media_ids', []) for s in self.store.data.get('sets', []) if s.get('kind', 'set') == 'set'):
+                raise ValueError('This image already belongs to a Set. It was not moved.')
+            for example in result['matches']:
+                self._validate_match_media(context, example)
+                if example not in target.get('media_ids', []):
+                    raise ValueError('The suggested Set changed. Search again before assigning.')
+            item = self.store.update_set(sid, add_media_ids=[mid], preserve_placement=True)
+            job['assigned_ids'].append(mid)
+            return copy.deepcopy(item)
+
+    def create_from_matches(self, body):
+        ident = str(body.get('job_id', ''))
+        ids = body.get('media_ids', [])
+        if not isinstance(ids, list) or not ids or any(not isinstance(mid, str) for mid in ids):
+            raise ValueError('Select matching library images first.')
+        ids = list(dict.fromkeys(ids))
+        with self.lock, self.store.lock:
+            job, context = self._completed(ident)
+            if job['scan']:
+                raise ValueError('Use individual image matching to create a Set.')
+            available = {r['media_id'] for r in job['individual_results']}
+            if not set(ids).issubset(available):
+                raise ValueError('Selected images are not in these search results.')
+            query_id = str(body.get('query_media_id', ''))
+            target_id = str(body.get('target_set_id', ''))
+            if query_id:
+                # Only the query used for this job may be included or anchor a Set.
+                if query_id != context.get('query_id'):
+                    raise ValueError('Query image does not match this search.')
+                self._validate_match_media(context, query_id)
+            memberships = [s for s in self.store.data.get('sets', []) if s.get('kind', 'set') == 'set']
+            for mid in ids:
+                self._validate_match_media(context, mid)
+                if any(mid in group.get('media_ids', []) for group in memberships):
+                    raise ValueError('A selected image already belongs to a Set. Search again; nothing was moved.')
+            if target_id:
+                target = self.store.set_item(target_id)
+                if not query_id or not target or target.get('character_id') != context['owner'] or query_id not in target.get('media_ids', []):
+                    raise ValueError('The query image is no longer in this Set.')
+                return copy.deepcopy(self.store.update_set(target_id, add_media_ids=ids, preserve_placement=True))
+            if query_id:
+                if any(query_id in group.get('media_ids', []) for group in memberships):
+                    raise ValueError('The query already belongs to a Set. Search again to add matches to that Set.')
+                ids.append(query_id)
+            return copy.deepcopy(self.store.create_set(context['owner'], str(body.get('name', '')), ids, preserve_placement=True))
 
 
 class LibraryStore:
@@ -2725,7 +2878,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     self._send_json(200, {"revision": self.store.revision})
                 return
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "outfit_matching": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "outfit_matching": True, "outfit_library_scan": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/duplicate-review/catalog":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -2870,6 +3023,18 @@ class MediaHandler(BaseHTTPRequestHandler):
             if match:
                 body = self._read_json()
                 self._send_json(200, self.store.rename_category(match.group(1), str(body.get("name", ""))))
+                return
+            if path == "/api/sets/scan":
+                self._send_json(200, self.store.outfit_matcher.start(self._read_json(), scan=True))
+                return
+            if path == "/api/sets/match-cancel":
+                self._send_json(200, self.store.outfit_matcher.cancel(str(self._read_json().get('id', ''))))
+                return
+            if path == "/api/sets/scan-assign":
+                self._send_json(200, self.store.outfit_matcher.assign_scan(self._read_json()))
+                return
+            if path == "/api/sets/matching-create":
+                self._send_json(200, self.store.outfit_matcher.create_from_matches(self._read_json()))
                 return
             if path == "/api/sets/find-matches":
                 self._send_json(200, self.store.outfit_matcher.start(self._read_json()))

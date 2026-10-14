@@ -1,0 +1,133 @@
+// On-demand, local outfit retrieval shared by both interfaces and import queues.
+(() => {
+  const root=document.getElementById('nai-media-host')?.shadowRoot;if(!root)return;
+  const style=document.createElement('style');style.textContent=`
+    .naiMatchWrap{position:fixed;inset:0;z-index:2147483647;background:#000b;display:grid;place-items:center;padding:20px;color:#eee;font:13px system-ui}
+    .naiMatchDialog{width:min(1220px,96vw);max-height:92vh;overflow:auto;background:#12162d;border:1px solid #58506c;border-radius:12px;padding:18px;box-sizing:border-box}
+    .naiMatchHead{display:flex;gap:12px;align-items:center;margin-bottom:12px}.naiMatchHead strong{flex:1;font-size:18px}
+    .naiMatchWrap button,.naiMatchWrap select{color:#eee;background:#292644;border:1px solid #605878;border-radius:6px;padding:8px;cursor:pointer}.naiMatchWrap button:disabled{opacity:.5;cursor:default}
+    .naiMatchQuery{display:flex;gap:14px;align-items:center;margin-bottom:12px}.naiMatchQuery img{width:105px;height:130px;object-fit:contain;background:#080a13}.naiMatchQuery select{max-width:55vw}
+    .naiMatchStatus{white-space:pre-wrap;margin:10px 0;color:#cec9e6}.naiMatchGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+    .naiMatchCard{min-width:0;background:#1c203a;border:1px solid #49445f;border-radius:8px;padding:9px}.naiMatchCard h3{font-size:13px;margin:0 0 8px;overflow-wrap:anywhere}
+    .naiMatchImages{display:grid;grid-template-columns:1fr 1fr;gap:4px}.naiMatchImages img{width:100%;height:90px;object-fit:contain;background:#090b18;cursor:zoom-in}.naiMatchImages img:first-child{grid-column:1/-1;height:205px}.naiMatchCard button{width:100%;margin-top:8px}
+    .naiMatchFoot{display:flex;gap:12px;align-items:center;margin-top:14px;flex-wrap:wrap}.naiMatchNote{font-size:12px;color:#aba6c3}.naiMatchZoom{position:fixed;inset:0;background:#000e;z-index:2147483647;display:flex;align-items:center;justify-content:center;cursor:zoom-out}.naiMatchZoom img{max-width:96vw;max-height:94vh;object-fit:contain}
+    .naiMatchCrop{position:fixed;inset:0;z-index:2147483647;background:#080a16f5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px;box-sizing:border-box}.naiMatchCrop canvas{max-width:90vw;max-height:70vh;width:auto;height:auto;touch-action:none;cursor:crosshair}.naiMatchCropTools{display:flex;gap:10px}.naiMatchWrap [hidden]{display:none!important}
+  `;root.append(style);
+  const request=(path,body)=>new Promise((resolve,reject)=>GM_xmlhttpRequest({method:body?'POST':'GET',url:'http://127.0.0.1:8765'+path,headers:{'Content-Type':'application/json',Origin:'https://novelai.net'},data:body?JSON.stringify(body):null,timeout:30000,onload:r=>{try{const v=JSON.parse(r.responseText);if(r.status<200||r.status>=300)throw Error(v.error||'Set search failed');resolve(v);}catch(e){reject(e);}},onerror:()=>reject(Error('Could not reach companion.')),ontimeout:()=>reject(Error('Companion did not respond. Retry search.'))}));
+  const make=(tag,cls,text)=>{const el=document.createElement(tag);if(cls)el.className=cls;if(text)el.textContent=text;return el;};
+  const originalBlob=id=>new Promise((resolve,reject)=>GM_xmlhttpRequest({method:'GET',url:'http://127.0.0.1:8765/api/media/'+encodeURIComponent(id)+'/original',responseType:'blob',timeout:120000,onload:r=>r.status===200?resolve(r.response):reject(Error('Original image is unavailable.')),onerror:()=>reject(Error('Could not load original image.')),ontimeout:()=>reject(Error('Image loading timed out.'))}));
+  async function draftImage(url){
+    const response=await fetch(url);if(!response.ok)throw Error('Temporary image is unavailable.');
+    const bitmap=await createImageBitmap(await response.blob());
+    try{const scale=Math.min(1,1024/Math.max(bitmap.width,bitmap.height)),canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);return canvas.toDataURL('image/jpeg',.94).split(',')[1];}finally{bitmap.close();}
+  }
+  root.naiOutfitRequest=request;
+  root.naiOutfitOriginal=originalBlob;
+  root.naiOutfitRefreshLibrary=async()=>{
+    const lib=await request('/api/library'),grid=root.getElementById('grid'),scroll=grid?.scrollTop||0;
+    root.naiRenderNormalGrid?.(lib);root.naiSetsApplyLibrary216?.(lib);root.naiRefreshSelectedMetadata?.();
+    requestAnimationFrame(()=>{if(grid)grid.scrollTop=scroll;});return lib;
+  };
+  root.naiFindMatchingSets=async({queries,onChoose,chooseLabel='Use this Set'}={})=>{
+    queries=(queries||[]).filter(q=>q?.media_type==='image');
+    if(!queries.length){alert('Choose an image to find matching Sets. Video-only matching is not available.');return;}
+    const wrap=make('div','naiMatchWrap'),dialog=make('div','naiMatchDialog');dialog.setAttribute('role','dialog');dialog.setAttribute('aria-label','Find matching Sets');dialog.setAttribute('aria-modal','true');wrap.append(dialog);
+    const head=make('div','naiMatchHead'),title=make('strong','', 'Find matching Sets'),close=make('button','','Close');head.append(title,close);dialog.append(head);
+    const queryRow=make('div','naiMatchQuery'),queryPreview=make('img'),queryControls=make('div'),select=make('select');select.setAttribute('aria-label','Image to match');
+    queries.forEach((q,i)=>{const o=make('option','',q.original_name||'Image '+(i+1));o.value=i;select.append(o);});
+    const run=make('button','','Find matching Sets'),crop=make('button','','Focus on outfit'),resetCrop=make('button','','Use full image');resetCrop.hidden=true;run.style.marginLeft='8px';crop.style.marginLeft='8px';queryControls.append(select,run,crop,resetCrop,make('p','naiMatchNote','Local outfit search. First use downloads a 355 MB model and indexes library images. Nothing is imported or assigned by searching.'));
+    queryRow.append(queryPreview,queryControls);dialog.append(queryRow);
+    const status=make('div','naiMatchStatus');status.setAttribute('role','status');const progress=make('progress');progress.style.width='100%';const grid=make('div','naiMatchGrid'),foot=make('div','naiMatchFoot'),more=make('button','','Show more matches');more.hidden=true;
+    foot.append(more,make('span','naiMatchNote','Closest suggestions, not confirmed matches. An absent result does not prove there is no existing Set.'));
+    const individualSection=make('section','naiIndividualSection'),individualTitle=make('h3','','Matching individual images'),individualNote=make('p','naiMatchNote','Images not in a Set, including Main, Review and Purgatory. Select the same outfit to group them.'),individualGrid=make('div','naiMatchGrid'),individualMore=make('button','','Show more individual images'),compose=make('div','naiMatchFoot'),setName=make('input'),targetSet=make('select'),create=make('button','','Create Set with selected images'),createNote=make('p','naiMatchNote');
+    setName.placeholder='New Set name';setName.setAttribute('aria-label','New matching Set name');targetSet.setAttribute('aria-label','Set for matching individual images');setName.style.cssText='padding:9px;min-width:220px;background:#161a32;color:white;border:1px solid #605878;border-radius:6px';
+    compose.append(setName,targetSet,create);individualSection.append(individualTitle,individualNote,individualGrid,individualMore,compose,createNote);individualSection.hidden=true;
+    dialog.append(status,progress,make('h3','','Matching Sets'),grid,foot,individualSection);root.append(wrap);
+    let closed=false,busy=false,results=[],shown=0,query=queries[0],cropData=null,cropLayer=null,previousFocus=root.activeElement,individualResults=[],individualShown=0,selectedIndividuals=new Set(),jobId=null,querySets=[];
+    const finish=()=>{closed=true;cropLayer?.remove();wrap.remove();document.removeEventListener('keydown',escape,true);if(previousFocus?.isConnected)previousFocus.focus({preventScroll:true});};
+    const escape=e=>{if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();if(cropLayer){cropLayer.remove();cropLayer=null;crop.focus();}else finish();}};document.addEventListener('keydown',escape,true);
+    close.onclick=finish;wrap.onclick=e=>{if(e.target===wrap)finish();};
+    function preview(){query=queries[Number(select.value)||0];queryPreview.removeAttribute('src');queryPreview.alt='Image being matched';if(query.url)queryPreview.src=query.url;else root.naiLoadThumbnail(query.id,queryPreview);}
+    select.onchange=()=>{individualSection.hidden=true;cropData=null;resetCrop.hidden=true;preview();grid.replaceChildren();results=[];more.hidden=true;status.textContent='Click Find matching Sets to search with this image.';};
+    function paintMore(){
+      for(const item of results.slice(shown,shown+5)){
+        const card=make('article','naiMatchCard');card.dataset.setId=item.set_id;card.append(make('h3','',item.name));
+        const images=make('div','naiMatchImages');for(const mid of item.matches){const img=make('img');img.alt='Matching image from '+item.name;img.loading='lazy';img.dataset.matchMid=mid;img.onclick=()=>{if(!img.currentSrc)return;const zoom=make('div','naiMatchZoom'),large=make('img');large.src=img.src;large.alt=img.alt;zoom.append(large);dialog.append(zoom);let originalUrl=null;zoom.onclick=()=>{zoom.remove();if(originalUrl)URL.revokeObjectURL(originalUrl);};originalBlob(mid).then(blob=>{if(zoom.isConnected){originalUrl=URL.createObjectURL(blob);large.src=originalUrl;large.onload=()=>{URL.revokeObjectURL(originalUrl);originalUrl=null;};}}).catch(()=>{});};images.append(img);}card.append(images);
+        card.append(make('div','naiMatchNote',item.image_count+' comparison images'));
+        const choose=make('button','',chooseLabel);choose.onclick=async()=>{choose.disabled=true;try{await onChoose(item.set_id,query);finish();}catch(e){status.textContent=e.message;choose.disabled=false;}};card.append(choose);grid.append(card);for(const img of images.children)root.naiLoadThumbnail(img.dataset.matchMid,img);
+      }
+      shown=Math.min(results.length,shown+5);more.hidden=shown>=results.length;more.textContent='Show more matches ('+shown+' / '+results.length+')';
+    }
+    more.onclick=paintMore;
+    function paintIndividuals(){
+      for(const item of individualResults.slice(individualShown,individualShown+5)){
+        const card=make('article','naiMatchCard naiIndividualCard');card.dataset.mediaId=item.media_id;
+        const label=make('label'),box=make('input'),caption=make('span','',item.name);box.type='checkbox';box.setAttribute('aria-label','Select '+item.name);label.append(box,caption);card.append(label);
+        const img=make('img');img.style.cssText='display:block;width:100%;height:210px;object-fit:contain;background:#090b18';img.alt=item.name;card.append(img,make('p','naiMatchNote',item.placement));individualGrid.append(card);root.naiLoadThumbnail(item.media_id,img);
+        box.onchange=()=>{if(box.checked)selectedIndividuals.add(item.media_id);else selectedIndividuals.delete(item.media_id);create.disabled=!selectedIndividuals.size;};
+        img.style.cursor='zoom-in';img.onclick=()=>{if(!img.currentSrc)return;const zoom=make('div','naiMatchZoom'),large=make('img');large.src=img.src;zoom.append(large);dialog.append(zoom);zoom.onclick=()=>zoom.remove();originalBlob(item.media_id).then(blob=>{if(zoom.isConnected){const url=URL.createObjectURL(blob);large.onload=large.onerror=()=>URL.revokeObjectURL(url);large.src=url;}}).catch(()=>{});};
+      }
+      individualShown=Math.min(individualResults.length,individualShown+5);individualMore.hidden=individualShown>=individualResults.length;individualMore.textContent='Show more individual images ('+individualShown+' / '+individualResults.length+')';
+    }
+    individualMore.onclick=paintIndividuals;
+    function showIndividuals(job){
+      individualResults=job.individual_results||[];individualShown=0;selectedIndividuals.clear();individualGrid.replaceChildren();querySets=job.query_sets||[];targetSet.replaceChildren();
+      for(const set of querySets){const option=make('option','',set.name);option.value=set.set_id;targetSet.append(option);}
+      targetSet.hidden=!querySets.length;setName.hidden=!!querySets.length;create.disabled=true;create.textContent=querySets.length?'Add selected images to this Set':'Create Set with selected images';
+      createNote.textContent=querySets.length?'Adds only the selected ungrouped images to the chosen Set.':query.url?'Creates a Set with the selected library images. Your upload stays in the queue until you click Assign selected files.':'Creates a Set containing the current image and the selected library images. Existing main placement is preserved; assigned Purgatory images leave Purgatory.';
+      individualSection.hidden=false;paintIndividuals();if(!individualResults.length)individualGrid.append(make('p','naiMatchNote','No other ungrouped images are available for this character.'));
+    }
+    create.onclick=async()=>{
+      if(busy||!selectedIndividuals.size)return;if(!querySets.length&&!setName.value.trim()){setName.focus();status.textContent='Enter a name for the new Set.';return;}
+      busy=true;const controls=[...wrap.querySelectorAll('button,input,select')];controls.forEach(el=>el.disabled=true);
+      try{
+        const body={job_id:jobId,media_ids:[...selectedIndividuals],name:setName.value.trim()};if(!query.url)body.query_media_id=query.id;if(querySets.length)body.target_set_id=targetSet.value;
+        const saved=await request('/api/sets/matching-create',body);await root.naiOutfitRefreshLibrary();await onChoose(saved.id,query);finish();
+      }catch(e){status.textContent=e.message;}finally{busy=false;controls.forEach(el=>el.disabled=false);}
+    };
+    resetCrop.onclick=()=>{cropData=null;resetCrop.hidden=true;preview();run.click();};
+    crop.onclick=async()=>{
+      if(busy)return;busy=true;crop.disabled=true;run.disabled=true;select.disabled=true;resetCrop.disabled=true;
+      try{
+        const source=query.url?await (await fetch(query.url)).blob():await originalBlob(query.id);
+        const bitmap=await createImageBitmap(source);
+        if(closed){bitmap.close();return;}
+        const layer=make('div','naiMatchCrop');cropLayer=layer;
+        const canvas=make('canvas'),scale=Math.min(1,1200/Math.max(bitmap.width,bitmap.height));canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);
+        const sourceCanvas=make('canvas');sourceCanvas.width=canvas.width;sourceCanvas.height=canvas.height;sourceCanvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
+        const ctx=canvas.getContext('2d');let start=null,rect=null;
+        const paint=()=>{ctx.drawImage(sourceCanvas,0,0);if(rect){ctx.fillStyle='#0008';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(sourceCanvas,...rect,...rect);ctx.strokeStyle='#b5a1ff';ctx.lineWidth=3;ctx.strokeRect(...rect);}};
+        const point=e=>{const b=canvas.getBoundingClientRect();return [Math.max(0,Math.min(canvas.width,(e.clientX-b.left)*canvas.width/b.width)),Math.max(0,Math.min(canvas.height,(e.clientY-b.top)*canvas.height/b.height))];};
+        canvas.onpointerdown=e=>{start=point(e);canvas.setPointerCapture(e.pointerId);};
+        canvas.onpointermove=e=>{if(!start)return;const end=point(e);rect=[Math.min(start[0],end[0]),Math.min(start[1],end[1]),Math.abs(end[0]-start[0]),Math.abs(end[1]-start[1])];apply.disabled=rect[2]<12||rect[3]<12;paint();};
+        canvas.onpointerup=canvas.onpointercancel=()=>{start=null;};
+        const controls=make('div','naiMatchCropTools'),apply=make('button','','Search this outfit'),cancel=make('button','','Cancel');apply.disabled=true;controls.append(apply,cancel);
+        const dismiss=()=>{layer.remove();cropLayer=null;crop.focus();};cancel.onclick=dismiss;
+        apply.onclick=()=>{if(!rect||apply.disabled)return;const out=make('canvas');out.width=Math.round(rect[2]);out.height=Math.round(rect[3]);out.getContext('2d').drawImage(sourceCanvas,...rect,0,0,out.width,out.height);cropData=out.toDataURL('image/jpeg',.94);queryPreview.src=cropData;resetCrop.hidden=false;dismiss();run.click();};
+        layer.append(make('strong','','Drag a box around the complete outfit'),make('span','naiMatchNote','Include the clothing details. This only changes the search; your image stays untouched.'),canvas,controls);dialog.append(layer);paint();cancel.focus();
+      }catch(e){status.textContent=e.message;}finally{busy=false;crop.disabled=false;run.disabled=false;select.disabled=false;resetCrop.disabled=false;}
+    };
+    run.onclick=async()=>{
+      if(busy)return;busy=true;run.disabled=true;select.disabled=true;crop.disabled=true;resetCrop.disabled=true;grid.replaceChildren();individualSection.hidden=true;more.hidden=true;progress.hidden=false;progress.removeAttribute('value');status.textContent='Preparing search…';
+      try{
+        const health=await request('/api/health');if(!health.outfit_library_scan)throw Error('Restart the companion to install outfit matching, then retry.');
+        const body={character_id:query.character_id};if(cropData){body.image_base64=cropData.split(',')[1];if(!query.url)body.source_media_id=query.id;}else if(query.url)body.image_base64=await draftImage(query.url);else body.media_id=query.id;
+        if(closed)return;
+        let job=await request('/api/sets/find-matches',body);jobId=job.id;
+        while(!closed){
+          status.textContent=job.phase+(job.running&&job.total?' · '+job.done.toLocaleString()+' / '+job.total.toLocaleString():'');
+          if(job.cached_images!==undefined)status.textContent+=' · '+job.cached_images+' cached, '+job.new_images+' newly indexed';
+          if(!job.running&&job.elapsed_seconds!==undefined)status.textContent+=' · '+job.elapsed_seconds.toFixed(1)+'s';
+          if(job.total){progress.max=job.total;progress.value=job.done;}else progress.removeAttribute('value');
+          if(!job.running){if(job.error)throw Error(job.error);results=job.results||[];shown=0;paintMore();showIndividuals(job);
+            if(job.issues?.length||job.unsearchable_sets)status.textContent+='\nIncomplete coverage: '+(job.issues?.length||0)+' unavailable images; '+(job.unsearchable_sets||0)+' Sets without searchable images.';
+            if(!results.length)grid.append(make('p','naiMatchNote','No existing Set images are available to compare. Check individual images below.'));
+            break;
+          }
+          await new Promise(r=>setTimeout(r,800));if(!closed)job=await request('/api/sets/match-status?id='+encodeURIComponent(job.id));
+        }
+      }catch(e){if(!closed)status.textContent=e.message;}finally{busy=false;if(!closed){run.disabled=false;select.disabled=false;crop.disabled=false;resetCrop.disabled=false;progress.hidden=true;}}
+    };
+    preview();close.focus({preventScroll:true});run.click();
+  };
+})();
