@@ -17,17 +17,18 @@
     "payload/userscript-2.4.5.patch01.txt",
     "payload/userscript-2.4.7.patch01.txt",
     "payload/userscript-2.8.57.video-labels.txt",
-    "payload/userscript-2.8.77.set-picker.txt",
-    "payload/userscript-2.8.77.sets.txt",
+    "payload/userscript-2.8.78.outfit-matching.txt",
+    "payload/userscript-2.8.78.set-picker.txt",
+    "payload/userscript-2.8.78.sets.txt",
     "payload/userscript-2.8.76.set-import.txt",
     "payload/userscript-2.8.8.crop-bridge.txt",
     "payload/userscript-2.8.4.drag-safety.txt",
     "payload/userscript-2.8.51.thumbnail-picker.txt",
-    "payload/userscript-2.8.72.review-core.txt",
+    "payload/userscript-2.8.78.review-core.txt",
     "payload/userscript-2.8.72.ui-updates.txt",
     "payload/userscript-2.8.73.update-status.txt",
     "payload/userscript-2.8.10.review-height.txt",
-    "payload/userscript-2.8.75.groups.txt",
+    "payload/userscript-2.8.78.groups.txt",
     "payload/userscript-2.8.68.marker-previews.txt",
     "payload/userscript-2.8.67.video-layout.txt",
     "payload/userscript-2.8.66.filters.txt",
@@ -36,6 +37,6 @@
     "payload/userscript-2.8.76.search-fields.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 132,
-  "version": "2.8.77"
+  "release_build": 133,
+  "version": "2.8.78"
 }

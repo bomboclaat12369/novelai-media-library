@@ -41,6 +41,11 @@ with tempfile.TemporaryDirectory(prefix='nai-standalone-') as directory:
         for i in range(80):
             store.create_set(c['id'],f'Scroll Set {i:03d}',[],preserve_placement=True)
         store.create_set(c['id'],'Large Set',[m['id'] for m in store.data['media'] if m['original_name'].startswith('Grid ')],preserve_placement=True)
+    if os.environ.get('NAI_OUTFIT_MODEL'):
+        store.outfit_matcher.cache.mkdir(exist_ok=True)
+        os.link(os.environ['NAI_OUTFIT_MODEL'],store.outfit_matcher.cache/'fashion-siglip.onnx')
+        for i,m in enumerate(items[1:]):
+            store.create_set(c['id'],f'Outfit {i+1}',[m['id']],preserve_placement=True)
     store.save()
     server=runtime['MediaHTTPServer'](('127.0.0.1',8765),store)
     version=os.environ.get('NAI_UI_VERSION',json.loads((root/'release-userscript.json').read_text())['version'])

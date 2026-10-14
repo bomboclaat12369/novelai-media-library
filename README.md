@@ -204,3 +204,36 @@ restarting. Existing scans and caches carry over; no rescan is required.
 Download `downloads/Local-Duplicate-Review-1.6.1.zip`, close the older checker,
 extract the ZIP and run its batch file. This checker update is separate from the
 media-library UI; no companion update is needed.
+
+## Find matching Sets by outfit (UI 2.8.78 / companion 2.7.43)
+
+- **Find matching Sets** runs only when clicked. Available below the image viewer,
+  in Add to Set, in Rapid Review (including unsaved images), in its Set assignment
+  panel, and in the Set editor for selected new additions. Both interfaces use
+  the same feature. For multiple images, choose the image used for the search;
+  existing assignment controls still determine which files are added.
+- Compares against the current character's Set images, ranks Sets by their best
+  matching member, and shows five suggestions with up to three actual matching
+  thumbnails each. **Show more matches** reveals the next five. Choosing a result
+  selects a Set; the existing Add/Assign/Save action applies the membership change.
+- First use downloads a verified 355 MiB model and optional matching dependencies,
+  then indexes the character's Set images. Images remain local. Subsequent searches
+  reuse a disk cache; changed sources are re-encoded. No matching runs while idle.
+  The model remains loaded in RAM after use. Four CPU threads are used at most;
+  no CUDA, GPU drivers, accounts, API keys, or cloud inference are required.
+- Requires 64-bit Python 3.11–3.14 for the optional ONNX Runtime engine. Restart the
+  companion after updating; use the existing UI Update button in each interface.
+- Missing/unreadable images and Sets without searchable images are reported.
+  Search does not import unsaved files or change metadata. A change to Set images during
+  indexing asks for a retry, using the already-cached images.
+- Suggestions are not proof of outfit identity or absence. Similar clothing,
+  hidden details, changed poses and group photos can confuse matching. Video-only
+  Sets have no searchable image members in this release.
+
+Matching model: [Marqo-FashionSigLIP](https://huggingface.co/Marqo/marqo-fashionSigLIP),
+Apache 2.0, revision `c56244cc94f92419e8369fa71efdaf403b124ce8`.
+Model weights are downloaded from the publisher on first use, not included here.
+A 44-image, 12-Set leave-one-out pilot ranked the correct Set first for 37 queries,
+in the first three for 41, and in the first five for 43. Exact pixel copies were
+excluded; near-identical poses were not. These pilot results do not establish
+accuracy across a larger library or outfits with no existing Set.

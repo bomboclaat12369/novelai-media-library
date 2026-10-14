@@ -69,6 +69,204 @@ def json_bytes(obj: Any) -> bytes:
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
+class OutfitMatcher:
+    """On-demand local image retrieval. Never writes library metadata or originals."""
+    MODEL_URL = 'https://huggingface.co/Marqo/marqo-fashionSigLIP/resolve/c56244cc94f92419e8369fa71efdaf403b124ce8/onnx/vision_model.onnx'
+    MODEL_SHA = 'a7e773846b27a699c45ba7e3978514b7fca420662d7e69e3b9226982f09f4a13'
+    MODEL_BYTES = 371715502
+
+    def __init__(self, store):
+        self.store = store
+        self.cache = store.root / '.outfit-search'
+        self.lock = threading.RLock()
+        self.jobs = {}
+        self.session = None
+        self.thread = None
+
+    def status(self, ident):
+        with self.lock:
+            if ident not in self.jobs:
+                raise ValueError('Search expired. Click Find matching Sets again.')
+            return copy.deepcopy(self.jobs[ident])
+
+    def update(self, ident, **fields):
+        with self.lock:
+            self.jobs[ident].update(fields)
+
+    def start(self, body):
+        owner = str(body.get('character_id', ''))
+        media_id = str(body.get('media_id', ''))
+        encoded = body.get('image_base64', '')
+        if not isinstance(encoded, str) or len(encoded) > 6 * 1024 * 1024:
+            raise ValueError('Search image is too large.')
+        if bool(media_id) == bool(encoded):
+            raise ValueError('Choose one image to find matching Sets.')
+        query_bytes = base64.b64decode(encoded, validate=True) if encoded else None
+        with self.lock, self.store.lock:
+            if self.thread and self.thread.is_alive():
+                raise ValueError('Another Set search is running. Wait for it to finish, then retry.')
+            if not any(c['id'] == owner for c in self.store.data['characters']):
+                raise ValueError('Choose a character first.')
+            media = {m['id']: m for m in self.store.data['media'] if m.get('character_id') == owner and m.get('media_type', 'image') == 'image'}
+            if media_id and media_id not in media:
+                raise ValueError('Choose an image from this character.')
+            sets = copy.deepcopy([s for s in self.store.data.get('sets', []) if s.get('character_id') == owner and s.get('kind', 'set') == 'set'])
+            ids = {mid for s in sets for mid in s.get('media_ids', []) if mid in media}
+            candidates = {mid: copy.deepcopy(media[mid]) for mid in ids}
+            query = copy.deepcopy(media.get(media_id))
+            revision = self.store.revision
+            if len(self.jobs) >= 8:
+                self.jobs.pop(next(iter(self.jobs)))
+            ident = uuid.uuid4().hex
+            self.jobs[ident] = {'id': ident, 'running': True, 'phase': 'Preparing Set search', 'done': 0, 'total': len(candidates), 'results': [], 'issues': []}
+            self.thread = threading.Thread(target=self._run, args=(ident, sets, candidates, query, query_bytes, revision), daemon=True)
+            self.thread.start()
+            return self.status(ident)
+
+    def _prepare(self, ident):
+        if self.session is not None:
+            return
+        self.cache.mkdir(parents=True, exist_ok=True)
+        # Separate dependencies from the companion environment; installed only on request.
+        deps = self.cache / ('python-' + str(sys.version_info.major) + '.' + str(sys.version_info.minor))
+        if deps.is_dir() and str(deps) not in sys.path:
+            sys.path.insert(0, str(deps))
+        try:
+            import numpy as np
+            import onnxruntime as ort
+        except ImportError:
+            import importlib
+            self.update(ident, phase='First search: installing local matching engine (internet required)')
+            stage = self.cache / ('install-' + uuid.uuid4().hex)
+            try:
+                proc = subprocess.run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-warn-script-location',
+                                       '--only-binary=:all:', '--target', str(stage), 'onnxruntime==1.31.0', 'numpy>=1.26,<3'],
+                                      capture_output=True, timeout=600, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                if proc.returncode:
+                    raise ValueError('Could not install the matching engine. Check internet access and use 64-bit Python 3.11 or newer. ' + proc.stderr.decode(errors='replace')[-700:])
+                if deps.exists():
+                    shutil.rmtree(deps)
+                stage.rename(deps)
+            finally:
+                if stage.exists():
+                    shutil.rmtree(stage, ignore_errors=True)
+            if str(deps) not in sys.path:
+                sys.path.insert(0, str(deps))
+            importlib.invalidate_caches()
+            import numpy as np
+            import onnxruntime as ort
+        model = self.cache / 'fashion-siglip.onnx'
+        if not model.exists() or self.store._hash_file(model) != self.MODEL_SHA:
+            self.update(ident, phase='First search: downloading outfit model (355 MB)', done=0, total=self.MODEL_BYTES)
+            temp = self.cache / 'fashion-siglip.download'
+            try:
+                digest = hashlib.sha256();received = 0
+                with urllib.request.urlopen(self.MODEL_URL, timeout=45) as response, temp.open('wb') as output:
+                    while True:
+                        block = response.read(1024 * 1024)
+                        if not block:
+                            break
+                        received += len(block)
+                        if received > self.MODEL_BYTES:
+                            raise ValueError('Outfit model download exceeded expected size.')
+                        output.write(block);digest.update(block)
+                        self.update(ident, done=received)
+                if received != self.MODEL_BYTES or digest.hexdigest() != self.MODEL_SHA:
+                    raise ValueError('Outfit model download was incomplete. Retry Find matching Sets.')
+                os.replace(temp, model)
+            finally:
+                temp.unlink(missing_ok=True)
+        self.update(ident, phase='Loading outfit model', done=0, total=0)
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = min(4, os.cpu_count() or 1)
+        options.inter_op_num_threads = 1
+        self.session = ort.InferenceSession(str(model), sess_options=options, providers=['CPUExecutionProvider'])
+        self.np = np
+
+    def _encode(self, source):
+        if Image is None:
+            raise ValueError('Pillow is required for image matching.')
+        with Image.open(source) as original:
+            im = ImageOps.exif_transpose(original).convert('RGB').resize((224, 224), Image.Resampling.BICUBIC)
+            array = self.np.asarray(im, dtype=self.np.float32) / 127.5 - 1
+        tensor = self.np.transpose(array, (2, 0, 1))[None].copy()
+        vector = self.session.run(None, {self.session.get_inputs()[0].name: tensor})[0].reshape(-1)
+        norm = self.np.linalg.norm(vector)
+        if vector.size != 768 or not self.np.isfinite(vector).all() or norm <= 0:
+            raise ValueError('Invalid image embedding.')
+        return vector / norm
+
+    def _vector(self, db, media):
+        path = (self.store.root / media['stored_rel']).resolve()
+        if not path.is_relative_to(self.store.root.resolve()) or not path.is_file():
+            raise ValueError('Original image missing or outside library.')
+        stat = path.stat()
+        stamp = (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+        key = hashlib.sha256(json_bytes([self.MODEL_SHA, str(path), media.get('sha256'), stamp])).hexdigest()
+        row = db.execute('SELECT vector FROM embeddings WHERE key=?', (key,)).fetchone()
+        if row:
+            value = self.np.frombuffer(row[0], dtype=self.np.float32).copy()
+            if value.size == 768 and self.np.isfinite(value).all():
+                return value
+        vector = self._encode(path)
+        after = path.stat()
+        if stamp != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            raise ValueError('Image changed during matching. Retry search.')
+        db.execute('INSERT OR REPLACE INTO embeddings VALUES (?,?)', (key, vector.astype(self.np.float32).tobytes()))
+        db.commit()
+        return vector
+
+    @staticmethod
+    def _catalog_signature(sets, media):
+        return (sorted((s['id'], s['name'], tuple(sorted(s.get('media_ids', [])))) for s in sets),
+                sorted((m['id'], m.get('stored_rel'), m.get('sha256')) for m in media.values()))
+
+    def _run(self, ident, sets, candidates, query, query_bytes, revision):
+        import io
+        import sqlite3
+        try:
+            if not candidates:
+                self.update(ident, phase='No images in this character’s Sets to compare', unsearchable_sets=len(sets), indexed_images=0)
+                return
+            self._prepare(ident)
+            self.update(ident, phase='Comparing outfit with Set images', done=0, total=len(candidates))
+            issues = [];vectors = {}
+            with sqlite3.connect(self.cache / 'embeddings.sqlite') as db:
+                db.execute('CREATE TABLE IF NOT EXISTS embeddings (key TEXT PRIMARY KEY, vector BLOB NOT NULL)')
+                query_vector = self._vector(db, query) if query else self._encode(io.BytesIO(query_bytes))
+                for index, (mid, media) in enumerate(candidates.items()):
+                    try:
+                        vectors[mid] = self._vector(db, media)
+                    except Exception as exc:
+                        issues.append({'media_id': mid, 'message': str(exc)})
+                    self.update(ident, done=index+1)
+            results = [];unsearchable = 0
+            for group in sets:
+                ranked = sorted([(float(query_vector @ vectors[mid]), mid) for mid in set(group.get('media_ids', [])) if mid in vectors], reverse=True)
+                if not ranked:
+                    unsearchable += 1
+                    continue
+                results.append({'set_id': group['id'], 'name': group['name'], 'score': ranked[0][0],
+                                'matches': [mid for score, mid in ranked[:3]], 'image_count': len(ranked)})
+            results.sort(key=lambda r: (-r['score'], r['name'].casefold(), r['set_id']))
+            with self.store.lock:
+                if self.store.revision != revision:
+                    owner = sets[0]['character_id']
+                    live_sets = [s for s in self.store.data.get('sets', []) if s.get('character_id') == owner and s.get('kind', 'set') == 'set']
+                    live_ids = {mid for s in live_sets for mid in s.get('media_ids', [])}
+                    live_media = {m['id']: m for m in self.store.data['media'] if m['id'] in live_ids and m.get('character_id') == owner and m.get('media_type', 'image') == 'image'}
+                    current_query = self.store.media_item(query['id']) if query else None
+                    if (self._catalog_signature(sets, candidates) != self._catalog_signature(live_sets, live_media)
+                            or (query and (not current_query or any(current_query.get(k) != query.get(k) for k in ('stored_rel', 'sha256', 'character_id'))))):
+                        raise ValueError('Set images changed during search. Click Find matching Sets again to refresh results.')
+            self.update(ident, results=results, issues=issues, unsearchable_sets=unsearchable, indexed_images=len(vectors),
+                        phase=f'Compared {len(vectors)} images across {len(results)} Sets')
+        except Exception as exc:
+            self.update(ident, error=str(exc), phase='Set search could not finish')
+        finally:
+            self.update(ident, running=False)
+
+
 class LibraryStore:
     def __init__(self, root: Path):
         self.root = root
@@ -92,6 +290,7 @@ class LibraryStore:
         self._upload_lock = threading.RLock()
         self._uploads: dict[str, dict[str, Any]] = {}
         self._upload_dir = self.root / ".incoming" / "chunked-uploads"
+        self.outfit_matcher = OutfitMatcher(self)
 
     def _empty(self) -> dict[str, Any]:
         return {
@@ -2454,6 +2653,10 @@ class MediaHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            if path == "/api/sets/match-status":
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._send_json(200, self.store.outfit_matcher.status(query.get("id", [""])[0]))
+                return
             if path == "/api/ui-update/status":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._send_json(200, self.server.ui_updates.status(query.get("after", [None])[0]))
@@ -2473,7 +2676,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     self._send_json(200, {"revision": self.store.revision})
                 return
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "outfit_matching": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/duplicate-review/catalog":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -2618,6 +2821,9 @@ class MediaHandler(BaseHTTPRequestHandler):
             if match:
                 body = self._read_json()
                 self._send_json(200, self.store.rename_category(match.group(1), str(body.get("name", ""))))
+                return
+            if path == "/api/sets/find-matches":
+                self._send_json(200, self.store.outfit_matcher.start(self._read_json()))
                 return
             if path == "/api/sets/categories-bulk":
                 body = self._read_json()
