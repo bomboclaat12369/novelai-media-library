@@ -3,7 +3,7 @@ const fs=require('fs'),path=require('path'),assert=require('assert/strict'),{spa
 const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwright');
 const dir=path.resolve(__dirname,'..'),config=JSON.parse(fs.readFileSync(path.join(dir,'release-userscript.json'))),payload=config.parts.map(p=>fs.readFileSync(path.join(dir,p),'utf8')).join('');
 (async()=>{
- const server=spawn('python3',['tests/serve_standalone_fixture.py'],{cwd:dir,env:process.env});let stderr='',browser;server.stderr.on('data',b=>stderr+=b);
+ const server=spawn('python3',['tests/serve_standalone_fixture.py'],{cwd:dir,env:{...process.env,NAI_FIXTURE_SCROLL_SETS:'1'}});let stderr='',browser;server.stderr.on('data',b=>stderr+=b);
  try{
  const fixture=await new Promise((resolve,reject)=>{server.stdout.once('data',b=>resolve(JSON.parse(b)));server.on('exit',c=>reject(Error(stderr+c)));});
  browser=await chromium.launch({executablePath:process.env.NAI_CHROMIUM||'/tmp/duplicate-review-chromium',headless:true,args:['--no-sandbox','--disable-gpu']});
@@ -20,11 +20,32 @@ const dir=path.resolve(__dirname,'..'),config=JSON.parse(fs.readFileSync(path.jo
    },{payload,version:config.version});
   }
   await page.goto(standalone?'http://127.0.0.1:8765/library/':'https://novelai.net/stories');await page.getByText('Local library connected',{exact:true}).waitFor();
+  // Realistic long Set list: rows must not shrink or run underneath the footer.
+  await page.locator('#naiManageSetsBtn').click();await page.locator('#naiSetToolsList').waitFor();
+  await page.locator('#naiSetToolsList').evaluate(el=>{el.scrollTop=el.scrollHeight;});
+  const lastRow=page.locator('.naiSetToolsRow').last();await lastRow.scrollIntoViewIfNeeded();
+  const rowBounds=await lastRow.boundingBox(),listBounds=await page.locator('#naiSetToolsList').boundingBox();
+  assert(rowBounds.height>=50);assert(rowBounds.y+rowBounds.height<=listBounds.y+listBounds.height+1);
+  await page.screenshot({path:'/tmp/set-manager-'+(standalone?'standalone':'novelai')+'.png'});
+  await page.setViewportSize({width:600,height:800});
+  assert(await page.locator('.naiSetToolsDialog').evaluate(el=>el.scrollWidth<=el.clientWidth));
+  await page.setViewportSize({width:1700,height:1100});
+  await page.locator('.naiSetToolsDialog .modalFoot [data-close]').click();
   const before=await api('library');
   await page.evaluate(id=>document.getElementById('nai-media-host').shadowRoot.naiAssignGroups([id]),fixture.images[3]);
   assert.equal(await page.locator('.naiMatchWrap').count(),0);
   await page.locator('.naiFindMatchingSets').click();await page.locator('.naiMatchCard').first().waitFor().catch(async e=>{console.error('MATCH STATUS',await page.locator('.naiMatchStatus').allTextContents(),'ERRORS',errors);throw e;});
   assert.equal(await page.locator('.naiMatchCard').count(),5);
+  await page.waitForFunction(()=>[...document.getElementById('nai-media-host').shadowRoot.querySelectorAll('.naiMatchCard img')].every(img=>img.complete&&img.naturalWidth>0));
+  await page.screenshot({path:'/tmp/outfit-results-'+(standalone?'standalone':'novelai')+'.png'});
+  const warm=await api('sets/find-matches',{character_id:fixture.character,media_id:fixture.images[3]});
+  let warmed=warm;while(warmed.running){await new Promise(r=>setTimeout(r,100));warmed=await api('sets/match-status?id='+warm.id);}
+  assert(!warmed.error);assert.equal(warmed.new_images,0);assert.equal(warmed.cached_images,6);console.log('Warm search',warmed.elapsed_seconds+'s',warmed.cached_images+' cached');
+  await page.getByRole('button',{name:'Focus on outfit',exact:true}).click();const cropCanvas=page.locator('.naiMatchCrop canvas');await cropCanvas.waitFor();
+  const box=await cropCanvas.boundingBox();await page.mouse.move(box.x+box.width*.2,box.y+box.height*.15);await page.mouse.down();await page.mouse.move(box.x+box.width*.8,box.y+box.height*.85,{steps:3});await page.mouse.up();
+  await page.getByRole('button',{name:'Search this outfit',exact:true}).click();await page.locator('.naiMatchCard').first().waitFor();
+  await page.waitForFunction(()=>[...document.getElementById('nai-media-host').shadowRoot.querySelectorAll('.naiMatchCard img')].every(img=>img.complete&&img.naturalWidth>0));
+  assert(await page.getByRole('button',{name:'Use full image',exact:true}).isVisible());
   await page.getByRole('button',{name:/Show more matches/}).click();assert.equal(await page.locator('.naiMatchCard').count(),6);
   assert.deepEqual((await api('library')).sets,before.sets,'Search must not change membership');
   assert.equal((await api('library')).media.length,before.media.length);

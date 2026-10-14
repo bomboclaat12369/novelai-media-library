@@ -24,7 +24,7 @@ class OutfitTests(unittest.TestCase):
         self.m._prepare=self.prepare;self.m._encode=self.encode
     def prepare(self,ident):
         self.m.cache.mkdir(exist_ok=True);self.m.np=self.np
-    def encode(self,source):
+    def encode(self,source,angle=0):
         self.calls+=1
         b=source.read() if hasattr(source,'read') else Path(source).read_bytes()
         v=self.np.zeros(768,dtype=self.np.float32);v[0 if b==b'first' else 1]=1
@@ -41,12 +41,15 @@ class OutfitTests(unittest.TestCase):
         before=self.store.db_path.read_bytes()
         result=self.run_search(media_id=self.a['id']);self.assertEqual(result['results'][0]['set_id'],self.group['id'])
         self.assertEqual(len(result['results']),2);calls=self.calls
+        warm=self.run_search(media_id=self.a['id']);self.assertEqual(self.calls,calls)
+        self.assertEqual(warm['cached_images'],2);self.assertEqual(warm['new_images'],0)
+        self.m.vector_cache.clear()
         self.run_search(media_id=self.a['id']);self.assertEqual(self.calls,calls)
-        self.run_search(image_base64=base64.b64encode(b'first').decode());self.assertEqual(self.calls,calls+1)
+        self.run_search(image_base64=base64.b64encode(b'first').decode());self.assertEqual(self.calls,calls+3)
         self.assertEqual(before,self.store.db_path.read_bytes())
         self.assertEqual((self.store.root/self.a['stored_rel']).read_bytes(),b'first')
         (self.store.root/self.a['stored_rel']).write_bytes(b'changed image')
-        self.run_search(media_id=self.a['id']);self.assertEqual(self.calls,calls+2)
+        self.run_search(media_id=self.a['id']);self.assertEqual(self.calls,calls+6)
         with self.assertRaisesRegex(ValueError,'this character'):
             self.m.start({'character_id':self.other['id'],'media_id':self.a['id']})
     def test_membership_refresh_missing_original_and_stale_search(self):
@@ -61,3 +64,20 @@ class OutfitTests(unittest.TestCase):
         self.m._prepare=changing
         job=self.m.start({'character_id':self.owner['id'],'media_id':self.a['id']});self.m.thread.join(10)
         self.assertIn('Set images changed',self.m.status(job['id'])['error'])
+
+    def test_sideways_query_uses_cached_orientation(self):
+        original=self.m._encode
+        def rotated(source,angle=0):
+            data=source.read() if hasattr(source,'read') else Path(source).read_bytes()
+            if data==b'sideways':
+                self.calls+=1
+                v=self.np.zeros(768,dtype=self.np.float32);v[0 if angle==90 else 2]=1
+                return v
+            return original(source,angle)
+        self.m._encode=rotated
+        body={'image_base64':base64.b64encode(b'sideways').decode()}
+        result=self.run_search(**body)
+        self.assertEqual(result['results'][0]['set_id'],self.group['id'])
+        self.assertEqual(result['results'][0]['score'],1)
+        calls=self.calls
+        self.run_search(**body);self.assertEqual(self.calls,calls)

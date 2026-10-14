@@ -205,6 +205,28 @@ Download `downloads/Local-Duplicate-Review-1.6.1.zip`, close the older checker,
 extract the ZIP and run its batch file. This checker update is separate from the
 media-library UI; no companion update is needed.
 
+## Outfit search and Set manager fixes (UI 2.8.79 / companion 2.7.44)
+
+- Matching result thumbnails now load after their cards are attached. Clicking a
+  preview loads the original for closer inspection.
+- Manage Sets uses a wider, responsive row layout. Long lists keep their row
+  height and scroll inside the dialog; rename, categories and contents stay visible.
+- Query matching checks the original image plus 90°/270° orientations, with cached
+  results. On the supplied 44-image/12-Set leave-one-out sample, first-place matches
+  improved from 37 to 39; top-five remained 43. Exact pixel copies were excluded,
+  but similar poses remain, so this is not a whole-library accuracy guarantee.
+- **Focus on outfit** lets you draw a temporary search crop. **Use full image**
+  resets it. Neither action edits or imports the original.
+- Cached Set descriptions are reused in memory and on disk. New descriptions are
+  saved in batches rather than flushing every image; file changes still invalidate
+  cached descriptions. Progress shows cached/new image counts and elapsed time.
+- In a local 44-image check, initial indexing/model load took 9.84s, a different
+  saved query took 0.32s, and an unsaved query took 0.56s. These are backend times,
+  excluding the UI polling interval, and will vary by PC/library/storage. Initial
+  installation, model loading after restart, and newly added images take longer.
+- Restart the companion and refresh/apply the UI update. Existing model and image
+  caches are retained. Matching remains on demand and assignment remains manual.
+
 ## Find matching Sets by outfit (UI 2.8.78 / companion 2.7.43)
 
 - **Find matching Sets** runs only when clicked. Available below the image viewer,

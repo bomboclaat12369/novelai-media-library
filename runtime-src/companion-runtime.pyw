@@ -82,6 +82,10 @@ class OutfitMatcher:
         self.jobs = {}
         self.session = None
         self.thread = None
+        self.vector_cache = {}
+        self.query_cache = {}
+        self.cache_hits = 0
+        self.encoded_images = 0
 
     def status(self, ident):
         with self.lock:
@@ -183,11 +187,14 @@ class OutfitMatcher:
         self.session = ort.InferenceSession(str(model), sess_options=options, providers=['CPUExecutionProvider'])
         self.np = np
 
-    def _encode(self, source):
+    def _encode(self, source, angle=0):
         if Image is None:
             raise ValueError('Pillow is required for image matching.')
         with Image.open(source) as original:
-            im = ImageOps.exif_transpose(original).convert('RGB').resize((224, 224), Image.Resampling.BICUBIC)
+            im = ImageOps.exif_transpose(original).convert('RGB')
+            if angle:
+                im = im.rotate(angle, expand=True)
+            im = im.resize((224, 224), Image.Resampling.BICUBIC)
             array = self.np.asarray(im, dtype=self.np.float32) / 127.5 - 1
         tensor = self.np.transpose(array, (2, 0, 1))[None].copy()
         vector = self.session.run(None, {self.session.get_inputs()[0].name: tensor})[0].reshape(-1)
@@ -203,17 +210,24 @@ class OutfitMatcher:
         stat = path.stat()
         stamp = (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
         key = hashlib.sha256(json_bytes([self.MODEL_SHA, str(path), media.get('sha256'), stamp])).hexdigest()
+        cached = self.vector_cache.get(media['id'])
+        if cached and cached[0] == key:
+            self.cache_hits += 1
+            return cached[1]
         row = db.execute('SELECT vector FROM embeddings WHERE key=?', (key,)).fetchone()
         if row:
             value = self.np.frombuffer(row[0], dtype=self.np.float32).copy()
-            if value.size == 768 and self.np.isfinite(value).all():
+            if value.size == 768 and self.np.isfinite(value).all() and self.np.linalg.norm(value) > 0:
+                self.vector_cache[media['id']] = (key, value)
+                self.cache_hits += 1
                 return value
         vector = self._encode(path)
+        self.encoded_images += 1
         after = path.stat()
         if stamp != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
             raise ValueError('Image changed during matching. Retry search.')
         db.execute('INSERT OR REPLACE INTO embeddings VALUES (?,?)', (key, vector.astype(self.np.float32).tobytes()))
-        db.commit()
+        self.vector_cache[media['id']] = (key, vector)
         return vector
 
     @staticmethod
@@ -224,25 +238,60 @@ class OutfitMatcher:
     def _run(self, ident, sets, candidates, query, query_bytes, revision):
         import io
         import sqlite3
+        started = time.monotonic()
+        self.cache_hits = self.encoded_images = 0
         try:
             if not candidates:
                 self.update(ident, phase='No images in this character’s Sets to compare', unsearchable_sets=len(sets), indexed_images=0)
                 return
             self._prepare(ident)
-            self.update(ident, phase='Comparing outfit with Set images', done=0, total=len(candidates))
+            self.update(ident, phase='Analyzing query outfit', done=0, total=0)
             issues = [];vectors = {}
             with sqlite3.connect(self.cache / 'embeddings.sqlite') as db:
                 db.execute('CREATE TABLE IF NOT EXISTS embeddings (key TEXT PRIMARY KEY, vector BLOB NOT NULL)')
-                query_vector = self._vector(db, query) if query else self._encode(io.BytesIO(query_bytes))
+                if query:
+                    query_vector = self._vector(db, query)
+                else:
+                    query_key = hashlib.sha256(query_bytes).hexdigest()
+                    query_vector = self.query_cache.get(query_key)
+                    if query_vector is None:
+                        query_vector = self._encode(io.BytesIO(query_bytes))
+                        if len(self.query_cache) >= 16:
+                            self.query_cache.pop(next(iter(self.query_cache)))
+                        self.query_cache[query_key] = query_vector
+                # Sideways poses can hide the clothing signal. Compare upright and
+                # quarter-turn query views; persistent cache avoids repeat inference.
+                source_key = self.vector_cache[query['id']][0] if query else hashlib.sha256(query_bytes).hexdigest()
+                orientation_key = 'query-orientation-v1:' + self.MODEL_SHA + ':' + source_key
+                row = db.execute('SELECT vector FROM embeddings WHERE key=?', (orientation_key,)).fetchone()
+                rotated = self.np.frombuffer(row[0], dtype=self.np.float32).copy() if row else self.np.array([])
+                if rotated.size != 1536 or not self.np.isfinite(rotated).all():
+                    self.update(ident, phase='Checking outfit orientation', done=0, total=0)
+                    source = self.store.root / query['stored_rel'] if query else None
+                    rotated = self.np.stack([self._encode(source if query else io.BytesIO(query_bytes), angle) for angle in (90, 270)])
+                    if query:
+                        stat = source.stat()
+                        current_key = hashlib.sha256(json_bytes([self.MODEL_SHA, str(source.resolve()), query.get('sha256'), (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)])).hexdigest()
+                        if current_key != source_key:
+                            raise ValueError('Image changed during matching. Retry search.')
+                    db.execute('INSERT OR REPLACE INTO embeddings VALUES (?,?)', (orientation_key, rotated.astype(self.np.float32).tobytes()))
+                query_vectors = self.np.vstack([query_vector, rotated.reshape(2, 768)])
+                query_hits, query_encoded = self.cache_hits, self.encoded_images
+                # Remove deleted members from RAM; file stamps still invalidate edits.
+                self.vector_cache = {mid: value for mid, value in self.vector_cache.items() if mid in candidates or (query and mid == query['id'])}
+                self.update(ident, phase='Checking cached Set images; indexing new images', done=0, total=len(candidates))
                 for index, (mid, media) in enumerate(candidates.items()):
                     try:
                         vectors[mid] = self._vector(db, media)
                     except Exception as exc:
                         issues.append({'media_id': mid, 'message': str(exc)})
-                    self.update(ident, done=index+1)
+                    if (index + 1) % 32 == 0:
+                        db.commit()  # Checkpoint, without a disk flush for every image.
+                    self.update(ident, done=index+1, cached_images=self.cache_hits-query_hits, new_images=self.encoded_images-query_encoded)
+            self.update(ident, phase='Ranking matching Sets', done=len(candidates), total=len(candidates))
             results = [];unsearchable = 0
             for group in sets:
-                ranked = sorted([(float(query_vector @ vectors[mid]), mid) for mid in set(group.get('media_ids', [])) if mid in vectors], reverse=True)
+                ranked = sorted([(float((query_vectors @ vectors[mid]).max()), mid) for mid in set(group.get('media_ids', [])) if mid in vectors], reverse=True)
                 if not ranked:
                     unsearchable += 1
                     continue
@@ -264,7 +313,7 @@ class OutfitMatcher:
         except Exception as exc:
             self.update(ident, error=str(exc), phase='Set search could not finish')
         finally:
-            self.update(ident, running=False)
+            self.update(ident, running=False, elapsed_seconds=round(time.monotonic()-started, 2))
 
 
 class LibraryStore:
