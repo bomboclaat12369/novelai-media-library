@@ -13,7 +13,7 @@ const payload=config.parts.map(p=>fs.readFileSync(path.join(dir,p),'utf8')).join
  await context.route(/^https?:\/\/(?!127\.0\.0\.1(?::|\/)|novelai\.net(?:\/|$))/,r=>r.abort());
  const api=async(route,body)=>{const r=await context.request[body?'post':'get']('http://127.0.0.1:8765/api/'+route,body?{data:body}:{});assert.equal(r.status(),200,await r.text());return r.json();};
  const sourceBytes=await (await context.request.get('http://127.0.0.1:8765/api/media/'+fixture.images[3]+'/original')).body();
- const blue=await api('sets',{character_id:fixture.character,name:'Blue Dress',media_ids:[fixture.images[1],fixture.images[2]],preserve_placement:true});
+ const blue=await api('sets',{character_id:fixture.character,name:'Blue Dress',media_ids:[fixture.images[1],fixture.images[4]],preserve_placement:true});
  for(const standalone of [true,false]){
   let promptAnswer='Outfits';const page=await context.newPage(),errors=[],alerts=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept(d.type()==='prompt' ? promptAnswer : undefined));
   if(!standalone){
@@ -26,9 +26,22 @@ const payload=config.parts.map(p=>fs.readFileSync(path.join(dir,p),'utf8')).join
   }
   await page.goto(standalone?'http://127.0.0.1:8765/library/':'https://novelai.net/stories');await page.getByText('Local library connected',{exact:true}).waitFor();
   await page.locator('#naiResumeRapid').waitFor();await page.locator('#naiResumeRapid').click();await page.locator('#naiRapidBulkReview').waitFor();
-  await page.waitForFunction(()=>[...document.getElementById('nai-media-host').shadowRoot.querySelectorAll('#naiQueueStrip270 img')].slice(0,56).every(img=>img.naturalWidth>0));
+  await page.waitForFunction(()=>{const g=document.getElementById('nai-media-host').shadowRoot.querySelector('#naiQueueStrip270'),r=g.getBoundingClientRect();return [...g.querySelectorAll('img')].filter(img=>{const b=img.getBoundingClientRect();return b.bottom>r.top&&b.top<r.bottom;}).every(img=>img.naturalWidth>0);});
   if(standalone)await page.screenshot({path:'/tmp/rapid-review82.png'});
   let queue=await api('rapid-review?character_id='+fixture.character);
+  assert.equal(await page.locator('#naiRapidExpand').count(),0);
+  await page.locator('#naiRapidSize').fill('160');await page.locator('#naiRapidSize').dispatchEvent('input');
+  const addedMain=queue.items[0].id;
+  await page.locator('#naiRapidAddAll').click();await page.locator('.naiQueueThumb270[data-id="'+addedMain+'"]').waitFor({state:'detached'});
+  let placement=(await api('library')).media.find(m=>m.id===addedMain);assert(placement.in_all);assert.equal(placement.categories.length,0);
+  const toPurgatory=queue.items[1].id;
+  await page.locator('#naiPurgatoryNext270').click();await page.locator('.naiQueueThumb270[data-id="'+toPurgatory+'"]').waitFor({state:'detached'});
+  placement=(await api('library')).media.find(m=>m.id===toPurgatory);assert(placement.in_purgatory);assert(!placement.in_all);
+  queue=await api('rapid-review?character_id='+fixture.character);
+  await page.locator('#naiReviewFavorite270').check();
+  await page.locator('.naiQueueThumb270[data-id="'+queue.items[0].id+'"] .naiRapidEdited').waitFor();
+  const badge=await page.locator('.naiRapidEdited').first().boundingBox(),checkbox=await page.locator('.naiQueueThumb270 input').first().boundingBox();assert(badge.width>checkbox.width);
+
   assert.equal(await page.locator('#naiQueueStrip270 input:checked').count(),queue.items.length,'queue initially selected');
   const visible=await page.locator('#naiQueueStrip270').evaluate(g=>{const r=g.getBoundingClientRect();return [...g.children].filter(c=>{const b=c.getBoundingClientRect();return b.top>=r.top&&b.bottom<=r.bottom;}).length;});assert(visible>14,'large grid shows more than 14');
   await page.locator('#naiRapidUnselectAll').click();
@@ -41,12 +54,14 @@ const payload=config.parts.map(p=>fs.readFileSync(path.join(dir,p),'utf8')).join
   queue=await api('rapid-review?character_id='+fixture.character);const reviewId=queue.items[0].id;
   await page.locator('#naiRapidUnselectAll').click();await page.locator('.naiQueueThumb270[data-id="'+reviewId+'"] input').check();await page.locator('#naiRapidBulkReview').click();
   await page.locator('.naiQueueThumb270[data-id="'+reviewId+'"]').waitFor({state:'detached'});lib=await api('library');assert(lib.media.find(m=>m.id===reviewId).in_review);
+  const editedId=(await api('rapid-review?character_id='+fixture.character)).items[0].id;await page.locator('#naiReviewFavorite270').check();
   await page.locator('#naiQueueStrip270').evaluate(g=>g.scrollTop=500);
   await page.locator('#naiReviewClose270').click();await page.locator('#naiReviewClose270').waitFor({state:'detached'});
   const remaining=(await api('rapid-review?character_id='+fixture.character)).items.length;
   await page.reload();await page.getByText('Local library connected',{exact:true}).waitFor();await page.locator('#naiResumeRapid').click();await page.locator('#naiRapidBulkReview').waitFor();
+  assert((await api('rapid-review?character_id='+fixture.character)).items.find(m=>m.id===editedId).rapid_edited);
   assert.equal(await page.locator('#naiQueueStrip270 .naiQueueThumb270').count(),remaining);assert((await page.locator('#naiQueueStrip270').evaluate(g=>g.scrollTop))>200,'scroll survives reload');
-  await page.locator('#naiRapidExpand').click();assert(await page.locator('.naiReviewVisual270').isHidden());await page.locator('#naiRapidExpand').click();
+  assert.equal(await page.locator('#naiRapidExpand').count(),0);assert.equal(await page.locator('#naiRapidSize').inputValue(),'160');
   await page.locator('#naiReviewClose270').click();await page.locator('#naiReviewClose270').waitFor({state:'detached'});
   // Actual user import path appends to the existing durable queue.
   await page.locator('#addMediaBtn').click();await page.locator('#fileInput').setInputFiles([{name:'Append '+standalone+'.jpg',mimeType:'image/jpeg',buffer:Buffer.concat([sourceBytes,Buffer.from('append-'+standalone)])}]);
@@ -74,10 +89,25 @@ const payload=config.parts.map(p=>fs.readFileSync(path.join(dir,p),'utf8')).join
   await page.locator('#editBtn').click();await page.locator('#naiCategoryOrder').waitFor();
   await page.locator('[data-order-category="'+category.id+'"] button[title="Move category up"]').click();
   await page.waitForFunction(id=>{const cats=document.getElementById('nai-media-host').shadowRoot.naiGetLibrary().characters[0].categories;return cats.findIndex(c=>c.id===id)===cats.length-2;},category.id);
+  const ghostBox=page.getByRole('checkbox',{name:'Ghost category Bikini '+standalone,exact:true});await ghostBox.check();
+  await page.waitForFunction(id=>document.getElementById('nai-media-host').shadowRoot.naiGetLibrary().characters[0].categories.find(c=>c.id===id)?.ghost,category.id);
   await page.locator('#modalRoot [data-close]').first().click();
+  // Empty space beside a partial Set row navigates back, while image clicks stay inside.
+  await page.locator('#search').fill('');
+  await page.evaluate(id=>document.getElementById('nai-media-host').shadowRoot.naiOpenGroup(id),blue.id);await page.locator('#naiArrangeSet').waitFor();
+  await page.locator('#grid .tile').first().click();assert(await page.locator('#naiArrangeSet').isVisible());
+  const spot=await page.locator('#grid').evaluate(g=>{const r=g.getBoundingClientRect(),t=g.querySelector('.tile').getBoundingClientRect();return {x:r.right-20,y:t.top+Math.min(20,t.height/2)};});
+  await page.mouse.click(spot.x,spot.y);await page.locator('#naiArrangeSet').waitFor({state:'detached'});
+  // Default groups by the oldest Set member; Date Imported retains individual dates.
+  await page.locator('#search').fill('');await page.locator('#categories .cat').first().click();
+  await page.locator('#sortSelect').selectOption('default');
+  const ids=await page.locator('#grid .tile[data-id]').evaluateAll(els=>els.map(e=>e.dataset.id));assert.equal(ids.indexOf(fixture.images[4]),ids.indexOf(fixture.images[1])+1);
+  await page.locator('#sortSelect').selectOption('imported');
+  const dated=await page.locator('#grid .tile[data-id]').evaluateAll(els=>els.map(e=>e.dataset.id));assert(dated.indexOf(fixture.images[4])>dated.indexOf(fixture.images[1])+1);
+
   if(!standalone){await page.locator('#naiResumeRapid').click();await page.locator('#naiRapidDiscard').click();await page.locator('#naiReviewClose270').waitFor({state:'detached'});assert.equal((await api('rapid-review?character_id='+fixture.character)).items.length,0);assert((await api('library')).media.some(m=>m.id===first));}
   assert.deepEqual(errors,[]);await page.close();
  }
- console.log('PASS: standalone and NovelAI — persistent grid queue, bulk Set creation/Review, append imports, close/reload/discard, details, order toggle, Viewer 2 cover, category order, reverse-search entry.');
+ console.log('PASS: standalone and NovelAI — Rapid Review All/Purgatory, edited badges, persistent size and queue, bulk actions, ghost category control, Default grouping, Set blank-space navigation.');
  }finally{if(browser)await browser.close();server.kill();}
 })().catch(e=>{console.error(e);process.exitCode=1});

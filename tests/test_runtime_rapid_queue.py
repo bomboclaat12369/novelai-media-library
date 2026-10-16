@@ -15,6 +15,32 @@ class RapidQueueTests(unittest.TestCase):
     def resolve(self,action,items,**fields):
         return self.store.resolve_rapid({'character_id':self.character['id'],'action':action,'media_ids':[m['id'] for m in items],**fields})
 
+    def test_ghost_categories_and_explicit_main_queue_placement(self):
+        owner=self.character['id']
+        ghost=self.store.add_category(owner,'Ghost')
+        regular=self.store.add_category(owner,'Regular')
+        self.store.set_category_ghost(ghost['id'],True)
+        a,b,c,d=[self.pending(i+100) for i in range(4)]
+        self.resolve('save',[a],choices={a['id']:{'categories':[ghost['id']]}})
+        self.assertFalse(a['in_all']);self.assertFalse(self.store._in_main(a))
+        self.resolve('new_set',[b],name='Explicit Main',choices={b['id']:{'categories':[ghost['id']],'rapid_main':True,'rapid_edited':True}})
+        self.assertTrue(b['in_all']);self.assertTrue(b['rapid_edited'])
+        self.resolve('purgatory',[c],choices={c['id']:{'categories':[regular['id']]}})
+        self.assertTrue(c['in_purgatory']);self.assertFalse(c['in_all']);self.assertFalse(c['in_review'])
+        self.store.set_categories(c['id'],[ghost['id']]);self.assertTrue(c['in_purgatory'])
+        self.store.set_categories(c['id'],[ghost['id'],regular['id']]);self.assertFalse(c['in_purgatory']);self.assertTrue(c['in_all'])
+        self.resolve('main',[d]);self.assertTrue(d['in_all']);self.assertEqual(d['categories'],[])
+        self.store.set_category_ghost(regular['id'],True);self.assertFalse(c['in_all']);self.assertTrue(b['in_all'])
+        self.store.set_category_ghost(ghost['id'],False);self.assertTrue(a['in_all'])
+
+    def test_set_assignment_from_purgatory_with_only_ghost_categories(self):
+        item=self.pending(200);ghost=self.store.add_category(self.character['id'],'Ghost')
+        self.store.set_category_ghost(ghost['id'],True)
+        self.resolve('purgatory',[item],choices={item['id']:{'categories':[ghost['id']]}})
+        self.store.create_set(self.character['id'],'Ghost Set',[item['id']])
+        self.assertFalse(item['in_purgatory']);self.assertFalse(item['in_all'])
+        self.assertEqual(item['categories'],[ghost['id']])
+
     def test_queue_survives_restart_without_entering_library(self):
         a,b=self.pending(1),self.pending(2)
         self.store.rapid_state({'character_id':self.character['id'],'choices':{a['id']:{'favorite':True,'crop_top':.1}},'current_id':b['id'],'selected_ids':[b['id']],'scroll_top':700})

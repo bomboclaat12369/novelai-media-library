@@ -341,3 +341,29 @@ accuracy across a larger library or outfits with no existing Set.
   checks, plus real-companion browser workflows in standalone and NovelAI.
 - Apply the companion update and refresh/apply the UI update before importing
   into the new queue. Previously discarded unsaved sessions cannot be recovered.
+
+
+## Rapid Review placement, ghost categories, and Default sorting (UI 2.8.83 / companion 2.7.48)
+
+- Rapid Review has **Add to All + Next** and **Send to Purgatory** for the current
+  image. The **Add to All** checkbox also preserves Main placement when assigning
+  the image to a Set, without requiring any category.
+- In **Edit Media → Category actions**, toggle **Ghost** beside an image or video
+  category. Ghost categories remain browsable and assignable but do not by
+  themselves add media to All or remove it from Purgatory. A regular category or
+  explicit Add to All can still do so. Switching an existing category to Ghost
+  removes its automatic Main placement where no other regular category or recorded
+  explicit Main choice applies; files and memberships are retained.
+- **Default** is the initial sort and groups visible Set members together at the
+  earliest import date among that Set's members. Date Imported remains available
+  for strictly individual ordering. Existing Date Imported preferences migrate to
+  Default once; subsequent choices are remembered. Legacy overlapping Sets are
+  kept together as a combined group.
+- Removed Rapid Review's Expand Grid button. Thumbnail size is remembered through
+  closing and refreshing. A prominent green check marks edited queue items; the
+  smaller checkbox controls bulk selection. Edited status persists for pending
+  queue items.
+- Empty space beside or between Set images now follows Back, as does the space
+  below them. Image and control clicks, scrollbars, and Arrange mode are excluded.
+- Focused validation covers ghost/regular/explicit Main placement, Purgatory,
+  persistence, sorting, and the affected standalone and NovelAI UI workflows.

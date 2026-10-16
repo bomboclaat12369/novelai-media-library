@@ -747,7 +747,7 @@ class LibraryStore:
     @staticmethod
     def _in_main(media: dict[str, Any]) -> bool:
         return not media.get("in_review") and not media.get("in_purgatory") and bool(
-            media.get("categories") or media.get("in_videos" if media.get("media_type") == "video" else "in_all", True))
+            media.get("in_videos" if media.get("media_type") == "video" else "in_all", True))
 
     def _stamp_main_entry(self, media: dict[str, Any], was_in_main: bool) -> None:
         if not was_in_main and self._in_main(media):
@@ -942,7 +942,7 @@ class LibraryStore:
             raise ValueError('Invalid queue choices.')
         if 'categories' in values:
             item['categories'] = self._validate_categories(item['character_id'], values['categories'], item['media_type'])
-        for key in ('favorite', 'featured', 'needs_replacement', 'in_review'):
+        for key in ('favorite', 'featured', 'needs_replacement', 'in_review', 'rapid_main', 'rapid_edited'):
             if key in values:
                 if type(values[key]) is not bool:
                     raise ValueError('Invalid queue flag.')
@@ -959,7 +959,7 @@ class LibraryStore:
     def resolve_rapid(self, body):
         owner, action = str(body.get('character_id', '')), body.get('action')
         ids = body.get('media_ids', [])
-        if action not in ('save', 'review', 'set', 'new_set', 'discard') or not isinstance(ids, list) or not ids or any(not isinstance(mid, str) for mid in ids):
+        if action not in ('save', 'main', 'purgatory', 'review', 'set', 'new_set', 'discard') or not isinstance(ids, list) or not ids or any(not isinstance(mid, str) for mid in ids):
             raise ValueError('Choose queue files and an action.')
         ids = list(dict.fromkeys(ids))
         with self.lock:
@@ -986,7 +986,9 @@ class LibraryStore:
                         duplicates.append(item['id'])
                         continue  # Never change a previously imported image through a duplicate queue copy.
                     item['in_review'] = action == 'review' or (action == 'save' and item.get('in_review', False))
-                    main = not item['in_review'] and (action == 'save' or bool(item.get('categories')))
+                    item['in_purgatory'] = action == 'purgatory'
+                    item['main_explicit'] = action != 'purgatory' and (action == 'main' or bool(item.get('rapid_main')) or (action == 'save' and not item.get('categories') and not item['in_review']))
+                    main = not item['in_review'] and not item['in_purgatory'] and (item['main_explicit'] or self._main_categories(item))
                     item['in_all'] = main and item['media_type'] != 'video'
                     item['in_videos'] = main and item['media_type'] == 'video'
                     if main:
@@ -1401,6 +1403,33 @@ class LibraryStore:
             raise ValueError("Choose Set categories belonging to this character")
         return list(dict.fromkeys(categories))
 
+    def _main_categories(self, media):
+        owner = self.character(media['character_id'])
+        ids = set(media.get('categories', []))
+        return any(c['id'] in ids and not c.get('ghost', False) for c in (owner or {}).get('categories', []))
+
+    def set_category_ghost(self, category_id, ghost):
+        if type(ghost) is not bool:
+            raise ValueError('Ghost must be true or false.')
+        with self.lock:
+            owner = next((c for c in self.data['characters'] if any(k['id'] == category_id for k in c.get('categories', []))), None)
+            if not owner:
+                raise KeyError('Category not found')
+            category = next(c for c in owner['categories'] if c['id'] == category_id)
+            affected = [m for m in self.data['media'] if m['character_id'] == owner['id'] and category_id in m.get('categories', [])]
+            for m in affected:
+                flag = 'in_videos' if m['media_type'] == 'video' else 'in_all'
+                m.setdefault('main_explicit', bool(m.get(flag, True)) and not self._main_categories(m))
+            category['ghost'] = ghost
+            for m in affected:
+                was = self._in_main(m)
+                flag = 'in_videos' if m['media_type'] == 'video' else 'in_all'
+                if not m.get('in_review') and not m.get('in_purgatory'):
+                    m[flag] = bool(m.get('main_explicit')) or self._main_categories(m)
+                self._stamp_main_entry(m, was)
+            self.save()
+            return owner
+
     def add_category(self, character_id: str, name: str, media_type: str = "image") -> dict[str, Any]:
         name = name.strip()
         if not name:
@@ -1720,8 +1749,8 @@ class LibraryStore:
                 "media_type": media_type,
                 "content_type": content_type,
                 "categories": categories,
-                "in_all": media_type != "video",
-                "in_videos": True,
+                "in_all": media_type != "video" and (not categories or self._main_categories({"character_id": character_id, "categories": categories})),
+                "in_videos": media_type == "video" and (not categories or self._main_categories({"character_id": character_id, "categories": categories})),
                 "favorite": False,
                 "featured": False,
                 "in_review": False,
@@ -2154,8 +2183,8 @@ class LibraryStore:
                 if media and media.get("in_purgatory"):
                     media["in_purgatory"] = False
                     media["in_review"] = False
-                    media["in_videos" if media.get("media_type") == "video" else "in_all"] = bool(media.get("categories"))
-                elif kind == "set" and not preserve_placement and media and not media.get("categories"):
+                    media["in_videos" if media.get("media_type") == "video" else "in_all"] = self._main_categories(media)
+                elif kind == "set" and not preserve_placement and media and not self._main_categories(media) and not media.get("main_explicit"):
                     media["in_videos" if media.get("media_type") == "video" else "in_all"] = False
                 if media:
                     media["set_added_at"] = joined_at
@@ -2224,8 +2253,8 @@ class LibraryStore:
                 if media_id in assigned_ids and media and media.get("in_purgatory"):
                     media["in_purgatory"] = False
                     media["in_review"] = False
-                    media["in_videos" if media.get("media_type") == "video" else "in_all"] = bool(media.get("categories"))
-                elif media_id not in previous_member_ids and kind == "set" and not preserve_placement and media and not media.get("categories"):
+                    media["in_videos" if media.get("media_type") == "video" else "in_all"] = self._main_categories(media)
+                elif media_id not in previous_member_ids and kind == "set" and not preserve_placement and media and not self._main_categories(media) and not media.get("main_explicit"):
                     media["in_videos" if media.get("media_type") == "video" else "in_all"] = False
                 if media:
                     if media_id not in previous_member_ids:
@@ -2305,13 +2334,15 @@ class LibraryStore:
             explicit = in_videos if video else in_all
             next_main = bool(m.get(flag, True)) if explicit is None else bool(explicit)
             changes = {"categories": categories, flag: next_main}
+            if explicit is not None:
+                changes["main_explicit"] = bool(explicit)
             if video:
                 changes["in_all"] = False
-            if categories and explicit is None:
+            if self._main_categories({**m, "categories": categories}) and explicit is None:
                 changes[flag] = True
             # A category assignment or explicit Add to Main exits Purgatory,
             # including clients that submit the old false placement flag.
-            if m.get("in_purgatory") and (categories or explicit is True):
+            if m.get("in_purgatory") and (self._main_categories({**m, "categories": categories}) or explicit is True):
                 changes.update({"in_purgatory": False, "in_review": False, flag: True})
             return self._change_media(m, changes, "Change video categories / All" if video else "Change categories / All")
 
@@ -2334,7 +2365,7 @@ class LibraryStore:
             if in_review:
                 return self._change_media(m, {"in_review": True, "in_purgatory": False}, "Change Review status")
             # Keep the original import date; _change_media records entry into Main.
-            return self._change_media(m, {"in_review": False, "in_purgatory": False, "in_all": m.get("media_type") != "video", "in_videos": True}, "Promote from Review")
+            return self._change_media(m, {"in_review": False, "in_purgatory": False, "in_all": m.get("media_type") != "video", "in_videos": m.get("media_type") == "video", "main_explicit": True}, "Promote from Review")
 
     def set_purgatory(self, media_id: str, in_purgatory: bool) -> dict[str, Any]:
         with self.lock:
@@ -2344,7 +2375,7 @@ class LibraryStore:
             target = bool(in_purgatory)
             changes = {"in_purgatory": target}
             if target:
-                changes.update({"in_review": False, "in_all": False})
+                changes.update({"in_review": False, "in_all": False, "in_videos": False, "main_explicit": False})
             if all(m.get(key) == value for key, value in changes.items()):
                 return m
             return self._change_media(m, changes, "Send to Purgatory" if target else "Restore from Purgatory")
@@ -3241,6 +3272,10 @@ class MediaHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/rapid-review/resolve":
                 self._send_json(200, self.store.resolve_rapid(self._read_json()))
+                return
+            if path == "/api/categories/ghost":
+                body = self._read_json()
+                self._send_json(200, self.store.set_category_ghost(str(body.get('category_id', '')), body.get('ghost')))
                 return
             if path == "/api/categories/order":
                 body = self._read_json()
