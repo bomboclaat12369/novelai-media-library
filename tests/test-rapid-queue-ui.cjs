@@ -32,7 +32,7 @@ const payload=config.parts.map(p=>fs.readFileSync(path.join(dir,p),'utf8')).join
   assert.equal(await page.locator('#naiRapidExpand').count(),0);
   await page.locator('#naiRapidSize').fill('160');await page.locator('#naiRapidSize').dispatchEvent('input');
   const addedMain=queue.items[0].id;
-  await page.locator('#naiRapidAddAll').click();await page.locator('.naiQueueThumb270[data-id="'+addedMain+'"]').waitFor({state:'detached'});
+  await page.locator('#naiRapidMain').check();await page.locator('#naiReviewNext270').click();await page.locator('.naiQueueThumb270[data-id="'+addedMain+'"]').waitFor({state:'detached'});
   let placement=(await api('library')).media.find(m=>m.id===addedMain);assert(placement.in_all);assert.equal(placement.categories.length,0);
   const toPurgatory=queue.items[1].id;
   await page.locator('#naiPurgatoryNext270').click();await page.locator('.naiQueueThumb270[data-id="'+toPurgatory+'"]').waitFor({state:'detached'});

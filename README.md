@@ -367,3 +367,21 @@ accuracy across a larger library or outfits with no existing Set.
   below them. Image and control clicks, scrollbars, and Arrange mode are excluded.
 - Focused validation covers ghost/regular/explicit Main placement, Purgatory,
   persistence, sorting, and the affected standalone and NovelAI UI workflows.
+
+
+## Rapid Review layout (UI 2.8.84)
+
+- The preview uses nearly the full panel height. Current-image flags and categories
+  sit in compact rows above the thumbnail grid, with All styled like Review,
+  Favorite, Featured, and Needs replacement. Crop, Sets, Find matching Sets,
+  Create Category, and Carry categories remain visible beside these controls.
+- Selected-image controls retain Select all, Unselect all, thumbnail size,
+  Create Set + assign, Add to existing Set, and Add selected to Review.
+- Click the main image to view it fullscreen. Escape, another click, or the close
+  control returns without changing the current image, selections, or grid scroll.
+  Fullscreen uses the same preview element, including any displayed crop.
+- Edited thumbnails use a pencil badge. Removed Add to All + Next; use the All
+  checkbox with Save + Next or Set assignment. Existing queue persistence and
+  remembered thumbnail size are retained.
+- Focused browser checks cover both interfaces at 2048×1026 and 1280×720,
+  fullscreen return, visible controls, and queue state. Companion stays at 2.7.48.
