@@ -52,6 +52,10 @@ with tempfile.TemporaryDirectory(prefix='nai-standalone-') as directory:
             item=dict(items[i]);item['id']=uuid.uuid4().hex;item['original_name']=f'Ungrouped {i+1}.jpg'
             item['in_review']=i==1;item['in_purgatory']=i==2;item['in_all']=i not in (1,2)
             store.data['media'].append(item);ungrouped.append(item['id'])
+    for i in range(int(os.environ.get('NAI_FIXTURE_PENDING','0'))):
+        pending_file=Path(directory)/f'queue-{i}.jpg'
+        pending_file.write_bytes((store.root/items[i % len(items)]['stored_rel']).read_bytes()+f'pending-{i}'.encode())
+        store._register_file(pending_file,f'Queue {i}.jpg',c['id'],[],{'kind':'local'},'image/jpeg',pending=True)
     store.save()
     server=runtime['MediaHTTPServer'](('127.0.0.1',8765),store)
     version=os.environ.get('NAI_UI_VERSION',json.loads((root/'release-userscript.json').read_text())['version'])

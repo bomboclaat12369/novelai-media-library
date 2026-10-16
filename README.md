@@ -312,3 +312,32 @@ accuracy across a larger library or outfits with no existing Set.
   current eligible Main cover stays selected when more Main images are added.
 - Focused validation: membership-date persistence and cover precedence checks,
   plus real-companion browser checks of both standalone and NovelAI interfaces.
+
+
+## Persistent Rapid Review and Set tools (UI 2.8.82 / companion 2.7.47)
+
+- Imports sent to Rapid Review are staged in a durable per-character queue. Close,
+  refresh, or restart the companion and use **Resume Rapid Review** to continue.
+  Pending items stay outside Main until explicitly saved. **Discard remaining
+  queue** requires confirmation and deletes only the remaining pending copies.
+- A resizable preview sits beside a large, adjustable thumbnail grid. Expand the
+  grid, Shift-select a range, or use Select all / Unselect all. Items start selected;
+  selection controls apply to bulk **Add to Review**, **Add to existing Set**, and
+  **Create Set + assign**. New imports append to an unfinished queue.
+- New Set creation and assignment happen together, with a Color(s) field. Set
+  **Edit details** also offers aliases and notes; aliases and notes participate in
+  Set text searches. Colors are stored separately for future color filtering.
+- **Arrange** toggles intentional Set image movement on/off. Drag images or use
+  the earlier/later buttons; each move saves immediately. Category order is
+  adjustable in Edit Media for images and videos.
+- Opening a Set in dual mode displays its cover in Viewer 2, retaining Viewer 1.
+- **Find missing images** inside a Set searches ungrouped library images against
+  that Set's searchable members. Multi-image outfit searches can use up to four
+  extra examples. Assignment remains manual; there is no decision-based learning.
+  Incomplete matching shows a simple warning.
+- Existing-library exact duplicates encountered while resolving a pending import
+  are skipped, preserving their current placement and Set membership.
+- Verified with focused queue/restart, rollback, Set metadata/order and matching
+  checks, plus real-companion browser workflows in standalone and NovelAI.
+- Apply the companion update and refresh/apply the UI update before importing
+  into the new queue. Previously discarded unsaved sessions cannot be recovered.

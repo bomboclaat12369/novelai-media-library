@@ -5,6 +5,7 @@ import base64
 import copy
 import hashlib
 import json
+import math
 import mimetypes
 import os
 import queue
@@ -100,6 +101,7 @@ class OutfitMatcher:
 
     def start(self, body, scan=False):
         owner = str(body.get('character_id', ''))
+        target_set_id = str(body.get('target_set_id', ''))
         media_id = str(body.get('media_id', ''))
         encoded = body.get('image_base64', '')
         source_id = str(body.get('source_media_id', ''))
@@ -110,15 +112,23 @@ class OutfitMatcher:
         if not scan and bool(media_id) == bool(encoded):
             raise ValueError('Choose one image to find matching Sets.')
         query_bytes = base64.b64decode(encoded, validate=True) if encoded else None
+        example_ids, example_images = body.get('example_media_ids', []), body.get('example_images', [])
+        if not isinstance(example_ids, list) or not isinstance(example_images, list) or len(example_ids)+len(example_images)>4 or (scan and (example_ids or example_images)):
+            raise ValueError('Choose at most five examples of the same outfit.')
+        if any(not isinstance(mid, str) for mid in example_ids) or any(not isinstance(value, str) or len(value)>6*1024*1024 for value in example_images):
+            raise ValueError('Invalid matching example.')
+        example_bytes = [base64.b64decode(value, validate=True) for value in example_images]
         with self.lock, self.store.lock:
             if self.thread and self.thread.is_alive():
                 raise ValueError('Another Set search is running. Wait for it to finish, then retry.')
             if not any(c['id'] == owner for c in self.store.data['characters']):
                 raise ValueError('Choose a character first.')
             media = {m['id']: m for m in self.store.data['media'] if m.get('character_id') == owner and m.get('media_type', 'image') == 'image'}
-            if (media_id and media_id not in media) or (source_id and source_id not in media):
+            if any(mid not in media for mid in example_ids) or (media_id and media_id not in media) or (source_id and source_id not in media):
                 raise ValueError('Choose an image from this character.')
             sets = copy.deepcopy([s for s in self.store.data.get('sets', []) if s.get('character_id') == owner and s.get('kind', 'set') == 'set'])
+            if target_set_id and (not scan or not any(s['id'] == target_set_id for s in sets)):
+                raise ValueError('Choose an existing Set for this character.')
             candidates = copy.deepcopy(media)
             query = copy.deepcopy(media.get(media_id))
             revision = self.store.revision
@@ -128,7 +138,7 @@ class OutfitMatcher:
                 self.contexts.pop(expired, None)
             ident = uuid.uuid4().hex
             self.jobs[ident] = {'id': ident, 'character_id': owner, 'scan': scan, 'running': True, 'phase': 'Preparing Set scan' if scan else 'Preparing outfit search', 'done': 0, 'total': len(candidates), 'results': [], 'individual_results': [], 'scan_results': [], 'assigned_ids': [], 'issues': []}
-            self.contexts[ident] = {'owner': owner, 'media': candidates, 'stamps': {}, 'query_id': (media_id or source_id) if not scan else ''}
+            self.contexts[ident] = {'owner': owner, 'media': candidates, 'stamps': {}, 'query_id': (media_id or source_id) if not scan else '', 'target_set_id': target_set_id, 'example_ids': list(dict.fromkeys(example_ids)), 'example_bytes': example_bytes}
             self.thread = threading.Thread(target=self._run, args=(ident, sets, candidates, query, query_bytes, revision, owner, scan), daemon=True)
             self.thread.start()
             return self.status(ident)
@@ -348,7 +358,8 @@ class OutfitMatcher:
                         if mid in vectors:
                             try:
                                 views = self._orientations(db, candidates[mid], None, vectors[mid])
-                                ranked = self._rank_sets(sets, compare(views))
+                                targets = [s for s in sets if s["id"] == self.contexts[ident]["target_set_id"]] if self.contexts[ident].get("target_set_id") else sets
+                                ranked = self._rank_sets(targets, compare(views))
                                 row = self._description(candidates[mid])
                                 row.update(results=ranked[:5], stronger=self._stronger_lead(ranked))
                                 scan_results.append(row)
@@ -374,9 +385,23 @@ class OutfitMatcher:
                             self.query_cache[key] = base_vector
                     views = self._orientations(db, query, query_bytes, base_vector)
                     scores = compare(views)
+                    evidence = [scores]
+                    context = self.contexts[ident]
+                    for mid in context['example_ids']:
+                        if mid == context['query_id']:
+                            continue
+                        if mid not in vectors:
+                            raise ValueError('A selected example could not be checked. Remove it or retry.')
+                        evidence.append(compare(self._orientations(db, candidates[mid], None, vectors[mid])))
+                    for data in context['example_bytes']:
+                        vector = self._encode(io.BytesIO(data))
+                        evidence.append(compare(self._orientations(db, None, data, vector)))
+                    if len(evidence)>1:
+                        # Preserve a strong angle while rewarding agreement across outfit examples.
+                        scores = {mid: .75*max(e[mid] for e in evidence)+.25*sum(e[mid] for e in evidence)/len(evidence) for mid in scores}
                     results = self._rank_sets(sets, scores)
                     for mid in ungrouped:
-                        if mid in scores and mid != self.contexts[ident]['query_id']:
+                        if mid in scores and mid != self.contexts[ident]['query_id'] and mid not in self.contexts[ident]['example_ids']:
                             item = self._description(candidates[mid]);item['score'] = scores[mid];individuals.append(item)
                     individuals.sort(key=lambda row: (-row['score'], row['media_id']))
             self._check_cancel(ident)
@@ -673,7 +698,7 @@ class LibraryStore:
             ]}
 
     def _protected_media_files(self) -> set:
-        protected = {m.get(k) for m in self.data["media"] for k in ("stored_rel", "thumb_rel")}
+        protected = {m.get(k) for m in self.data["media"] + self.data.get("rapid_queue", []) for k in ("stored_rel", "thumb_rel")}
         for entry in self.data.get("undo_history", []):
             if entry["kind"] == "delete":
                 protected.update(entry["media"].get(k) for k in ("stored_rel", "thumb_rel"))
@@ -872,9 +897,167 @@ class LibraryStore:
             shutil.copy2(self.db_path, dst)
             return dst
 
+    def rapid_item(self, ident):
+        return next((m for m in self.data.get('rapid_queue', []) if m['id'] == ident), None)
+
+    def rapid_queue(self, owner):
+        with self.lock:
+            if not self.character(owner):
+                raise ValueError('Choose a character first.')
+            return copy.deepcopy({'items': [m for m in self.data.get('rapid_queue', []) if m['character_id'] == owner],
+                                  'state': self.data.get('rapid_states', {}).get(owner, {})})
+
+    def rapid_state(self, body):
+        owner = str(body.get('character_id', ''))
+        with self.lock:
+            if not self.character(owner):
+                raise ValueError('Choose a character first.')
+            choices = body.get('choices', {})
+            if not isinstance(choices, dict):
+                raise ValueError('Invalid queue choices.')
+            pending = {m['id']: m for m in self.data.get('rapid_queue', []) if m['character_id'] == owner}
+            updates = []
+            for ident, values in choices.items():
+                if ident in pending:
+                    updated = copy.deepcopy(pending[ident])
+                    self._rapid_choices(updated, values)
+                    updates.append((pending[ident], updated))
+            states = self.data.setdefault('rapid_states', {})
+            current = str(body.get('current_id', ''))
+            selected = body.get('selected_ids', [])
+            if not isinstance(selected, list):
+                raise ValueError('Invalid queue selection.')
+            scroll = float(body.get('scroll_top', 0))
+            if not math.isfinite(scroll):
+                raise ValueError('Invalid queue position.')
+            for item, updated in updates:
+                item.update(updated)
+            states[owner] = {'current_id': current, 'selected_ids': [mid for mid in selected if isinstance(mid, str) and mid in pending],
+                             'known_ids': list(pending), 'scroll_top': max(0, min(10000000, scroll))}
+            self.save()
+            return {'ok': True}
+
+    def _rapid_choices(self, item, values):
+        if not isinstance(values, dict):
+            raise ValueError('Invalid queue choices.')
+        if 'categories' in values:
+            item['categories'] = self._validate_categories(item['character_id'], values['categories'], item['media_type'])
+        for key in ('favorite', 'featured', 'needs_replacement', 'in_review'):
+            if key in values:
+                if type(values[key]) is not bool:
+                    raise ValueError('Invalid queue flag.')
+                item[key] = values[key]
+        for key in ('crop_top', 'crop_bottom'):
+            if key in values:
+                value = float(values[key])
+                if not math.isfinite(value) or not 0 <= value < .95:
+                    raise ValueError('Invalid crop.')
+                item[key] = value
+        if item.get('crop_top', 0) + item.get('crop_bottom', 0) >= .95:
+            raise ValueError('Crop removes too much of the image.')
+
+    def resolve_rapid(self, body):
+        owner, action = str(body.get('character_id', '')), body.get('action')
+        ids = body.get('media_ids', [])
+        if action not in ('save', 'review', 'set', 'new_set', 'discard') or not isinstance(ids, list) or not ids or any(not isinstance(mid, str) for mid in ids):
+            raise ValueError('Choose queue files and an action.')
+        ids = list(dict.fromkeys(ids))
+        with self.lock:
+            items = [self.rapid_item(mid) for mid in ids]
+            if any(not m or m['character_id'] != owner for m in items):
+                raise ValueError('The queue changed in another window. Resume it again before continuing.')
+            group = self.set_item(str(body.get('set_id', ''))) if action == 'set' else None
+            if action == 'set' and (not group or group['character_id'] != owner):
+                raise ValueError('Choose a Set for this character.')
+            name = str(body.get('name', '')).strip()
+            if action == 'new_set' and not name:
+                raise ValueError('Enter a Set name.')
+            before = copy.deepcopy(self.data)
+            promoted, duplicates = [], []
+            try:
+                for item in items:
+                    self._rapid_choices(item, body.get('choices', {}).get(item['id'], {}))
+                    if action == 'discard':
+                        continue
+                    if not (self.root / item['stored_rel']).is_file():
+                        raise ValueError('A queued original is unavailable. The queue was kept.')
+                    existing = next((m for m in self.data['media'] if m['character_id'] == owner and m.get('sha256') == item.get('sha256')), None)
+                    if existing:
+                        duplicates.append(item['id'])
+                        continue  # Never change a previously imported image through a duplicate queue copy.
+                    item['in_review'] = action == 'review' or (action == 'save' and item.get('in_review', False))
+                    main = not item['in_review'] and (action == 'save' or bool(item.get('categories')))
+                    item['in_all'] = main and item['media_type'] != 'video'
+                    item['in_videos'] = main and item['media_type'] == 'video'
+                    if main:
+                        item['main_added_at'] = now_iso()
+                    self.data['media'].append(item)
+                    promoted.append(item['id'])
+                # Remove pending references before any Set helper persists the transaction.
+                self.data['rapid_queue'] = [m for m in self.data.get('rapid_queue', []) if m['id'] not in ids]
+                if action == 'new_set' and promoted:
+                    group = self.create_set(owner, name, promoted, preserve_placement=True, colors=body.get("colors"), aliases=body.get("aliases"), notes=body.get("notes"))
+                elif action == 'set' and promoted:
+                    self.update_set(group['id'], add_media_ids=promoted, preserve_placement=True)
+                self.save()
+            except Exception:
+                self.data = before
+                self.save()
+                raise
+            # Only private pending copies are removed; source-folder files are never touched.
+            for item in items:
+                if item['id'] not in promoted:
+                    for key in ('stored_rel', 'thumb_rel'):
+                        if item.get(key):
+                            try:
+                                (self.root / item[key]).unlink(missing_ok=True)
+                            except OSError:
+                                pass
+            return {'ok': True, 'resolved_ids': ids, 'saved_ids': promoted, 'duplicate_ids': duplicates,
+                    'set': copy.deepcopy(group) if group else None}
+
+    def reorder_categories(self, owner, media_type, ids):
+        with self.lock:
+            character = self.character(owner)
+            if not character or media_type not in ('image', 'video') or not isinstance(ids, list):
+                raise ValueError('Invalid category order.')
+            cats = character.get('categories', [])
+            selected = {c['id']: c for c in cats if c.get('media_type', 'image') == media_type}
+            if len(ids) != len(selected) or set(ids) != set(selected):
+                raise ValueError('Categories changed. Reopen the editor before ordering them.')
+            ordered = iter(selected[ident] for ident in ids)
+            character['categories'] = [next(ordered) if c['id'] in selected else c for c in cats]
+            self.save()
+            return copy.deepcopy(character)
+
+    def reorder_set(self, ident, ids):
+        with self.lock:
+            group = self.set_item(ident)
+            if not group or not isinstance(ids, list) or len(ids) != len(set(ids)) or set(ids) != set(group.get('media_ids', [])):
+                raise ValueError('Set contents changed. Reopen the Set before ordering its images.')
+            group['media_ids'] = ids
+            group['manual_order'] = True
+            group['updated_at'] = now_iso()
+            self.save()
+            return copy.deepcopy(group)
+
+    @staticmethod
+    def _set_details(aliases=None, colors=None, notes=None):
+        result = {}
+        for key, value in (('aliases', aliases), ('colors', colors)):
+            if value is not None:
+                if not isinstance(value, list) or len(value) > 50 or any(not isinstance(v, str) or len(v) > 150 for v in value):
+                    raise ValueError('Invalid Set ' + key)
+                result[key] = list(dict.fromkeys(v.strip() for v in value if v.strip()))
+        if notes is not None:
+            if not isinstance(notes, str) or len(notes) > 5000:
+                raise ValueError('Set notes must be at most 5000 characters.')
+            result['notes'] = notes.strip()
+        return result
+
     def public_library(self) -> dict[str, Any]:
         with self.lock:
-            return json.loads(json.dumps({**{k: v for k, v in self.data.items() if k not in ("undo_history", "duplicate_replacements", "duplicate_cleanups")}, "revision": self.revision}))
+            return json.loads(json.dumps({**{k: v for k, v in self.data.items() if k not in ("undo_history", "duplicate_replacements", "duplicate_cleanups", "rapid_queue", "rapid_states")}, "revision": self.revision}))
 
     def duplicate_catalog(self, character_id: str = "") -> dict[str, Any]:
         """Only live image records; filesystem leftovers are never reference images."""
@@ -1160,6 +1343,8 @@ class LibraryStore:
         with self.lock:
             if not self.character(character_id):
                 raise KeyError("Character not found")
+            if any(m.get("character_id") == character_id for m in self.data.get("rapid_queue", [])):
+                raise ValueError("This character has a pending Rapid Review queue. Finish or discard it first.")
             if any(m.get("character_id") == character_id for m in self.data["media"]):
                 raise ValueError("This character contains images or videos. Remove or move them before deleting the character.")
             if any(s.get("character_id") == character_id and s.get("media_ids") for s in self.data.get("sets", [])):
@@ -1281,7 +1466,7 @@ class LibraryStore:
 
             owner["categories"] = [cat for cat in owner.get("categories", []) if cat.get("id") != category_id]
             affected = 0
-            for m in self.data["media"]:
+            for m in self.data["media"] + self.data.get("rapid_queue", []):
                 if m.get("character_id") != owner.get("id"):
                     continue
                 cats = list(m.get("categories", []))
@@ -1375,7 +1560,7 @@ class LibraryStore:
                 original, media_id, character_name = job
                 # Skip items deleted/replaced while waiting, before decoding anything.
                 with self.lock:
-                    item = self.media_item(media_id)
+                    item = self.media_item(media_id) or self.rapid_item(media_id)
                     if not item or (self.root / str(item.get("stored_rel") or "")).resolve() != original.resolve():
                         continue
                 # Let the successful import response flush before background work starts.
@@ -1391,7 +1576,7 @@ class LibraryStore:
                 if not thumb_rel:
                     continue
                 with self.lock:
-                    item = self.media_item(media_id)
+                    item = self.media_item(media_id) or self.rapid_item(media_id)
                     if not item or (self.root / str(item.get("stored_rel") or "")).resolve() != original.resolve():
                         (self.root / thumb_rel).unlink(missing_ok=True)
                         continue
@@ -1447,6 +1632,7 @@ class LibraryStore:
         categories: list[str],
         source: dict[str, Any],
         content_type: str | None = None,
+        pending: bool = False,
     ) -> tuple[dict[str, Any], bool]:
         # Hashing can read a large video for many seconds. Do it before taking the
         # library lock so playback, metadata reads, and other UI requests remain
@@ -1470,7 +1656,7 @@ class LibraryStore:
             if not c:
                 raise KeyError("Character not found")
             categories = self._validate_categories(character_id, categories, media_type)
-            for existing in self.data["media"]:
+            for existing in (self.data.get("rapid_queue", []) if pending else self.data["media"]):
                 if existing.get("character_id") == character_id and existing.get("sha256") == sha:
                     changed = False
                     if existing.get("media_type") == "video":
@@ -1550,9 +1736,10 @@ class LibraryStore:
                 "height": height,
                 "created_at": now_iso(),
             }
-            item["main_added_at"] = item["created_at"]
+            if not pending:
+                item["main_added_at"] = item["created_at"]
             self._apply_resolution_flag(item)
-            self.data["media"].append(item)
+            self.data.setdefault("rapid_queue" if pending else "media", []).append(item)
             self.save()
             if media_type == "image":
                 self._queue_image_thumbnail(destination, media_id, c["name"])
@@ -1592,7 +1779,7 @@ class LibraryStore:
                 size = body.get("size")
                 if type(size) is not int or size <= 0 or size > 16 * 1024**3:
                     raise ValueError("File must be between 1 byte and 16 GiB")
-                meta = {k: body.get(k) for k in ("character_id", "filename", "size", "content_type", "categories", "source_url")}
+                meta = {k: body.get(k) for k in ("character_id", "filename", "size", "content_type", "categories", "source_url", "pending_review")}
                 if job:
                     if job["meta"] != meta:
                         raise ValueError("Upload ID already belongs to another file")
@@ -1657,7 +1844,7 @@ class LibraryStore:
                 self.last_import_debug = {"state": "registering", "filename": meta["filename"], "file_bytes": job["offset"]}
                 source = {"kind": "url", "url": meta["source_url"]} if meta["source_url"] else {"kind": "local", "original_name": meta["filename"]}
                 item, duplicate = self._register_file(temp, meta["filename"], str(meta["character_id"]),
-                    meta["categories"] if isinstance(meta["categories"], list) else [], source, job["content_type"])
+                    meta["categories"] if isinstance(meta["categories"], list) else [], source, job["content_type"], pending=meta.get("pending_review") is True)
                 job["result"] = {"item": item, "duplicate": duplicate}
                 job["state"] = "done"
                 self.last_import_debug = {"state": "done", "recorded_at_epoch_ms": int(time.time()*1000),
@@ -1945,12 +2132,13 @@ class LibraryStore:
         suffix = max((int(m.group(1)) for n in names if (m := pattern.fullmatch(n))), default=0) + 1
         return f"{name} {suffix}"
 
-    def create_set(self, character_id: str, name: str, media_ids: list[Any], cover_media_id: Any = None, kind: str = "set", preserve_placement: bool = False, cover_source: Any = None, categories: Any = None) -> dict[str, Any]:
+    def create_set(self, character_id: str, name: str, media_ids: list[Any], cover_media_id: Any = None, kind: str = "set", preserve_placement: bool = False, cover_source: Any = None, categories: Any = None, aliases: Any = None, colors: Any = None, notes: Any = None) -> dict[str, Any]:
         if kind != "set":
             raise ValueError("Only Sets are supported")
         name = str(name or "").strip()
         if not name:
             raise ValueError("Set name cannot be empty")
+        details = self._set_details(aliases, colors, notes)
         with self.lock:
             if not self.character(character_id):
                 raise KeyError("Character not found")
@@ -1989,11 +2177,13 @@ class LibraryStore:
                 "created_at": stamp,
                 "updated_at": stamp,
             }
+            item.update(details)
             self.data.setdefault("sets", []).append(item)
             self.save()
             return item
 
-    def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None, cover_source: Any = None, favorite: Any = None, categories: Any = None, remove_media_ids: Any = None) -> dict[str, Any]:
+    def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None, cover_source: Any = None, favorite: Any = None, categories: Any = None, remove_media_ids: Any = None, aliases: Any = None, colors: Any = None, notes: Any = None) -> dict[str, Any]:
+        details = self._set_details(aliases, colors, notes)
         with self.lock:
             item = self.set_item(set_id)
             if not item:
@@ -2050,6 +2240,7 @@ class LibraryStore:
                 source = cover_source
             elif cover_media_id is not None and (cover != item.get("cover_media_id") or media_ids is None):
                 source = "manual"
+            item.update(details)
             item["categories"] = next_categories
             item["cover_source"] = source
             if favorite is not None:
@@ -2286,7 +2477,7 @@ class LibraryStore:
 
     def media_path(self, media_id: str, thumb: bool = False) -> tuple[Path, str]:
         with self.lock:
-            m = self.media_item(media_id)
+            m = self.media_item(media_id) or self.rapid_item(media_id)
             if not m:
                 raise KeyError("Media not found")
             rel = m.get("thumb_rel") if thumb else m.get("stored_rel")
@@ -2881,6 +3072,10 @@ class MediaHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            if path == "/api/rapid-review":
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._send_json(200, self.store.rapid_queue(query.get('character_id', [''])[0]))
+                return
             if path == "/api/sets/match-status":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._send_json(200, self.store.outfit_matcher.status(query.get("id", [""])[0]))
@@ -2904,7 +3099,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     self._send_json(200, {"revision": self.store.revision})
                 return
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "outfit_matching": True, "outfit_library_scan": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "outfit_matching": True, "outfit_library_scan": True, "persistent_rapid_review": True, "set_examples": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/duplicate-review/catalog":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -2944,7 +3139,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                 thumb = bool(match.group(2))
                 requested = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("size", ["0"])[0]
                 size = int(requested) if str(requested).isdigit() else 0
-                if thumb and size > 0:
+                if thumb and size > 0 and not self.store.rapid_item(media_id):
                     file_path, content_type = self.store.grid_preview(media_id, size)
                 else:
                     file_path, content_type = self.store.media_path(media_id, thumb=thumb)
@@ -3041,6 +3236,20 @@ class MediaHandler(BaseHTTPRequestHandler):
                 body = self._read_json()
                 self._send_json(200, self.store.add_character(str(body.get("name", ""))))
                 return
+            if path == "/api/rapid-review/state":
+                self._send_json(200, self.store.rapid_state(self._read_json()))
+                return
+            if path == "/api/rapid-review/resolve":
+                self._send_json(200, self.store.resolve_rapid(self._read_json()))
+                return
+            if path == "/api/categories/order":
+                body = self._read_json()
+                self._send_json(200, self.store.reorder_categories(str(body.get('character_id', '')), body.get('media_type'), body.get('category_ids')))
+                return
+            if path == "/api/sets/order":
+                body = self._read_json()
+                self._send_json(200, self.store.reorder_set(str(body.get('set_id', '')), body.get('media_ids')))
+                return
             if path == "/api/categories":
                 body = self._read_json()
                 self._send_json(200, self.store.add_category(str(body.get("character_id", "")), str(body.get("name", "")), str(body.get("media_type", "image"))))
@@ -3080,6 +3289,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     bool(body.get("preserve_placement", False)),
                     body.get("cover_source"),
                     body.get("categories"),
+                    body.get("aliases"), body.get("colors"), body.get("notes"),
                 )
                 self._send_json(200, item)
                 return
@@ -3097,6 +3307,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     body.get("favorite"),
                     body.get("categories"),
                     body.get("remove_media_ids"),
+                    body.get("aliases"), body.get("colors"), body.get("notes"),
                 )
                 self._send_json(200, item)
                 return

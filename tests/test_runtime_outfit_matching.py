@@ -37,6 +37,19 @@ class OutfitTests(unittest.TestCase):
     def run_search(self,**query):
         job=self.m.start({'character_id':self.owner['id'],**query});self.m.thread.join(10)
         result=self.m.status(job['id']);self.assertFalse(result['running']);self.assertNotIn('error',result);return result
+    def test_reverse_set_search_and_multiple_examples(self):
+        self.add_ungrouped()
+        job=self.m.start({'character_id':self.owner['id'],'target_set_id':self.second['id']},scan=True)
+        self.m.thread.join(10);result=self.m.status(job['id'])
+        self.assertNotIn('error',result)
+        self.assertEqual(len(result['scan_results']),3)
+        self.assertTrue(all([r['set_id'] for r in row['results']]==[self.second['id']] for row in result['scan_results']))
+        combined=self.run_search(media_id=self.a['id'],example_media_ids=[self.b['id']])
+        self.assertEqual(len(combined['results']),2)
+        self.assertTrue(all(0<=row['score']<=1 for row in combined['results']))
+        with self.assertRaisesRegex(ValueError,'five examples'):
+            self.m.start({'character_id':self.owner['id'],'media_id':self.a['id'],'example_media_ids':[self.b['id']]*5})
+
     def test_saved_and_draft_cache_no_library_changes(self):
         before=self.store.db_path.read_bytes()
         result=self.run_search(media_id=self.a['id']);self.assertEqual(result['results'][0]['set_id'],self.group['id'])
