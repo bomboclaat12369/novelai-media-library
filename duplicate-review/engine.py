@@ -22,8 +22,9 @@ import numpy as np
 from PIL import Image, ImageOps
 from library_bridge import LibraryClient
 import crop_match
+import same_photo
 
-VERSION = '1.6.1'
+VERSION = '1.7.0'
 ALGORITHM = 1
 QUARANTINE = '_Duplicate_Review_Quarantine'
 EXTENSIONS = {'.jpg', '.jpeg', '.jpe', '.jfif', '.png', '.webp', '.bmp', '.tif', '.tiff', '.avif', '.gif'}
@@ -235,6 +236,7 @@ class Engine:
                 CREATE TABLE IF NOT EXISTS errors(path TEXT, message TEXT);
                 CREATE TABLE IF NOT EXISTS features(path TEXT PRIMARY KEY, stamp TEXT, version INTEGER, data BLOB);
                 CREATE TABLE IF NOT EXISTS aligned_tasks(key TEXT PRIMARY KEY, results TEXT);
+                CREATE TABLE IF NOT EXISTS verified_copies(key TEXT PRIMARY KEY, accepted INTEGER);
                 CREATE TABLE IF NOT EXISTS separations(a TEXT, b TEXT, PRIMARY KEY(a,b));
                 CREATE TABLE IF NOT EXISTS group_links(a TEXT, b TEXT, PRIMARY KEY(a,b));
                 CREATE TABLE IF NOT EXISTS keeps(path TEXT, sha TEXT, PRIMARY KEY(path,sha));
@@ -959,6 +961,122 @@ class Engine:
                     'moves':[{'move':m['target']['path'], 'keep':m['keeper']['path'], 'target':m['target']['id'], 'keeper':m['keeper']['id'], 'proof':m['proof']} for m in moves],
                     'missing_pixels':sum(not r.get('pixel') for r in records)}
 
+    def start_verified(self, revision, scope='all'):
+        with self.lock:
+            if self.status['running'] or revision != self.revision:
+                raise ValueError('The review changed. Reload and try again.')
+            if self.config().get('scan_kind') == 'library':
+                raise ValueError('Library-only cleanup requires manual choices to preserve assignments.')
+            if scope not in ('all', 'folder'):
+                raise ValueError('Choose a valid folder scope.')
+            self.groups()
+            groups = [list(g['files']) for g in self.groups_cache['groups']]
+            with self.db() as db:
+                ignored = {r[0] for r in db.execute('SELECT key FROM ignored')}
+                separated = {tuple(r) for r in db.execute('SELECT a,b FROM separations')}
+            self.exact_plan = None
+            self.cancel.clear()
+            workers = max(1, min(8, int(self.config().get('workers', 8))))
+            self.status.update(running=True, phase='Verifying same-photo copies', done=0,
+                               total=len(groups), workers=workers, elapsed_seconds=0,
+                               eta_seconds=None, cached_tasks=0)
+            self.thread = threading.Thread(target=self._run_verified,
+                args=(groups, ignored, separated, scope, workers), daemon=True)
+            self.thread.start()
+            return {'message':'Verifying copies, then quarantining matches. Uncertain images stay for review.'}
+
+    def _verified_group(self, files, ignored, separated, scope):
+        # Stable MP sort preserves the UI's left-to-right ordering on ties.
+        ordered = sorted(files, key=lambda r:-(r['w']*r['h']))
+        keepers, moves = [], []
+        failed = set()
+        @lru_cache(maxsize=8)
+        def prepared(ident):
+            r = next(r for r in files if r['id']==ident)
+            try:
+                path = self.validate(r)
+                image = same_photo.prepare(path)
+                self.validate(r, verify_hash=False)
+                return image
+            except Exception as e:
+                if ident not in failed:
+                    failed.add(ident)
+                    self.error(r['path'], str(e))
+                return None
+        for target in ordered:
+            if self.cancel.is_set():
+                break
+            chosen = None
+            if not target['keep'] and not target['reference'] and not target.get('library'):
+                for keeper in keepers:
+                    if self.cancel.is_set():
+                        break
+                    if scope == 'folder' and Path(target['path']).parent != Path(keeper['path']).parent:
+                        continue
+                    if pair_key(target, keeper) in ignored or tuple(sorted((target['sha'],keeper['sha']))) in separated:
+                        continue
+                    proof = None
+                    if target['sha'] == keeper['sha']:
+                        proof = 'bytes'
+                    elif target.get('pixel') and target['pixel'] == keeper.get('pixel'):
+                        proof = 'pixels'
+                    else:
+                        key = same_photo.VERSION+':'+target['sha']+':'+keeper['sha']
+                        with self.db() as db:
+                            cached = db.execute('SELECT accepted FROM verified_copies WHERE key=?',(key,)).fetchone()
+                        if cached is not None:
+                            accepted = bool(cached[0])
+                        else:
+                            accepted = same_photo.verify(prepared(target['id']), prepared(keeper['id']))
+                            if target['id'] not in failed and keeper['id'] not in failed:
+                                with self.db() as db:
+                                    db.execute('INSERT OR REPLACE INTO verified_copies VALUES (?,?)',(key,int(accepted)))
+                        if accepted:
+                            proof = 'same_photo'
+                    if proof:
+                        chosen = {'target':target, 'keeper':keeper, 'proof':proof}
+                        break
+            if chosen:
+                moves.append(chosen)
+            else:
+                keepers.append(target)
+        # No chain: every keeper remains on disk, and every target was checked
+        # directly against that keeper, not inferred from group membership.
+        return moves
+
+    def _run_verified(self, groups, ignored, separated, scope, workers):
+        started = time.monotonic()
+        moves = []
+        try:
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='verify') as pool:
+                pending = {pool.submit(self._verified_group, g, ignored, separated, scope) for g in groups}
+                done = 0
+                while pending:
+                    finished, pending = wait(pending, timeout=.2, return_when=FIRST_COMPLETED)
+                    for future in finished:
+                        moves.extend(future.result())
+                        done += 1
+                    self.set_status(done=done, elapsed_seconds=round(time.monotonic()-started))
+                    if self.cancel.is_set():
+                        for future in pending:
+                            future.cancel()
+                        break
+            if self.cancel.is_set():
+                self.set_status(phase='Verification stopped. No files moved.')
+                return
+            if not moves:
+                self.set_status(phase='No additional verified copies. Remaining images need manual review; check Issues for any failures.')
+                return
+            self.set_status(phase='Moving verified copies to quarantine', done=0, total=len(moves),
+                            workers=0, eta_seconds=None)
+            # Existing move journal, live source+keeper hashing and Undo batch.
+            self._run_exact(moves, uuid.uuid4().hex, finish=False)
+        except Exception as e:
+            self.error('Automatic copy verification', str(e))
+            self.set_status(phase='Automatic verification failed. Check Issues before retrying.')
+        finally:
+            self.set_status(running=False)
+
     def start_exact(self, token):
         with self.lock:
             if self.status['running']:
@@ -975,7 +1093,7 @@ class Engine:
             self.thread.start()
             return {'message':f'Moving {len(moves)} selected copies to quarantine…'}
 
-    def _run_exact(self, moves, batch, keep_records=None):
+    def _run_exact(self, moves, batch, keep_records=None, finish=True):
         moved, failed = 0, 0
         try:
             for index, item in enumerate(moves):
@@ -1006,7 +1124,8 @@ class Engine:
                     self.invalidate_groups()
             self.set_status(phase=f'Moved {moved} selected copies' + (f' · {failed} skipped (see issues)' if failed else '') + (' · Stopped' if self.cancel.is_set() else '') + ' · Undo last action restores this batch')
         finally:
-            self.set_status(running=False)
+            if finish:
+                self.set_status(running=False)
 
     def reset_dismissed(self):
         with self.lock:

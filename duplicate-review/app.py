@@ -111,6 +111,8 @@ def make_server(engine, port=0, token=None):
                     result = {'message': 'Stopping after the current file…'}
                 elif path == '/api/review':
                     result = engine.review(int(body['pair']), body['action'])
+                elif path == '/api/verified/start':
+                    result = engine.start_verified(int(body['revision']), body.get('scope', 'all'))
                 elif path == '/api/exact/preview':
                     result = engine.preview_exact(body.get('scope', 'all'),bool(body.get('include_pixels')))
                 elif path == '/api/exact/start':

@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.6.1
+LOCAL DUPLICATE REVIEW 1.7.0
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -13,6 +13,33 @@ The database is stored separately in %LOCALAPPDATA%\LocalDuplicateReview.
 Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
 Later launches, scans and image processing stay local; no cloud account or GPU.
+
+NEW IN 1.7.0: AUTO-QUARANTINE VERIFIED COPIES
+- Click Auto-quarantine verified copies after scanning. It checks your current
+  review groups and then quarantines qualifying incoming copies in one batch.
+  Existing completed scans can be used immediately; no rescan is required.
+- Each discarded image is checked directly against its retained keeper. Review
+  group membership, Broad-mode scores and indirect matches never authorize moves.
+- The separate verifier aligns copies, requires full containment of the discarded
+  image, and checks local structure and pixel differences across the image. Many
+  resized, recompressed and cropped copies qualify. Different/uncertain poses,
+  complementary crops, very small images and ambiguous edits stay for review.
+- Highest megapixels wins; ties use the displayed left-to-right order. There is
+  no separate sharpness/upscaling quality ranking. If a higher-MP crop lacks part
+  of another image, the image with additional content is retained too.
+- Library/reference images and manual Keep choices cannot be quarantined. An
+  incoming copy above library resolution stays available for Replace library copy.
+  Library-only cleanup remains manual to preserve your metadata assignments.
+- Keep-both and Different image decisions are respected, as is the folder-scope
+  selector. Verification uses up to 8 CPU workers, capped by your worker setting.
+  Content-keyed verification results are cached; unchanged comparisons are reused.
+- Stop during verification moves nothing. Stop during moving stops after the
+  current copy. Undo restores this action's entire moved batch, including after
+  restarting. Actual source and keeper files are verified again before each move.
+- This is conservative visual verification, not mathematical proof of identity.
+  Nothing is permanently deleted. Check Issues for skipped/unreadable/changed files.
+- The older exact-selection buttons retain their existing byte/pixel-only behavior.
+  They select first and still use newest-folder priority.
 
 NEW IN 1.6.1: QUARANTINE A WHOLE INCOMING GROUP
 - Click Quarantine all incoming to move every incoming image in the displayed
@@ -70,8 +97,8 @@ CROP-AWARE MATCHING AND SCAN COVERAGE
 - A second visual pass aligns local details and compares overlapping image content.
   It handles many crops, rotations, mirrors, borders and mild exposure changes.
   It is independent of the old whole-image hash and 3% aspect-ratio restriction.
-- These are manual-review suggestions only. Automatic selection still requires
-  identical file bytes or decoded pixels. Different poses can be false positives.
+- These scan matches are manual-review suggestions. The separate 1.7 verifier
+  rechecks candidates before auto-quarantine; Broad suggestions alone never qualify.
 - Run a fresh scan after upgrading. The first scan builds new cached fingerprints
   and takes longer. Scan time increases with collection size; Stop stays available.
 - Read the scan summary: included/discovered totals, library totals and any Issues.
@@ -153,7 +180,8 @@ COMPARISON AND AUTOMATIC SELECTION
 - Select obvious duplicates requires identical full-resolution decoded pixels OR
   identical SHA-256 bytes. Names, lossless encoding and nonvisual metadata can
   differ; color profiles/display interpretation must agree.
-- JPEG recompression normally changes pixels and still needs manual review.
+- JPEG recompression normally changes pixels. The separate Auto-quarantine
+  verifier can handle many of these copies; uncertain cases need manual review.
   Same dimensions, a visual similarity score, or group membership is not proof.
 - Select exact bytes only limits automatic selection to SHA-256 equality.
 - Both buttons select first. Nothing moves until you click Move selected copies.

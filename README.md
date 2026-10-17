@@ -398,3 +398,27 @@ accuracy across a larger library or outfits with no existing Set.
   continues to prevent accidental moves.
 - Focused browser checks cover repeated review selections and native mouse dragging
   forward, backward, and into gaps in standalone and NovelAI. Companion remains 2.7.48.
+
+
+## Automatic same-photo quarantine (Duplicate Review 1.7.0)
+
+- **Auto-quarantine verified copies** performs a stricter verification pass over
+  current review groups, then moves qualifying incoming copies in one undoable batch.
+  It handles many resized, recompressed and contained cropped copies, independently
+  of the Broad/Balanced/Strict review-suggestion setting.
+- Highest megapixels wins; ties follow the current left-to-right order. Every
+  discarded copy is compared directly with its retained keeper. Local detail and
+  full containment are checked; group membership and indirect matches are insufficient.
+- Uncertain matches and complementary crops remain for manual review. Library
+  references, manual Keep choices and Different image decisions stay protected.
+  Incoming upgrades above library resolution remain available for replacement.
+- Verification is cached and runs with up to eight CPU workers. Stop before the
+  move phase leaves all files untouched. Source and keeper hashes are rechecked
+  before each journaled move, and Undo restores the entire moved batch.
+- Focused checks cover resizing/cropping versus localized changes, mixed-group
+  keeper selection, library validation, scope/decisions, changed files, caching,
+  cancellation and batch Undo across restart, plus the real browser/HTTP action.
+- Download [Local Duplicate Review 1.7.0](downloads/Local-Duplicate-Review-1.7.0.zip).
+  Quit the old checker, extract the whole package and run its launcher. Existing
+  scans, decisions and Undo history carry over. No media-library UI or companion
+  update is needed. Visual verification is conservative, not a zero-error guarantee.
