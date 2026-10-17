@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.7.0
+LOCAL DUPLICATE REVIEW 1.7.1
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -13,6 +13,25 @@ The database is stored separately in %LOCALAPPDATA%\LocalDuplicateReview.
 Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
 Later launches, scans and image processing stay local; no cloud account or GPU.
+
+NEW IN 1.7.1: FASTER CROP SEARCH AND MORE WORKERS
+- Crop searches can now run concurrently against independent copies of the same
+  search trees. This removes the single shared search lock. Up to eight copies
+  are used, bounded per 256-image block to limit extra memory use.
+- Adds 24 and 32 CPU-worker choices, capped to the CPU threads available on your
+  computer. Existing choices are retained; the default remains 8. More workers
+  are not always faster, particularly if other programs are busy.
+- Completed task writes are checkpointed in short batches to avoid a disk flush
+  for every worker result. Stop saves already collected results before returning.
+  A forced shutdown can lose the last short uncommitted checkpoint, not prior work.
+- Matching thresholds, candidate searches, image coverage, block ordering and
+  cache keys are unchanged. Existing completed crop comparisons remain reusable,
+  including when changing the worker count. Keep folders/files and matching mode
+  unchanged when resuming. Keep/Different image decisions and Undo carry over.
+- To upgrade during a scan: click Stop and wait, then Quit, replace/extract the
+  program files, reopen, choose your worker count and click Scan again. Cached
+  work is reused; the scan may first show its normal file-checking stages.
+- No changes to automatic-quarantine verification or keeper selection.
 
 NEW IN 1.7.0: AUTO-QUARANTINE VERIFIED COPIES
 - Click Auto-quarantine verified copies after scanning. It checks your current

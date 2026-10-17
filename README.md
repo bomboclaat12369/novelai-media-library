@@ -422,3 +422,20 @@ accuracy across a larger library or outfits with no existing Set.
   Quit the old checker, extract the whole package and run its launcher. Existing
   scans, decisions and Undo history carry over. No media-library UI or companion
   update is needed. Visual verification is conservative, not a zero-error guarantee.
+
+
+## Parallel crop searches (Duplicate Review 1.7.1)
+
+- Crop comparison uses bounded independent copies of the same saved search trees,
+  allowing simultaneous searches instead of serializing them behind one lock.
+  Native index objects are never searched concurrently by multiple threads.
+- Adds 24/32-worker options (hardware capped) and batches frequent database flushes
+  into short checkpoints. Stop commits the completed results already collected.
+- Existing cache keys, matching thresholds, candidate parameters and image
+  coverage are unchanged. Previously completed comparisons can be reused after
+  upgrading or changing workers with unchanged files, folders and matching mode.
+- Focused checks cover identical search results, matching results, reuse of the
+  previous version's database, multiple blocks, review decisions, and Stop/resume.
+- Download [Local Duplicate Review 1.7.1](downloads/Local-Duplicate-Review-1.7.1.zip).
+  Stop the scan and wait, Quit, extract the full package, reopen and Scan again.
+  No media-library UI or companion update is required.

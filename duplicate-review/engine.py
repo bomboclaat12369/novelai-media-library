@@ -23,8 +23,9 @@ from PIL import Image, ImageOps
 from library_bridge import LibraryClient
 import crop_match
 import same_photo
+from search_index import SearchIndexes
 
-VERSION = '1.7.0'
+VERSION = '1.7.1'
 ALGORITHM = 1
 QUARANTINE = '_Duplicate_Review_Quarantine'
 EXTENSIONS = {'.jpg', '.jpeg', '.jpe', '.jfif', '.png', '.webp', '.bmp', '.tif', '.tiff', '.avif', '.gif'}
@@ -288,7 +289,7 @@ class Engine:
                     raise ValueError('Connect to the companion and choose All characters or a character.')
             if mode not in MODES:
                 raise ValueError('Choose a matching sensitivity.')
-            workers = max(1,min(16,int(workers)))
+            workers = max(1,min(32,int(workers)))
             incoming = list(dict.fromkeys(str(canonical(p)) for p in incoming if p.strip()))
             reference = list(dict.fromkeys(str(canonical(p)) for p in reference if p.strip()))
             if not incoming and scan_kind != 'library':
@@ -523,7 +524,7 @@ class Engine:
     def match_aligned(self, records, mode, workers=8):
         """Same retrieval and match thresholds, bounded concurrent verification."""
         import cv2
-        workers = max(1,min(int(workers),16,os.cpu_count() or 1))
+        workers = max(1,min(int(workers),32,os.cpu_count() or 1))
         unique, identities = [], set()
         for record in preferred(records):
             if not record.get('features'): continue
@@ -580,13 +581,13 @@ class Engine:
                     completed += len(jobs); progress(); db.commit(); continue
                 descriptors = np.concatenate(arrays)
                 owner_array = np.array(owners,dtype=np.int32)
-                index = cv2.flann_Index(descriptors,dict(algorithm=1,trees=4))
-                index_lock = threading.Lock()
+                indexes = SearchIndexes(descriptors, workers)
                 def compare(j):
                     if self.cancel.is_set(): raise InterruptedError()
                     query = feature(j)
-                    # Protect the shared search index; expensive pair verification runs concurrently.
-                    with index_lock:
+                    # Independent copies share identical trees, allowing concurrent
+                    # searches without concurrent access to a single native index.
+                    with indexes.acquire() as index:
                         choices = [(mirrored,crop_match.candidates(query['mirror_desc' if mirrored else 'desc'],index,owner_array))
                                    for mirrored in (False,True)]
                     results, found = [], set()
@@ -600,6 +601,7 @@ class Engine:
                     return results
                 pending = {}
                 iterator = iter(jobs)
+                committed = time.monotonic()
                 try:
                     while True:
                         if self.cancel.is_set(): raise InterruptedError()
@@ -618,12 +620,18 @@ class Engine:
                                 self.add_pair(db,unique[j],unique[start+i],label,score,ignored)
                             completed += 1
                         progress()
-                        if ready: db.commit()
+                        # Avoid a disk flush for every worker completion. Keep the
+                        # durable checkpoint delay below half a second while running.
+                        if ready and time.monotonic()-committed >= .5:
+                            db.commit()
+                            committed = time.monotonic()
                 finally:
                     # Workers must finish before releasing this block's index or rebinding closures.
                     for future in pending: future.cancel()
                     if pending: wait(pending)
-                    index.release()
+                    indexes.close()
+                    # Save completed tasks even when Stop interrupts this block.
+                    db.commit()
                 db.commit()
         feature.cache_clear()
         progress()
