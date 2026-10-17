@@ -385,3 +385,16 @@ accuracy across a larger library or outfits with no existing Set.
   remembered thumbnail size are retained.
 - Focused browser checks cover both interfaces at 2048×1026 and 1280×720,
   fullscreen return, visible controls, and queue state. Companion stays at 2.7.48.
+
+
+## Compact Rapid Review controls and reliable arrangement (UI 2.8.85)
+
+- Current-image controls use compact, content-width buttons in wrapping rows for
+  flags, categories, and actions. Selected-image bulk tools remain separate.
+- Rapid Review keeps its thumbnail scroll position when selecting images, including
+  with larger saved thumbnail sizes.
+- Set Arrange accepts drops before or after images and in grid gaps, displays an
+  insertion marker, and immediately shows the new order while saving. Arrange Off
+  continues to prevent accidental moves.
+- Focused browser checks cover repeated review selections and native mouse dragging
+  forward, backward, and into gaps in standalone and NovelAI. Companion remains 2.7.48.
