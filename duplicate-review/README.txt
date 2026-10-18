@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.7.1
+LOCAL DUPLICATE REVIEW 1.7.2
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -13,6 +13,13 @@ The database is stored separately in %LOCALAPPDATA%\LocalDuplicateReview.
 Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
 Later launches, scans and image processing stay local; no cloud account or GPU.
+
+NEW IN 1.7.2: CONSISTENT COMPARE LARGE ORDER
+- Clicking a thumbnail compares it with the next image in grid order. The last
+  thumbnail is compared with the preceding image, retaining left-to-right order.
+- Compare large starts with the first two images. Numbered dropdown choices
+  match the grid; changing choices keeps the pair distinct and in grid order.
+- No scanning, matching, quarantine or cache changes. No rescan is required.
 
 NEW IN 1.7.1: FASTER CROP SEARCH AND MORE WORKERS
 - Crop searches can now run concurrently against independent copies of the same

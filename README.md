@@ -439,3 +439,14 @@ accuracy across a larger library or outfits with no existing Set.
 - Download [Local Duplicate Review 1.7.1](downloads/Local-Duplicate-Review-1.7.1.zip).
   Stop the scan and wait, Quit, extract the full package, reopen and Scan again.
   No media-library UI or companion update is required.
+
+## Consistent comparison order (Duplicate Review 1.7.2)
+
+- Compare Large preserves thumbnail order. Clicking an image shows it beside
+  its next neighbor; the last image appears on the right beside its predecessor.
+- The toolbar button opens the first two images. Numbered dropdowns match the
+  grid and preserve distinct choices in left-to-right order.
+- Scanning, matching rules, caches and saved decisions are unchanged. No rescan
+  is needed for this fix.
+- Download [Local Duplicate Review 1.7.2](downloads/Local-Duplicate-Review-1.7.2.zip).
+  Quit the old checker, extract the full package and run the launcher.
