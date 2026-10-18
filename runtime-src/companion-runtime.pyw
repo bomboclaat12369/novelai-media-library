@@ -1484,6 +1484,71 @@ class LibraryStore:
     def character(self, character_id: str) -> dict[str, Any] | None:
         return next((c for c in self.data["characters"] if c["id"] == character_id), None)
 
+    def profile_request(self, action, body):
+        with self.lock:
+            owner = str(body.get('character_id', ''))
+            character = self.character(owner)
+            if not character:
+                raise ValueError('Choose a character first.')
+            profile = copy.deepcopy(character.get('profile') or {})
+            revision = profile.get('revision', '')
+            valid = {m['id'] for m in self.data['media'] if m.get('character_id') == owner and m.get('media_type') != 'video'}
+            if action == 'save':
+                if body.get('revision', '') != revision:
+                    raise ValueError('This profile changed in another window. Reopen it before editing.')
+                proposed = body.get('profile')
+                if not isinstance(proposed, dict):
+                    raise ValueError('Invalid profile.')
+                photos = proposed.get('photos', [])
+                if not isinstance(photos, list) or len(photos) > 5 or any(not isinstance(i, str) or i not in valid for i in photos) or len(set(photos)) != len(photos):
+                    raise ValueError('Choose up to five different images belonging to this person.')
+                measurements = proposed.get('measurements', {})
+                if not isinstance(measurements, dict):
+                    raise ValueError('Invalid measurements.')
+                cleaned = {}
+                for key in ('height', 'bust', 'waist', 'hips', 'bra'):
+                    item = measurements.get(key, {})
+                    if not isinstance(item, dict):
+                        raise ValueError('Invalid measurement.')
+                    value = str(item.get('value', '')).strip()
+                    status = item.get('status', 'estimated')
+                    if status not in ('estimated', 'confirmed'):
+                        raise ValueError('Choose Estimated or Confirmed.')
+                    if value:
+                        if key == 'bra':
+                            if len(value) > 30:
+                                raise ValueError('Bra size must be 30 characters or less.')
+                        else:
+                            try:
+                                number = float(value)
+                            except (ValueError, OverflowError):
+                                raise ValueError('Measurements must be positive numbers in inches.')
+                            if not 0 < number <= 200:
+                                raise ValueError('Measurements must be between 0 and 200 inches.')
+                            value = format(number, 'g')
+                        cleaned[key] = {'value': value, 'status': status}
+                notes = proposed.get('notes', '')
+                if not isinstance(notes, str) or len(notes) > 10000:
+                    raise ValueError('Notes must be 10,000 characters or less.')
+                profile = {'photos': photos, 'measurements': cleaned, 'notes': notes.strip(), 'revision': uuid.uuid4().hex}
+                previous = character.get('profile')
+                character['profile'] = profile
+                try:
+                    self.save()
+                except Exception:
+                    if previous is None:
+                        character.pop('profile', None)
+                    else:
+                        character['profile'] = previous
+                    raise
+            elif action != 'state':
+                raise ValueError('Unknown profile action.')
+            profile.setdefault('measurements', {})
+            profile.setdefault('notes', '')
+            profile.setdefault('revision', '')
+            profile['photos'] = [i for i in profile.get('photos', []) if i in valid]
+            return {'character_id': owner, 'name': character['name'], 'profile': profile}
+
     def media_item(self, media_id: str) -> dict[str, Any] | None:
         return next((m for m in self.data["media"] if m["id"] == media_id), None)
 
@@ -3294,7 +3359,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     self._send_json(200, {"revision": self.store.revision})
                 return
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "image_set_battles": True, "outfit_matching": True, "outfit_library_scan": True, "persistent_rapid_review": True, "set_examples": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "character_profiles": True, "image_set_battles": True, "outfit_matching": True, "outfit_library_scan": True, "persistent_rapid_review": True, "set_examples": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/duplicate-review/catalog":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -3394,6 +3459,9 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/ui-update/activate":
                 body = self._read_json()
                 self._send_json(200, self.server.ui_updates.activate(str(body.get("version", ""))))
+                return
+            if path in {"/api/profile/state", "/api/profile/save"}:
+                self._send_json(200, self.store.profile_request(path.rsplit("/", 1)[1], self._read_json()))
                 return
             if path in {"/api/battles/state", "/api/battles/start", "/api/battles/vote", "/api/battles/undo"}:
                 self._send_json(200, self.store.battles.request(path.rsplit("/",1)[1], self._read_json()))

@@ -2,6 +2,12 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Profiles and battle MMR (UI 2.8.87 / companion 2.7.50)
+
+Use **Profile** beside the person selector for five curated photos (first is the main photo), optional height/bust/waist/hips in inches, bra size, per-measurement Estimated or Confirmed labels, and notes. Use **Add to profile photos** beneath the viewer or choose photos inside Edit profile; Save profile commits changes. Profiles also display the top five played Main images by battle MMR, independently of curated photos.
+
+Image and set battles retain their existing Elo ratings and votes, now labeled MMR. Ratings start at 1200, remain provisional for the first five comparisons, and update with opponent strength. Show MMR can be toggled; the last vote shows rating changes. Battle images fill the available screen height with compact controls.
+
 ## Automatic updates
 
 Starting with the v2.2 bootstrap, normal future updates require no copying or pasting.
