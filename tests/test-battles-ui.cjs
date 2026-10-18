@@ -24,11 +24,11 @@ const dir=path.resolve(__dirname,'..'),config=JSON.parse(fs.readFileSync(path.jo
   await page.goto(standalone?'http://127.0.0.1:8765/library/':'https://novelai.net/stories');
   await page.getByText('Local library connected',{exact:true}).waitFor();
   await page.locator('#naiProfileBtn').click();await page.getByRole('button',{name:'Edit profile',exact:true}).click();
-  await page.getByLabel('Height',{exact:true}).fill('67.5');await page.getByLabel('Height status',{exact:true}).selectOption('confirmed');
+  await page.getByLabel('Height feet',{exact:true}).fill('5');await page.getByLabel('Height inches',{exact:true}).fill('7.5');await page.getByLabel('Height status',{exact:true}).selectOption('confirmed');
   await page.getByLabel('Bust',{exact:true}).fill('35');await page.getByLabel('Bra size',{exact:true}).fill('34D (US)');
   await page.getByRole('button',{name:'Choose photos',exact:true}).click();await page.locator('.naiProfilePickGrid button').first().click();
   await page.getByRole('button',{name:'Save profile',exact:true}).click();await page.getByRole('button',{name:'Edit profile',exact:true}).waitFor();
-  await page.getByRole('button',{name:'Close',exact:true}).click();await page.locator('#naiProfileBtn').click();await page.locator('.naiProfileHero').waitFor();assert((await page.locator('.naiProfileBody').textContent()).includes('67.5″'));
+  await page.getByRole('button',{name:'Close',exact:true}).click();await page.locator('#naiProfileBtn').click();await page.locator('.naiProfileHero').waitFor();assert((await page.locator('.naiProfileBody').textContent()).includes('5 ft 7.5 in'));
   await page.getByRole('button',{name:'Close',exact:true}).click();
   await page.evaluate(id=>document.getElementById('nai-media-host').shadowRoot.naiSelectMedia(id),lib.media[1].id);
   await page.locator('#naiAddProfilePhoto').click();await page.getByRole('button',{name:'Make profile photo',exact:true}).click();await page.getByRole('button',{name:'Save profile',exact:true}).click();await page.getByRole('button',{name:'Edit profile',exact:true}).waitFor();
@@ -54,13 +54,13 @@ const dir=path.resolve(__dirname,'..'),config=JSON.parse(fs.readFileSync(path.jo
   assert(await page.locator('.naiBattleWrap').evaluate(w=>w.scrollHeight<=w.clientHeight+2));
   if(standalone)await page.screenshot({path:'/tmp/battles-sets.png'});
   const setBefore=await state('sets');await page.locator('.naiBattleChoose').last().click();await page.waitForFunction(n=>document.getElementById('nai-media-host').shadowRoot.querySelector('.naiBattleStatus').textContent.includes(n+' saved votes'),setBefore.votes+1);
-  await page.locator('#naiBattleLeaderboard').click();assert.equal(await page.locator('.naiBattleRow').count(),3);assert((await page.locator('.naiBattleBoard').textContent()).includes('Provisional'));
+  await page.locator('#naiBattleTrophies').click();assert((await page.locator('.naiCabinet').textContent()).includes('First choice'));await page.locator('#naiBattleLeaderboard').click();assert.equal(await page.locator('.naiBattleRow').count(),3);assert((await page.locator('.naiBattleBoard').textContent()).includes('Provisional'));
   assert.equal((await state('images')).votes,before.votes);await page.locator('#naiBattleUndo').click();
   await page.getByRole('button',{name:'Close',exact:true}).click();
   const ratingStart=await api('battles/start',{character_id:owner,kind:'images',revision:(await state('images')).revision,mode:'rank',limit:10});
   const ranking=await api('battles/vote',{character_id:owner,kind:'images',revision:ratingStart.revision,pair_id:ratingStart.session.pair.id,outcome:'left'});
   await page.locator('#naiProfileBtn').click();await page.locator('.naiProfileTop button').first().waitFor();assert((await page.locator('.naiProfileTop button').first().textContent()).includes(Math.round(ranking.entries[0].rating)+' MMR'));
-  await page.getByRole('button',{name:'Close',exact:true}).click();assert.deepEqual(errors,[]);await page.close();
+  await page.getByRole('button',{name:'Trophy Cabinet',exact:true}).click();await page.locator('.naiTrophyCard').first().waitFor();assert((await page.locator('.naiCabinet').textContent()).includes('First choice'));await page.getByRole('button',{name:'Overview',exact:true}).click();await page.getByRole('button',{name:'Close',exact:true}).click();assert.deepEqual(errors,[]);await page.close();
  }
  console.log('Battles UI passed in standalone and NovelAI: Main-only images, Winner Stays, resume, undo, set minimum, equal samples, browsing and separate leaderboards.');
  }finally{if(browser)await browser.close();server.kill();}

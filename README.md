@@ -2,6 +2,14 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Profile design, rank tiers and trophies (UI 2.8.88 / companion 2.7.51)
+
+Profiles now show and edit height in feet and inches; stored inch values convert automatically. Overview uses a larger photo gallery, measurement cards, battle statistics and top-ranked image cards. Trophy Cabinet is available from profiles and battles, with filters for image or set achievements. The three screens share a dark gallery design with compact controls and colored rank badges.
+
+Tiers are separate per person and battle type. Entries need five comparisons; at least five eligible entries must finish placement, with differing MMR, before tiers unlock. The sole MMR leader is Champion, followed by Diamond (top 10%), Gold (top 25%), Silver (top 50%), and Bronze. Tied scores share a tier; tied leaders receive Diamond. Tiers reflect current eligible entries, while trophies preserve achievements.
+
+Trophies recognize vote milestones, Gold/Diamond/Champion achievements, and consecutive win streaks of 5, 10 and 25 appearances. Ties end streaks; skips do not count. Existing totals and current qualifying tiers are recognized as existing records, without inventing past streaks or achievement dates. New votes save awards atomically with MMR; Undo reverses the undone vote's awards and streak changes. Existing MMR, votes, profile photos and measurements are preserved.
+
 ## Profiles and battle MMR (UI 2.8.87 / companion 2.7.50)
 
 Use **Profile** beside the person selector for five curated photos (first is the main photo), optional height/bust/waist/hips in inches, bra size, per-measurement Estimated or Confirmed labels, and notes. Use **Add to profile photos** beneath the viewer or choose photos inside Edit profile; Save profile commits changes. Profiles also display the top five played Main images by battle MMR, independently of curated photos.

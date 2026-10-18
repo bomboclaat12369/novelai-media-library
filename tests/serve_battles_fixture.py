@@ -36,6 +36,13 @@ with tempfile.TemporaryDirectory() as directory:
     store.create_set(owner['id'],'Blue dress',[items[i]['id'] for i in [0,4,5,6,7]],preserve_placement=True)
     store.create_set(owner['id'],'White dress',[items[i]['id'] for i in [1,8,9,10,11,12]],preserve_placement=True)
     store.create_set(owner['id'],'Small set',[items[i]['id'] for i in [2,13]],preserve_placement=True)
+    if os.environ.get('NAI_RANKS_DEMO') == '1':
+        for item in items:
+            item['in_all'] = True
+        owner['profile'] = {'photos':[m['id'] for m in items[:5]], 'measurements':{'height':{'value':'67.5','status':'confirmed'},'bust':{'value':'35','status':'estimated'},'waist':{'value':'26','status':'confirmed'},'hips':{'value':'37','status':'estimated'},'bra':{'value':'34D (US)','status':'estimated'}}, 'notes':'Example profile for layout checks.', 'revision':'fixture'}
+        board={'revision':'fixture', 'ratings':{m['id']:{'rating':1600-i*24.,'played':20,'wins':15-i//2,'losses':5+i//2,'ties':0,'streak':0,'best_streak':5 if i==0 else 0} for i,m in enumerate(items)}, 'recent':[], 'undo':[], 'votes':160, 'session':None}
+        board['trophies']=store.battles._awards(board,store.battles._ranked_rows(board,store.battles._entries(owner['id'],'images')))
+        store.battles._save({'version':1,'boards':{owner['id']+':images':board}})
     store.save()
     server=runtime['MediaHTTPServer'](('127.0.0.1',8765),store);server.RequestHandlerClass=Handler
     def download(url,*args):

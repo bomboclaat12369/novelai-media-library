@@ -578,21 +578,77 @@ class BattleRankings:
                 return {'id':uuid.uuid4().hex, 'left':ids[0], 'right':ids[1]}
         return None
 
+    def _ranked_rows(self, board, entries):
+        rows = [{**e, **self._score(board, i)} for i, e in entries.items()]
+        rows.sort(key=lambda r: (r['played'] == 0, -r['rating'], -r['played'], r['id']))
+        placed = sorted((r for r in rows if r['played'] >= 5), key=lambda r: -r['rating'])
+        enough = len(placed) >= 5 and round(placed[0]['rating'], 8) > round(placed[-1]['rating'], 8)
+        positions, counts = {}, {}
+        for index, item in enumerate(placed, 1):
+            rating = round(item['rating'], 8)
+            positions.setdefault(rating, index)
+            counts[rating] = counts.get(rating, 0) + 1
+        for row in rows:
+            row['provisional'] = row['played'] < 5
+            row['tier_rank'] = None
+            if not row['played']:
+                tier = 'Unranked'
+            elif row['provisional']:
+                tier = 'Provisional'
+            elif not enough:
+                tier = 'Placement'
+            else:
+                rating = round(row['rating'], 8)
+                rank = positions[rating]
+                row['tier_rank'] = rank
+                unique_lead = rank == 1 and counts[rating] == 1
+                tier = ('Champion' if unique_lead else 'Diamond' if rank <= max(1, math.ceil(len(placed)*.10))
+                        else 'Gold' if rank <= math.ceil(len(placed)*.25) else 'Silver' if rank <= math.ceil(len(placed)*.50) else 'Bronze')
+            row['tier'] = tier
+        return rows
+
+    def _awards(self, board, rows, legacy=False):
+        awards = {}
+        def add(key, title, detail, level='Gold', entry=None):
+            awards[key] = {'id': key, 'title': title, 'detail': detail, 'level': level,
+                           'entry_id': entry['id'] if entry else None,
+                           'name': entry['name'] if entry else '',
+                           'image_id': entry['images'][0] if entry else None,
+                           'earned_at': None if legacy else now_iso(), 'legacy': legacy}
+        for count, title in ((1, 'First choice'), (25, 'Finding favorites'), (100, 'The curator'), (500, 'A discerning eye'), (1000, 'Connoisseur')):
+            if board.get('votes', 0) >= count:
+                add('votes:'+str(count), title, f'{count:,} saved battle votes')
+        for row in rows:
+            tier = row['tier']
+            for level in ('Gold', 'Diamond', 'Champion'):
+                if tier in ('Gold', 'Diamond', 'Champion') and ('Gold', 'Diamond', 'Champion').index(tier) >= ('Gold', 'Diamond', 'Champion').index(level):
+                    add('tier:'+level+':'+row['id'], level+' achieved', 'Reached '+level+' among eligible ranked entries', level, row)
+            for count in (5, 10, 25):
+                if row.get('best_streak', 0) >= count:
+                    add('streak:'+str(count)+':'+row['id'], f'{count} in a row', f'Won {count} consecutive appearances; ties end a streak', 'Silver' if count == 5 else 'Gold', row)
+        return awards
+
     def _view(self, board, entries, owner, kind):
         session = copy.deepcopy(board.get('session'))
         if session and session.get('pair'):
             pair=session['pair']
             session['available'] = all(i in entries and entries[i]['count']>=session['minimum'] for i in (pair['left'],pair['right']))
-        rows=[]
-        baseline=(session or {}).get('baseline',{})
-        for ident,entry in entries.items():
-            score=self._score(board,ident)
-            rows.append({**entry, **score, 'provisional':score['played']<5,
-                         'round_change':round(score['rating']-baseline.get(ident,score['rating']),1)})
-        rows.sort(key=lambda r:(r['played']==0,-r['rating'],-r['played'],r['name']))
+        rows = self._ranked_rows(board, entries)
+        baseline = (session or {}).get('baseline', {})
+        for row in rows:
+            row['round_change'] = round(row['rating'] - baseline.get(row['id'], row['rating']), 1)
+        awards = board.get('trophies')
+        if awards is None:
+            awards = self._awards(board, rows, legacy=True)
+        # Historical awards remain, even if their entry is no longer eligible.
+        existing_media = {m['id'] for m in self.store.data['media'] if m.get('character_id') == owner}
+        trophies = [{**award, 'kind': kind, 'image_id': award.get('image_id') if award.get('image_id') in existing_media else None}
+                    for award in awards.values()]
+        trophies.sort(key=lambda t: (t.get('earned_at') or '', t['id']), reverse=True)
         if session:session.pop('baseline',None)
         return {'character_id':owner,'kind':kind,'revision':board['revision'], 'entries':rows,
-                'session':session, 'can_undo':bool(board.get('undo')), 'votes':board.get('votes',0)}
+                'session':session, 'can_undo':bool(board.get('undo')), 'votes':board.get('votes',0),
+                'trophies':trophies, 'ranked_count':sum(r['played'] >= 5 for r in rows)}
 
     def request(self, action, body):
         with self.store.lock:
@@ -607,6 +663,8 @@ class BattleRankings:
             existing=self._load()['boards'].get(key)
             if existing and body.get('revision') != existing['revision']:
                 raise ValueError('Rankings changed in another window. Refresh battles before continuing.')
+            if 'trophies' not in board:
+                board['trophies'] = self._awards(board, self._ranked_rows(board, entries), legacy=True)
             if action=='start':
                 mode=body.get('mode','rank');limit=body.get('limit',25)
                 minimum=body.get('minimum',5) if kind=='sets' else 1
@@ -628,7 +686,7 @@ class BattleRankings:
                 if any(i not in entries or entries[i]['count']<session['minimum'] for i in ids):
                     raise ValueError('An opponent is no longer eligible. Start a new round.')
                 before={'session':copy.deepcopy(session),'recent':list(board['recent']),'votes':board['votes'],
-                        'ratings':{i:copy.deepcopy(board['ratings'].get(i)) for i in ids}}
+                        'ratings':{i:copy.deepcopy(board['ratings'].get(i)) for i in ids}, 'awarded_trophy_ids':[]}
                 board['recent']=(board['recent']+[ids])[-32:]
                 champion=None
                 if outcome!='skip':
@@ -639,8 +697,15 @@ class BattleRankings:
                     for ident,score,delta,value in ((ids[0],a,change,result),(ids[1],b,-change,1-result)):
                         score['rating']+=delta;score['played']+=1
                         score['wins' if value==1 else 'losses' if value==0 else 'ties']+=1
+                        score['streak'] = score.get('streak', 0) + 1 if value == 1 else 0
+                        score['best_streak'] = max(score.get('best_streak', 0), score['streak'])
                         board['ratings'][ident]=score
                     session['done']+=1;board['votes']+=1
+                    awards = self._awards(board, self._ranked_rows(board, entries))
+                    for trophy_id, award in awards.items():
+                        if trophy_id not in board['trophies']:
+                            board['trophies'][trophy_id] = award
+                            before['awarded_trophy_ids'].append(trophy_id)
                     board['undo']=(board['undo']+[before])[-20:]
                     if session['mode']=='winner' and outcome in ('left','right'):champion=pair[outcome]
                 session['pair']=self._pair(board,entries,champion) if session['done']<session['limit'] else None
@@ -651,6 +716,11 @@ class BattleRankings:
                     if score is None:board['ratings'].pop(ident,None)
                     else:board['ratings'][ident]=score
                 for field in ('session','recent','votes'):board[field]=before[field]
+                if 'awarded_trophy_ids' in before:
+                    for trophy_id in before['awarded_trophy_ids']:
+                        board['trophies'].pop(trophy_id, None)
+                else:
+                    board['trophies'] = self._awards(board, self._ranked_rows(board, entries), legacy=True)
             else:raise ValueError('Unknown battle action.')
             board['revision']=uuid.uuid4().hex
             self._save(data)
