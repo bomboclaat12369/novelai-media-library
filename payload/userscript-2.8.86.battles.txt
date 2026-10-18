@@ -1,0 +1,128 @@
+// Personal, same-character image and set battles. Votes live in the companion.
+(() => {
+  'use strict';
+  const root=document.getElementById('nai-media-host')?.shadowRoot;
+  if(!root||root.getElementById('naiBattlesBtn'))return;
+  const make=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
+  const button=(text,fn,cls='')=>{const b=make('button',cls,text);b.type='button';b.onclick=fn;return b;};
+  const request=(action,body)=>root.naiOutfitRequest('/api/battles/'+action,body);
+  const style=make('style');style.textContent=`
+    .naiBattleWrap{position:fixed;inset:0;z-index:2147483647;background:#080a18f5;color:#eee;font:14px system-ui;display:flex;flex-direction:column;padding:18px 24px;box-sizing:border-box;overflow:auto}
+    .naiBattleWrap *{box-sizing:border-box}.naiBattleWrap button,.naiBattleWrap select,.naiBattleWrap input{font:inherit;color:inherit;background:#252b43;border:1px solid #525d7a;border-radius:7px;padding:8px 12px;width:auto;max-width:100%}
+    .naiBattleWrap button{cursor:pointer}.naiBattleWrap button:disabled{opacity:.45;cursor:default}.naiBattleWrap button:focus-visible{outline:2px solid #b9afff;outline-offset:3px}
+    .naiBattleWrap .naiBattlePrimary{background:#9d91ed;color:#111329;border-color:#b7abff;font-weight:650}
+    .naiBattleHead,.naiBattleTools,.naiBattleActions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}.naiBattleHead{justify-content:space-between}.naiBattleHead h2{margin:0;font-size:22px}
+    .naiBattleTools label{display:flex;align-items:center;gap:6px}.naiBattleTools input[type=number]{width:75px}.naiBattleTools input[type=checkbox]{width:17px;height:17px}
+    .naiBattleNote{color:#b5bed5;font-size:12px;margin:5px 0 12px}.naiBattleStatus{color:#d4ccff;min-height:20px}.naiBattleError{color:#ffb7a8;white-space:pre-wrap;margin:8px 0}
+    .naiBattleArena{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;flex:1;min-height:0}.naiBattleCard{min-width:0;background:#11172a;border:1px solid #39445e;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px}
+    .naiBattleCard h3{margin:0;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;font-size:16px}.naiBattlePhoto{display:block;width:100%;height:clamp(180px,49vh,850px);object-fit:contain;background:#080d19;cursor:pointer;border-radius:6px}
+    .naiBattleBrowse{display:flex;align-items:center;gap:8px;justify-content:center}.naiBattleBrowse span{color:#bdc7e0}.naiBattleSamples{display:flex;justify-content:center;gap:6px;height:64px}.naiBattleSamples button{padding:2px;min-width:0;width:64px;background:#0b1020}.naiBattleSamples img{width:100%;height:100%;object-fit:contain}.naiBattleSamples button[aria-pressed=true]{border-color:#b9afff}
+    .naiBattleChoose{width:100%!important}.naiBattleActions{justify-content:center;margin:12px 0 0}.naiBattleBoard{overflow:auto;flex:1;min-height:0}.naiBattleRow{display:grid;grid-template-columns:50px 60px minmax(130px,1fr) 110px 100px;align-items:center;gap:12px;padding:10px;border-bottom:1px solid #30394f}.naiBattleRow img{width:56px;height:64px;object-fit:contain}.naiBattleRow strong{overflow-wrap:anywhere}.naiBattleRow small{display:block;color:#b5bed5}.naiBattleEmpty{padding:40px 15px;text-align:center;color:#c4cce0}.naiBattleWrap [hidden]{display:none!important}
+    .naiBattleLight{position:absolute;inset:0;background:#080b16fa;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:12px}.naiBattleLight img{max-width:96%;max-height:80vh;object-fit:contain}.naiBattleLight .naiBattleBrowse{flex-wrap:wrap}
+    @media(max-width:800px){.naiBattleWrap{padding:12px}.naiBattleArena{gap:8px}.naiBattlePhoto{height:38vh}.naiBattleRow{grid-template-columns:30px 45px minmax(90px,1fr) 75px}.naiBattleRow>button{grid-column:3/5}.naiBattleSamples{height:45px}.naiBattleHead h2{font-size:18px}}
+  `;root.append(style);
+  const launch=button('Battles',open);launch.id='naiBattlesBtn';
+  const anchor=root.getElementById('randomBtn');if(anchor)anchor.after(launch);else root.querySelector('.right .toolbar')?.append(launch);
+  let active=false;
+  async function open(){
+    if(active)return;
+    const select=root.getElementById('characterSelect'),owner=select?.value;
+    if(!owner){alert('Choose a character first.');return;}
+    active=true;
+    const previousFocus=root.activeElement,wrap=make('section','naiBattleWrap');wrap.setAttribute('role','dialog');wrap.setAttribute('aria-modal','true');wrap.setAttribute('aria-label','Image and Set Battles');
+    const head=make('div','naiBattleHead'),title=make('h2','',`${select.selectedOptions[0]?.textContent||'Character'} · Battles`),close=button('Close',dismiss);head.append(title,close);
+    const tools=make('div','naiBattleTools');
+    function choice(label,values){const l=make('label','',label),s=make('select');s.setAttribute('aria-label',label);for(const [value,text] of values){const o=make('option','',text);o.value=value;s.append(o)}l.append(s);tools.append(l);return s;}
+    const kind=choice('Battle type',[['images','Images'],['sets','Sets']]);
+    const mode=choice('Mode',[['rank','Rank my library'],['winner','Winner stays']]);
+    const length=choice('Round',[['10','10 votes'],['25','25 votes'],['50','50 votes']]);length.value='25';
+    const minLabel=make('label','','Minimum images'),minimum=make('input');minimum.type='number';minimum.min='1';minimum.max='10000';minimum.value='5';minimum.setAttribute('aria-label','Minimum set images');minLabel.append(minimum);
+    const sizeLabel=make('label'),similar=make('input');similar.type='checkbox';similar.setAttribute('aria-label','Similar-size opponents');sizeLabel.append(similar,document.createTextNode('Similar-size opponents (within 2×)'));tools.append(minLabel,sizeLabel);
+    const start=button('Start round',()=>act('start',{mode:mode.value,limit:Number(length.value),minimum:Number(minimum.value),similar:similar.checked}), 'naiBattlePrimary');start.id='naiBattleStart';
+    const boardButton=button('Leaderboard',()=>{view=view==='board'?'battle':'board';paint();});boardButton.id='naiBattleLeaderboard';
+    const refresh=button('Refresh',()=>load(false)),undo=button('Undo last vote',()=>act('undo'));undo.id='naiBattleUndo';tools.append(start,boardButton,undo,refresh);
+    const note=make('p','naiBattleNote'),status=make('div','naiBattleStatus'),error=make('div','naiBattleError'),arena=make('div','naiBattleArena'),board=make('div','naiBattleBoard'),actions=make('div','naiBattleActions');error.setAttribute('role','alert');status.setAttribute('role','status');
+    const tie=button('Tie [T]',()=>vote('tie')),skip=button('Skip [S]',()=>vote('skip'));actions.append(tie,skip);
+    wrap.append(head,tools,note,status,error,arena,board,actions);root.append(wrap);
+    let state=null,view='battle',pending=false,closed=false,serial=0,light=null;
+    let entryMap=new Map(),showCount=50;
+    const urls=new Map();
+    function previewUrl(id){return 'http://127.0.0.1:8765/api/media/'+encodeURIComponent(id)+'/thumb?size=1200';}
+    async function picture(im,id){
+      im.dataset.mediaId=id;im.onload=lock;im.onerror=lock;im.alt='Loading image';im.removeAttribute('src');
+      try{
+        if(!urls.has(id))urls.set(id,root.naiOutfitOriginal(id).then(b=>{const url=URL.createObjectURL(b);if(closed){URL.revokeObjectURL(url);throw Error('Closed')}return url;}));
+        const url=await urls.get(id);if(!closed&&im.dataset.mediaId===id){im.src=url;im.alt='Battle image';if(urls.size>16){const shown=new Set([...wrap.querySelectorAll('img[data-media-id]')].map(e=>e.dataset.mediaId));for(const [key,p] of urls){if(urls.size<=16)break;if(!shown.has(key)){urls.delete(key);p.then(u=>URL.revokeObjectURL(u)).catch(()=>{});}}}}
+      }catch(e){urls.delete(id);if(!closed&&im.dataset.mediaId===id)im.alt='Image unavailable — skip this matchup';}
+    }
+    function dismiss(){if(pending)return;closed=true;serial++;light?.remove();wrap.remove();for(const promise of urls.values())promise.then(url=>URL.revokeObjectURL(url)).catch(()=>{});urls.clear();active=false;previousFocus?.focus?.();}
+    async function load(reset=true){
+      const current=++serial;pending=true;error.textContent='';lock();
+      try{const value=await request('state',{character_id:owner,kind:kind.value});if(closed||current!==serial)return;state=value;if(reset&&state.session){mode.value=state.session.mode;length.value=String(state.session.limit);if(kind.value==='sets')minimum.value=String(state.session.minimum);similar.checked=state.session.similar;}paint();}
+      catch(e){error.textContent=e.message+' If this is your first battle, update and restart the companion.';}
+      finally{if(current===serial){pending=false;lock()}}
+    }
+    async function act(action,extra={}){
+      if(pending||!state)return;pending=true;error.textContent='';lock();
+      try{state=await request(action,{character_id:owner,kind:kind.value,revision:state.revision,...extra});view='battle';paint();}
+      catch(e){error.textContent=e.message+' Use Refresh to recover the saved state.';}
+      finally{pending=false;lock()}
+    }
+    function vote(outcome){if(light||!state?.session?.pair||!state.session.available||(outcome!=='skip'&&!ready()))return;act('vote',{pair_id:state.session.pair.id,outcome});}
+    function ready(){const images=[...arena.querySelectorAll('.naiBattlePhoto')];return images.length===2&&images.every(im=>im.complete&&im.naturalWidth>0);}
+    function lock(){for(const e of wrap.querySelectorAll('button,input,select'))e.disabled=pending;undo.disabled=pending||!state?.can_undo;skip.disabled=pending||!state?.session?.pair||!state.session.available;tie.disabled=skip.disabled||!ready();for(const b of wrap.querySelectorAll('.naiBattleChoose'))b.disabled=skip.disabled||!ready();}
+    function openLight(entry,index=0){
+      if(light)return;light=make('div','naiBattleLight');const im=make('img'),nav=make('div','naiBattleBrowse'),label=make('span');
+      const show=()=>{index=(index+entry.images.length)%entry.images.length;label.textContent=entry.name+' · '+(index+1)+' / '+entry.images.length;picture(im,entry.images[index]);};
+      const done=()=>{light.remove();light=null;};nav.append(button('←',()=>{index--;show()}),label,button('→',()=>{index++;show()}),button('Close image',done));light.append(im,nav);wrap.append(light);show();
+    }
+    function card(entry,side,samples){
+      const c=make('article','naiBattleCard');c.dataset.entryId=entry.id;
+      const h=make('h3','',kind.value==='sets'?entry.name:'Which image do you prefer?');h.title=entry.name;
+      const im=make('img','naiBattlePhoto');let index=0;
+      c.append(h,im);const nav=make('div','naiBattleBrowse'),position=make('span');
+      const show=()=>{index=(index+entry.images.length)%entry.images.length;picture(im,entry.images[index]);position.textContent=(index+1)+' / '+entry.images.length;for(const b of c.querySelectorAll('.naiBattleSamples button'))b.setAttribute('aria-pressed',Number(b.dataset.index)===index?'true':'false');};
+      im.onclick=()=>kind.value==='images'?vote(side):openLight(entry,index);
+      if(kind.value==='sets'){
+        nav.append(button('←',()=>{index--;show()}),position,button('→',()=>{index++;show()}));c.append(nav);
+        const strip=make('div','naiBattleSamples');
+        for(let j=0;j<samples;j++){
+          const i=samples===1?0:Math.round(j*(entry.images.length-1)/(samples-1)),b=button('',()=>{index=i;show()}),thumb=make('img');b.dataset.index=i;b.setAttribute('aria-label','Preview image '+(i+1)+' in '+entry.name);thumb.src=previewUrl(entry.images[i]);thumb.alt='';b.append(thumb);strip.append(b);
+        }c.append(strip);
+      }
+      c.append(button('View full image',()=>openLight(entry,index)),button(side==='left'?'Choose left [←]':'Choose right [→]',()=>vote(side),'naiBattlePrimary naiBattleChoose'));show();return c;
+    }
+    function paint(){
+      if(!state)return;
+      entryMap=new Map(state.entries.map(e=>[e.id,e]));minLabel.hidden=sizeLabel.hidden=kind.value!=='sets';
+      note.textContent=kind.value==='images'?'Main-library images only, including images also in sets. Set-only, Review, Purgatory and videos are excluded. Click an image or use ← / → to vote.':'Choose your favorite set. Both sides show the same number of samples; browse every image before deciding. Set-only images are included; videos are excluded.';
+      const session=state.session,pair=session?.pair;
+      const eligibleCount=state.entries.filter(e=>kind.value!=='sets'||e.count>=(session?.minimum||Number(minimum.value)||5)).length;
+      status.textContent=eligibleCount+' eligible '+(kind.value==='sets'?'sets':'images')+' · '+state.votes+' saved votes'+(session?' · Round '+session.done+' / '+session.limit:'')+(session&&session.done===session.limit?' · Round complete!':'');
+      start.textContent=session?'Start new round':'Start round';boardButton.textContent=view==='board'?'Back to battles':'Leaderboard';
+      arena.hidden=view==='board';board.hidden=view!=='board';actions.hidden=view==='board'||!pair||!session.available;
+      arena.replaceChildren();board.replaceChildren();
+      if(view==='battle'){
+        if(pair&&session.available){const a=entryMap.get(pair.left),b=entryMap.get(pair.right),n=Math.min(4,a.count,b.count);arena.append(card(a,'left',n),card(b,'right',n));}
+        else{
+          arena.style.display='block';const text=session&&session.done===session.limit?'Round complete. Your choices are saved. Open the leaderboard to see your favorites.':pair?'An opponent is no longer eligible. Start a new round.':'Choose your settings and start a round. Your rankings stay saved when you close this screen.';arena.append(make('p','naiBattleEmpty',text));
+          if(session&&session.done===session.limit){const rising=state.entries.filter(e=>e.round_change>0).sort((a,b)=>b.round_change-a.round_change).slice(0,3);for(const e of rising)arena.append(make('p','naiBattleNote',e.name+' · +'+e.round_change.toFixed(1)+' rating this round'));}
+        }
+        if(pair&&session.available)arena.style.display='';
+      }else{
+        board.append(make('p','naiBattleNote','Rankings reflect your choices, not image quality. Provisional = fewer than 5 comparisons. Unplayed entries are unranked. Image and set scores are separate.'));
+        state.entries.slice(0,showCount).forEach((e,i)=>{const row=make('div','naiBattleRow'),rank=make('span','',e.played?'#'+(i+1):'—'),im=make('img'),name=make('strong','',e.name),score=make('div','',e.played?Math.round(e.rating)+' pts':'Unranked');im.src=previewUrl(e.images[0]);im.alt='';name.append(make('small','',e.played+' comparisons · '+e.wins+' wins'+(kind.value==='sets'?' · '+e.count+' images':'')));score.append(make('small','',e.played?(e.provisional?'Provisional':'Ranked'):''));row.append(rank,im,name,score,button('View',()=>openLight(e)));board.append(row)});
+        if(state.entries.length>showCount)board.append(button('Show more',()=>{showCount+=50;paint()}));
+      }
+      lock();
+    }
+    kind.onchange=()=>{state=null;view='battle';showCount=50;load();};
+    wrap.addEventListener('keydown',e=>{
+      if(e.key==='Escape'){e.preventDefault();e.stopPropagation();if(light){light.remove();light=null;}else dismiss();return;}
+      if(e.key==='Tab'){const focus=[...(light||wrap).querySelectorAll('button,input,select')].filter(x=>!x.disabled&&x.getClientRects().length),first=focus[0],last=focus.at(-1);if(e.shiftKey&&root.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&root.activeElement===last){e.preventDefault();first?.focus()}return;}
+      e.stopPropagation();if(pending||light||view!=='battle'||/INPUT|SELECT/.test(e.target.tagName))return;
+      const outcome={ArrowLeft:'left',ArrowRight:'right',t:'tie',T:'tie',s:'skip',S:'skip'}[e.key];if(outcome){e.preventDefault();vote(outcome)}
+    });
+    await load();close.focus();
+  }
+})();

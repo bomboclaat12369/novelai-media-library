@@ -9,6 +9,7 @@ import math
 import mimetypes
 import os
 import queue
+import random
 import re
 import shutil
 import subprocess
@@ -494,6 +495,168 @@ class OutfitMatcher:
             return copy.deepcopy(self.store.create_set(context['owner'], str(body.get('name', '')), ids, preserve_placement=True))
 
 
+class BattleRankings:
+    """Personal rankings, atomic vote persistence and resumable per-character rounds."""
+    def __init__(self, store):
+        self.store = store
+        self.path = store.root / 'battles.json'
+        self.data = None
+
+    def _load(self):
+        if self.data is None:
+            self.data = json.loads(self.path.read_text('utf-8')) if self.path.exists() else {'version':1, 'boards':{}}
+            if self.data.get('version') != 1 or not isinstance(self.data.get('boards'), dict):
+                self.data = None
+                raise ValueError('Battle rankings could not be read. Existing rankings have not been replaced.')
+        return self.data
+
+    def _save(self, data):
+        temporary = self.path.with_suffix('.json.tmp')
+        try:
+            with temporary.open('w', encoding='utf-8') as stream:
+                json.dump(data, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            if self.path.exists():
+                shutil.copy2(self.path, self.store.backup_dir / 'battles-previous.json')
+            os.replace(temporary, self.path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        self.data = data
+
+    @staticmethod
+    def _score(board, ident):
+        return board['ratings'].get(ident, {'rating':1200., 'played':0, 'wins':0, 'ties':0, 'losses':0})
+
+    def _entries(self, owner, kind):
+        media = {m['id']:m for m in self.store.data['media'] if m.get('character_id') == owner
+                 and m.get('media_type') != 'video' and not m.get('in_review') and not m.get('in_purgatory')}
+        if kind == 'images':
+            return {ident:{'id':ident, 'name':m.get('original_name',m.get('filename','Image')), 'images':[ident], 'count':1}
+                    for ident,m in media.items() if self.store._in_main(m)}
+        entries = {}
+        for group in self.store.data.get('sets', []):
+            if group.get('character_id') != owner or group.get('kind','set') != 'set':
+                continue
+            images = list(dict.fromkeys(i for i in group.get('media_ids',[]) if i in media))
+            if not images:
+                continue
+            cover = group.get('cover_media_id')
+            if cover in images:
+                images.remove(cover); images.insert(0,cover)
+            entries[group['id']] = {'id':group['id'], 'name':group.get('name','Set'), 'images':images, 'count':len(images)}
+        return entries
+
+    def _pair(self, board, entries, champion=None):
+        session = board['session']
+        eligible = [e for e in entries.values() if e['count'] >= session['minimum']]
+        pool = list(eligible)
+        recent = {tuple(sorted(p)) for p in board.get('recent',[])}
+        score = lambda e:self._score(board,e['id'])
+        rng = random.SystemRandom()
+        def opponents(left):
+            return [e for e in pool if e['id'] != left['id'] and
+                    (not session['similar'] or max(e['count'],left['count']) <= 2*min(e['count'],left['count']))]
+        # Favor underplayed entries, then similarly rated opponents. Retain variety.
+        eligible.sort(key=lambda e:(score(e)['played'],rng.random()))
+        if champion in entries and any(e['id']==champion for e in eligible):
+            eligible = [e for e in eligible if e['id']==champion]
+        for attempt in range(2):
+            for left in eligible:
+                choices = opponents(left)
+                if attempt == 0:
+                    choices = [e for e in choices if tuple(sorted((left['id'],e['id']))) not in recent]
+                if not choices:
+                    continue
+                if score(left)['played'] < 3:
+                    choices.sort(key=lambda e:(score(e)['played'],rng.random()))
+                else:
+                    choices.sort(key=lambda e:abs(score(e)['rating']-score(left)['rating'])+rng.random()*80)
+                right = rng.choice(choices[:min(4,len(choices))])
+                ids = [left['id'],right['id']]
+                if rng.random()<.5:ids.reverse()
+                return {'id':uuid.uuid4().hex, 'left':ids[0], 'right':ids[1]}
+        return None
+
+    def _view(self, board, entries, owner, kind):
+        session = copy.deepcopy(board.get('session'))
+        if session and session.get('pair'):
+            pair=session['pair']
+            session['available'] = all(i in entries and entries[i]['count']>=session['minimum'] for i in (pair['left'],pair['right']))
+        rows=[]
+        baseline=(session or {}).get('baseline',{})
+        for ident,entry in entries.items():
+            score=self._score(board,ident)
+            rows.append({**entry, **score, 'provisional':score['played']<5,
+                         'round_change':round(score['rating']-baseline.get(ident,score['rating']),1)})
+        rows.sort(key=lambda r:(r['played']==0,-r['rating'],-r['played'],r['name']))
+        if session:session.pop('baseline',None)
+        return {'character_id':owner,'kind':kind,'revision':board['revision'], 'entries':rows,
+                'session':session, 'can_undo':bool(board.get('undo')), 'votes':board.get('votes',0)}
+
+    def request(self, action, body):
+        with self.store.lock:
+            owner=str(body.get('character_id',''));kind=body.get('kind','images')
+            if not self.store.character(owner) or kind not in ('images','sets'):
+                raise ValueError('Choose one character and a valid battle type.')
+            data=copy.deepcopy(self._load());key=owner+':'+kind
+            board=data['boards'].setdefault(key,{'revision':uuid.uuid4().hex,'ratings':{},'recent':[],'undo':[],'votes':0,'session':None})
+            entries=self._entries(owner,kind)
+            if action=='state':return self._view(board,entries,owner,kind)
+            # New boards can be started without persisting a read-only state request.
+            existing=self._load()['boards'].get(key)
+            if existing and body.get('revision') != existing['revision']:
+                raise ValueError('Rankings changed in another window. Refresh battles before continuing.')
+            if action=='start':
+                mode=body.get('mode','rank');limit=body.get('limit',25)
+                minimum=body.get('minimum',5) if kind=='sets' else 1
+                if mode not in ('rank','winner') or type(limit) is not int or limit not in (10,25,50):
+                    raise ValueError('Choose a valid mode and round length.')
+                if type(minimum) is not int or not 1<=minimum<=10000:
+                    raise ValueError('Minimum set size must be between 1 and 10,000 images.')
+                board['session']={'mode':mode,'limit':limit,'done':0,'minimum':minimum,
+                                  'similar':kind=='sets' and body.get('similar') is True,
+                                  'baseline':{i:self._score(board,i)['rating'] for i in entries}}
+                pair=self._pair(board,entries)
+                if not pair:raise ValueError('Not enough eligible opponents. Set battles need two sets meeting your minimum and size filter; image battles need two Main images.')
+                board['session']['pair']=pair;board['undo']=[]
+            elif action=='vote':
+                session=board.get('session');pair=(session or {}).get('pair');outcome=body.get('outcome')
+                if not pair or pair['id']!=body.get('pair_id') or outcome not in ('left','right','tie','skip'):
+                    raise ValueError('This matchup is no longer active. Refresh battles.')
+                ids=[pair['left'],pair['right']]
+                if any(i not in entries or entries[i]['count']<session['minimum'] for i in ids):
+                    raise ValueError('An opponent is no longer eligible. Start a new round.')
+                before={'session':copy.deepcopy(session),'recent':list(board['recent']),'votes':board['votes'],
+                        'ratings':{i:copy.deepcopy(board['ratings'].get(i)) for i in ids}}
+                board['recent']=(board['recent']+[ids])[-32:]
+                champion=None
+                if outcome!='skip':
+                    a,b=[dict(self._score(board,i)) for i in ids]
+                    result={'left':1.,'right':0.,'tie':.5}[outcome]
+                    expected=1/(1+10**max(-8,min(8,(b['rating']-a['rating'])/400)))
+                    change=32*(result-expected)
+                    for ident,score,delta,value in ((ids[0],a,change,result),(ids[1],b,-change,1-result)):
+                        score['rating']+=delta;score['played']+=1
+                        score['wins' if value==1 else 'losses' if value==0 else 'ties']+=1
+                        board['ratings'][ident]=score
+                    session['done']+=1;board['votes']+=1
+                    board['undo']=(board['undo']+[before])[-20:]
+                    if session['mode']=='winner' and outcome in ('left','right'):champion=pair[outcome]
+                session['pair']=self._pair(board,entries,champion) if session['done']<session['limit'] else None
+            elif action=='undo':
+                if not board['undo']:raise ValueError('No vote to undo in this round.')
+                before=board['undo'].pop()
+                for ident,score in before['ratings'].items():
+                    if score is None:board['ratings'].pop(ident,None)
+                    else:board['ratings'][ident]=score
+                for field in ('session','recent','votes'):board[field]=before[field]
+            else:raise ValueError('Unknown battle action.')
+            board['revision']=uuid.uuid4().hex
+            self._save(data)
+            return self._view(board,entries,owner,kind)
+
+
 class LibraryStore:
     def __init__(self, root: Path):
         self.root = root
@@ -519,6 +682,7 @@ class LibraryStore:
         self._upload_lock = threading.RLock()
         self._uploads: dict[str, dict[str, Any]] = {}
         self._upload_dir = self.root / ".incoming" / "chunked-uploads"
+        self.battles = BattleRankings(self)
         self.outfit_matcher = OutfitMatcher(self)
 
     def _empty(self) -> dict[str, Any]:
@@ -3130,7 +3294,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     self._send_json(200, {"revision": self.store.revision})
                 return
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "outfit_matching": True, "outfit_library_scan": True, "persistent_rapid_review": True, "set_examples": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "image_set_battles": True, "outfit_matching": True, "outfit_library_scan": True, "persistent_rapid_review": True, "set_examples": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/duplicate-review/catalog":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -3230,6 +3394,9 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/ui-update/activate":
                 body = self._read_json()
                 self._send_json(200, self.server.ui_updates.activate(str(body.get("version", ""))))
+                return
+            if path in {"/api/battles/state", "/api/battles/start", "/api/battles/vote", "/api/battles/undo"}:
+                self._send_json(200, self.store.battles.request(path.rsplit("/",1)[1], self._read_json()))
                 return
             if path == "/api/quality/settings":
                 self._send_json(200, self.store.set_quality_settings(self._read_json()))

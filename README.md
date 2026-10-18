@@ -477,3 +477,29 @@ accuracy across a larger library or outfits with no existing Set.
 - Matching thresholds and scan caches are unchanged. No rescan is required.
 - Download [Local Duplicate Review 1.7.4](downloads/Local-Duplicate-Review-1.7.4.zip).
   Quit the old checker, extract the entire package and launch it.
+
+## Image and Set Battles (UI 2.8.86 / companion 2.7.49)
+
+Click **Battles** next to Random after selecting a character. Both interfaces offer
+Rank my library and Winner stays, with 10-, 25-, or 50-vote rounds, Tie, Skip and
+Undo last vote. Close any time and reopen to resume; starting a new round retains
+ratings and starts a fresh round/undo history.
+
+- Image battles include only that character's Main images. Images also in sets are
+  eligible if they are in Main; set-only, Review, Purgatory and videos are excluded.
+- Set battles compare your favorite sets, with a default minimum of five images
+  and an optional within-2x size filter. Both opponents show equal sample counts,
+  begin at their covers when eligible, and allow browsing all saved images in each
+  set. Review/Purgatory images and videos do not count toward the minimum.
+- Separate per-character image and set leaderboards use personal pairwise Elo
+  ratings. Fewer than five comparisons is marked Provisional; unplayed entries
+  remain unranked. Matchups favor underplayed entries and similarly rated opponents.
+- Votes, current matchups and undo history are written atomically to battles.json
+  beside library.json, with a previous-file backup. Voting does not change media
+  placement, Favorites, set membership, or thumbnails. Deleted/ineligible entries
+  disappear from eligible rankings while their historical ratings stay stored.
+- Keyboard: left/right chooses a side, T ties, S skips. Set photos open full-size
+  browsing; individual battle photos can be clicked to vote.
+
+Update/restart the companion for 2.7.49, then refresh and apply the library UI update
+for 2.8.86. The standalone and NovelAI interfaces share the same saved rankings.
