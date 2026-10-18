@@ -31,6 +31,42 @@ class VerifiedPreview(unittest.TestCase):
         self.assertEqual(self.engine.view()['verified_preview']['token'],plan['token'])
         return plan
 
+    def test_exact_families_and_visual_actions_are_separate(self):
+        import shutil
+        from PIL import PngImagePlugin
+        image=artwork()
+        image.save(self.incoming/'full.jpg',quality=96)
+        shutil.copyfile(self.incoming/'full.jpg',self.incoming/'full-copy.jpg')
+        small=image.resize((320,420),Image.Resampling.LANCZOS)
+        small.save(self.incoming/'small.png',compress_level=0)
+        info=PngImagePlugin.PngInfo();info.add_text('Comment','same pixels, different bytes')
+        small.save(self.incoming/'small-metadata.png',compress_level=9,pnginfo=info)
+        shutil.copyfile(self.incoming/'small.png',self.incoming/'small-copy.png')
+        image.save(self.incoming/'recompressed.jpg',quality=80)
+        self.scan()
+        exact=self.engine.preview_exact('all',True)
+        self.assertEqual(exact['count'],3)
+        exact_targets={m['target'] for m in exact['moves']}
+        self.engine.start_verified(self.engine.revision,preview=True);self.engine.thread.join(30)
+        visual=self.engine.verified_preview()
+        self.assertEqual(len(visual['moves']),1)
+        self.assertEqual(Path(visual['moves'][0]['target']['path']).name,'recompressed.jpg')
+        self.assertTrue(all(m['proof']=='same_photo' and m['target']['id'] not in exact_targets for m in visual['moves']))
+        self.assertEqual(self.engine.view()['stats']['moved'],0)
+        # Direct auto action must match the preview, with all exact families intact.
+        self.engine.start_verified(self.engine.revision);self.engine.thread.join(30)
+        self.assertFalse((self.incoming/'recompressed.jpg').exists())
+        for filename in ('full.jpg','full-copy.jpg','small.png','small-metadata.png','small-copy.png'):
+            self.assertTrue((self.incoming/filename).exists())
+        exact=self.engine.preview_exact('all',True)
+        self.assertEqual(exact['count'],3)
+        self.engine.start_exact(exact['token']);self.engine.thread.join(30)
+        # Once exact families are consolidated, the remaining small copy is visual-only.
+        self.engine.start_verified(self.engine.revision,preview=True);self.engine.thread.join(30)
+        plan=self.engine.verified_preview()
+        self.assertEqual(len(plan['moves']),1)
+        self.assertEqual(plan['moves'][0]['proof'],'same_photo')
+
     def test_preview_subset_apply_and_undo(self):
         plan=self.prepare_preview();chosen,excluded=plan['moves']
         for targets in ([],[999999],[str(chosen['target']['id'])]):

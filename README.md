@@ -463,3 +463,17 @@ accuracy across a larger library or outfits with no existing Set.
 - Matching rules, scan caches and the separate automatic action are unchanged.
 - Download [Local Duplicate Review 1.7.3](downloads/Local-Duplicate-Review-1.7.3.zip).
   Quit the old checker, extract the full package and launch it. No rescan required.
+
+## Separate exact and visual duplicates (Duplicate Review 1.7.4)
+
+- **Select exact duplicates** selects identical bytes or decoded pixels. Use
+  **Move selected copies** to quarantine that selection.
+- **Preview visual copies** and **Quarantine verified visual copies** handle only
+  non-exact matches that pass same-photo verification. Exact-match families remain
+  untouched by both visual actions, including lower-resolution exact families.
+- Run exact cleanup first, then visual cleanup. Exact-family images may serve as
+  keepers; after exact cleanup their remaining representatives can be considered
+  for visual cleanup. Preview approval and Undo remain available.
+- Matching thresholds and scan caches are unchanged. No rescan is required.
+- Download [Local Duplicate Review 1.7.4](downloads/Local-Duplicate-Review-1.7.4.zip).
+  Quit the old checker, extract the entire package and launch it.

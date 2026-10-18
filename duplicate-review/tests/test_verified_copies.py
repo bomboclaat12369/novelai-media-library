@@ -72,8 +72,8 @@ class VerifiedCopies(unittest.TestCase):
             for r in files[1:]: self.engine.add_pair(db, files[0], r, 'Visual match', 99, set())
         self.engine.invalidate_groups()
         self.run_auto()
-        self.assertEqual({p.name for p in self.incoming.iterdir() if p.is_file()}, {'a-full.jpg', 'b-pose.jpg'})
-        self.assertEqual(self.engine.view()['stats']['moved'], 3)
+        self.assertEqual({p.name for p in self.incoming.iterdir() if p.is_file()}, {'a-full.jpg', 'z-tie.jpg', 'b-pose.jpg'})
+        self.assertEqual(self.engine.view()['stats']['moved'], 2)
         self.assertEqual(len({h['batch'] for h in self.engine.history()}), 1)
         self.engine = Engine(self.base/'state'); self.engine.undo(); self.engine.thread.join(30)
         self.assertEqual(self.engine.view()['stats']['moved'], 0)
@@ -81,7 +81,7 @@ class VerifiedCopies(unittest.TestCase):
         # Successful visual verifications are cached by contents and verifier version.
         with patch('same_photo.verify', side_effect=AssertionError('Unexpected repeated verification')):
             self.run_auto()
-        self.assertEqual(self.engine.view()['stats']['moved'], 3)
+        self.assertEqual(self.engine.view()['stats']['moved'], 2)
 
     def test_protected_reference_upgrade_manual_keep_and_folder_scope(self):
         image = artwork()

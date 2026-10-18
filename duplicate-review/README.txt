@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.7.3
+LOCAL DUPLICATE REVIEW 1.7.4
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -13,6 +13,19 @@ The database is stored separately in %LOCALAPPDATA%\LocalDuplicateReview.
 Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
 Later launches, scans and image processing stay local; no cloud account or GPU.
+
+NEW IN 1.7.4: SEPARATE EXACT AND VISUAL CLEANUP
+- Select exact duplicates (formerly Select obvious duplicates) selects identical
+  file bytes or identical decoded pixels. Then use Move selected copies.
+- Preview visual copies and Quarantine verified visual copies handle only non-exact
+  matches accepted by the existing same-photo verifier. Both exclude exact families.
+- Exact-family members can be retained keepers for visual copies but are never moved
+  by the visual action. This includes lower-resolution exact families that could
+  also visually match a larger image. Clean up exact duplicates first, then run
+  visual cleanup to consider the remaining representative from each family.
+- Preview and automatic visual cleanup use the same proposal generator. Preview
+  still moves nothing until you explicitly approve a subset. Undo is unchanged.
+- Matching thresholds and scan-cache keys are unchanged. No rescan required.
 
 NEW IN 1.7.3: PREVIEW AUTO-QUARANTINE
 - Preview auto-quarantine runs the same checks as the automatic action, but moves
