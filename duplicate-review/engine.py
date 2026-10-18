@@ -25,7 +25,7 @@ import crop_match
 import same_photo
 from search_index import SearchIndexes
 
-VERSION = '1.7.2'
+VERSION = '1.7.3'
 ALGORITHM = 1
 QUARANTINE = '_Duplicate_Review_Quarantine'
 EXTENSIONS = {'.jpg', '.jpeg', '.jpe', '.jfif', '.png', '.webp', '.bmp', '.tif', '.tiff', '.avif', '.gif'}
@@ -220,6 +220,7 @@ class Engine:
         self.thread = None
         self.revision = 0
         self.groups_cache = None
+        self.verified_plan = None
         self.exact_plan = None
         self.library = LibraryClient()
         with self.db() as db:
@@ -676,7 +677,9 @@ class Engine:
             splits = db.execute('SELECT COUNT(*) FROM separations').fetchone()[0]
         with self.lock:
             status = self.status.copy()
-        return dict(pairs=pairs, count=count, stats=stats, status=status, errors=errors, coverage=coverage, dismissed=dismissed, splits=splits, revision=self.revision, scan_kind=self.config().get('scan_kind','folders'))
+            plan = self.verified_plan
+            verified_preview = {'token':plan['token'], 'count':len(plan['moves'])} if plan and plan['revision'] == self.revision else None
+        return dict(verified_preview=verified_preview, pairs=pairs, count=count, stats=stats, status=status, errors=errors, coverage=coverage, dismissed=dismissed, splits=splits, revision=self.revision, scan_kind=self.config().get('scan_kind','folders'))
 
     def record(self, ident):
         with self.db() as db:
@@ -969,7 +972,7 @@ class Engine:
                     'moves':[{'move':m['target']['path'], 'keep':m['keeper']['path'], 'target':m['target']['id'], 'keeper':m['keeper']['id'], 'proof':m['proof']} for m in moves],
                     'missing_pixels':sum(not r.get('pixel') for r in records)}
 
-    def start_verified(self, revision, scope='all'):
+    def start_verified(self, revision, scope='all', preview=False):
         with self.lock:
             if self.status['running'] or revision != self.revision:
                 raise ValueError('The review changed. Reload and try again.')
@@ -988,10 +991,11 @@ class Engine:
             self.status.update(running=True, phase='Verifying same-photo copies', done=0,
                                total=len(groups), workers=workers, elapsed_seconds=0,
                                eta_seconds=None, cached_tasks=0)
+            self.verified_plan = None
             self.thread = threading.Thread(target=self._run_verified,
-                args=(groups, ignored, separated, scope, workers), daemon=True)
+                args=(groups, ignored, separated, scope, workers, preview), daemon=True)
             self.thread.start()
-            return {'message':'Verifying copies, then quarantining matches. Uncertain images stay for review.'}
+            return {'message':'Preparing preview. No files will move.' if preview else 'Verifying copies, then quarantining matches. Uncertain images stay for review.'}
 
     def _verified_group(self, files, ignored, separated, scope):
         # Stable MP sort preserves the UI's left-to-right ordering on ties.
@@ -1052,7 +1056,7 @@ class Engine:
         # directly against that keeper, not inferred from group membership.
         return moves
 
-    def _run_verified(self, groups, ignored, separated, scope, workers):
+    def _run_verified(self, groups, ignored, separated, scope, workers, preview=False):
         started = time.monotonic()
         moves = []
         try:
@@ -1075,6 +1079,13 @@ class Engine:
             if not moves:
                 self.set_status(phase='No additional verified copies. Remaining images need manual review; check Issues for any failures.')
                 return
+            if preview:
+                # Save server-owned pairs; approval may only select a subset, never change keepers.
+                moves.sort(key=lambda m:(m['keeper']['path'], m['target']['path']))
+                with self.lock:
+                    self.verified_plan = {'token':uuid.uuid4().hex, 'revision':self.revision, 'moves':moves}
+                self.set_status(phase=f'Preview ready: {len(moves)} proposed removals. No files moved.')
+                return
             self.set_status(phase='Moving verified copies to quarantine', done=0, total=len(moves),
                             workers=0, eta_seconds=None)
             # Existing move journal, live source+keeper hashing and Undo batch.
@@ -1084,6 +1095,37 @@ class Engine:
             self.set_status(phase='Automatic verification failed. Check Issues before retrying.')
         finally:
             self.set_status(running=False)
+
+    def verified_preview(self):
+        with self.lock:
+            plan = self.verified_plan
+            if self.status['running'] or not plan or plan['revision'] != self.revision:
+                raise ValueError('Preview unavailable or outdated. Run Preview auto-quarantine again.')
+            def details(r):
+                return {k:r.get(k) for k in ('id','path','w','h','size')}
+            return {'token':plan['token'], 'moves':[
+                {'target':details(m['target']), 'keeper':details(m['keeper']), 'proof':m['proof']}
+                for m in plan['moves']]}
+
+    def apply_verified_preview(self, token, targets):
+        with self.lock:
+            plan = self.verified_plan
+            if self.status['running'] or not plan or token != plan['token'] or plan['revision'] != self.revision:
+                raise ValueError('The review changed. Preview the batch again before moving files.')
+            if not isinstance(targets, list) or any(type(i) is not int for i in targets):
+                raise ValueError('Choose valid preview items.')
+            approved = set(targets)
+            available = {m['target']['id'] for m in plan['moves']}
+            if not approved or not approved <= available:
+                raise ValueError('Choose at least one item from this preview.')
+            moves = [m for m in plan['moves'] if m['target']['id'] in approved]
+            self.verified_plan = None
+            self.exact_plan = None
+            self.cancel.clear()
+            self.status.update(running=True, phase='Moving approved copies to quarantine', done=0, total=len(moves))
+            self.thread = threading.Thread(target=self._run_exact, args=(moves, uuid.uuid4().hex), daemon=True)
+            self.thread.start()
+            return {'message':f'Moving {len(moves)} approved copies. Undo restores this batch.'}
 
     def start_exact(self, token):
         with self.lock:
@@ -1154,6 +1196,7 @@ class Engine:
             return [dict(r) for r in db.execute('SELECT * FROM moves ORDER BY created DESC LIMIT 200')]
 
     def invalidate_groups(self):
+        self.verified_plan = None
         self.revision += 1
         self.groups_cache = None
 

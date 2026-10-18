@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.7.2
+LOCAL DUPLICATE REVIEW 1.7.3
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -13,6 +13,23 @@ The database is stored separately in %LOCALAPPDATA%\LocalDuplicateReview.
 Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
 Later launches, scans and image processing stay local; no cloud account or GPU.
+
+NEW IN 1.7.3: PREVIEW AUTO-QUARANTINE
+- Preview auto-quarantine runs the same checks as the automatic action, but moves
+  nothing. It opens a large KEEP / QUARANTINE comparison for each proposed removal.
+- Use Previous / Next or the pair selector, Fit / 100%, and Open original to inspect.
+  The reason distinguishes identical bytes, identical decoded pixels and visual checks.
+- Uncheck Include this removal to keep both images, or use Exclude all / Include all.
+  Apply approved moves shows a final count and confirmation before moving the subset.
+- Close preview moves nothing; Review prepared preview reopens it. Exclusions are
+  retained while this page stays open, but reset on browser refresh. Prepared plans
+  expire when review data changes or the checker quits; verification results stay cached.
+- Exclusions only affect this preview, not future automatic runs. Existing automatic
+  quarantine is still available separately and still moves files after verification.
+- Approval is tied to server-owned pairs and the current review. Changed files are
+  checked again before moving. Undo last action restores the approved batch.
+- No matching thresholds or scan-cache keys changed. Visual verification is still
+  fallible; the preview lets you inspect actual decisions rather than assume accuracy.
 
 NEW IN 1.7.2: CONSISTENT COMPARE LARGE ORDER
 - Clicking a thumbnail compares it with the next image in grid order. The last

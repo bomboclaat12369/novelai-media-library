@@ -450,3 +450,16 @@ accuracy across a larger library or outfits with no existing Set.
   is needed for this fix.
 - Download [Local Duplicate Review 1.7.2](downloads/Local-Duplicate-Review-1.7.2.zip).
   Quit the old checker, extract the full package and run the launcher.
+
+## Preview automatic quarantine (Duplicate Review 1.7.3)
+
+- Preview auto-quarantine runs the existing verifier without moving files, then
+  shows each proposed removal beside its actual keeper with zoom and original access.
+- Exclude individual suggestions or all, then explicitly apply the approved subset.
+  A final confirmation shows the count. Closing the preview moves nothing.
+- Prepared plans are tied to the current review; changed files are rechecked before
+  moving. Undo restores the batch. Exclusions last for this preview on the current page,
+  not future automatic runs or browser refreshes. Restarting the checker clears plans.
+- Matching rules, scan caches and the separate automatic action are unchanged.
+- Download [Local Duplicate Review 1.7.3](downloads/Local-Duplicate-Review-1.7.3.zip).
+  Quit the old checker, extract the full package and launch it. No rescan required.

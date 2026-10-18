@@ -75,6 +75,8 @@ def make_server(engine, port=0, token=None):
                     return self.send(200, engine.view(int(params.get('offset', [0])[0]), params.get('filter', ['all'])[0]))
                 if url.path == '/api/groups':
                     return self.send(200, engine.groups(int(params['group'][0]) if 'group' in params else None, params.get('sort',['most'])[0]))
+                if url.path == '/api/verified/preview':
+                    return self.send(200, engine.verified_preview())
                 if url.path == '/api/config':
                     return self.send(200, engine.config())
                 if url.path == '/api/library':
@@ -112,7 +114,9 @@ def make_server(engine, port=0, token=None):
                 elif path == '/api/review':
                     result = engine.review(int(body['pair']), body['action'])
                 elif path == '/api/verified/start':
-                    result = engine.start_verified(int(body['revision']), body.get('scope', 'all'))
+                    result = engine.start_verified(int(body['revision']), body.get('scope', 'all'), preview=body.get('preview') is True)
+                elif path == '/api/verified/apply':
+                    result = engine.apply_verified_preview(body['token'], body['targets'])
                 elif path == '/api/exact/preview':
                     result = engine.preview_exact(body.get('scope', 'all'),bool(body.get('include_pixels')))
                 elif path == '/api/exact/start':
