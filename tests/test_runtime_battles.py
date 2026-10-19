@@ -38,8 +38,8 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(state['votes'],1)
         self.assertIn(pair['left'],(state['session']['pair']['left'],state['session']['pair']['right']))
         by_id={e['id']:e for e in state['entries']}
-        self.assertAlmostEqual(by_id[pair['left']]['rating'],1216)
-        self.assertAlmostEqual(by_id[pair['right']]['rating'],1184)
+        self.assertGreater(by_id[pair['left']]['rating'],1300)
+        self.assertAlmostEqual(by_id[pair['left']]['rating']+by_id[pair['right']]['rating'],2400)
         status,_=self.post('/api/battles/vote',{'character_id':self.character['id'],'kind':'images','revision':old,'pair_id':pair['id'],'outcome':'right'})
         self.assertNotEqual(status,200)
         reloaded=fixtures.RUNTIME['LibraryStore'](self.store.root)
@@ -56,7 +56,7 @@ class BattleTests(unittest.TestCase):
         state=self.call('start',limit=10)
         for i in range(10):state=self.call('vote',revision=state['revision'],pair_id=state['session']['pair']['id'],outcome='tie')
         self.assertIsNone(state['session']['pair']);self.assertEqual(state['session']['done'],10)
-        self.assertTrue(all(e['rating']==1200 and e['ties']==10 and not e['provisional'] for e in state['entries']))
+        self.assertTrue(all(e['rating']==1200 and e['ties']==10 and e['provisional'] for e in state['entries']))
         state=self.call('undo',revision=state['revision']);self.assertEqual(state['session']['done'],9)
         images[0]['in_all']=False
         status,_=self.post('/api/battles/vote',{'character_id':self.character['id'],'kind':'images','revision':state['revision'],'pair_id':state['session']['pair']['id'],'outcome':'left'})

@@ -2,6 +2,16 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Faster placement and adaptive set battles (UI 2.8.89 / companion 2.7.52)
+
+Battle MMR now uses uncertainty-aware Glicko updates: new images and sets move quickly, while established ratings change more cautiously. Matchmaking keeps a persistent batch of up to eight unfinished placements, mixes in calibration comparisons, and favors informative, varied opponents. **Place this image** beneath the viewer and **Place this set** inside a set start a focused ten-comparison round; both are also available from the leaderboard. Choosing placement never grants rating points by itself.
+
+Ratings show Unrated, Provisional, Developing or Established confidence. Placement requires at least six comparisons against four distinct opponents and sufficiently low uncertainty; Established requires twelve comparisons, eight opponents and tighter uncertainty. Tiers require completed placement and at least five placed eligible entries. Ratings do not decay with inactivity. These are estimates of your preferences, not guarantees of an exact ordering. Only wins, losses and ties affect MMR; there is no “Both are great” bonus.
+
+Existing MMR and vote totals are preserved. Older ratings begin with estimated uncertainty and need new varied comparisons to establish confidence. A one-time pre-migration battle backup is retained. Each new comparison records the before/after ratings and uncertainty; Undo restores the previous state and records the reversal. Older comparisons are not reconstructed.
+
+Set battles fill each side with an adaptive grid of whole, uncropped images, up to twelve per set. Larger sets show the cover and evenly spaced samples with a visible count. Click the grid to choose that set, or use Left/Right arrows to vote. **Browse full set** opens every image individually; arrows browse instead of voting while this view is open. Compact controls leave more room for images.
+
 ## Profile design, rank tiers and trophies (UI 2.8.88 / companion 2.7.51)
 
 Profiles now show and edit height in feet and inches; stored inch values convert automatically. Overview uses a larger photo gallery, measurement cards, battle statistics and top-ranked image cards. Trophy Cabinet is available from profiles and battles, with filters for image or set achievements. The three screens share a dark gallery design with compact controls and colored rank badges.

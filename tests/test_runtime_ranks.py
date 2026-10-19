@@ -13,7 +13,7 @@ class RankTests(unittest.TestCase):
     def test_rank_cutoffs_ties_and_legacy_records(self):
         images=[self.import_image(i) for i in range(20)]
         battle=self.store.battles;key=self.character['id']+':images'
-        board={'revision':'legacy','ratings':{m['id']:{'rating':1600-i*10.,'played':5,'wins':3,'losses':2,'ties':0} for i,m in enumerate(images)},'recent':[],'undo':[],'votes':50,'session':None}
+        board={'revision':'legacy','ratings':{m['id']:{'rating':1600-i*10.,'played':6,'wins':4,'losses':2,'ties':0,'rd':100.,'opponents':{o['id']:1 for o in images if o['id']!=m['id']}} for i,m in enumerate(images)},'recent':[],'undo':[],'votes':50,'session':None}
         battle._save({'version':1,'boards':{key:board}})
         state=self.call('state');tiers=[r['tier'] for r in state['entries']]
         self.assertEqual(tiers,['Champion','Diamond']+['Gold']*3+['Silver']*5+['Bronze']*10)

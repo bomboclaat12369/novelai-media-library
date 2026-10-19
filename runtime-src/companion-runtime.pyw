@@ -501,6 +501,7 @@ class BattleRankings:
         self.store = store
         self.path = store.root / 'battles.json'
         self.data = None
+        self.rng = random.SystemRandom()
 
     def _load(self):
         if self.data is None:
@@ -518,6 +519,10 @@ class BattleRankings:
                 stream.flush()
                 os.fsync(stream.fileno())
             if self.path.exists():
+                if data.get('rating_model') and not (self.data or {}).get('rating_model'):
+                    migration = self.store.backup_dir / 'battles-before-placement.json'
+                    if not migration.exists():
+                        shutil.copy2(self.path, migration)
                 shutil.copy2(self.path, self.store.backup_dir / 'battles-previous.json')
             os.replace(temporary, self.path)
         finally:
@@ -526,7 +531,39 @@ class BattleRankings:
 
     @staticmethod
     def _score(board, ident):
-        return board['ratings'].get(ident, {'rating':1200., 'played':0, 'wins':0, 'ties':0, 'losses':0})
+        score = dict(board['ratings'].get(ident, {'rating':1200., 'played':0, 'wins':0, 'ties':0, 'losses':0}))
+        # Retain old Elo scores; their uncertainty is only an initial estimate.
+        score.setdefault('rd', max(160., 350. / math.sqrt(1 + score['played']/3)))
+        score.setdefault('opponents', {})
+        score.setdefault('last_seen', 0)
+        return score
+
+    @staticmethod
+    def _quality(score):
+        varied = len(score.get('opponents', {}))
+        if not score['played']:
+            return 'Unrated'
+        if score['played'] < 6 or varied < 4 or score['rd'] > 140:
+            return 'Provisional'
+        if score['played'] >= 12 and varied >= 8 and score['rd'] <= 85:
+            return 'Established'
+        return 'Developing'
+
+    @staticmethod
+    def _glicko(rating, rd, games):
+        """Glickman original Glicko, static preferences: no inactivity inflation.
+        games contains pre-update (opponent rating, RD, result) tuples.
+        https://www.glicko.net/glicko/glicko.pdf ; a one-vote rating period.
+        """
+        q = math.log(10)/400
+        information = evidence = 0.
+        for other_rating, other_rd, outcome in games:
+            g = 1/math.sqrt(1 + 3*q*q*other_rd*other_rd/(math.pi*math.pi))
+            expected = 1/(1+10**max(-12., min(12., -g*(rating-other_rating)/400)))
+            information += q*q*g*g*expected*(1-expected)
+            evidence += g*(outcome-expected)
+        precision = 1/(rd*rd) + information
+        return rating + q*evidence/precision, max(50., math.sqrt(1/precision))
 
     def _entries(self, owner, kind):
         media = {m['id']:m for m in self.store.data['media'] if m.get('character_id') == owner
@@ -549,39 +586,67 @@ class BattleRankings:
 
     def _pair(self, board, entries, champion=None):
         session = board['session']
-        eligible = [e for e in entries.values() if e['count'] >= session['minimum']]
-        pool = list(eligible)
-        recent = {tuple(sorted(p)) for p in board.get('recent',[])}
-        score = lambda e:self._score(board,e['id'])
-        rng = random.SystemRandom()
-        def opponents(left):
-            return [e for e in pool if e['id'] != left['id'] and
-                    (not session['similar'] or max(e['count'],left['count']) <= 2*min(e['count'],left['count']))]
-        # Favor underplayed entries, then similarly rated opponents. Retain variety.
-        eligible.sort(key=lambda e:(score(e)['played'],rng.random()))
-        if champion in entries and any(e['id']==champion for e in eligible):
-            eligible = [e for e in eligible if e['id']==champion]
+        pool = [e for e in entries.values() if e['count'] >= session['minimum']]
+        by_id = {e['id']:e for e in pool}
+        if len(pool) < 2:
+            return None
+        scores = {e['id']:self._score(board, e['id']) for e in pool}
+        recent = {tuple(sorted(p)) for p in board.get('recent', [])}
+        scheduler = board.setdefault('scheduler', {'batch':[]})
+        batch = [i for i in scheduler.get('batch', []) if i in by_id and self._quality(scores[i]) in ('Unrated','Provisional')]
+        waiting = [e['id'] for e in pool if e['id'] not in batch and self._quality(scores[e['id']]) in ('Unrated','Provisional')]
+        # Finish partially placed entries before admitting more fresh ones.
+        waiting.sort(key=lambda i:(scores[i]['played']==0, scores[i]['last_seen'], self.rng.random()))
+        batch += waiting[:max(0,8-len(batch))]
+        scheduler['batch'] = batch
+        target = session.get('target_id')
+        forced = champion if champion in by_id else target if target in by_id else None
+        if target and target not in by_id:
+            return None
+        if forced:
+            candidates = [by_id[forced]]
+        elif batch and board.get('votes',0)%4 != 3:
+            candidates = [by_id[i] for i in sorted(batch,key=lambda i:(scores[i]['last_seen'],self.rng.random()))]
+        else:
+            # Calibration turns connect batches and revisit uncertain/older scores.
+            candidates = sorted(pool,key=lambda e:(scores[e['id']]['last_seen'], -scores[e['id']]['rd'], self.rng.random()))
+        if not forced:
+            chosen = {e['id'] for e in candidates}
+            candidates += [e for e in pool if e['id'] not in chosen]
         for attempt in range(2):
-            for left in eligible:
-                choices = opponents(left)
-                if attempt == 0:
-                    choices = [e for e in choices if tuple(sorted((left['id'],e['id']))) not in recent]
+            for left in candidates:
+                ls = scores[left['id']]
+                choices = [e for e in pool if e['id'] != left['id'] and
+                           (not session['similar'] or max(e['count'],left['count']) <= 2*min(e['count'],left['count'])) and
+                           (attempt or tuple(sorted((left['id'],e['id']))) not in recent)]
                 if not choices:
                     continue
-                if score(left)['played'] < 3:
-                    choices.sort(key=lambda e:(score(e)['played'],rng.random()))
-                else:
-                    choices.sort(key=lambda e:abs(score(e)['rating']-score(left)['rating'])+rng.random()*80)
-                right = rng.choice(choices[:min(4,len(choices))])
+                def utility(right):
+                    rs = scores[right['id']]
+                    q = math.log(10)/400
+                    g = 1/math.sqrt(1+3*q*q*rs['rd']**2/(math.pi**2))
+                    probability = 1/(1+10**max(-12.,min(12.,-g*(ls['rating']-rs['rating'])/400)))
+                    information = g*g*probability*(1-probability)
+                    # Reliable, similarly rated and varied opponents are informative.
+                    diversity = 1/math.sqrt(1+ls.get('opponents',{}).get(right['id'],0))
+                    return information*diversity*(.9+.2*self.rng.random())
+                choices.sort(key=utility,reverse=True)
+                # Periodic broad comparisons keep rating ranges connected.
+                right = self.rng.choice(choices[:min(8,len(choices))]) if board.get('votes',0)%8 == 7 else choices[0]
                 ids = [left['id'],right['id']]
-                if rng.random()<.5:ids.reverse()
-                return {'id':uuid.uuid4().hex, 'left':ids[0], 'right':ids[1]}
+                if self.rng.random()<.5:
+                    ids.reverse()
+                return {'id':uuid.uuid4().hex, 'left':ids[0], 'right':ids[1],
+                        'reason':'Focused placement' if target else 'Placement' if left['id'] in batch else 'Calibration'}
         return None
 
     def _ranked_rows(self, board, entries):
         rows = [{**e, **self._score(board, i)} for i, e in entries.items()]
         rows.sort(key=lambda r: (r['played'] == 0, -r['rating'], -r['played'], r['id']))
-        placed = sorted((r for r in rows if r['played'] >= 5), key=lambda r: -r['rating'])
+        for row in rows:
+            row['rating_status'] = self._quality(row)
+            row['opponent_count'] = len(row.pop('opponents', {}))
+        placed = sorted((r for r in rows if r['rating_status'] in ('Developing','Established')), key=lambda r: -r['rating'])
         enough = len(placed) >= 5 and round(placed[0]['rating'], 8) > round(placed[-1]['rating'], 8)
         positions, counts = {}, {}
         for index, item in enumerate(placed, 1):
@@ -589,7 +654,7 @@ class BattleRankings:
             positions.setdefault(rating, index)
             counts[rating] = counts.get(rating, 0) + 1
         for row in rows:
-            row['provisional'] = row['played'] < 5
+            row['provisional'] = row['rating_status'] in ('Unrated','Provisional')
             row['tier_rank'] = None
             if not row['played']:
                 tier = 'Unranked'
@@ -648,7 +713,9 @@ class BattleRankings:
         if session:session.pop('baseline',None)
         return {'character_id':owner,'kind':kind,'revision':board['revision'], 'entries':rows,
                 'session':session, 'can_undo':bool(board.get('undo')), 'votes':board.get('votes',0),
-                'trophies':trophies, 'ranked_count':sum(r['played'] >= 5 for r in rows)}
+                'trophies':trophies, 'ranked_count':sum(not r['provisional'] for r in rows), 'rating_model':'glicko-static-v1',
+                'placement_batch':list(board.get('scheduler',{}).get('batch',[])),
+                'recorded_votes':sum(e.get('type')=='vote' for e in board.get('history',[]))}
 
     def request(self, action, body):
         with self.store.lock:
@@ -665,15 +732,21 @@ class BattleRankings:
                 raise ValueError('Rankings changed in another window. Refresh battles before continuing.')
             if 'trophies' not in board:
                 board['trophies'] = self._awards(board, self._ranked_rows(board, entries), legacy=True)
-            if action=='start':
-                mode=body.get('mode','rank');limit=body.get('limit',25)
-                minimum=body.get('minimum',5) if kind=='sets' else 1
+            data['rating_model'] = 'glicko-static-v1'
+            board.setdefault('history', [])
+            if action in ('start','place'):
+                target = str(body.get('entry_id','')) if action=='place' else None
+                if action=='place' and target not in entries:
+                    raise ValueError('This entry is not eligible for battles. Images must be in Main; Review, Purgatory and videos are excluded.')
+                mode = 'rank' if target else body.get('mode','rank')
+                limit = 10 if target else body.get('limit',25)
+                minimum = min(5,entries[target]['count']) if target and kind=='sets' else body.get('minimum',5) if kind=='sets' else 1
                 if mode not in ('rank','winner') or type(limit) is not int or limit not in (10,25,50):
                     raise ValueError('Choose a valid mode and round length.')
                 if type(minimum) is not int or not 1<=minimum<=10000:
                     raise ValueError('Minimum set size must be between 1 and 10,000 images.')
                 board['session']={'mode':mode,'limit':limit,'done':0,'minimum':minimum,
-                                  'similar':kind=='sets' and body.get('similar') is True,
+                                  'similar':not target and kind=='sets' and body.get('similar') is True, 'target_id':target,
                                   'baseline':{i:self._score(board,i)['rating'] for i in entries}}
                 pair=self._pair(board,entries)
                 if not pair:raise ValueError('Not enough eligible opponents. Set battles need two sets meeting your minimum and size filter; image battles need two Main images.')
@@ -686,21 +759,32 @@ class BattleRankings:
                 if any(i not in entries or entries[i]['count']<session['minimum'] for i in ids):
                     raise ValueError('An opponent is no longer eligible. Start a new round.')
                 before={'session':copy.deepcopy(session),'recent':list(board['recent']),'votes':board['votes'],
-                        'ratings':{i:copy.deepcopy(board['ratings'].get(i)) for i in ids}, 'awarded_trophy_ids':[]}
+                        'ratings':{i:copy.deepcopy(board['ratings'].get(i)) for i in ids}, 'awarded_trophy_ids':[], 'scheduler':copy.deepcopy(board.get('scheduler',{}))}
                 board['recent']=(board['recent']+[ids])[-32:]
                 champion=None
                 if outcome!='skip':
                     a,b=[dict(self._score(board,i)) for i in ids]
                     result={'left':1.,'right':0.,'tie':.5}[outcome]
-                    expected=1/(1+10**max(-8,min(8,(b['rating']-a['rating'])/400)))
-                    change=32*(result-expected)
-                    for ident,score,delta,value in ((ids[0],a,change,result),(ids[1],b,-change,1-result)):
-                        score['rating']+=delta;score['played']+=1
+                    # Both sides use the same pre-vote snapshot, never an already updated opponent.
+                    for ident,other_id,score,opponent,value in ((ids[0],ids[1],a,b,result),(ids[1],ids[0],b,a,1-result)):
+                        new_rating,new_rd=self._glicko(score['rating'],score['rd'],[(opponent['rating'],opponent['rd'],value)])
+                        updated=dict(score)
+                        updated['rating']=new_rating;updated['rd']=new_rd;updated['played']+=1
+                        updated['opponents']=dict(score['opponents'])
+                        updated['opponents'][other_id]=updated['opponents'].get(other_id,0)+1
+                        updated['last_seen']=board['votes']+1
+                        score=updated
                         score['wins' if value==1 else 'losses' if value==0 else 'ties']+=1
                         score['streak'] = score.get('streak', 0) + 1 if value == 1 else 0
                         score['best_streak'] = max(score.get('best_streak', 0), score['streak'])
                         board['ratings'][ident]=score
                     session['done']+=1;board['votes']+=1
+                    event_id=uuid.uuid4().hex
+                    before['history_vote_id']=event_id
+                    summary=lambda score:{k:score[k] for k in ('rating','rd','played')}
+                    board['history'].append({'id':event_id,'type':'vote','at':now_iso(),'left':ids[0],'right':ids[1],
+                                             'outcome':outcome,'model':'glicko-static-v1','before':[summary(a),summary(b)],
+                                             'after':[summary(board['ratings'][i]) for i in ids]})
                     awards = self._awards(board, self._ranked_rows(board, entries))
                     for trophy_id, award in awards.items():
                         if trophy_id not in board['trophies']:
@@ -716,6 +800,9 @@ class BattleRankings:
                     if score is None:board['ratings'].pop(ident,None)
                     else:board['ratings'][ident]=score
                 for field in ('session','recent','votes'):board[field]=before[field]
+                board['scheduler']=before.get('scheduler',{'batch':[]})
+                board['history'].append({'type':'undo','at':now_iso(),'vote_id':before.get('history_vote_id'),
+                                         'legacy':not bool(before.get('history_vote_id'))})
                 if 'awarded_trophy_ids' in before:
                     for trophy_id in before['awarded_trophy_ids']:
                         board['trophies'].pop(trophy_id, None)
@@ -3533,7 +3620,7 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path in {"/api/profile/state", "/api/profile/save"}:
                 self._send_json(200, self.store.profile_request(path.rsplit("/", 1)[1], self._read_json()))
                 return
-            if path in {"/api/battles/state", "/api/battles/start", "/api/battles/vote", "/api/battles/undo"}:
+            if path in {"/api/battles/state", "/api/battles/start", "/api/battles/vote", "/api/battles/undo", "/api/battles/place"}:
                 self._send_json(200, self.store.battles.request(path.rsplit("/",1)[1], self._read_json()))
                 return
             if path == "/api/quality/settings":

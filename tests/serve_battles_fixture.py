@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory() as directory:
         for item in items:
             item['in_all'] = True
         owner['profile'] = {'photos':[m['id'] for m in items[:5]], 'measurements':{'height':{'value':'67.5','status':'confirmed'},'bust':{'value':'35','status':'estimated'},'waist':{'value':'26','status':'confirmed'},'hips':{'value':'37','status':'estimated'},'bra':{'value':'34D (US)','status':'estimated'}}, 'notes':'Example profile for layout checks.', 'revision':'fixture'}
-        board={'revision':'fixture', 'ratings':{m['id']:{'rating':1600-i*24.,'played':20,'wins':15-i//2,'losses':5+i//2,'ties':0,'streak':0,'best_streak':5 if i==0 else 0} for i,m in enumerate(items)}, 'recent':[], 'undo':[], 'votes':160, 'session':None}
+        board={'revision':'fixture', 'ratings':{m['id']:{'rating':1600-i*24.,'played':20,'rd':80.,'opponents':{o['id']:1 for o in items if o['id']!=m['id']},'wins':15-i//2,'losses':5+i//2,'ties':0,'streak':0,'best_streak':5 if i==0 else 0} for i,m in enumerate(items)}, 'recent':[], 'undo':[], 'votes':160, 'session':None}
         board['trophies']=store.battles._awards(board,store.battles._ranked_rows(board,store.battles._entries(owner['id'],'images')))
         store.battles._save({'version':1,'boards':{owner['id']+':images':board}})
     store.save()

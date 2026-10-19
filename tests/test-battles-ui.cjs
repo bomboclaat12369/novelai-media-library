@@ -48,12 +48,11 @@ const dir=path.resolve(__dirname,'..'),config=JSON.parse(fs.readFileSync(path.jo
   await page.getByLabel('Battle type',{exact:true}).selectOption('sets');await page.waitForFunction(()=>document.getElementById('nai-media-host').shadowRoot.querySelector('.naiBattleStatus').textContent.startsWith('2 eligible sets'));
   await page.getByLabel('Minimum set images',{exact:true}).fill('5');await page.getByLabel('Similar-size opponents',{exact:true}).check();await page.locator('#naiBattleStart').click();
   await page.waitForFunction(()=>[...document.getElementById('nai-media-host').shadowRoot.querySelectorAll('.naiBattleChoose')].length===2&&[...document.getElementById('nai-media-host').shadowRoot.querySelectorAll('.naiBattleChoose')].every(b=>!b.disabled));
-  assert.equal(await page.locator('.naiBattleSamples button').count(),8);assert.equal(await page.getByRole('heading',{name:'Small set',exact:true}).count(),0);
-  await page.locator('.naiBattleCard').first().getByRole('button',{name:'→',exact:true}).click();
-  await page.locator('.naiBattleCard').first().getByRole('button',{name:'View full image',exact:true}).click();await page.locator('.naiBattleLight').waitFor();await page.getByRole('button',{name:'Close image',exact:true}).click();
+  assert.equal(await page.locator('.naiBattleSetImage').count(),11);assert.equal(await page.getByRole('heading',{name:'Small set',exact:true}).count(),0);
+  await page.locator('.naiBattleCard').first().getByRole('button',{name:'Browse full set ⛶',exact:true}).click();await page.locator('.naiBattleLight').waitFor();const navBefore=(await state('sets')).votes;await page.keyboard.press('ArrowRight');assert((await page.locator('.naiBattleLight .naiBattleBrowse').textContent()).includes('2 /'));assert.equal((await state('sets')).votes,navBefore);await page.getByRole('button',{name:'Close image',exact:true}).click();
   assert(await page.locator('.naiBattleWrap').evaluate(w=>w.scrollHeight<=w.clientHeight+2));
   if(standalone)await page.screenshot({path:'/tmp/battles-sets.png'});
-  const setBefore=await state('sets');await page.locator('.naiBattleChoose').last().click();await page.waitForFunction(n=>document.getElementById('nai-media-host').shadowRoot.querySelector('.naiBattleStatus').textContent.includes(n+' saved votes'),setBefore.votes+1);
+  const setBefore=await state('sets');await page.keyboard.press('ArrowRight');await page.waitForFunction(n=>document.getElementById('nai-media-host').shadowRoot.querySelector('.naiBattleStatus').textContent.includes(n+' saved votes'),setBefore.votes+1);
   await page.locator('#naiBattleTrophies').click();assert((await page.locator('.naiCabinet').textContent()).includes('First choice'));await page.locator('#naiBattleLeaderboard').click();assert.equal(await page.locator('.naiBattleRow').count(),3);assert((await page.locator('.naiBattleBoard').textContent()).includes('Provisional'));
   assert.equal((await state('images')).votes,before.votes);await page.locator('#naiBattleUndo').click();
   await page.getByRole('button',{name:'Close',exact:true}).click();
@@ -62,6 +61,6 @@ const dir=path.resolve(__dirname,'..'),config=JSON.parse(fs.readFileSync(path.jo
   await page.locator('#naiProfileBtn').click();await page.locator('.naiProfileTop button').first().waitFor();assert((await page.locator('.naiProfileTop button').first().textContent()).includes(Math.round(ranking.entries[0].rating)+' MMR'));
   await page.getByRole('button',{name:'Trophy Cabinet',exact:true}).click();await page.locator('.naiTrophyCard').first().waitFor();assert((await page.locator('.naiCabinet').textContent()).includes('First choice'));await page.getByRole('button',{name:'Overview',exact:true}).click();await page.getByRole('button',{name:'Close',exact:true}).click();assert.deepEqual(errors,[]);await page.close();
  }
- console.log('Battles UI passed in standalone and NovelAI: Main-only images, Winner Stays, resume, undo, set minimum, equal samples, browsing and separate leaderboards.');
+ console.log('Battles UI passed in standalone and NovelAI: Main-only images, Winner Stays, resume, undo, set minimum, adaptive set grids, keyboard voting/fullscreen navigation and separate leaderboards.');
  }finally{if(browser)await browser.close();server.kill();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
