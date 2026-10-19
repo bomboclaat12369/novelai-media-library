@@ -2,7 +2,7 @@
   "parts": [
     "payload/userscript-2.8.68.transport-start.txt",
     "payload/userscript-2.8.5.reset-state.txt",
-    "payload/userscript-2.8.83.part01.txt",
+    "payload/userscript-2.8.92.part01.txt",
     "payload/userscript-2.8.77.virtual-grid.txt",
     "payload/userscript-2.3.0.patch01.txt",
     "payload/userscript-2.3.0.patch02.txt",
@@ -20,7 +20,7 @@
     "payload/userscript-2.8.82.outfit-matching.txt",
     "payload/userscript-2.8.82.set-scan.txt",
     "payload/userscript-2.8.82.set-picker.txt",
-    "payload/userscript-2.8.85.sets.txt",
+    "payload/userscript-2.8.92.sets.txt",
     "payload/userscript-2.8.76.set-import.txt",
     "payload/userscript-2.8.82.crop-bridge.txt",
     "payload/userscript-2.8.4.drag-safety.txt",
@@ -36,11 +36,12 @@
     "payload/userscript-2.8.72.standalone.txt",
     "payload/userscript-2.8.68.stats.txt",
     "payload/userscript-2.8.76.search-fields.txt",
-    "payload/userscript-2.8.91.ranks.txt",
-    "payload/userscript-2.8.91.battles.txt",
-    "payload/userscript-2.8.91.profiles.txt",
+    "payload/userscript-2.8.92.ranks.txt",
+    "payload/userscript-2.8.92.ranking-library.txt",
+    "payload/userscript-2.8.92.battles.txt",
+    "payload/userscript-2.8.92.profiles.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 146,
-  "version": "2.8.91"
+  "release_build": 147,
+  "version": "2.8.92"
 }

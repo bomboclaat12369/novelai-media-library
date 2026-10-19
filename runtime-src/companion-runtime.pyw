@@ -711,7 +711,8 @@ class BattleRankings:
         media = {m['id']:m for m in self.store.data['media'] if m.get('character_id') == owner
                  and m.get('media_type') != 'video' and not m.get('in_review') and not m.get('in_purgatory')}
         if kind == 'images':
-            return {ident:{'id':ident, 'name':m.get('original_name',m.get('filename','Image')), 'images':[ident], 'count':1}
+            return {ident:{'id':ident, 'name':m.get('original_name',m.get('filename','Image')), 'images':[ident], 'count':1,
+                           'categories':list(m.get('categories',[])), 'flagged_for_removal':bool(m.get('flagged_for_removal'))}
                     for ident,m in media.items() if self.store._in_main(m)}
         entries = {}
         for group in self.store.data.get('sets', []):
@@ -723,13 +724,20 @@ class BattleRankings:
             cover = group.get('cover_media_id')
             if cover in images:
                 images.remove(cover); images.insert(0,cover)
-            entries[group['id']] = {'id':group['id'], 'name':group.get('name','Set'), 'images':images, 'count':len(images)}
+            entries[group['id']] = {'id':group['id'], 'name':group.get('name','Set'), 'images':images, 'count':len(images),
+                                    'categories':list(group.get('categories',[]))}
         return entries
+
+    @staticmethod
+    def _in_scope(entry, session, scheduling=False):
+        return (entry['count'] >= session['minimum'] and
+                (not session.get('category') or session['category'] in entry.get('categories',[])) and
+                (not scheduling or not entry.get('flagged_for_removal')))
 
     def _pair(self, board, entries, champion=None, rng=None):
         rng = rng or self.rng
         session = board['session']
-        pool = [e for e in entries.values() if e['count'] >= session['minimum']]
+        pool = [e for e in entries.values() if self._in_scope(e,session,scheduling=True)]
         refining = session['mode'] in ('refine10', 'refine25')
         if refining:
             pool = sorted((e for e in pool if self._score(board,e['id'])['played']),
@@ -740,11 +748,12 @@ class BattleRankings:
         scores = {e['id']:self._score(board, e['id']) for e in pool}
         recent = {tuple(sorted(p)) for p in board.get('recent', [])}
         scheduler = board.setdefault('scheduler', {'batch':[]})
-        batch = [i for i in scheduler.get('batch', []) if i in by_id and self._quality(scores[i]) in ('Unrated','Provisional')]
-        waiting = [e['id'] for e in pool if e['id'] not in batch and self._quality(scores[e['id']]) in ('Unrated','Provisional')]
-        # Finish partially placed entries before admitting more fresh ones.
-        waiting.sort(key=lambda i:(scores[i]['played']==0, scores[i]['last_seen'], rng.random()))
-        batch += waiting[:max(0,8-len(batch))]
+        waiting = [e['id'] for e in pool if self._quality(scores[e['id']]) in ('Unrated','Provisional')]
+        # First spread a few observations across the collection. Then rotate
+        # unfinished entries by recency and uncertainty; no sticky batch can starve them.
+        waiting.sort(key=lambda i:(scores[i]['played']>=4, scores[i]['played'] if scores[i]['played']<4 else scores[i]['last_seen'],
+                                   -scores[i]['rd'], scores[i]['last_seen'], rng.random()))
+        batch = waiting[:8]
         scheduler['batch'] = batch
         target = session.get('target_id')
         forced = champion if champion in by_id else target if target in by_id else None
@@ -752,12 +761,17 @@ class BattleRankings:
             return None
         if forced:
             candidates = [by_id[forced]]
-        elif batch and not refining and board.get('votes',0)%4 != 3:
-            candidates = [by_id[i] for i in sorted(batch,key=lambda i:(scores[i]['last_seen'],rng.random()))]
+        elif waiting and not refining and (session['mode']=='placements' or board.get('votes',0)%8 != 7):
+            candidates = [by_id[i] for i in waiting]
         else:
-            # Calibration turns connect batches and revisit uncertain/older scores.
-            candidates = sorted(pool,key=lambda e:(scores[e['id']]['last_seen'], -scores[e['id']]['rd'], rng.random()))
-        if not forced:
+            if session['mode']=='placements' and not waiting:
+                return None
+            # Developing ratings get attention; established images mainly serve
+            # as opponents. Occasional recency-first turns preserve broad coverage.
+            candidates = sorted(pool,key=lambda e:((scores[e['id']]['last_seen'], -scores[e['id']]['rd'])
+                                if board.get('votes',0)%8==7 else
+                                (self._quality(scores[e['id']])=='Established',-scores[e['id']]['rd'],scores[e['id']]['last_seen'])))
+        if not forced and session['mode']!='placements':
             chosen = {e['id'] for e in candidates}
             candidates += [e for e in pool if e['id'] not in chosen]
         for attempt in range(2):
@@ -784,7 +798,7 @@ class BattleRankings:
                 if rng.random()<.5:
                     ids.reverse()
                 return {'id':uuid.uuid4().hex, 'left':ids[0], 'right':ids[1],
-                        'reason':'Focus comparisons' if target else 'Refine top rankings' if refining else 'Placement' if left['id'] in batch else 'Calibration'}
+                        'reason':'Focus comparisons' if target else 'Refine top rankings' if refining else 'Initial comparisons' if ls['played']<4 else 'Finish placement' if left['id'] in waiting else 'Calibration'}
         return None
 
     def _ranked_rows(self, board, entries):
@@ -833,19 +847,68 @@ class BattleRankings:
                            'name': entry['name'] if entry else '',
                            'image_id': entry['images'][0] if entry else None,
                            'earned_at': None if legacy else now_iso(), 'legacy': legacy}
-        for count, title in ((1, 'First choice'), (25, 'Finding favorites'), (100, 'The curator'), (500, 'A discerning eye'), (1000, 'Connoisseur')):
-            if board.get('votes', 0) >= count:
-                add('votes:'+str(count), title, f'{count:,} saved battle votes')
-        for row in rows:
-            tier = row['tier']
-            levels = ('Bronze','Silver','Gold','Platinum','Diamond','Master','Grandmaster')
-            for level in levels[2:]:
-                if tier in levels and levels.index(tier) >= levels.index(level):
-                    add('tier:'+level+':'+row['id'], level+' achieved', 'Reached '+level+' among eligible ranked entries', level, row)
-            for count in (5, 10, 25):
-                if row.get('best_streak', 0) >= count:
-                    add('streak:'+str(count)+':'+row['id'], f'{count} in a row', f'Won {count} consecutive appearances; ties end a streak', 'Silver' if count == 5 else 'Gold', row)
+        for family in self._achievement_progress(board, rows):
+            for milestone in family['milestones']:
+                if family['value'] >= milestone:
+                    add('progress:'+family['id']+':'+str(milestone),family['title'],str(milestone)+family['unit'],
+                        'Grandmaster' if family['id']=='grandmaster' else 'Gold')
         return awards
+
+    @staticmethod
+    def _achievement_progress(board, rows):
+        placed=sum(not r['provisional'] for r in rows)
+        specifications=[('placements','Placement progress',placed,[10,25,50,100,250,500,1000],' entries placed'),
+                        ('coverage','Collection coverage',100*placed/len(rows) if rows else 0,[25,50,75,100],'% placed'),
+                        ('established','Established collection',sum(r['rating_status']=='Established' for r in rows),[5,10,25,50,100,250],' established entries'),
+                        ('grandmaster','First Grandmaster',int(any(r['tier']=='Grandmaster' for r in rows)),[1],' Grandmaster'),
+                        ('votes','Comparisons completed',board.get('votes',0),[1,25,100,500,1000,2500,5000],' saved comparisons')]
+        awards=board.get('trophies',{})
+        result=[]
+        for ident,title,value,milestones,unit in specifications:
+            earned=[m for m in milestones if value>=m or 'progress:'+ident+':'+str(m) in awards or
+                    (ident=='votes' and 'votes:'+str(m) in awards) or
+                    (ident=='grandmaster' and any(k.startswith(('tier:Grandmaster:','tier:Champion:')) for k in awards))]
+            achieved=max(earned,default=0)
+            result.append({'id':ident,'title':title,'value':value,'milestones':milestones,'achieved':achieved,
+                           'next':next((m for m in milestones if m>achieved),None),'unit':unit})
+        return result
+
+    def _record_rating_path(self, board, before, action, pair):
+        paths=board.setdefault('rating_paths',{})
+        clock=board['path_clock']=board.get('path_clock',0)+1
+        at=now_iso()
+        participants={pair.get('left'),pair.get('right')}
+        for ident in set(before)|set(board['ratings'])|participants:
+            if not ident:continue
+            old=self._score({'ratings':before},ident);new=self._score(board,ident)
+            values=lambda s:[round(s['rating'],1),round(s['rd'],1),s['played']]
+            if values(old)==values(new):continue
+            points=paths.setdefault(ident,[[clock-1,at,*values(old),'baseline']])
+            points.append([clock,at,*values(new),'undo' if action=='undo' else 'direct' if ident in participants else 'indirect'])
+            # Keep a long overview and detailed recent history, bounded per entry.
+            if len(points)>400:paths[ident]=points[:200:2]+points[200:]
+
+    def _rating_path(self, board, ident, entries):
+        if ident not in entries:raise ValueError('This entry is no longer eligible for this leaderboard.')
+        points=board.get('rating_paths',{}).get(ident,[])
+        past=[]
+        cutoff=points[0][1] if points else None
+        for event in self._active_history(board):
+            if ident not in (event['left'],event['right']) or (cutoff and event['at']>=cutoff):continue
+            side=0 if event['left']==ident else 1
+            score=event['after'][side]
+            past.append([len(past),event['at'],round(score['rating'],1),round(score['rd'],1),score['played'],'older direct'])
+        # Downsample only the older display points; raw vote history is preserved.
+        if len(past)>200:past=[past[round(i*(len(past)-1)/199)] for i in range(200)]
+        opponents=[]
+        for event in reversed(self._active_history(board)):
+            if ident not in (event['left'],event['right']):continue
+            side='left' if event['left']==ident else 'right';other=event['right' if side=='left' else 'left']
+            opponents.append({'at':event['at'],'opponent':entries.get(other,{}).get('name','Unavailable entry'),
+                              'result':'Tie' if event['outcome']=='tie' else 'Win' if event['outcome']==side else 'Loss'})
+            if len(opponents)==20:break
+        return {'entry':entries[ident],'points':past+points,'comparisons':opponents,
+                'note':'Older points show recorded direct results only. New history includes indirect changes and Undo. Older graph points may be sampled.'}
 
     def _apply_comparison(self, board, pair, outcome):
         ids=[pair['left'],pair['right']]
@@ -905,11 +968,11 @@ class BattleRankings:
                     if upcoming[side] not in candidates:candidates.append(upcoming[side])
         return candidates
 
-    def _view(self, board, entries, owner, kind):
+    def _view(self, board, entries, owner, kind, preload=True):
         session = copy.deepcopy(board.get('session'))
         if session and session.get('pair'):
             pair=session['pair']
-            session['available'] = all(i in entries and entries[i]['count']>=session['minimum'] for i in (pair['left'],pair['right']))
+            session['available'] = all(i in entries and self._in_scope(entries[i],session) for i in (pair['left'],pair['right']))
         rows = self._ranked_rows(board, entries)
         baseline = (session or {}).get('baseline', {})
         for row in rows:
@@ -926,9 +989,12 @@ class BattleRankings:
         return {'character_id':owner,'kind':kind,'revision':board['revision'], 'entries':rows,
                 'session':session, 'can_undo':bool(board.get('undo')), 'votes':board.get('votes',0),
                 'trophies':trophies, 'ranked_count':sum(not r['provisional'] for r in rows), 'rating_model':self.MODEL,
+                'achievements':self._achievement_progress(board,rows),
+                'scope_count':sum(self._in_scope(e,session or {'minimum':5 if kind=='sets' else 1},True) for e in entries.values()),
+                'unfinished_count':sum(r['provisional'] and self._in_scope(r,session or {'minimum':5 if kind=='sets' else 1},True) for r in rows),
                 'placement_batch':list(board.get('scheduler',{}).get('batch',[])),
                 'recorded_votes':len(self._active_history(board)),
-                'preload_entries':self._forecast(board,entries)}
+                'preload_entries':self._forecast(board,entries) if preload else []}
 
     def request(self, action, body):
         with self.store.lock:
@@ -938,6 +1004,8 @@ class BattleRankings:
             data=copy.deepcopy(self._load());key=owner+':'+kind
             board=data['boards'].setdefault(key,{'revision':uuid.uuid4().hex,'ratings':{},'recent':[],'undo':[],'votes':0,'session':None})
             entries=self._entries(owner,kind)
+            if action=='history':return self._rating_path(board,str(body.get('entry_id','')),entries)
+            if action=='summary':return self._view(board,entries,owner,kind,preload=False)
             if action=='state':return self._view(board,entries,owner,kind)
             # New boards can be started without persisting a read-only state request.
             existing=self._load()['boards'].get(key)
@@ -954,20 +1022,25 @@ class BattleRankings:
                     raise ValueError('This entry is not eligible for battles. Images must be in Main; Review, Purgatory and videos are excluded.')
                 mode = 'rank' if target else body.get('mode','rank')
                 previous = board.get('session') or {}
-                return_settings={k:previous.get(k,v) for k,v in {'mode':'rank','limit':0,'minimum':1 if kind=='images' else min(5,entries[target]['count']) if target else 5,'similar':False}.items()}
+                return_settings={k:previous.get(k,v) for k,v in {'mode':'rank','limit':0,'minimum':1 if kind=='images' else min(5,entries[target]['count']) if target else 5,'similar':False,'category':''}.items()}
                 if previous.get('target_id'):return_settings=copy.deepcopy(previous.get('return_settings',return_settings))
                 limit = 10 if target else body.get('limit',0)
                 minimum = min(5,entries[target]['count']) if target and kind=='sets' else body.get('minimum',5) if kind=='sets' else 1
-                if mode not in ('rank','winner','refine10','refine25') or type(limit) is not int or limit not in (0,10,25,50):
+                if mode not in ('rank','placements','winner','refine10','refine25') or type(limit) is not int or limit not in (0,10,25,50):
                     raise ValueError('Choose a valid mode and round length.')
                 if type(minimum) is not int or not 1<=minimum<=10000:
                     raise ValueError('Minimum set size must be between 1 and 10,000 images.')
+                category='' if target else str(body.get('category',''))
+                categories=self.store.character(owner).get('categories' if kind=='images' else 'set_categories',[])
+                if category and not any(c['id']==category and (kind=='sets' or c.get('media_type','image')=='image') for c in categories):
+                    raise ValueError('Choose a valid category for this battle type.')
                 board['session']={'mode':mode,'limit':limit,'done':0,'minimum':minimum,
+                                  'category':category,
                                   'similar':not target and kind=='sets' and body.get('similar') is True, 'target_id':target,
                                   'baseline':{i:self._score(board,i)['rating'] for i in entries}}
                 if target:board['session']['return_settings']=return_settings
                 pair=self._pair(board,entries)
-                if not pair:raise ValueError('Not enough eligible opponents. Set battles need two sets meeting your minimum and size filter; image battles need two Main images.')
+                if not pair and mode!='placements':raise ValueError('Not enough eligible opponents in this category. Check the minimum size and removal flags.')
                 board['session']['pair']=pair
             elif action=='resume':
                 if not (board.get('session') or {}).get('target_id'):raise ValueError('No focused comparison is active.')
@@ -979,13 +1052,14 @@ class BattleRankings:
                 if not pair or pair['id']!=body.get('pair_id') or outcome not in ('left','right','tie','skip'):
                     raise ValueError('This matchup is no longer active. Refresh battles.')
                 ids=[pair['left'],pair['right']]
-                if any(i not in entries or entries[i]['count']<session['minimum'] for i in ids):
+                if any(i not in entries or not self._in_scope(entries[i],session) for i in ids):
                     raise ValueError('An opponent is no longer eligible. Start a new round.')
                 before={'session':copy.deepcopy(session),'recent':list(board['recent']),'votes':board['votes'],
                         'ratings':{i:copy.deepcopy(board['ratings'].get(i)) for i in ids}, 'awarded_trophy_ids':[], 'scheduler':copy.deepcopy(board.get('scheduler',{}))}
                 board['recent']=(board['recent']+[ids])[-32:]
                 champion=None
                 if outcome!='skip':
+                    previous_ratings=copy.deepcopy(board['ratings'])
                     a,b=self._apply_comparison(board,pair,outcome)
                     event_id=uuid.uuid4().hex
                     before['history_vote_id']=event_id
@@ -994,6 +1068,7 @@ class BattleRankings:
                                              'outcome':outcome,'model':self.MODEL,'before':[summary(a),summary(b)],
                                              'after':[summary(board['ratings'][i]) for i in ids]})
                     self._fit_history(board)
+                    self._record_rating_path(board,previous_ratings,'vote',pair)
                     board['history'][-1]['after'] = [summary(board['ratings'][i]) for i in ids]
                     awards = self._awards(board, self._ranked_rows(board, entries))
                     for trophy_id, award in awards.items():
@@ -1005,6 +1080,7 @@ class BattleRankings:
                 self._advance_pair(board,entries,pair,outcome)
             elif action=='undo':
                 if not board['undo']:raise ValueError('No vote to undo in this round.')
+                previous_ratings=copy.deepcopy(board['ratings'])
                 before=board['undo'].pop()
                 for ident,score in before['ratings'].items():
                     if score is None:board['ratings'].pop(ident,None)
@@ -1019,6 +1095,7 @@ class BattleRankings:
                         score = self._score(board, ident)
                         board['history_priors'][ident] = {k:score[k] for k in ('rating','rd')}
                 self._fit_history(board)
+                self._record_rating_path(board,previous_ratings,'undo',before['session'].get('pair') or {})
                 if 'awarded_trophy_ids' in before:
                     for trophy_id in before['awarded_trophy_ids']:
                         board['trophies'].pop(trophy_id, None)
@@ -1328,6 +1405,13 @@ class LibraryStore:
             if bool(media.get("featured")) == bool(featured):
                 return media
             return self._change_media(media, {"featured": bool(featured)}, "Change Featured status")
+
+    def set_removal_flag(self, media_id, flagged):
+        if type(flagged) is not bool:raise ValueError('Removal flag must be true or false.')
+        with self.lock:
+            media=self.media_item(media_id)
+            if not media or media.get('media_type')!='image':raise ValueError('Choose an image to flag.')
+            return self._change_media(media, {'flagged_for_removal':flagged}, 'Change removal flag')
 
     def undo_last(self, entry_id: str) -> dict[str, Any]:
         with self.lock:
@@ -3838,8 +3922,12 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path in {"/api/profile/state", "/api/profile/save"}:
                 self._send_json(200, self.store.profile_request(path.rsplit("/", 1)[1], self._read_json()))
                 return
-            if path in {"/api/battles/state", "/api/battles/start", "/api/battles/vote", "/api/battles/undo", "/api/battles/place", "/api/battles/resume"}:
+            if path in {"/api/battles/state", "/api/battles/start", "/api/battles/vote", "/api/battles/undo", "/api/battles/place", "/api/battles/resume", "/api/battles/summary", "/api/battles/history"}:
                 self._send_json(200, self.store.battles.request(path.rsplit("/",1)[1], self._read_json()))
+                return
+            removal_match=re.fullmatch(r"/api/media/([0-9a-f]+)/removal-flag",path)
+            if removal_match:
+                self._send_json(200,self.store.set_removal_flag(removal_match.group(1),self._read_json().get('flagged')))
                 return
             if path == "/api/quality/settings":
                 self._send_json(200, self.store.set_quality_settings(self._read_json()))

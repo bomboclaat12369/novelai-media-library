@@ -1,6 +1,6 @@
 // Exercise the actual layout function without browser dependencies.
 const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
-const source=fs.readFileSync('payload/userscript-2.8.91.battles.txt','utf8');
+const source=fs.readFileSync('payload/userscript-2.8.92.battles.txt','utf8');
 const begin=source.indexOf('        function layout(){'),end=source.indexOf('        for(const [index,id]',begin);
 const layout=source.slice(begin,end);
 function fit(count,width,height,ratios=Array(count).fill(2/3)){

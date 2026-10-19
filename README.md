@@ -2,6 +2,18 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Collection ranking and review (UI 2.8.92 / companion 2.7.55)
+
+Normal matchmaking spreads initial comparisons across unfinished entries before refining placements. **Finish placements** prioritizes unfinished entries and stops when the eligible scope is placed. Established entries can still serve as useful opponents; equal appearance counts are not the objective. Repeats remain possible when needed, with recent-pair avoidance and opponent diversity. There are no rating bonuses, resets or inactivity decay. The joint-history rating model is unchanged.
+
+**Battle category** optionally restricts both opponents to one image or set category. It uses the same person/type MMR and global placed-entry tier denominator; it does not create category-specific ratings. Focus comparisons temporarily broadens the scope and returns to the prior category afterward.
+
+**Flag for removal** is available on image battle cards, full-size browsing and the regular viewer. Flags exclude images from future matchmaking without changing their Main membership, votes or MMR, and the currently displayed matchup remains usable. The **Flagged for removal** library section includes flagged images even if subsequently moved to Review or Purgatory. Clear the flag, inspect the image or use the existing deletion/Undo controls there.
+
+Standalone library thumbnails can show rank badges. Images and sets have **Highest MMR**, **Lowest MMR** and **Fewest comparisons** sorting; ordinary MMR sorts put completed placements before provisional entries and unrated/ineligible items. Viewer ratings and leaderboard **Rating history** open an MMR graph showing direct results, indirect history recalculations and Undo. Earlier detailed direct results are shown where available; missing older indirect changes cannot be reconstructed. Graph samples are bounded, while the underlying comparison log is preserved.
+
+The trophy cabinet now has five progressive cards per person/type: placements, collection coverage, established entries, first Grandmaster and comparisons. Milestones upgrade a card instead of creating per-image rank spam. Earlier awards remain in a collapsed archive. Profile **Choose photos** now filters by image category alongside filename search, including set-only, Review and Purgatory images. This shared profile improvement is the reason NovelAI also advances to 2.8.92; all battle features remain standalone-only.
+
 ## Historical ratings and standalone-only battles (UI 2.8.91 / companion 2.7.54)
 
 MMR jointly fits all recorded wins, losses and ties. Later evidence about an opponent can move an earlier participant's rating without another direct comparison. Each active vote enters the model once; a tie contributes one half-result, not two bonus wins. Fixed starting priors anchor the scale. Confidence incorporates linked opponent uncertainty, and sparse evidence remains provisional. Undo removes a vote's influence throughout the comparison history, not only its two participants. The last-vote message reports when other ratings were refined.

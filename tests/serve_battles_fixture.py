@@ -38,6 +38,10 @@ with tempfile.TemporaryDirectory() as directory:
     store.create_set(owner['id'],'Blue dress',[items[i]['id'] for i in [0,4,5,6,7]],preserve_placement=True)
     store.create_set(owner['id'],'White dress',[items[i]['id'] for i in [1,8,9,10,11,12]],preserve_placement=True)
     store.create_set(owner['id'],'Small set',[items[i]['id'] for i in [2,13]],preserve_placement=True)
+    owner['categories']=[{'id':'dress','name':'Dress','media_type':'image'},{'id':'bikini','name':'Bikini','media_type':'image'}]
+    owner['set_categories']=[{'id':'dresses','name':'Dresses'}]
+    for i,item in enumerate(items):item['categories']=['dress' if i%2==0 else 'bikini']
+    for group in store.data['sets']:group['categories']=['dresses']
     if os.environ.get('NAI_RANKS_DEMO') == '1':
         for item in items:
             item['in_all'] = True

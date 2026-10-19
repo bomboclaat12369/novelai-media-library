@@ -1,0 +1,71 @@
+// Standalone ranking controls share the same per-person boards as Battles.
+(() => {
+ 'use strict';
+ const root=document.getElementById('nai-media-host')?.shadowRoot;
+ if(document.documentElement.dataset.naiStandalone!=='1'||!root)return;
+ const el=(tag,cls='',text='')=>{const e=document.createElement(tag);e.className=cls;e.textContent=text;return e};
+ const btn=(text,fn,cls='')=>{const b=el('button',cls,text);b.type='button';b.onclick=fn;return b};
+ const owner=()=>root.getElementById('characterSelect')?.value;
+ const cache=new Map(),requests=new Map();let snapshot=null,selected=null,timer=null;
+ let badges=localStorage.getItem('nai-library-rank-badges')!=='0';
+ const style=el('style');style.textContent=`
+ .naiLibraryRank{position:absolute;bottom:5px;left:5px;z-index:3;display:flex;align-items:center;gap:3px;border-radius:5px;padding:2px 5px;background:#0c1428ed;color:#f2f4ff;font:10px system-ui;pointer-events:none}.naiLibraryRank svg{width:24px;height:24px}.naiSetTile .naiLibraryRank{bottom:30px}.naiRemovalMark{position:absolute;top:5px;left:5px;z-index:4;padding:3px 5px;background:#512f38eb;color:#ffceca;border-radius:4px;font:11px system-ui;pointer-events:none}.naiLibraryRankToggle{font-size:11px!important}.naiRankHistory{position:fixed;inset:0;z-index:2147483647;background:#080e1af5;color:#e6edf6;display:grid;place-items:center;padding:20px;font:14px system-ui;box-sizing:border-box}.naiRankHistoryPanel{width:min(960px,100%);max-height:95vh;overflow:auto;background:#141d2b;border:1px solid #39465c;border-radius:16px;padding:24px;box-sizing:border-box}.naiRankHistory h2{font-size:24px;margin:5px 0 10px;overflow-wrap:anywhere}.naiRankHistoryHead{display:flex;align-items:center;justify-content:space-between;gap:20px}.naiRankHistory button{width:auto;padding:7px 12px;border:1px solid #52617a;border-radius:7px;background:#253149;color:#eef2fb;cursor:pointer}.naiRankHistory p{color:#acbbcf;line-height:1.6}.naiRankHistory svg{width:100%;height:auto;display:block;background:#0e1623;border-radius:10px;margin:16px 0}.naiHistoryLegend{display:flex;flex-wrap:wrap;gap:18px;font-size:12px}.naiHistoryLegend span::before{content:'●';color:var(--color);margin-right:6px}.naiRankHistory table{width:100%;border-collapse:collapse;font-size:12px}.naiRankHistory th,.naiRankHistory td{text-align:left;padding:9px;border-bottom:1px solid #2d3b50;overflow-wrap:anywhere}.naiRankHistory th{color:#acbbcf}.naiRankHistory [role=alert]{color:#ffb9b0}
+ `;root.append(style);
+ const toggle=btn('Rank badges',()=>{badges=!badges;localStorage.setItem('nai-library-rank-badges',badges?'1':'0');toggle.setAttribute('aria-pressed',String(badges));repaint()},'naiLibraryRankToggle');toggle.id='naiRankBadges';toggle.setAttribute('aria-pressed',String(badges));root.getElementById('sortDirectionBtn')?.after(toggle);
+ const notice=el('span','','');notice.style.cssText='font-size:11px;color:#e5bd99';notice.setAttribute('role','status');toggle.after(notice);
+ function board(kind,person=owner()){return cache.get(person+':'+kind)}
+ function score(id,kind){return board(kind)?.map.get(id)}
+ function refreshView(){root.naiReapplyCombinedFilters?.();root.naiRefreshSelectedMetadata?.();repaint()}
+ function saveBoard(value){cache.set(value.character_id+':'+value.kind,{value,map:new Map(value.entries.map(e=>[e.id,e]))})}
+ async function ensure(){const lib=root.naiGetLibrary?.(),person=owner();if(!lib?.characters?.some(c=>c.id===person))return;
+  if(snapshot!==lib){snapshot=lib;cache.clear()}
+  const jobs=['images','sets'].filter(kind=>!board(kind,person)&&!requests.has(person+':'+kind));
+  if(!jobs.length)return;
+  const outcomes=await Promise.allSettled(jobs.map(async kind=>{const key=person+':'+kind,p=root.naiOutfitRequest('/api/battles/summary',{character_id:person,kind});requests.set(key,p);try{const value=await p;if(root.naiGetLibrary?.()===lib)saveBoard(value)}finally{requests.delete(key)}}));
+  if(person!==owner()||root.naiGetLibrary?.()!==lib)return;
+  const failed=outcomes.some(r=>r.status==='rejected');notice.textContent=failed?'Ranks unavailable · refresh library to retry':'';
+  // Cache failures until an explicit library refresh; never retry on every grid mutation.
+  if(failed)for(const kind of jobs)if(!board(kind,person))cache.set(person+':'+kind,{map:new Map(),error:true});
+  refreshView();
+ }
+ root.naiRankingsChanged=value=>{saveBoard(value);notice.textContent='';refreshView()};
+ function sorted(items,mode,kind){if(!mode.startsWith('rank_'))return items;const values=board(kind)?.map;if(!values)return items;
+  return [...items].sort((a,b)=>{const x=values.get(a.id),y=values.get(b.id);if(!x||!y)return Number(!!y)-Number(!!x)||String(a.id).localeCompare(String(b.id));
+   if(mode==='rank_few')return x.played-y.played||y.rd-x.rd||String(a.id).localeCompare(String(b.id));
+   return Number(x.provisional)-Number(y.provisional)||(mode==='rank_low'?x.rating-y.rating:y.rating-x.rating)||String(a.id).localeCompare(String(b.id));
+  });
+ }
+ root.naiSortRankedMedia=(items,mode)=>sorted(items,mode,'images');root.naiSortRankedSets=(items,mode)=>sorted(items,mode,'sets');
+ root.naiDecorateRanking=(tile,item,kind)=>{const e=score(item.id,kind),sig=JSON.stringify([badges,e?.tier,e?.rating,e?.played,item.flagged_for_removal]);if(tile.dataset.rankSignature===sig)return;tile.dataset.rankSignature=sig;
+  tile.querySelector('.naiLibraryRank')?.remove();tile.querySelector('.naiRemovalMark')?.remove();
+  if(badges&&e?.played){const mark=el('span','naiLibraryRank');mark.append(root.naiRanks.emblem(e.tier),document.createTextNode(Math.round(e.rating)));mark.title=e.tier+' · '+e.played+' comparisons';tile.append(mark)}
+  if(item.flagged_for_removal){const mark=el('span','naiRemovalMark','⚑ Removal');mark.title='Flagged for removal; review before deleting';tile.append(mark)}
+ };
+ function repaint(){const lib=root.naiGetLibrary?.();if(!lib)return;const media=new Map(lib.media.map(m=>[m.id,m])),sets=new Map((lib.sets||[]).map(s=>[s.id,s]));for(const tile of root.querySelectorAll('#grid .tile[data-id],#grid .naiSetTile[data-set-id]')){const kind=tile.dataset.setId?'sets':'images',item=(kind==='sets'?sets:media).get(tile.dataset.setId||tile.dataset.id);if(item)root.naiDecorateRanking(tile,item,kind)}
+  const id=root.naiOpenGroupId?.(),entry=score(id,'sets'),crumb=root.querySelector('.naiSetBreadcrumb');if(entry&&crumb){let b=crumb.querySelector('.naiSetRating');if(!b){b=btn('',()=>root.naiRankHistory(owner(),'sets',id),'naiSetRating');crumb.append(b)}const text=(entry.played?entry.tier+' · '+Math.round(entry.rating)+' MMR':'Unrated')+' · History';if(b.textContent!==text)b.textContent=text}
+ }
+ const rankButton=btn('',()=>selected&&root.naiRankHistory(selected.character_id,'images',selected.id));rankButton.id='naiViewerRank';rankButton.hidden=true;
+ const flagButton=btn('',async()=>{if(!selected)return;flagButton.disabled=true;try{await root.naiToggleRemovalFlag(selected.id)}catch(e){alert(e.message)}finally{flagButton.disabled=false}});flagButton.id='naiViewerRemoval';flagButton.hidden=true;root.getElementById('editBtn')?.after(rankButton,flagButton);
+ const oldMemberships=root.naiRenderMemberships;root.naiRenderMemberships=function(media,...args){selected=media;const entry=media&&board('images',media.character_id)?.map.get(media.id);rankButton.hidden=!entry;rankButton.textContent=entry?(entry.played?entry.tier+' · '+Math.round(entry.rating)+' MMR':'Unrated')+' · History':'';flagButton.hidden=!media||media.media_type!=='image';flagButton.textContent=media?.flagged_for_removal?'Clear removal flag':'Flag for removal';flagButton.setAttribute('aria-pressed',String(!!media?.flagged_for_removal));return oldMemberships?.call(this,media,...args)};
+ root.naiToggleRemovalFlag=async id=>{const media=root.naiGetLibrary?.()?.media?.find(m=>m.id===id);if(!media)throw Error('Image no longer available.');const updated=await root.naiOutfitRequest('/api/media/'+encodeURIComponent(id)+'/removal-flag',{flagged:!media.flagged_for_removal});root.naiApplyMediaUpdate(updated);repaint();return updated};
+ const grid=root.getElementById('grid');if(grid)new MutationObserver(()=>{clearTimeout(timer);timer=setTimeout(()=>{ensure();repaint()},80)}).observe(grid,{childList:true,subtree:true});root.getElementById('characterSelect')?.addEventListener('change',()=>setTimeout(ensure,0));ensure();
+ root.naiRankHistory=async(person,kind,id)=>{
+  if(root.querySelector('.naiRankHistory'))return;
+  const previous=root.activeElement,wrap=el('section','naiRankHistory'),panel=el('div','naiRankHistoryPanel'),head=el('div','naiRankHistoryHead'),title=el('h2','','Rating history'),content=el('div','','Loading rating history…');wrap.setAttribute('role','dialog');wrap.setAttribute('aria-modal','true');wrap.setAttribute('aria-label','Rating history');
+  const close=btn('Close history',()=>{wrap.remove();previous?.focus?.({preventScroll:true})});head.append(title,close);panel.append(head,content);wrap.append(panel);root.append(wrap);close.focus();
+  wrap.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Escape'){e.preventDefault();close.click()}if(e.key==='Tab'){e.preventDefault();close.focus()}});
+  try{const data=await root.naiOutfitRequest('/api/battles/history',{character_id:person,kind,entry_id:id});if(!wrap.isConnected)return;content.replaceChildren();title.textContent=data.entry.name;const current=board(kind,person)?.map.get(id);content.append(el('p','',current?current.tier+' · '+Math.round(current.rating)+' MMR · '+current.played+' comparisons':'Recorded rating changes'));
+   const points=data.points,colors={direct:'#b7a6f5',indirect:'#68c9ca',undo:'#efb883',baseline:'#a1afc3','older direct':'#7d8ba3'};
+   if(points.length){const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 860 310');svg.setAttribute('role','img');svg.setAttribute('aria-label','MMR over recorded updates');
+    const add=(tag,attrs,text)=>{const n=document.createElementNS(ns,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,String(v));if(text)n.textContent=text;svg.append(n);return n};
+    const low=Math.floor((Math.min(...points.map(p=>p[2]))-25)/50)*50,high=Math.ceil((Math.max(...points.map(p=>p[2]))+25)/50)*50;
+    const x=i=>64+i*766/Math.max(1,points.length-1),y=v=>260-(v-low)/(high-low)*230;
+    for(let i=0;i<5;i++){const value=low+(high-low)*i/4;add('line',{x1:64,x2:830,y1:y(value),y2:y(value),stroke:'#2c394d'});add('text',{x:52,y:y(value)+4,fill:'#9cacc3','text-anchor':'end','font-size':12},String(Math.round(value)))}
+    add('polyline',{points:points.map((p,i)=>x(i)+','+y(p[2])).join(' '),fill:'none',stroke:'#b7a6f5','stroke-width':2});
+    points.forEach((p,i)=>{const dot=add('circle',{cx:x(i),cy:y(p[2]),r:points.length>150?2:3.5,fill:colors[p[5]]||colors.direct});const label=document.createElementNS(ns,'title');label.textContent=p[2]+' MMR · '+p[5]+' · '+new Date(p[1]).toLocaleString();dot.append(label)});add('text',{x:64,y:292,fill:'#9cacc3','font-size':12},'Earlier');add('text',{x:830,y:292,fill:'#9cacc3','font-size':12,'text-anchor':'end'},'Latest recorded update');content.append(svg);
+    const legend=el('div','naiHistoryLegend');for(const key of [...new Set(points.map(p=>p[5]))]){const item=el('span','',key==='indirect'?'History recalculation':key==='direct'?'Direct battle':key==='undo'?'Undo':key==='baseline'?'Starting point':'Older direct result');item.style.setProperty('--color',colors[key]);legend.append(item)}content.append(legend);
+   }else content.append(el('p','','No recorded rating changes yet. Your next battle will start this graph.'));
+   content.append(el('p','',data.note),el('h3','','Recent comparisons'));const table=el('table'),thead=el('thead'),tr=el('tr');for(const label of ['Result','Opponent','Date'])tr.append(el('th','',label));thead.append(tr);table.append(thead);const tbody=el('tbody');for(const event of data.comparisons){const row=el('tr');for(const text of [event.result,event.opponent,new Date(event.at).toLocaleString()])row.append(el('td','',text));tbody.append(row)}table.append(tbody);content.append(table);if(!data.comparisons.length)content.append(el('p','','No detailed comparison records yet.'));
+  }catch(e){content.textContent=e.message;content.setAttribute('role','alert')}
+ };
+})();

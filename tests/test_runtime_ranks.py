@@ -28,7 +28,7 @@ class RankTests(unittest.TestCase):
         battle._save({'version':1,'boards':{key:board}})
         self.assertEqual(next(e for e in self.call('state')['entries'] if e['id']==images[0]['id'])['tier'],'Provisional')
 
-    def test_trophy_streak_persistence_and_undo(self):
+    def test_progress_trophy_persistence_and_undo_without_streak_spam(self):
         for i in range(3):self.import_image(i)
         state=self.call('start',mode='winner',limit=10)
         winner=state['session']['pair']['left']
@@ -36,8 +36,8 @@ class RankTests(unittest.TestCase):
             pair=state['session']['pair'];outcome='left' if pair['left']==winner else 'right'
             state=self.call('vote',revision=state['revision'],pair_id=pair['id'],outcome=outcome)
         trophy='streak:5:'+winner
-        self.assertIn(trophy,[t['id'] for t in state['trophies']])
-        self.assertIn('votes:1',[t['id'] for t in state['trophies']])
+        self.assertNotIn(trophy,[t['id'] for t in state['trophies']])
+        self.assertIn('progress:votes:1',[t['id'] for t in state['trophies']])
         restored=fixtures.RUNTIME['LibraryStore'](self.store.root).battles.request('state',{'character_id':self.character['id']})
         self.assertEqual(restored['trophies'],state['trophies'])
         undone=self.call('undo',revision=state['revision'])

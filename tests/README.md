@@ -1,5 +1,23 @@
 # Stability regression checks
 
+## UI 2.8.92 / runtime 2.7.55 validation
+
+Focused runtime checks passed in `test_runtime_collection_ranking.py`,
+`test_runtime_ranks.py` and `test_runtime_placement.py`: broad initial coverage,
+placement completion, category scoping without splitting ratings, focus return,
+removal-flag eligibility without changing ratings, direct/indirect/Undo graph
+points, read-only history queries, progressive awards, and persistence/Undo.
+`test-battle-grid-logic.cjs` also passed.
+
+Real Chromium passed `test-battles-ui.cjs` for standalone and NovelAI: category
+photo filtering, scoped placement battles, original-resolution images, voting,
+Undo, history graphs, removal flags and the flagged library view, rank sorting
+controls/badges, trophy cards, and no battle controls or requests on NovelAI.
+`test-ranks-design.cjs` passed at wide and compact sizes; trophy layouts were
+also visually inspected. Build/hash checks cover the versioned artifacts.
+These checks use synthetic local images, not the user's installed Windows app.
+The legacy review-DOM baseline failures documented below remain outside this release.
+
 ## UI 2.8.91 / runtime 2.7.54 validation
 
 Historical-rating migration, fixed-prior/no-double-counting behavior, linked Undo,
