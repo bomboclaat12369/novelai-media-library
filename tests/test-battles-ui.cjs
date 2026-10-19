@@ -35,8 +35,8 @@ const dir=path.resolve(__dirname,'..'),config=JSON.parse(fs.readFileSync(path.jo
   assert.equal((await api('profile/state',{character_id:owner})).profile.photos[0],lib.media[1].id);
   if(standalone)await page.screenshot({path:'/tmp/profile-ui.png'});
   await page.getByRole('button',{name:'Close',exact:true}).click();await page.locator('#naiBattlesBtn').click();
-  await page.getByLabel('Mode',{exact:true}).selectOption('winner');await page.getByLabel('Round',{exact:true}).selectOption('10');await page.locator('#naiBattleStart').click();
-  await page.waitForFunction(()=>[...document.getElementById('nai-media-host').shadowRoot.querySelectorAll('.naiBattleChoose')].length===2&&[...document.getElementById('nai-media-host').shadowRoot.querySelectorAll('.naiBattleChoose')].every(b=>!b.disabled));
+  await page.getByLabel('Mode',{exact:true}).selectOption('winner');await page.getByLabel('Session',{exact:true}).selectOption('10');await page.locator('#naiBattleStart').click();
+  await page.waitForFunction(()=>[...document.getElementById('nai-media-host').shadowRoot.querySelectorAll('.naiBattleChoose')].length===2&&[...document.getElementById('nai-media-host').shadowRoot.querySelectorAll('.naiBattleChoose')].every(b=>!b.disabled)).catch(async error=>{console.error({standalone,errors,ui:await page.locator('.naiBattleError').textContent(),images:await page.locator('.naiBattlePhoto,.naiBattleSetImage').evaluateAll(images=>images.map(im=>({src:im.src,complete:im.complete,width:im.naturalWidth}))) });throw error});
   assert(await page.locator('.naiBattlePhoto').first().evaluate(im=>im.getBoundingClientRect().height>innerHeight*.65));
   const ids=await page.locator('.naiBattleCard').evaluateAll(cards=>cards.map(c=>c.dataset.entryId));assert(ids.every(id=>main.has(id)));
   const before=await state('images');assert.equal(before.entries.length,4);
@@ -53,7 +53,7 @@ const dir=path.resolve(__dirname,'..'),config=JSON.parse(fs.readFileSync(path.jo
   assert(await page.locator('.naiBattleWrap').evaluate(w=>w.scrollHeight<=w.clientHeight+2));
   if(standalone)await page.screenshot({path:'/tmp/battles-sets.png'});
   const setBefore=await state('sets');await page.keyboard.press('ArrowRight');await page.waitForFunction(n=>document.getElementById('nai-media-host').shadowRoot.querySelector('.naiBattleStatus').textContent.includes(n+' saved votes'),setBefore.votes+1);
-  await page.locator('#naiBattleTrophies').click();assert((await page.locator('.naiCabinet').textContent()).includes('First choice'));await page.locator('#naiBattleLeaderboard').click();assert.equal(await page.locator('.naiBattleRow').count(),3);assert((await page.locator('.naiBattleBoard').textContent()).includes('Provisional'));
+  await page.locator('#naiBattleTrophies').click();assert((await page.locator('.naiCabinet').textContent()).includes('First choice'));await page.locator('#naiBattleLeaderboard').click();assert.equal(await page.locator('.naiBattleRankCard').count(),3);assert((await page.locator('.naiBattleBoard').textContent()).includes('Provisional'));
   assert.equal((await state('images')).votes,before.votes);await page.locator('#naiBattleUndo').click();
   await page.getByRole('button',{name:'Close',exact:true}).click();
   const ratingStart=await api('battles/start',{character_id:owner,kind:'images',revision:(await state('images')).revision,mode:'rank',limit:10});

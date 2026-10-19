@@ -2,6 +2,16 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Continuous battles and a visual ranked gallery (UI 2.8.90 / companion 2.7.53)
+
+New battle sessions default to **Continuous**; optional 10/25/50-vote sessions remain. Existing active sessions retain their settings. Every vote saves immediately, and the most recent twenty undoable votes remain available across session changes. **Focus comparisons** is available on battle cards, beneath the library viewer, inside sets, and on leaderboard cards. It runs ten comparisons featuring that entry and then returns to the previous mode. **End focus** returns early. Focus uses ordinary MMR calculations without bonuses or rating resets.
+
+The leaderboard is now a gallery with large whole-image previews and set collages. Image size is adjustable and remembered, with name, rank and confidence filters. Click a card to view full-size images; image leaderboards browse in their filtered ranking order, while set leaderboards provide both image and set navigation. **Recent movement** shows MMR changes since the current session began. Close-contender labels identify neighbors whose rating gap is within their combined model uncertainty; they do not claim certainty about the correct order. **Refine top 10/25** concentrates comparisons on the current highest-MMR played entries that meet the battle filters.
+
+Seven ranks have distinct custom vector emblems: Bronze, Silver, Gold, Platinum, Diamond, Master and Grandmaster. Among entries that have completed placement, the cumulative cutoffs are Grandmaster 1%, Master 5%, Diamond 10%, Platinum 25%, Gold 50%, Silver 80%, and Bronze the rest. Cutoffs round up to whole entries; exact MMR ties share tiers, and small collections may not populate every tier. The crown identifies the sole highest-rated placed entry. Tiers remain separate per person and battle type. Existing MMR, votes and historical trophies are preserved, including older Champion awards; Champion is no longer a current tier.
+
+Upcoming previews are prepared for possible vote outcomes without recording a vote or changing saved ratings. The actual matchup is still chosen after voting. Preview sizes scale with the number of displayed images, decoded previews use a bounded cache, and speculative loading uses three workers only while battles are open. The current matchup stays visible while the next is prepared. Preview loading uses the companion transport in both NovelAI and standalone; fullscreen continues to load originals.
+
 ## Faster placement and adaptive set battles (UI 2.8.89 / companion 2.7.52)
 
 Battle MMR now uses uncertainty-aware Glicko updates: new images and sets move quickly, while established ratings change more cautiously. Matchmaking keeps a persistent batch of up to eight unfinished placements, mixes in calibration comparisons, and favors informative, varied opponents. **Place this image** beneath the viewer and **Place this set** inside a set start a focused ten-comparison round; both are also available from the leaderboard. Choosing placement never grants rating points by itself.

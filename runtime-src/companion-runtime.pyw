@@ -584,9 +584,14 @@ class BattleRankings:
             entries[group['id']] = {'id':group['id'], 'name':group.get('name','Set'), 'images':images, 'count':len(images)}
         return entries
 
-    def _pair(self, board, entries, champion=None):
+    def _pair(self, board, entries, champion=None, rng=None):
+        rng = rng or self.rng
         session = board['session']
         pool = [e for e in entries.values() if e['count'] >= session['minimum']]
+        refining = session['mode'] in ('refine10', 'refine25')
+        if refining:
+            pool = sorted((e for e in pool if self._score(board,e['id'])['played']),
+                          key=lambda e:(-self._score(board,e['id'])['rating'],e['id']))[:int(session['mode'][6:])]
         by_id = {e['id']:e for e in pool}
         if len(pool) < 2:
             return None
@@ -596,7 +601,7 @@ class BattleRankings:
         batch = [i for i in scheduler.get('batch', []) if i in by_id and self._quality(scores[i]) in ('Unrated','Provisional')]
         waiting = [e['id'] for e in pool if e['id'] not in batch and self._quality(scores[e['id']]) in ('Unrated','Provisional')]
         # Finish partially placed entries before admitting more fresh ones.
-        waiting.sort(key=lambda i:(scores[i]['played']==0, scores[i]['last_seen'], self.rng.random()))
+        waiting.sort(key=lambda i:(scores[i]['played']==0, scores[i]['last_seen'], rng.random()))
         batch += waiting[:max(0,8-len(batch))]
         scheduler['batch'] = batch
         target = session.get('target_id')
@@ -605,11 +610,11 @@ class BattleRankings:
             return None
         if forced:
             candidates = [by_id[forced]]
-        elif batch and board.get('votes',0)%4 != 3:
-            candidates = [by_id[i] for i in sorted(batch,key=lambda i:(scores[i]['last_seen'],self.rng.random()))]
+        elif batch and not refining and board.get('votes',0)%4 != 3:
+            candidates = [by_id[i] for i in sorted(batch,key=lambda i:(scores[i]['last_seen'],rng.random()))]
         else:
             # Calibration turns connect batches and revisit uncertain/older scores.
-            candidates = sorted(pool,key=lambda e:(scores[e['id']]['last_seen'], -scores[e['id']]['rd'], self.rng.random()))
+            candidates = sorted(pool,key=lambda e:(scores[e['id']]['last_seen'], -scores[e['id']]['rd'], rng.random()))
         if not forced:
             chosen = {e['id'] for e in candidates}
             candidates += [e for e in pool if e['id'] not in chosen]
@@ -629,15 +634,15 @@ class BattleRankings:
                     information = g*g*probability*(1-probability)
                     # Reliable, similarly rated and varied opponents are informative.
                     diversity = 1/math.sqrt(1+ls.get('opponents',{}).get(right['id'],0))
-                    return information*diversity*(.9+.2*self.rng.random())
+                    return information*diversity*(.9+.2*rng.random())
                 choices.sort(key=utility,reverse=True)
                 # Periodic broad comparisons keep rating ranges connected.
-                right = self.rng.choice(choices[:min(8,len(choices))]) if board.get('votes',0)%8 == 7 else choices[0]
+                right = rng.choice(choices[:min(8,len(choices))]) if board.get('votes',0)%8 == 7 else choices[0]
                 ids = [left['id'],right['id']]
-                if self.rng.random()<.5:
+                if rng.random()<.5:
                     ids.reverse()
                 return {'id':uuid.uuid4().hex, 'left':ids[0], 'right':ids[1],
-                        'reason':'Focused placement' if target else 'Placement' if left['id'] in batch else 'Calibration'}
+                        'reason':'Focus comparisons' if target else 'Refine top rankings' if refining else 'Placement' if left['id'] in batch else 'Calibration'}
         return None
 
     def _ranked_rows(self, board, entries):
@@ -666,10 +671,16 @@ class BattleRankings:
                 rating = round(row['rating'], 8)
                 rank = positions[rating]
                 row['tier_rank'] = rank
-                unique_lead = rank == 1 and counts[rating] == 1
-                tier = ('Champion' if unique_lead else 'Diamond' if rank <= max(1, math.ceil(len(placed)*.10))
-                        else 'Gold' if rank <= math.ceil(len(placed)*.25) else 'Silver' if rank <= math.ceil(len(placed)*.50) else 'Bronze')
+                tier = next((name for fraction,name in ((.01,'Grandmaster'),(.05,'Master'),(.10,'Diamond'),(.25,'Platinum'),(.50,'Gold'),(.80,'Silver'))
+                             if rank <= max(1,math.ceil(len(placed)*fraction))), 'Bronze')
+            row['leader'] = bool(enough and row['tier_rank'] == 1 and counts.get(round(row['rating'],8)) == 1)
             row['tier'] = tier
+        positions = {}
+        played = [r for r in rows if r['played']]
+        for index,row in enumerate(played,1):
+            row['position'] = positions.setdefault(round(row['rating'],8),index)
+            neighbors = played[max(0,index-2):min(len(played),index+1)]
+            row['close_contender'] = any(other is not row and abs(row['rating']-other['rating']) <= math.hypot(row['rd'],other['rd']) for other in neighbors)
         return rows
 
     def _awards(self, board, rows, legacy=False):
@@ -685,13 +696,68 @@ class BattleRankings:
                 add('votes:'+str(count), title, f'{count:,} saved battle votes')
         for row in rows:
             tier = row['tier']
-            for level in ('Gold', 'Diamond', 'Champion'):
-                if tier in ('Gold', 'Diamond', 'Champion') and ('Gold', 'Diamond', 'Champion').index(tier) >= ('Gold', 'Diamond', 'Champion').index(level):
+            levels = ('Bronze','Silver','Gold','Platinum','Diamond','Master','Grandmaster')
+            for level in levels[2:]:
+                if tier in levels and levels.index(tier) >= levels.index(level):
                     add('tier:'+level+':'+row['id'], level+' achieved', 'Reached '+level+' among eligible ranked entries', level, row)
             for count in (5, 10, 25):
                 if row.get('best_streak', 0) >= count:
                     add('streak:'+str(count)+':'+row['id'], f'{count} in a row', f'Won {count} consecutive appearances; ties end a streak', 'Silver' if count == 5 else 'Gold', row)
         return awards
+
+    def _apply_comparison(self, board, pair, outcome):
+        ids=[pair['left'],pair['right']]
+        a,b=[self._score(board,i) for i in ids]
+        result={'left':1.,'right':0.,'tie':.5}[outcome]
+        for ident,other_id,score,opponent,value in ((ids[0],ids[1],a,b,result),(ids[1],ids[0],b,a,1-result)):
+            updated=dict(score)
+            updated['rating'],updated['rd']=self._glicko(score['rating'],score['rd'],[(opponent['rating'],opponent['rd'],value)])
+            updated['played']+=1
+            updated['opponents']=dict(score['opponents'])
+            updated['opponents'][other_id]=updated['opponents'].get(other_id,0)+1
+            updated['last_seen']=board['votes']+1
+            updated['wins' if value==1 else 'losses' if value==0 else 'ties']+=1
+            updated['streak']=score.get('streak',0)+1 if value==1 else 0
+            updated['best_streak']=max(score.get('best_streak',0),updated['streak'])
+            board['ratings'][ident]=updated
+        board['session']['done']+=1
+        board['votes']+=1
+        return a,b
+
+    @staticmethod
+    def _finish_focus(session):
+        target=session.pop('target_id',None)
+        session.update(session.pop('return_settings',{'mode':'rank','limit':0,'minimum':session['minimum'],'similar':False}))
+        session['done']=0
+        session['focus_completed']=target
+
+    def _advance_pair(self, board, entries, previous_pair, outcome):
+        session=board['session']
+        if session.get('target_id') and session['done']>=10:
+            self._finish_focus(session)
+        champion=previous_pair[outcome] if session['mode']=='winner' and outcome in ('left','right') else None
+        # A stable seed lets read-only forecasts prepare exactly the images that
+        # the subsequent vote would choose, without freezing future matchmaking.
+        rng=random.Random(previous_pair['id']+':'+outcome)
+        session['pair']=self._pair(board,entries,champion,rng) if not session['limit'] or session['done']<session['limit'] else None
+
+    def _forecast(self, board, entries):
+        session=board.get('session') or {};pair=session.get('pair')
+        if not pair or any(pair[k] not in entries for k in ('left','right')):
+            return []
+        candidates=[]
+        for outcome in ('left','right','tie','skip'):
+            # Do not copy the growing history or undo buffers for previews.
+            forecast={key:copy.deepcopy(board.get(key,default)) for key,default in
+                      (('ratings',{}),('session',{}),('scheduler',{}),('recent',[]),('votes',0))}
+            forecast['recent']=(forecast['recent']+[[pair['left'],pair['right']]])[-32:]
+            if outcome!='skip':self._apply_comparison(forecast,pair,outcome)
+            self._advance_pair(forecast,entries,pair,outcome)
+            upcoming=forecast['session'].get('pair')
+            if upcoming:
+                for side in ('left','right'):
+                    if upcoming[side] not in candidates:candidates.append(upcoming[side])
+        return candidates
 
     def _view(self, board, entries, owner, kind):
         session = copy.deepcopy(board.get('session'))
@@ -715,7 +781,8 @@ class BattleRankings:
                 'session':session, 'can_undo':bool(board.get('undo')), 'votes':board.get('votes',0),
                 'trophies':trophies, 'ranked_count':sum(not r['provisional'] for r in rows), 'rating_model':'glicko-static-v1',
                 'placement_batch':list(board.get('scheduler',{}).get('batch',[])),
-                'recorded_votes':sum(e.get('type')=='vote' for e in board.get('history',[]))}
+                'recorded_votes':sum(e.get('type')=='vote' for e in board.get('history',[])),
+                'preload_entries':self._forecast(board,entries)}
 
     def request(self, action, body):
         with self.store.lock:
@@ -739,18 +806,27 @@ class BattleRankings:
                 if action=='place' and target not in entries:
                     raise ValueError('This entry is not eligible for battles. Images must be in Main; Review, Purgatory and videos are excluded.')
                 mode = 'rank' if target else body.get('mode','rank')
-                limit = 10 if target else body.get('limit',25)
+                previous = board.get('session') or {}
+                return_settings={k:previous.get(k,v) for k,v in {'mode':'rank','limit':0,'minimum':1 if kind=='images' else min(5,entries[target]['count']) if target else 5,'similar':False}.items()}
+                if previous.get('target_id'):return_settings=copy.deepcopy(previous.get('return_settings',return_settings))
+                limit = 10 if target else body.get('limit',0)
                 minimum = min(5,entries[target]['count']) if target and kind=='sets' else body.get('minimum',5) if kind=='sets' else 1
-                if mode not in ('rank','winner') or type(limit) is not int or limit not in (10,25,50):
+                if mode not in ('rank','winner','refine10','refine25') or type(limit) is not int or limit not in (0,10,25,50):
                     raise ValueError('Choose a valid mode and round length.')
                 if type(minimum) is not int or not 1<=minimum<=10000:
                     raise ValueError('Minimum set size must be between 1 and 10,000 images.')
                 board['session']={'mode':mode,'limit':limit,'done':0,'minimum':minimum,
                                   'similar':not target and kind=='sets' and body.get('similar') is True, 'target_id':target,
                                   'baseline':{i:self._score(board,i)['rating'] for i in entries}}
+                if target:board['session']['return_settings']=return_settings
                 pair=self._pair(board,entries)
                 if not pair:raise ValueError('Not enough eligible opponents. Set battles need two sets meeting your minimum and size filter; image battles need two Main images.')
-                board['session']['pair']=pair;board['undo']=[]
+                board['session']['pair']=pair
+            elif action=='resume':
+                if not (board.get('session') or {}).get('target_id'):raise ValueError('No focused comparison is active.')
+                previous_pair=board['session']['pair']
+                self._finish_focus(board['session'])
+                self._advance_pair(board,entries,previous_pair,'skip')
             elif action=='vote':
                 session=board.get('session');pair=(session or {}).get('pair');outcome=body.get('outcome')
                 if not pair or pair['id']!=body.get('pair_id') or outcome not in ('left','right','tie','skip'):
@@ -763,22 +839,7 @@ class BattleRankings:
                 board['recent']=(board['recent']+[ids])[-32:]
                 champion=None
                 if outcome!='skip':
-                    a,b=[dict(self._score(board,i)) for i in ids]
-                    result={'left':1.,'right':0.,'tie':.5}[outcome]
-                    # Both sides use the same pre-vote snapshot, never an already updated opponent.
-                    for ident,other_id,score,opponent,value in ((ids[0],ids[1],a,b,result),(ids[1],ids[0],b,a,1-result)):
-                        new_rating,new_rd=self._glicko(score['rating'],score['rd'],[(opponent['rating'],opponent['rd'],value)])
-                        updated=dict(score)
-                        updated['rating']=new_rating;updated['rd']=new_rd;updated['played']+=1
-                        updated['opponents']=dict(score['opponents'])
-                        updated['opponents'][other_id]=updated['opponents'].get(other_id,0)+1
-                        updated['last_seen']=board['votes']+1
-                        score=updated
-                        score['wins' if value==1 else 'losses' if value==0 else 'ties']+=1
-                        score['streak'] = score.get('streak', 0) + 1 if value == 1 else 0
-                        score['best_streak'] = max(score.get('best_streak', 0), score['streak'])
-                        board['ratings'][ident]=score
-                    session['done']+=1;board['votes']+=1
+                    a,b=self._apply_comparison(board,pair,outcome)
                     event_id=uuid.uuid4().hex
                     before['history_vote_id']=event_id
                     summary=lambda score:{k:score[k] for k in ('rating','rd','played')}
@@ -792,7 +853,7 @@ class BattleRankings:
                             before['awarded_trophy_ids'].append(trophy_id)
                     board['undo']=(board['undo']+[before])[-20:]
                     if session['mode']=='winner' and outcome in ('left','right'):champion=pair[outcome]
-                session['pair']=self._pair(board,entries,champion) if session['done']<session['limit'] else None
+                self._advance_pair(board,entries,pair,outcome)
             elif action=='undo':
                 if not board['undo']:raise ValueError('No vote to undo in this round.')
                 before=board['undo'].pop()
@@ -3620,7 +3681,7 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path in {"/api/profile/state", "/api/profile/save"}:
                 self._send_json(200, self.store.profile_request(path.rsplit("/", 1)[1], self._read_json()))
                 return
-            if path in {"/api/battles/state", "/api/battles/start", "/api/battles/vote", "/api/battles/undo", "/api/battles/place"}:
+            if path in {"/api/battles/state", "/api/battles/start", "/api/battles/vote", "/api/battles/undo", "/api/battles/place", "/api/battles/resume"}:
                 self._send_json(200, self.store.battles.request(path.rsplit("/",1)[1], self._read_json()))
                 return
             if path == "/api/quality/settings":

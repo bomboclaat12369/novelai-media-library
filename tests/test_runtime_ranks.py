@@ -16,12 +16,12 @@ class RankTests(unittest.TestCase):
         board={'revision':'legacy','ratings':{m['id']:{'rating':1600-i*10.,'played':6,'wins':4,'losses':2,'ties':0,'rd':100.,'opponents':{o['id']:1 for o in images if o['id']!=m['id']}} for i,m in enumerate(images)},'recent':[],'undo':[],'votes':50,'session':None}
         battle._save({'version':1,'boards':{key:board}})
         state=self.call('state');tiers=[r['tier'] for r in state['entries']]
-        self.assertEqual(tiers,['Champion','Diamond']+['Gold']*3+['Silver']*5+['Bronze']*10)
+        self.assertEqual(tiers,['Grandmaster','Diamond']+['Platinum']*3+['Gold']*5+['Silver']*6+['Bronze']*4)
         self.assertTrue(all(t['legacy'] and t['earned_at'] is None for t in state['trophies']))
         self.assertFalse(any(t['id'].startswith('streak:') for t in state['trophies']))
         board['ratings'][images[1]['id']]['rating']=1600
         battle._save({'version':1,'boards':{key:board}})
-        self.assertEqual([e['tier'] for e in self.call('state')['entries'][:2]],['Diamond','Diamond'])
+        self.assertEqual([e['tier'] for e in self.call('state')['entries'][:2]],['Grandmaster','Grandmaster'])
         for m in images[4:]:m['in_review']=True
         self.assertTrue(all(e['tier']=='Placement' for e in self.call('state')['entries']))
         board['ratings'][images[0]['id']]['played']=4
