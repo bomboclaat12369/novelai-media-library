@@ -1,0 +1,228 @@
+// Personal, same-character image and set battles. Votes live in the companion.
+(() => {
+  'use strict';
+  const root=document.getElementById('nai-media-host')?.shadowRoot;
+  if(document.documentElement.dataset.naiStandalone!=='1'||!root||root.getElementById('naiBattlesBtn'))return;
+  const make=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e;};
+  const button=(text,fn,cls='')=>{const b=make('button',cls,text);b.type='button';b.onclick=fn;return b;};
+  const ranks=root.naiRanks;
+  const request=(action,body)=>root.naiOutfitRequest('/api/battles/'+action,body);
+  const style=make('style');style.textContent=`
+    .naiBattleWrap{position:fixed;inset:0;z-index:2147483647;background:#080a18f5;color:#eee;font:14px system-ui;display:flex;flex-direction:column;padding:10px 16px;box-sizing:border-box;overflow:auto}
+    .naiBattleWrap *{box-sizing:border-box}.naiBattleWrap>div:not(.naiBattleArena):not(.naiBattleBoard){flex-shrink:0}.naiBattleCard>:not(.naiBattlePhoto){flex-shrink:0}.naiBattleWrap button,.naiBattleWrap select,.naiBattleWrap input{font:inherit;color:inherit;background:#252b43;border:1px solid #525d7a;border-radius:7px;padding:6px 10px;width:auto;max-width:100%}
+    .naiBattleWrap button{cursor:pointer}.naiBattleWrap button:disabled{opacity:.45;cursor:default}.naiBattleWrap button:focus-visible{outline:2px solid #b9afff;outline-offset:3px}
+    .naiBattleWrap .naiBattlePrimary{background:#9d91ed;color:#111329;border-color:#b7abff;font-weight:650}
+    .naiBattleHead,.naiBattleTools,.naiBattleActions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}.naiBattleHead{justify-content:space-between}.naiBattleHead h2{margin:0;font-size:20px}
+    .naiBattleTools label{display:flex;align-items:center;gap:6px}.naiBattleTools input[type=number]{width:75px}.naiBattleTools input[type=checkbox]{width:17px;height:17px}
+    .naiBattleNote{color:#b5bed5;font-size:12px;margin:3px 0 6px}.naiBattleStatus{color:#d4ccff;min-height:20px}.naiBattleError{color:#ffb7a8;white-space:pre-wrap;margin:8px 0}
+    .naiBattleArena{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:12px;flex:1;min-height:320px}.naiBattleCard{min-width:0;min-height:0;background:#11172a;border:1px solid #39445e;border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:5px}
+    .naiBattleCard h3{margin:0;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;font-size:16px}.naiBattlePhoto{display:block;width:100%;height:0;min-height:0;flex:1 1 0px;object-fit:contain;background:#080d19;cursor:pointer;border-radius:6px}
+    .naiBattleBrowse{display:flex;align-items:center;gap:8px;justify-content:center}.naiBattleBrowse span{color:#bdc7e0}.naiBattleSamples{display:flex;justify-content:center;gap:6px;height:48px;flex-shrink:0}.naiBattleSamples button{padding:2px;min-width:0;width:64px;background:#0b1020}.naiBattleSamples img{width:100%;height:100%;object-fit:contain}.naiBattleSamples button[aria-pressed=true]{border-color:#b9afff}
+    .naiBattleChoose{width:100%!important}.naiBattleActions{justify-content:center;margin:6px 0 0}.naiBattleBoard{overflow:auto;flex:1;min-height:0}.naiBattleRow{display:grid;grid-template-columns:50px 60px minmax(130px,1fr) 110px 100px;align-items:center;gap:12px;padding:10px;border-bottom:1px solid #30394f}.naiBattleRow img{width:56px;height:64px;object-fit:contain}.naiBattleRow strong{overflow-wrap:anywhere}.naiBattleRow small{display:block;color:#b5bed5}.naiBattleEmpty{padding:40px 15px;text-align:center;color:#c4cce0}.naiBattleWrap [hidden]{display:none!important}
+    .naiBattleLight{position:absolute;inset:0;background:#080b16fa;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:12px}.naiBattleLight img{max-width:96%;max-height:80vh;object-fit:contain}.naiBattleLight .naiBattleBrowse{flex-wrap:wrap}
+    @media(max-width:800px){.naiBattleWrap{padding:12px}.naiBattleArena{gap:8px}.naiBattlePhoto{height:38vh}.naiBattleRow{grid-template-columns:30px 45px minmax(90px,1fr) 75px}.naiBattleRow>button{grid-column:3/5}.naiBattleSamples{height:45px}.naiBattleHead h2{font-size:18px}}
+
+    .naiBattleWrap .naiBattleMosaic{flex:1 1 0px;min-height:0;min-width:0;display:grid;gap:5px;cursor:pointer;background:#080c13;border-radius:6px;overflow:hidden}
+    .naiBattleSetImage{display:block;min-width:0;min-height:0;width:100%;height:100%;object-fit:contain;background:#080c13}
+    .naiBattleWrap .naiBattleFooter{display:flex;gap:6px;align-items:center;flex-shrink:0}.naiBattleWrap .naiBattleFooter .naiBattleChoose{flex:1;width:auto!important}.naiBattleWrap .naiBattleFooter>button{white-space:nowrap}
+    .naiBattleSetMeta{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:10px;color:#a9b6ca;min-height:15px}.naiBattleGridMessage{color:#ffc5ad}.naiBattleGridMessage:empty+.naiBattleRetry{display:none}.naiBattleWrap .naiBattleRetry{padding:2px 6px;font-size:10px}.naiBattleError:empty{display:none}
+    .naiBattleWrap .naiBattleMmr small{font-size:10px;color:#a7b4c9;font-weight:400}.naiBattleRowControls{display:flex;gap:4px;flex-wrap:wrap}.naiBattleWrap .naiBattleRowControls button{font-size:11px;padding:5px 7px}.naiBattleWrap .naiBattleRow{grid-template-columns:40px 60px minmax(120px,1fr) 150px 130px}
+    @media(max-width:900px){.naiBattleWrap .naiBattleMmr{flex-wrap:wrap;justify-content:flex-end;max-width:65%}.naiBattleWrap .naiBattleMmr small{display:none}.naiBattleWrap .naiBattleFooter>button{font-size:11px;padding:6px}.naiBattleWrap .naiBattleRow{grid-template-columns:25px 40px minmax(90px,1fr) 100px}.naiBattleRowControls{grid-column:3/5}}
+
+    .naiBattleWrap .naiBattleFooter{flex-wrap:wrap}.naiBattleFooter>button:last-child{font-size:11px}.naiBattleWrap .naiBattleMmr .naiRankBadge svg{width:24px;height:24px}
+    .naiGalleryHead{display:flex;align-items:center;justify-content:space-between;padding:16px 0 8px}.naiGalleryHead h2{font-size:28px;font-weight:650;letter-spacing:-.035em;margin:4px 0 8px}.naiGalleryHead p{margin:0}
+    .naiRankLegend{display:flex;gap:8px;flex-wrap:wrap;padding:8px 0 16px}.naiRankLegend .naiRankBadge{background:transparent;border-color:transparent}.naiRankLegend .naiRankEmblem{width:38px!important;height:38px!important}
+    .naiGalleryTools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:#131c29;padding:10px;border:1px solid #2d3c51;border-radius:10px}.naiGalleryTools>input{min-width:150px;flex:1}.naiGalleryTools label{display:flex;gap:8px;align-items:center;color:#afbed0;font-size:12px}.naiGalleryTools input[type=range]{width:100px;padding:0;accent-color:#c5b3e8}
+    .naiBattleGallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(var(--card-size,240px),100%),1fr));gap:16px;align-items:start;padding:2px 0 18px}
+    .naiBattleRankCard{min-width:0;overflow:hidden;background:#141d2a;border:1px solid #2d3b50;border-radius:12px;box-shadow:0 5px 18px #0002}.naiBattleRankCard[data-podium=true]{border-color:color-mix(in srgb,var(--medal,#c4b6e8) 55%,#293447);box-shadow:0 0 0 1px #ffffff04}
+    .naiBattleWrap button.naiBattleGalleryVisual{position:relative;display:grid;grid-template-columns:1fr;gap:3px;width:100%;padding:0;border:0;border-radius:0;background:#080d15;aspect-ratio:4/5;overflow:hidden}.naiBattleGalleryVisual[data-count="2"],.naiBattleGalleryVisual[data-count="3"],.naiBattleGalleryVisual[data-count="4"]{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr))}.naiBattleGalleryVisual[data-count="2"]{grid-template-rows:minmax(0,1fr)}.naiBattleGalleryVisual[data-count="3"] img:first-child{grid-row:span 2}.naiBattleGalleryVisual img{display:block;width:100%;height:100%;min-width:0;min-height:0;object-fit:contain}
+    .naiGalleryPosition,.naiGalleryCount{position:absolute;display:flex;align-items:center;gap:5px;background:#0b1222e8;border:1px solid #ffffff28;border-radius:5px;padding:5px 8px;font-weight:700;pointer-events:none}.naiGalleryPosition{top:9px;left:9px;font-size:16px}.naiGalleryPosition svg{width:21px;height:21px}.naiGalleryCount{bottom:9px;right:9px;font-size:11px;font-weight:500}
+    .naiGalleryInfo{padding:12px}.naiGalleryName{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:550;color:#bcc9dc;margin-bottom:7px}.naiGalleryRating{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:5px}.naiGalleryRating>.naiRankBadge{border:0;background:none!important;padding:0;gap:3px;font-size:11px}.naiGalleryRating .naiRankEmblem{width:50px!important;height:50px!important}.naiGalleryRating>strong{font-size:15px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .naiGalleryDetail{font-size:10px;color:#9eafc7;margin:6px 0}.naiCloseContender{display:inline-block;font-size:10px;color:#b9c9db;background:#273346;border-radius:4px;padding:3px 5px;margin:2px 5px 4px 0}.naiGalleryDelta{font-size:10px;color:#e5a0a0;display:inline-block;margin:2px 0 4px}.naiGalleryDelta[data-positive=true]{color:#8fd8ba}.naiBattleWrap .naiGalleryFocus{display:block;width:100%;margin-top:8px;font-size:11px;background:#202d40;border-color:#3a4a63}
+    @media(max-width:900px){.naiGalleryTools{gap:6px}.naiGalleryTools select{max-width:165px;font-size:11px}.naiBattleGallery{gap:10px}.naiGalleryRating>strong{font-size:12px}.naiGalleryRating .naiRankEmblem{width:38px!important;height:38px!important}}
+  `;root.append(style);queueMicrotask(()=>root.append(style));
+  const launch=button('Battles',()=>open());launch.id='naiBattlesBtn';
+  const anchor=root.getElementById('randomBtn');if(anchor)anchor.after(launch);else root.querySelector('.right .toolbar')?.append(launch);
+  let active=false;
+  root.naiOpenBattles=open;
+  let selectedMedia=null;const placeImage=button('Focus comparisons',()=>open({kind:'images',entryId:selectedMedia?.id}));placeImage.id='naiPlaceImage';placeImage.disabled=true;root.getElementById('editBtn')?.after(placeImage);
+  const oldMemberships=root.naiRenderMemberships;root.naiRenderMemberships=function(media,...args){selectedMedia=media;placeImage.disabled=!media||media.media_type==='video'||media.in_review||media.in_purgatory||media.in_all===false;return oldMemberships?.call(this,media,...args)};root.naiRefreshSelectedMetadata?.();
+  const addSetPlacement=()=>{const id=root.naiOpenGroupId?.(),crumb=root.querySelector('.naiSetBreadcrumb');if(!crumb||crumb.querySelector('.naiPlaceSet')||!root.naiGetLibrary?.()?.sets?.some(s=>s.id===id&&s.kind!=='connection'))return;const b=button('Focus comparisons',()=>open({kind:'sets',entryId:id}));b.className='naiPlaceSet';crumb.append(b)};const grid=root.getElementById('grid');if(grid)new MutationObserver(addSetPlacement).observe(grid,{childList:true,subtree:true});addSetPlacement();
+  async function open(options={}){
+    if(active)return;
+    const select=root.getElementById('characterSelect'),owner=select?.value;
+    if(!owner){alert('Choose a character first.');return;}
+    active=true;
+    const previousFocus=root.activeElement,wrap=make('section','naiBattleWrap');wrap.setAttribute('role','dialog');wrap.setAttribute('aria-modal','true');wrap.setAttribute('aria-label','Image and Set Battles');
+    const head=make('div','naiBattleHead'),title=make('h2','',`${select.selectedOptions[0]?.textContent||'Character'} · Battles`),close=button('Close',dismiss);head.append(title,close);
+    const tools=make('div','naiBattleTools');
+    function choice(label,values){const l=make('label','',label),s=make('select');s.setAttribute('aria-label',label);for(const [value,text] of values){const o=make('option','',text);o.value=value;s.append(o)}l.append(s);tools.append(l);return s;}
+    const kind=choice('Battle type',[['images','Images'],['sets','Sets']]);kind.value=options.kind==='sets'?'sets':'images';
+    const mode=choice('Mode',[['rank','Rank my library'],['winner','Winner stays'],['refine10','Refine top 10'],['refine25','Refine top 25']]);
+    const length=choice('Session',[['0','Continuous'],['10','10 votes'],['25','25 votes'],['50','50 votes']]);length.value='0';
+    const minLabel=make('label','','Minimum images'),minimum=make('input');minimum.type='number';minimum.min='1';minimum.max='10000';minimum.value='5';minimum.setAttribute('aria-label','Minimum set images');minLabel.append(minimum);
+    const sizeLabel=make('label'),similar=make('input');similar.type='checkbox';similar.setAttribute('aria-label','Similar-size opponents');sizeLabel.append(similar,document.createTextNode('Similar-size opponents (within 2×)'));tools.append(minLabel,sizeLabel);
+    const start=button('Start battles',()=>act('start',{mode:mode.value,limit:Number(length.value),minimum:Number(minimum.value),similar:similar.checked}), 'naiBattlePrimary');start.id='naiBattleStart';
+    const boardButton=button('Leaderboard',()=>{view=view==='board'?'battle':'board';paint();});boardButton.id='naiBattleLeaderboard';
+    const trophiesButton=button('Trophy Cabinet',()=>{view=view==='trophies'?'battle':'trophies';paint()});trophiesButton.id='naiBattleTrophies';
+    const ratingLabel=make('label'),showRating=make('input');showRating.type='checkbox';showRating.checked=localStorage.getItem('nai-battle-show-mmr')!=='0';showRating.onchange=()=>{localStorage.setItem('nai-battle-show-mmr',showRating.checked?'1':'0');paint()};ratingLabel.append(showRating,document.createTextNode('Show MMR'));tools.append(ratingLabel);
+    const refresh=button('Refresh',()=>load(false)),undo=button('Undo last vote',()=>act('undo'));undo.id='naiBattleUndo';const movementButton=button('Recent movement',()=>{view='board';galleryOrder='movement';paint()});const stopFocus=button('End focus',()=>act('resume'));stopFocus.hidden=true;tools.append(start,stopFocus,boardButton,movementButton,trophiesButton,undo,refresh);
+    const note=make('p','naiBattleNote'),status=make('div','naiBattleStatus'),error=make('div','naiBattleError'),arena=make('div','naiBattleArena'),board=make('div','naiBattleBoard'),actions=make('div','naiBattleActions');error.setAttribute('role','alert');status.setAttribute('role','status');arena.tabIndex=-1;
+    const tie=button('Tie [T]',()=>vote('tie')),skip=button('Skip [S]',()=>vote('skip'));actions.append(tie,skip);
+    wrap.append(head,tools,note,status,error,arena,board,actions);root.append(wrap);
+    let lastResult='',state=null,view='battle',pending=false,closed=false,serial=0,light=null;
+    let entryMap=new Map(),showCount=50,lightNavigate=null,gallerySearch='',galleryTier='all',galleryStatus='all',galleryOrder='rank';let gallerySize=Math.max(160,Math.min(360,Number(localStorage.getItem('nai-battle-gallery-size'))||240));const gridObservers=[];const clearGrids=()=>{for(const observer of gridObservers)observer.disconnect();gridObservers.length=0};
+    const urls=new Map();
+    function previewUrl(id,size=512){return 'http://127.0.0.1:8765/api/media/'+encodeURIComponent(id)+(size===0?'/original':'/thumb?size='+size);}
+    const sampled=(entry,limit=12)=>{const count=Math.min(limit,entry.images.length);return Array.from({length:count},(_,j)=>entry.images[count===1?0:Math.round(j*(entry.images.length-1)/(count-1))])};
+    function tileSize(){return 0} // Every battle tile uses the stored original, never a thumbnail.
+    const previewCache=new Map(),previewObjects=new Set();let preloadGeneration=0,preloadTimer=null;
+    function sweepObjects(){const used=new Set([...wrap.querySelectorAll('img')].map(im=>im.src));for(const item of previewCache.values())if(item.objectUrl)used.add(item.objectUrl);for(const url of previewObjects)if(!used.has(url)){URL.revokeObjectURL(url);previewObjects.delete(url)}}
+    function trimCache(){let bytes=0;for(const item of previewCache.values())bytes+=item.bytes||0;const visible=new Set([...wrap.querySelectorAll('img')].map(im=>im.src));for(const [url,item] of previewCache){if(previewCache.size<=80&&bytes<=128*1024*1024)break;if(item.done&&!visible.has(item.objectUrl)){previewCache.delete(url);bytes-=item.bytes||0}}sweepObjects()}
+    function warm(url,background=false){
+      if(previewCache.has(url)){const item=previewCache.get(url);previewCache.delete(url);previewCache.set(url,item);return item.promise}
+      // Keep encoded files only. Decoding every possible upcoming set would use
+      // hundreds of megabytes unnecessarily; visible <img> elements decode them.
+      const item={done:false,bytes:0,objectUrl:null,request:null,cancel:null};
+      item.promise=new Promise((resolve,reject)=>{
+        let settled=false;const finish=(error)=>{if(settled)return;settled=true;clearTimeout(timer);item.done=true;
+          if(error){if(previewCache.get(url)===item)previewCache.delete(url);if(item.objectUrl){URL.revokeObjectURL(item.objectUrl);previewObjects.delete(item.objectUrl)}reject(error)}
+          else{resolve(item.objectUrl);setTimeout(trimCache,0)}};
+        const timer=setTimeout(()=>{item.request?.abort?.();finish(Error('Image timed out'))},120000);
+        item.cancel=()=>{item.request?.abort?.();finish(Error('Closed'))};
+        item.request=GM_xmlhttpRequest({method:'GET',url,responseType:'blob',timeout:120000,naiBackground:background,
+          onload:r=>{if(settled||closed)return finish(Error('Closed'));if(r.status!==200)return finish(Error('Image unavailable'));item.bytes=r.response.size;item.objectUrl=URL.createObjectURL(r.response);previewObjects.add(item.objectUrl);finish()},
+          onerror:()=>finish(Error('Could not load preview')),ontimeout:()=>finish(Error('Preview timed out')),onabort:()=>finish(Error('Preview cancelled'))});
+      });
+      previewCache.set(url,item);return item.promise;
+    }
+    function previewImage(im,id,size=512,retry=false){const key=previewUrl(id,size)+(retry?(size===0?'?':'&')+'retry='+Date.now():'');im.dataset.previewKey=key;warm(key).then(url=>{if(!closed&&im.isConnected&&im.dataset.previewKey===key)im.src=url}).catch(()=>{if(!closed&&im.isConnected&&im.dataset.previewKey===key){im.alt='Image unavailable';im.onerror?.(new Event('error'))}})}
+    function pairUrls(value){const pair=value.session?.pair,map=new Map(value.entries.map(e=>[e.id,e]));if(!pair)return[];return [...new Set([pair.left,pair.right].flatMap(id=>{const e=map.get(id);return e?sampled(e).map(i=>previewUrl(i,tileSize(e))):[]}))]}
+    async function prepare(value){if(!value.session?.available)return;const jobs=pairUrls(value);let cursor=0;const work=Promise.allSettled(Array.from({length:Math.min(4,jobs.length)},async()=>{while(cursor<jobs.length&&!closed){const url=jobs[cursor++];try{await warm(url)}catch{}}}));let timer;await Promise.race([work,new Promise(resolve=>{timer=setTimeout(resolve,3500)})]);clearTimeout(timer);}
+    function prefetch(){
+      clearTimeout(preloadTimer);const generation=++preloadGeneration;
+      if(closed||pending||view!=='battle'||!state?.session?.available)return;
+      preloadTimer=setTimeout(()=>{const jobs=[...new Set((state.preload_entries||[]).flatMap(id=>{const e=entryMap.get(id);return e?sampled(e).map(i=>previewUrl(i,tileSize(e))):[]}))];let cursor=0,bytes=0;Array.from({length:3},async()=>{while(cursor<jobs.length&&bytes<64*1024*1024&&!closed&&!pending&&generation===preloadGeneration&&view==='battle'){const url=jobs[cursor++];try{await warm(url,true);bytes+=previewCache.get(url)?.bytes||0}catch{}}});},120);
+    }
+    async function picture(im,id){
+      im.dataset.mediaId=id;im.onload=lock;im.onerror=lock;im.alt='Loading image';im.removeAttribute('src');
+      try{
+        if(!urls.has(id))urls.set(id,root.naiOutfitOriginal(id).then(b=>{const url=URL.createObjectURL(b);if(closed){URL.revokeObjectURL(url);throw Error('Closed')}return url;}));
+        const url=await urls.get(id);if(!closed&&im.dataset.mediaId===id){im.src=url;im.alt='Battle image';if(urls.size>16){const shown=new Set([...wrap.querySelectorAll('img[data-media-id]')].map(e=>e.dataset.mediaId));for(const [key,p] of urls){if(urls.size<=16)break;if(!shown.has(key)){urls.delete(key);p.then(u=>URL.revokeObjectURL(u)).catch(()=>{});}}}}
+      }catch(e){urls.delete(id);if(!closed&&im.dataset.mediaId===id)im.alt='Image unavailable — skip this matchup';}
+    }
+    function dismiss(){if(pending)return;closed=true;serial++;preloadGeneration++;clearTimeout(preloadTimer);for(const item of previewCache.values())if(!item.done)item.cancel?.();previewCache.clear();for(const url of previewObjects)URL.revokeObjectURL(url);previewObjects.clear();clearGrids();light?.remove();wrap.remove();for(const promise of urls.values())promise.then(url=>URL.revokeObjectURL(url)).catch(()=>{});urls.clear();active=false;previousFocus?.focus?.();}
+    async function load(reset=true){
+      const current=++serial;preloadGeneration++;clearTimeout(preloadTimer);pending=true;error.textContent='';lock();
+      try{const value=await request('state',{character_id:owner,kind:kind.value});if(closed||current!==serial)return;await prepare(value);if(closed||current!==serial)return;state=value;if(reset&&state.session){mode.value=state.session.mode;length.value=String(state.session.limit);if(kind.value==='sets')minimum.value=String(state.session.minimum);similar.checked=state.session.similar;}paint();}
+      catch(e){error.textContent=e.message+' If this is your first battle, update and restart the companion.';}
+      finally{if(current===serial){pending=false;lock();prefetch()}}
+    }
+    async function act(action,extra={}){
+      if(pending||!state)return;preloadGeneration++;clearTimeout(preloadTimer);pending=true;error.textContent='';lock();
+      try{const before=state;const next=await request(action,{character_id:owner,kind:kind.value,revision:state.revision,...extra});status.textContent=action==='vote'?'Preparing next matchup… Your choice is saved.':'Preparing matchup…';await prepare(next);state=next;lastResult='';if(action==='vote'&&extra.outcome!=='skip'){lastResult=['left','right'].map(side=>{const id=before.session.pair[side],old=before.entries.find(e=>e.id===id),now=state.entries.find(e=>e.id===id);const delta=now.rating-old.rating;return (side==='left'?'Left':'Right')+': '+Math.round(now.rating)+' MMR ('+(delta>=0?'+':'')+delta.toFixed(1)+')';}).join(' · ');const pairIds=new Set([before.session.pair.left,before.session.pair.right]),oldRatings=new Map(before.entries.map(e=>[e.id,e.rating]));const revised=state.entries.filter(e=>!pairIds.has(e.id)&&oldRatings.has(e.id)&&Math.abs(e.rating-oldRatings.get(e.id))>=.1).length;if(revised)lastResult+=' · '+revised+' other ratings refined from history';const oldAwards=new Set((before.trophies||[]).map(t=>t.id));const earned=(state.trophies||[]).filter(t=>!oldAwards.has(t.id));if(earned.length)lastResult+=' · Trophy earned: '+earned[0].title+(earned.length>1?' +'+(earned.length-1)+' more':'');}view='battle';if(state.session){mode.value=state.session.mode;length.value=String(state.session.limit);if(kind.value==='sets')minimum.value=String(state.session.minimum);similar.checked=state.session.similar;}paint();arena.focus({preventScroll:true});}
+      catch(e){error.textContent=e.message+' Use Refresh to recover the saved state.';}
+      finally{pending=false;lock();prefetch()}
+    }
+    function vote(outcome){if(light||!state?.session?.pair||!state.session.available||(outcome!=='skip'&&!ready()))return;act('vote',{pair_id:state.session.pair.id,outcome});}
+    function ready(){const images=[...arena.querySelectorAll('.naiBattlePhoto,.naiBattleSetImage')];return arena.querySelectorAll('.naiBattleCard').length===2&&images.length>=2&&images.every(im=>im.complete&&im.naturalWidth>0);}
+    function lock(){for(const e of wrap.querySelectorAll('button,input,select'))e.disabled=pending;undo.disabled=pending||!state?.can_undo;skip.disabled=pending||!state?.session?.pair||!state.session.available;tie.disabled=skip.disabled||!ready();for(const b of wrap.querySelectorAll('.naiBattleChoose'))b.disabled=skip.disabled||!ready();}
+    function openLight(entry,index=0,collection=null){
+      if(light)return;light=make('div','naiBattleLight');const im=make('img'),nav=make('div','naiBattleBrowse'),label=make('span');let collectionIndex=collection?collection.findIndex(e=>e.id===entry.id):0;
+      const show=()=>{index=(index+entry.images.length)%entry.images.length;label.textContent=(entry.position?'#'+entry.position+' · ':'')+entry.name+' · '+(index+1)+' / '+entry.images.length;picture(im,entry.images[index]);};
+      const adjacent=step=>{collectionIndex=(collectionIndex+step+collection.length)%collection.length;entry=collection[collectionIndex];index=0;show()};
+      const done=()=>{light.remove();light=null;lightNavigate=null;(view==='board'?board:arena).focus({preventScroll:true})};lightNavigate=step=>{if(collection&&kind.value==='images')adjacent(step);else{index+=step;show()}};
+      nav.append(button('←',()=>lightNavigate(-1)),label,button('→',()=>lightNavigate(1)));
+      if(collection&&kind.value==='sets'&&collection.length>1)nav.append(button('Previous set',()=>adjacent(-1)),button('Next set',()=>adjacent(1)));
+      nav.append(button('Close image',done));light.append(im,nav);wrap.append(light);show();nav.querySelector('button')?.focus();
+    }
+    function card(entry,side){
+      const c=make('article','naiBattleCard');c.dataset.entryId=entry.id;
+      const h=make('h3'),name=make('span','',kind.value==='sets'?entry.name:(side==='left'?'LEFT IMAGE':'RIGHT IMAGE'));h.append(name);h.title=entry.name;
+      if(showRating.checked){const rating=make('span','naiBattleMmr');rating.title=(entry.rating_status||'Provisional')+' · '+entry.played+' comparisons · '+(entry.opponent_count||0)+' different opponents · model uncertainty ±'+Math.round(2*(entry.rd||350))+' MMR (estimate, not a guarantee)';rating.append(ranks.badge(entry.tier),make('span','',Math.round(entry.rating)+' MMR'),make('small','',entry.rating_status||'Provisional'));h.append(rating)}
+      c.append(h);
+      if(kind.value==='sets'){
+        const mosaic=make('div','naiBattleMosaic'),images=[],message=make('span','naiBattleGridMessage');mosaic.setAttribute('role','button');mosaic.setAttribute('aria-label','Choose '+(side==='left'?'left':'right')+' set');mosaic.tabIndex=0;mosaic.onclick=()=>vote(side);mosaic.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();if(!e.repeat)vote(side)}};
+        const count=Math.min(12,entry.images.length),ids=Array.from({length:count},(_,j)=>entry.images[count===1?0:Math.round(j*(entry.images.length-1)/(count-1))]);
+        function layout(){if(!mosaic.isConnected)return;const w=mosaic.clientWidth,h=mosaic.clientHeight;if(!w||!h)return;let best=null;
+          for(let columns=1;columns<=count;columns++){const rows=Math.ceil(count/columns),cw=(w-5*(columns-1))/columns,ch=(h-5*(rows-1))/rows;let area=0;for(const im of images){const ratio=im.naturalWidth&&im.naturalHeight?im.naturalWidth/im.naturalHeight:2/3;const iw=Math.min(cw,ch*ratio);area+=iw*iw/ratio}const value=area*(1-.025*(columns*rows-count)/count)-Math.abs(columns-rows)*.001;
+            if(!best||value>best.value)best={columns,rows,value};}
+          mosaic.style.gridTemplateColumns='repeat('+best.columns+',minmax(0,1fr))';mosaic.style.gridTemplateRows='repeat('+best.rows+',minmax(0,1fr))';
+        }
+        for(const [index,id] of ids.entries()){const im=make('img','naiBattleSetImage');im.dataset.mediaId=id;im.alt='Set image '+(index+1);im.onload=()=>{layout();lock()};im.onerror=()=>{message.textContent='An image failed to load. Retry or skip this matchup.';lock()};images.push(im);mosaic.append(im);previewImage(im,id,tileSize(entry))}
+        c.append(mosaic);const observer=new ResizeObserver(layout);observer.observe(mosaic);gridObservers.push(observer);
+        const meta=make('div','naiBattleSetMeta');meta.append(make('span','',count<entry.images.length?count+' of '+entry.images.length+' images · Browse full set to see all':entry.images.length+' images'),message);const retry=button('Retry images',()=>{message.textContent='';for(const im of images)if(!im.naturalWidth)previewImage(im,im.dataset.mediaId,tileSize(entry),true)});retry.className='naiBattleRetry';meta.append(retry);c.append(meta);
+      }else{const im=make('img','naiBattlePhoto');im.onclick=()=>vote(side);c.append(im);im.dataset.mediaId=entry.images[0];im.onload=lock;im.onerror=()=>{im.alt='Image unavailable — skip or refresh this matchup';lock()};previewImage(im,entry.images[0],tileSize(entry))}
+      const footer=make('div','naiBattleFooter');footer.append(button(side==='left'?'Choose left [←]':'Choose right [→]',()=>vote(side),'naiBattlePrimary naiBattleChoose'),button(kind.value==='sets'?'Browse full set ⛶':'View full image',()=>openLight(entry)),button('Focus comparisons',()=>act('place',{entry_id:entry.id})));c.append(footer);return c;
+    }
+    function paint(){
+      if(!state)return;
+      entryMap=new Map(state.entries.map(e=>[e.id,e]));minLabel.hidden=sizeLabel.hidden=kind.value!=='sets';
+      note.textContent=kind.value==='images'?'Main images only · Click an image or press ← / → to choose. T = tie; S = skip.':'Choose a favorite set · Click its grid or press ← / →. Up to 12 images per grid; fullscreen browsing includes every image.';
+      const session=state.session,pair=session?.pair;
+      const eligibleCount=state.entries.filter(e=>kind.value!=='sets'||e.count>=(session?.minimum||Number(minimum.value)||5)).length;
+      status.textContent=eligibleCount+' eligible '+(kind.value==='sets'?'sets':'images')+' · '+state.votes+' saved votes'+(session?(session.limit?' · Session '+session.done+' / '+session.limit:' · Continuous · '+session.done+' comparisons'):'')+(session&&session.limit>0&&session.done===session.limit?' · Session complete!':'')+(session?.target_id?' · Focusing '+(entryMap.get(session.target_id)?.name||'selected entry')+' · '+session.done+'/10':pair?.reason?' · '+pair.reason:'')+(lastResult?' · Last vote: '+lastResult:'');
+      stopFocus.hidden=!session?.target_id;start.textContent=session?'Apply settings / restart':'Start battles';boardButton.textContent=view==='board'?'Back to battles':'Leaderboard';
+      trophiesButton.textContent=view==='trophies'?'Back to battles':'Trophy Cabinet';
+      arena.hidden=view!=='battle';board.hidden=view==='battle';actions.hidden=view!=='battle'||!pair||!session.available;
+      const boardScroll=board.scrollTop;clearGrids();arena.replaceChildren();board.replaceChildren();preloadGeneration++;clearTimeout(preloadTimer);
+      if(view==='battle'){
+        if(pair&&session.available){const a=entryMap.get(pair.left),b=entryMap.get(pair.right);arena.append(card(a,'left'),card(b,'right'));}
+        else{
+          arena.style.display='block';const text=session&&session.limit>0&&session.done===session.limit?'Session complete. Every choice is saved. Open the leaderboard to see your favorites.':pair?'An opponent is no longer eligible. Start a new session.':'Choose your settings and start battles. Your rankings stay saved when you close this screen.';arena.append(make('p','naiBattleEmpty',text));
+          if(session&&session.limit>0&&session.done===session.limit){const rising=state.entries.filter(e=>e.round_change>0).sort((a,b)=>b.round_change-a.round_change).slice(0,3);for(const e of rising)arena.append(make('p','naiBattleNote',e.name+' · +'+e.round_change.toFixed(1)+' MMR this round'));}
+        }
+        if(pair&&session.available)arena.style.display='';
+      }else if(view==='trophies'){
+        board.append(ranks.cabinet([state],id=>openLight({name:'Trophy image',images:[id]})));
+      }else{
+        renderGallery();board.scrollTop=boardScroll;
+      }
+
+      sweepObjects();lock();prefetch();
+    }
+    function renderGallery(){
+      board.tabIndex=-1;
+      const heading=make('div','naiGalleryHead'),copy=make('div');copy.append(make('div','naiEyebrow','YOUR FAVORITES, RANKED'),make('h2','',kind.value==='sets'?'Set leaderboard':'Image leaderboard'),make('p','naiRankMuted',state.ranked_count+' placed · '+state.entries.length+' eligible · rankings stay within this person'));
+      heading.append(copy);board.append(heading);
+      const legend=make('div','naiRankLegend');for(const tier of ['Bronze','Silver','Gold','Platinum','Diamond','Master','Grandmaster'])legend.append(ranks.badge(tier));board.append(legend);
+      const toolbar=make('div','naiGalleryTools'),search=make('input');search.type='search';search.placeholder='Search '+(kind.value==='sets'?'sets':'images');search.setAttribute('aria-label','Search leaderboard');search.autocomplete='off';search.value=gallerySearch;toolbar.append(search);
+      const select=(label,values,value)=>{const e=make('select');e.setAttribute('aria-label',label);for(const [val,text] of values){const o=make('option','',text);o.value=val;e.append(o)}e.value=value;toolbar.append(e);return e};
+      const tierFilter=select('Rank filter',[['all','All ranks'],...['Grandmaster','Master','Diamond','Platinum','Gold','Silver','Bronze','Provisional','Unranked','Placement'].map(x=>[x,x])],galleryTier);
+      const statusFilter=select('Confidence filter',[['all','All confidence levels'],['Unrated','Unrated'],['Provisional','Provisional'],['Developing','Developing'],['Established','Established']],galleryStatus);
+      const order=select('Leaderboard order',[['rank','MMR ranking'],['movement','Recent movement'],['risers','Biggest risers'],['fallers','Biggest falls']],galleryOrder);
+      const sizeLabel=make('label','','Image size'),size=make('input');size.type='range';size.min='160';size.max='360';size.step='20';size.value=String(gallerySize);size.setAttribute('aria-label','Leaderboard image size');sizeLabel.append(size);toolbar.append(sizeLabel);board.append(toolbar);
+      const count=make('p','naiRankMuted'),gallery=make('div','naiBattleGallery'),more=button('Show more',()=>{showCount+=50;draw()}),rules=ranks.rules();board.append(count,gallery,more,rules);
+      const observer=new IntersectionObserver(items=>{for(const item of items)if(item.isIntersecting){observer.unobserve(item.target);previewImage(item.target,item.target.dataset.mediaId,512)}},{root:board,rootMargin:'300px'});gridObservers.push(observer);
+      function draw(){
+        observer.disconnect();const scroll=board.scrollTop;gallery.style.setProperty('--card-size',gallerySize+'px');gallery.replaceChildren();
+        let entries=state.entries.filter(e=>(!gallerySearch||e.name.toLocaleLowerCase().includes(gallerySearch.toLocaleLowerCase()))&&(galleryTier==='all'||e.tier===galleryTier)&&(galleryStatus==='all'||e.rating_status===galleryStatus));
+        if(galleryOrder!=='rank'){entries=entries.filter(e=>galleryOrder==='risers'?e.round_change>0:galleryOrder==='fallers'?e.round_change<0:e.round_change!==0);entries.sort((a,b)=>galleryOrder==='fallers'?a.round_change-b.round_change:galleryOrder==='risers'?b.round_change-a.round_change:Math.abs(b.round_change)-Math.abs(a.round_change))}
+        count.textContent=entries.length+' shown'+(galleryOrder==='rank'?' · Click a picture to browse at full size':' · MMR changes since this session began');
+        for(const e of entries.slice(0,showCount)){
+          const card=make('article','naiBattleRankCard');card.dataset.tier=e.tier;card.dataset.podium=e.position<=3?'true':'false';
+          const visual=button('',()=>openLight(e,0,entries),'naiBattleGalleryVisual'),ids=kind.value==='sets'?sampled(e,4):[e.images[0]];visual.setAttribute('aria-label','View '+e.name);visual.dataset.count=String(ids.length);
+          for(const id of ids){const im=make('img');im.alt='';im.decoding='async';im.dataset.mediaId=id;visual.append(im);observer.observe(im)}
+          const position=make('span','naiGalleryPosition',e.position?'#'+e.position:'Unrated');if(e.leader)position.append(ranks.crown());visual.append(position);
+          if(kind.value==='sets')visual.append(make('span','naiGalleryCount',e.count+' images'));
+          const info=make('div','naiGalleryInfo'),name=make('strong','naiGalleryName',e.name);name.title=e.name;const rating=make('div','naiGalleryRating');rating.append(ranks.badge(e.tier),make('strong','',e.played?Math.round(e.rating)+' MMR':'Unrated'));info.append(name,rating);
+          const detail=make('div','naiGalleryDetail',e.rating_status+' · '+e.played+' comparisons');detail.title=e.opponent_count+' distinct opponents · model uncertainty ±'+Math.round(2*e.rd)+' MMR; an estimate, not a guarantee.';info.append(detail);
+          if(e.close_contender){const close=make('span','naiCloseContender','Close contender');close.title='A neighboring rating is within the combined model uncertainty. Their exact ordering is not settled.';info.append(close)}
+          if(e.round_change){const delta=make('span','naiGalleryDelta',(e.round_change>0?'+':'')+e.round_change.toFixed(1)+' this session');delta.dataset.positive=String(e.round_change>0);info.append(delta)}
+          info.append(button('Focus comparisons',()=>act('place',{entry_id:e.id}),'naiGalleryFocus'));card.append(visual,info);gallery.append(card)
+        }
+        if(!entries.length)gallery.append(make('p','naiBattleEmpty',galleryOrder==='rank'?'No entries match these filters.':'No matching rating changes in this session yet.'));
+        more.hidden=entries.length<=showCount;board.scrollTop=scroll;
+      }
+      search.oninput=()=>{gallerySearch=search.value;showCount=50;draw()};tierFilter.onchange=()=>{galleryTier=tierFilter.value;showCount=50;draw()};statusFilter.onchange=()=>{galleryStatus=statusFilter.value;showCount=50;draw()};order.onchange=()=>{galleryOrder=order.value;showCount=50;draw()};size.oninput=()=>{gallerySize=Number(size.value);localStorage.setItem('nai-battle-gallery-size',String(gallerySize));gallery.style.setProperty('--card-size',gallerySize+'px')};draw();
+    }
+    kind.onchange=()=>{lastResult='';state=null;view='battle';showCount=50;gallerySearch='';galleryTier=galleryStatus='all';galleryOrder='rank';load();};
+    wrap.addEventListener('keydown',e=>{
+      if(e.key==='Escape'){e.preventDefault();e.stopPropagation();if(light){light.remove();light=null;lightNavigate=null;arena.focus({preventScroll:true})}else dismiss();return;}
+      if(e.key==='Tab'){const focus=[...(light||wrap).querySelectorAll('button,input,select,summary,[tabindex="0"]')].filter(x=>!x.disabled&&x.getClientRects().length),first=focus[0],last=focus.at(-1);if(e.shiftKey&&root.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&root.activeElement===last){e.preventDefault();first?.focus()}return;}
+      e.stopPropagation();if(light){if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();if(!e.repeat)lightNavigate?.(e.key==='ArrowLeft'?-1:1)}return;}if(e.repeat||pending||view!=='battle'||(/SELECT|TEXTAREA/.test(e.target.tagName)||(e.target.tagName==='INPUT'&&e.target.type!=='checkbox')))return;
+      const outcome={ArrowLeft:'left',ArrowRight:'right',t:'tie',T:'tie',s:'skip',S:'skip'}[e.key];if(outcome){e.preventDefault();vote(outcome)}
+    });
+    await load();if(options.entryId&&state)await act('place',{entry_id:options.entryId});else close.focus();
+  }
+})();

@@ -6,7 +6,7 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
   await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.on('exit',c=>reject(Error(stderr+c)))});
   browser=await chromium.launch({executablePath:process.env.NAI_CHROMIUM||'/tmp/chromium',headless:true,args:['--no-sandbox','--disable-gpu']});
   const page=await browser.newPage({viewport:{width:1700,height:1100}});page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  const loaded=new Set();page.on('response',r=>{if(r.url().includes('/thumb?size='))loaded.add(new URL(r.url()).origin+new URL(r.url()).pathname+'?size='+new URL(r.url()).searchParams.get('size'))});
+  const loaded=new Set();page.on('response',r=>{if(r.url().includes('/original'))loaded.add(new URL(r.url()).origin+new URL(r.url()).pathname)});
   await page.goto('http://127.0.0.1:8765/library/');await page.getByText('Local library connected',{exact:true}).waitFor();await page.locator('#naiBattlesBtn').click();
   assert.equal(await page.getByLabel('Session',{exact:true}).inputValue(),'0');await page.locator('#naiBattleStart').click();
   const ready=()=>page.waitForFunction(()=>{const b=document.getElementById('nai-media-host').shadowRoot.querySelector('.naiBattleChoose');return b&&!b.disabled});await ready();
@@ -25,7 +25,7 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
   await page.locator('#naiBattleLeaderboard').click();await page.getByLabel('Minimum set images',{exact:true}).fill('1');await page.locator('#naiBattleStart').click();await ready();
   const library=await (await page.request.get('http://127.0.0.1:8765/api/library')).json();const state=await (await page.request.post('http://127.0.0.1:8765/api/battles/state',{data:{character_id:library.characters[0].id,kind:'sets'}})).json();
   const pair=state.session.pair,upcoming=state.preload_entries.filter(id=>id!==pair.left&&id!==pair.right);assert(upcoming.length>0);
-  const expected=upcoming.flatMap(id=>{const e=state.entries.find(x=>x.id===id),size=e.images.length<=2?1024:e.images.length<=6?768:512;return e.images.map(mid=>'http://127.0.0.1:8765/api/media/'+mid+'/thumb?size='+size)});
+  const expected=upcoming.flatMap(id=>state.entries.find(x=>x.id===id).images.map(mid=>'http://127.0.0.1:8765/api/media/'+mid+'/original'));
   await new Promise((resolve,reject)=>{let timer;const check=()=>{if(expected.every(url=>loaded.has(url))){clearTimeout(timer);page.off('response',check);resolve()}};timer=setTimeout(()=>{page.off('response',check);reject(Error('Upcoming set previews were not preloaded'))},5000);page.on('response',check);check()});
   assert.deepEqual(errors,[]);console.log('Gallery UI passed: large cards, filters, typing focus, fullscreen rank navigation, remembered size, compact layout, focus/end focus, continuous play and set grids.');
  }finally{await browser?.close();server.kill()}

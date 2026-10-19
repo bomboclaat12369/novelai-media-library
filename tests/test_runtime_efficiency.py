@@ -81,6 +81,14 @@ class UpdateTests(unittest.TestCase):
             activated=updates.activate('2.8.68');thread.join(2)
             self.assertEqual(received[0]['activation'],activated['activation'])
             self.assertEqual(updates.payload()['code'],code.decode())
+            # A standalone-only battle release must not change the NovelAI version.
+            html=b'<html data-nai-media-payload-version="2.8.99">'
+            manifest['standalone_version']='2.8.99'
+            manifest['standalone_sha256']=hashlib.sha256(html).hexdigest()
+            result=updates.check(force=True)
+            self.assertEqual(result['version'],'2.8.68')
+            self.assertEqual(ui.cached,html)
+            self.assertEqual(updates.payload()['code'],code.decode())
             # A damaged new release must not replace either verified interface.
             updates.checked_at=0;manifest['userscript_payload_version']='2.8.69';manifest['userscript_sha256']='0'*64
             with self.assertRaises(ValueError):updates.check()

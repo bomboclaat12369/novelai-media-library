@@ -1,5 +1,28 @@
 # Stability regression checks
 
+## UI 2.8.91 / runtime 2.7.54 validation
+
+Historical-rating migration, fixed-prior/no-double-counting behavior, linked Undo,
+all three outcomes, contradictory evidence, order independence and exact two-entry
+marginal uncertainty are covered by `test_runtime_joint_history.py`. A synthetic
+220-entry / 1,600-vote fit takes roughly one second in the validation environment.
+The runtime suite passed (112 tests before adding the additional covariance check);
+the joint-history module then passed all nine collected tests. The 18 UI stability
+unit checks also passed.
+
+Real Chromium checks passed in `test-battles-ui.cjs`, `test-battle-gallery-ui.cjs`
+and `test-ranks-design.cjs`: original dimensions in both image and set battles,
+preloading, voting/Undo, profiles, gallery controls, and absence of battle controls
+and ranking requests in NovelAI. Independent-version handling is covered by
+`test_runtime_efficiency.py`; use `NAI_CHROMIUM` for the browser executable.
+
+Known baseline: `test-review-dom.cjs` has 23 failures in both this release and the
+published 2.8.90 payload (checked with its exact release config). These older
+fixtures target removed controls, obsolete queue paging and earlier import APIs.
+They were not disabled or treated as passing; the legacy UI workflow will still
+report them. Release artifacts and manifest hashes are built and verified locally
+with `python3 tools/build-release.py` and published together.
+
 Run from the repository root:
 
 ```sh

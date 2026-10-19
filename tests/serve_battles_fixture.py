@@ -12,8 +12,10 @@ runtime=runpy.run_path(str(root/'runtime-src/companion-runtime.pyw'))
 config=json.loads((root/os.environ.get('NAI_RELEASE_CONFIG','release-userscript.json')).read_text())
 code=b''.join((root/p).read_bytes() for p in config['parts'])
 base_version=config['version']
-html=(root/f'payload/standalone-{base_version}.html').read_bytes()
-release={'version':base_version}
+standalone_config=json.loads((root/'release-standalone.json').read_text())
+standalone_version=standalone_config['version']
+html=(root/f'payload/standalone-{standalone_version}.html').read_bytes()
+release={'version':base_version,'standalone_version':standalone_version}
 class Handler(runtime['MediaHandler']):
     def do_GET(self):
         if self.path.startswith('/test/release/'):
@@ -23,14 +25,14 @@ class Handler(runtime['MediaHandler']):
 
     def do_POST(self):
         if self.path=='/test/advance':
-            release['version']=self._read_json()['version'];self.server.ui_updates.checked_at=0
+            release.update(self._read_json());self.server.ui_updates.checked_at=0
             self._send_json(200,{'ok':True});return
         super().do_POST()
 with tempfile.TemporaryDirectory() as directory:
     store=runtime['LibraryStore'](Path(directory));store._queue_image_thumbnail=lambda *a:None
     owner=store.add_character('Nikki fixture');items=[]
     for i in range(16):
-        data=io.BytesIO();Image.new('RGB',(400+i,600),['#4182be','#f29463','#7a97bf','#61b18f'][i%4]).save(data,'PNG')
+        data=io.BytesIO();Image.new('RGB',(1600+i,2400),['#4182be','#f29463','#7a97bf','#61b18f'][i%4]).save(data,'PNG')
         items.append(store.import_bytes(data.getvalue(),f'Image {i}.png',owner['id'],[],{},'image/png')[0])
         items[-1]['in_all']=i<4
     store.create_set(owner['id'],'Blue dress',[items[i]['id'] for i in [0,4,5,6,7]],preserve_placement=True)
@@ -46,9 +48,9 @@ with tempfile.TemporaryDirectory() as directory:
     store.save()
     server=runtime['MediaHTTPServer'](('127.0.0.1',8765),store);server.RequestHandlerClass=Handler
     def download(url,*args):
-        current_html=html.replace(f'data-nai-media-payload-version="{base_version}"'.encode(),f'data-nai-media-payload-version="{release["version"]}"'.encode())
+        current_html=html.replace(f'data-nai-media-payload-version="{standalone_version}"'.encode(),f'data-nai-media-payload-version="{release["standalone_version"]}"'.encode())
         if 'manifest.json' in url:
-            return json.dumps({'userscript_payload_version':release['version'],'userscript_sha256':hashlib.sha256(code).hexdigest(),'userscript_parts':[server.standalone.BASE+'payload/code'], 'standalone_url':server.standalone.BASE+'html','standalone_sha256':hashlib.sha256(current_html).hexdigest()}).encode()
+            return json.dumps({'userscript_payload_version':release['version'],'userscript_sha256':hashlib.sha256(code).hexdigest(),'userscript_parts':[server.standalone.BASE+'payload/code'], 'standalone_version':release['standalone_version'],'standalone_url':server.standalone.BASE+'html','standalone_sha256':hashlib.sha256(current_html).hexdigest()}).encode()
         return code if url.endswith('code') else current_html
     server.standalone._download=download
     print('READY',flush=True);server.serve_forever()

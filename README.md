@@ -2,6 +2,16 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Historical ratings and standalone-only battles (UI 2.8.91 / companion 2.7.54)
+
+MMR jointly fits all recorded wins, losses and ties. Later evidence about an opponent can move an earlier participant's rating without another direct comparison. Each active vote enters the model once; a tie contributes one half-result, not two bonus wins. Fixed starting priors anchor the scale. Confidence incorporates linked opponent uncertainty, and sparse evidence remains provisional. Undo removes a vote's influence throughout the comparison history, not only its two participants. The last-vote message reports when other ratings were refined.
+
+Migration automatically recalculates logged history and saves `backups/battles-before-joint-history.json`. Detailed event logging started in UI 2.8.89 / companion 2.7.52: earlier unlogged evidence is retained as a fixed baseline using the first logged before-values. Missing old matchups cannot be reconstructed. Existing counts, trophies, sessions and Undo remain intact. Model: regularized Bradley–Terry with fractional ties, Newton/PCG fitting, and marginal Laplace uncertainty; no inactivity penalty or repeated replay bonuses. Ratings describe your comparisons, not an objective or guaranteed ordering.
+
+Battle images and every visible set-grid tile now load the **stored original file**, scaled to fit without cropping. The leaderboard still uses efficient thumbnails. Likely upcoming original files are prefetched as encoded blobs rather than keeping all possible sets decoded. Background requests are bounded and lower-priority; the actual next pair is still chosen after the vote. Voting waits for the displayed images to load, and failures remain visible.
+
+Battles, focus controls, battle statistics, top-ranked profile images and trophies are **standalone only**. NovelAI retains normal library viewing and profile photos/measurements. Battle history is not deleted. `release-standalone.json` and `manifest.standalone_version` are independent of `release-userscript.json`; future battle-only releases must leave the NovelAI config, parts and hash unchanged. Build all artifacts with `python3 tools/build-release.py` and publish them atomically with the manifest. The shared companion must be restarted for this runtime update.
+
 ## Continuous battles and a visual ranked gallery (UI 2.8.90 / companion 2.7.53)
 
 New battle sessions default to **Continuous**; optional 10/25/50-vote sessions remain. Existing active sessions retain their settings. Every vote saves immediately, and the most recent twenty undoable votes remain available across session changes. **Focus comparisons** is available on battle cards, beneath the library viewer, inside sets, and on leaderboard cards. It runs ten comparisons featuring that entry and then returns to the previous mode. **End focus** returns early. Focus uses ordinary MMR calculations without bonuses or rating resets.

@@ -207,7 +207,7 @@ test('the UI patches reset viewer state and expose bulk image editing', () => {
   const ui = read(config.parts.find(p => p.endsWith('.ui-updates.txt')));
   assert.match(ui, /openBulkEditModal/);
   assert.match(ui, /Delete selected images/);
-  assert.match(ui, /All \$\{count\} images in this Rapid Review queue are shown/);
+  assert.match(ui, /All \$\{count\} files in this Rapid Review queue are shown/);
   assert.doesNotMatch(ui, /Permanently delete/);
   const release = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-userscript.json'));
   const review = read(release.parts.find(p => p.endsWith('.review-core.txt')));
@@ -226,9 +226,12 @@ function reviewQueueFixture() {
   const release = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-userscript.json'));
   const source = read(release.parts.find(p => p.endsWith('.review-core.txt')));
   class Element {
-    constructor(tag) { this.tagName = tag; this.children = []; this.listeners = {}; }
+    constructor(tag) { this.tagName = tag; this.children = []; this.listeners = {}; this.dataset={}; this.style={setProperty(){}}; }
     get isConnected() { return this.connected === true || !!this.parent?.isConnected; }
     appendChild(child) { child.parent = this; this.children.push(child); return child; }
+    append(...children) { for(const child of children)this.appendChild(child); }
+    setAttribute(name,value) { this[name]=value; }
+    remove() { if(this.parent)this.parent.children=this.parent.children.filter(child=>child!==this);this.parent=null; }
     replaceChildren() { for (const child of this.children) child.parent = null; this.children = []; }
     querySelector(selector) { return selector === '.current' ? this.children.find(child => child.className.includes(' current')) : null; }
     addEventListener(type, callback) { this.listeners[type] = callback; }
@@ -245,7 +248,10 @@ function reviewQueueFixture() {
   let token = 0;
   const context = vm.createContext({
     API:'http://127.0.0.1:8765', reviewSession:session,
-    drafts, queueSetOverlay:null, root:{},
+    drafts, queueSetOverlay:null, queueObserver:null,
+    root:{naiPersistRapidChoices(){},naiLoadThumbnail(id,img){img.src='http://127.0.0.1:8765/api/media/'+encodeURIComponent(id)+'/thumb';}},
+    IntersectionObserver:class {constructor(fn){this.fn=fn}observe(target){this.fn([{target,isIntersecting:true}])}unobserve(){}disconnect(){}},
+    requestAnimationFrame:fn=>fn(),pendingMode:()=>false,closeRapidFullscreen(){},updateResumeButton(){},bulkReview(){},discardPendingQueue(){},
     URL:{createObjectURL:() => `blob:fixture-${++token}`, revokeObjectURL:url => revoked.push(url)},
     importToken274:() => String(++token),
     uploadFileResilient:async (...args) => { uploads.push(args); return {item:{id:`persisted-${uploads.length}`}}; },
@@ -264,7 +270,8 @@ function reviewQueueFixture() {
   assert.ok(start >= 0 && end > start);
   const helpers = source.slice(source.indexOf('  function orderedReviewFiles('), source.indexOf('  // ----- Review / Rapid Review'));
   const cleanup = source.slice(source.indexOf('  function revokeSessionUrls()'), source.indexOf('  async function openReviewQueue('));
-  vm.runInContext(helpers + cleanup + source.slice(start, end) + `
+  const edited=source.split('\n').find(line=>line.startsWith('  function markRapidEdited('));
+  vm.runInContext(helpers + cleanup + edited + '\n' + source.slice(start, end) + `
     async function renderReviewQueue() {
       for (const child of strip.children) child.parent = null;
       strip.children = [];
@@ -286,7 +293,7 @@ test('queue image previews get thumbnail URLs on first render and after navigati
   assert.equal(f.strip.children.length, 10);
   function checkPreviews() {
     for (const card of f.strip.children) {
-      const index = Number(card.title.split('.')[0]) - 1;
+      const index = f.media.findIndex(m=>m.id===card.dataset.id);
       const img = card.children.find(child => child.tagName === 'img');
       if (f.media[index].media_type === 'video') { assert.equal(img, undefined); continue; }
       assert.equal(img.isConnected, true);
@@ -294,7 +301,7 @@ test('queue image previews get thumbnail URLs on first render and after navigati
     }
   }
   checkPreviews();
-  await f.strip.children[4].listeners.click();
+  await f.strip.children[4].onclick();
   assert.equal(f.session.index, 4);
   checkPreviews();
 });
@@ -302,7 +309,7 @@ test('queue image previews get thumbnail URLs on first render and after navigati
 test('jumping does not save; an explicit Save marks the item while allowing it to remain in Review', async () => {
   const f = reviewQueueFixture();
   await f.render();
-  await f.strip.children[1].listeners.click();
+  await f.strip.children[1].onclick();
   assert.deepEqual([...f.session.saved], []);
   assert.equal(f.requests.length, 0);
   await f.save();
@@ -328,8 +335,8 @@ test('previewing and closing draft imports writes nothing and releases all previ
   const ids = [1,2,3].map(i => f.addDraft({name:`image-${i}.jpg`,type:'image/jpeg'}, 'character', []));
   f.session.ids = ids;
   await f.render();
-  assert.ok(f.strip.children[0].children[0].src.startsWith('blob:'));
-  await f.strip.children[1].listeners.click();
+  assert.ok(f.strip.children[0].children.find(child=>child.tagName==='img').src.startsWith('blob:'));
+  await f.strip.children[1].onclick();
   await f.close();
   assert.equal(f.uploads.length, 0);
   assert.equal(f.requests.length, 0);

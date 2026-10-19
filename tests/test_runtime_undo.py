@@ -121,13 +121,17 @@ class UndoTests(unittest.TestCase):
         self.assertEqual(self.store.set_item(group['id'])['name'], 'Renamed')
         self.assertIsNone(self.store.media_item(image['id']))
 
-    def test_source_replacement_clears_flag_and_its_old_history(self):
+    def test_source_replacement_clears_flag_but_keeps_undo_history(self):
         image = self.image()
         self.store.set_needs_replacement(image['id'], True)
         self.store.replace_media_bytes(b'better', 'better.png', image['id'], 'image/png')
         self.assertFalse(image['needs_replacement'])
-        self.assertFalse(self.store.undo_history()['entries'])
+        self.assertEqual(self.store.undo_history()['entries'][0]['label'], 'Replace image source')
         self.assertEqual((self.store.root / image['stored_rel']).read_bytes(), b'better')
+        self.undo()
+        restored = self.store.media_item(image['id'])
+        self.assertTrue(restored['needs_replacement'])
+        self.assertEqual((self.store.root / restored['stored_rel']).read_bytes(), b'one')
 
     def test_clear_history_permanently_removes_only_retained_deleted_files(self):
         deleted, active = self.image('deleted'), self.image('active')

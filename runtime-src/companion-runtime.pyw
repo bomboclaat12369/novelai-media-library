@@ -497,6 +497,7 @@ class OutfitMatcher:
 
 class BattleRankings:
     """Personal rankings, atomic vote persistence and resumable per-character rounds."""
+    MODEL = 'joint-history-v1'
     def __init__(self, store):
         self.store = store
         self.path = store.root / 'battles.json'
@@ -509,6 +510,18 @@ class BattleRankings:
             if self.data.get('version') != 1 or not isinstance(self.data.get('boards'), dict):
                 self.data = None
                 raise ValueError('Battle rankings could not be read. Existing rankings have not been replaced.')
+            if self.data.get('boards') and self.data.get('rating_model') != self.MODEL:
+                try:
+                    migrated = copy.deepcopy(self.data)
+                    for board in migrated['boards'].values():
+                        self._priors(board)
+                        self._fit_history(board)
+                        board['revision'] = uuid.uuid4().hex
+                    migrated['rating_model'] = self.MODEL
+                    self._save(migrated)
+                except Exception:
+                    self.data = None
+                    raise
         return self.data
 
     def _save(self, data):
@@ -519,6 +532,10 @@ class BattleRankings:
                 stream.flush()
                 os.fsync(stream.fileno())
             if self.path.exists():
+                if data.get('rating_model') == self.MODEL and (self.data or {}).get('rating_model') != self.MODEL:
+                    migration = self.store.backup_dir / 'battles-before-joint-history.json'
+                    if not migration.exists():
+                        shutil.copy2(self.path, migration)
                 if data.get('rating_model') and not (self.data or {}).get('rating_model'):
                     migration = self.store.backup_dir / 'battles-before-placement.json'
                     if not migration.exists():
@@ -528,6 +545,131 @@ class BattleRankings:
         finally:
             temporary.unlink(missing_ok=True)
         self.data = data
+
+    @staticmethod
+    def _active_history(board):
+        undone = {e.get('vote_id') for e in board.get('history', []) if e.get('type') == 'undo'}
+        return [e for e in board.get('history', []) if e.get('type') == 'vote' and e.get('id') not in undone]
+
+    def _priors(self, board):
+        """Freeze pre-log evidence, NOT the latest rating that already includes the log.
+
+        Earliest before-values include older unlogged battles. Even an undone first
+        event supplies the correct starting point. New entries start at 1200/350.
+        """
+        if 'history_priors' in board:
+            return board['history_priors']
+        priors = {}
+        for event in board.get('history', []):
+            if event.get('type') != 'vote':
+                continue
+            for ident, score in zip((event['left'], event['right']), event['before']):
+                priors.setdefault(ident, {'rating':score['rating'], 'rd':score['rd']})
+        for ident in board['ratings']:
+            score = self._score(board, ident)
+            priors.setdefault(ident, {'rating':score['rating'], 'rd':score['rd']})
+        board['history_priors'] = priors
+        return priors
+
+    def _fit_history(self, board, confidence=True):
+        """Regularized joint Bradley-Terry fit; a tie is one half-result.
+
+        Fixed Gaussian priors anchor the scale; each active vote enters once.
+        Newton/PCG solves the sparse convex problem. Marginal Laplace variances
+        include opponent uncertainty (not just the Hessian diagonal). No numeric
+        dependencies or arbitrary re-awarding of old Elo gains are needed.
+        """
+        priors = self._priors(board)
+        events = self._active_history(board)
+        ids = sorted(set(board['ratings']) | {e[k] for e in events for k in ('left','right')})
+        if not ids:
+            return
+        scale = 400 / math.log(10)
+        index = {ident:i for i,ident in enumerate(ids)}
+        n = len(ids)
+        means, precision = [], []
+        for ident in ids:
+            prior = priors.setdefault(ident, {'rating':1200., 'rd':350.})
+            means.append((prior['rating'] - 1200) / scale)
+            precision.append((scale / max(50., min(350., prior['rd']))) ** 2)
+        aggregated = {}
+        for event in events:
+            a, b = index[event['left']], index[event['right']]
+            value = {'left':1., 'right':0., 'tie':.5}[event['outcome']]
+            if a > b:
+                a, b, value = b, a, 1-value
+            count, wins = aggregated.get((a,b), (0,0.))
+            aggregated[a,b] = (count+1, wins+value)
+        pairs = [(a,b,count,wins) for (a,b),(count,wins) in sorted(aggregated.items())]
+
+        def system(x):
+            diagonal = list(precision)
+            gradient = [precision[i]*(x[i]-means[i]) for i in range(n)]
+            edges = []
+            loss = sum(.5*precision[i]*(x[i]-means[i])**2 for i in range(n))
+            for a,b,count,wins in pairs:
+                difference = x[a]-x[b]
+                probability = 1 / (1 + math.exp(-max(-40.,min(40.,difference))))
+                residual = count*probability-wins
+                gradient[a] += residual; gradient[b] -= residual
+                weight = count*probability*(1-probability)
+                diagonal[a] += weight; diagonal[b] += weight
+                edges.append((a,b,weight))
+                loss += count*(max(difference,0)+math.log1p(math.exp(-abs(difference))))-wins*difference
+            return loss, gradient, diagonal, edges
+
+        def solve(rhs, diagonal, edges):
+            # Symmetric positive definite: positive prior precision fixes even
+            # disconnected components and perfectly one-sided win records.
+            result = [0.]*n
+            residual = list(rhs)
+            direction = [residual[i]/diagonal[i] for i in range(n)]
+            product = sum(residual[i]*direction[i] for i in range(n))
+            threshold = max(1e-22, sum(v*v for v in rhs)*1e-18)
+            for _ in range(max(20,n*2)):
+                if sum(v*v for v in residual) <= threshold:
+                    break
+                hd = [diagonal[i]*direction[i] for i in range(n)]
+                for a,b,weight in edges:
+                    hd[a] -= weight*direction[b]; hd[b] -= weight*direction[a]
+                denominator = sum(direction[i]*hd[i] for i in range(n))
+                if denominator <= 0:
+                    raise ValueError('Historical rating solver failed; no vote has been saved.')
+                alpha = product/denominator
+                result = [result[i]+alpha*direction[i] for i in range(n)]
+                residual = [residual[i]-alpha*hd[i] for i in range(n)]
+                z = [residual[i]/diagonal[i] for i in range(n)]
+                updated = sum(residual[i]*z[i] for i in range(n))
+                beta = updated/product
+                direction = [z[i]+beta*direction[i] for i in range(n)]
+                product = updated
+            return result
+
+        x = list(means)  # deterministic; the saved current ratings are NOT evidence
+        for _ in range(40):
+            loss, gradient, diagonal, edges = system(x)
+            if max(abs(g) for g in gradient) < 1e-8:
+                break
+            step = solve(gradient, diagonal, edges)
+            factor = 1.
+            while factor > 1e-8:
+                candidate = [x[i]-factor*step[i] for i in range(n)]
+                if system(candidate)[0] <= loss+1e-12:
+                    break
+                factor *= .5
+            x = candidate
+        _, gradient, diagonal, edges = system(x)
+        if max(abs(g) for g in gradient) > 1e-5:
+            raise ValueError('Historical ratings did not converge; no vote has been saved.')
+        for ident,i in index.items():
+            if ident not in board['ratings']:
+                continue
+            score = board['ratings'][ident]
+            score['rating'] = 1200 + scale*x[i]
+            if confidence:
+                unit = [0.]*n; unit[i] = 1.
+                variance = solve(unit,diagonal,edges)[i]
+                score['rd'] = max(50., min(350., scale*math.sqrt(max(0.,variance))))
 
     @staticmethod
     def _score(board, ident):
@@ -736,8 +878,8 @@ class BattleRankings:
         if session.get('target_id') and session['done']>=10:
             self._finish_focus(session)
         champion=previous_pair[outcome] if session['mode']=='winner' and outcome in ('left','right') else None
-        # A stable seed lets read-only forecasts prepare exactly the images that
-        # the subsequent vote would choose, without freezing future matchmaking.
+        # Stable seed for likely next opponents. Forecasts approximate confidence;
+        # only saved votes run the full joint uncertainty calculation.
         rng=random.Random(previous_pair['id']+':'+outcome)
         session['pair']=self._pair(board,entries,champion,rng) if not session['limit'] or session['done']<session['limit'] else None
 
@@ -749,9 +891,13 @@ class BattleRankings:
         for outcome in ('left','right','tie','skip'):
             # Do not copy the growing history or undo buffers for previews.
             forecast={key:copy.deepcopy(board.get(key,default)) for key,default in
-                      (('ratings',{}),('session',{}),('scheduler',{}),('recent',[]),('votes',0))}
+                      (('ratings',{}),('session',{}),('scheduler',{}),('recent',[]),('votes',0),('history_priors',{}))}
+            forecast['history'] = list(board.get('history', []))
             forecast['recent']=(forecast['recent']+[[pair['left'],pair['right']]])[-32:]
-            if outcome!='skip':self._apply_comparison(forecast,pair,outcome)
+            if outcome!='skip':
+                self._apply_comparison(forecast,pair,outcome)
+                forecast['history'].append({'id':'forecast','type':'vote','left':pair['left'],'right':pair['right'],'outcome':outcome})
+                self._fit_history(forecast, confidence=False)
             self._advance_pair(forecast,entries,pair,outcome)
             upcoming=forecast['session'].get('pair')
             if upcoming:
@@ -779,9 +925,9 @@ class BattleRankings:
         if session:session.pop('baseline',None)
         return {'character_id':owner,'kind':kind,'revision':board['revision'], 'entries':rows,
                 'session':session, 'can_undo':bool(board.get('undo')), 'votes':board.get('votes',0),
-                'trophies':trophies, 'ranked_count':sum(not r['provisional'] for r in rows), 'rating_model':'glicko-static-v1',
+                'trophies':trophies, 'ranked_count':sum(not r['provisional'] for r in rows), 'rating_model':self.MODEL,
                 'placement_batch':list(board.get('scheduler',{}).get('batch',[])),
-                'recorded_votes':sum(e.get('type')=='vote' for e in board.get('history',[])),
+                'recorded_votes':len(self._active_history(board)),
                 'preload_entries':self._forecast(board,entries)}
 
     def request(self, action, body):
@@ -799,8 +945,9 @@ class BattleRankings:
                 raise ValueError('Rankings changed in another window. Refresh battles before continuing.')
             if 'trophies' not in board:
                 board['trophies'] = self._awards(board, self._ranked_rows(board, entries), legacy=True)
-            data['rating_model'] = 'glicko-static-v1'
+            data['rating_model'] = self.MODEL
             board.setdefault('history', [])
+            self._priors(board)
             if action in ('start','place'):
                 target = str(body.get('entry_id','')) if action=='place' else None
                 if action=='place' and target not in entries:
@@ -844,8 +991,10 @@ class BattleRankings:
                     before['history_vote_id']=event_id
                     summary=lambda score:{k:score[k] for k in ('rating','rd','played')}
                     board['history'].append({'id':event_id,'type':'vote','at':now_iso(),'left':ids[0],'right':ids[1],
-                                             'outcome':outcome,'model':'glicko-static-v1','before':[summary(a),summary(b)],
+                                             'outcome':outcome,'model':self.MODEL,'before':[summary(a),summary(b)],
                                              'after':[summary(board['ratings'][i]) for i in ids]})
+                    self._fit_history(board)
+                    board['history'][-1]['after'] = [summary(board['ratings'][i]) for i in ids]
                     awards = self._awards(board, self._ranked_rows(board, entries))
                     for trophy_id, award in awards.items():
                         if trophy_id not in board['trophies']:
@@ -864,6 +1013,12 @@ class BattleRankings:
                 board['scheduler']=before.get('scheduler',{'batch':[]})
                 board['history'].append({'type':'undo','at':now_iso(),'vote_id':before.get('history_vote_id'),
                                          'legacy':not bool(before.get('history_vote_id'))})
+                if not before.get('history_vote_id'):
+                    # An undo from before event logging changes the legacy prior.
+                    for ident in before['ratings']:
+                        score = self._score(board, ident)
+                        board['history_priors'][ident] = {k:score[k] for k in ('rating','rd')}
+                self._fit_history(board)
                 if 'awarded_trophy_ids' in before:
                     for trophy_id in before['awarded_trophy_ids']:
                         board['trophies'].pop(trophy_id, None)
@@ -3254,12 +3409,13 @@ class UIUpdates:
             try:
                 manifest = json.loads(ui._download(ui.BASE + "manifest.json?_=" + str(time.time_ns()), 256 * 1024, 10))
                 version = str(manifest.get("userscript_payload_version", ""))
+                standalone_version = str(manifest.get("standalone_version", version))
                 digest = str(manifest.get("userscript_sha256", ""))
                 html_digest = str(manifest.get("standalone_sha256", ""))
                 parts = manifest.get("userscript_parts", [])
                 if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){2}", version) or not re.fullmatch(r"[0-9a-f]{64}", digest) or not re.fullmatch(r"[0-9a-f]{64}", html_digest) or not isinstance(parts, list) or not 1 <= len(parts) <= 80:
                     raise ValueError("Invalid interface release manifest")
-                if version == self.version and digest == self.digest:
+                if version == self.version and digest == self.digest and html_digest == getattr(self, 'html_digest', None):
                     self.checked_at = time.monotonic()
                     return self.status()
                 cache = ui.directory / "coordinated-update.json"
@@ -3279,7 +3435,7 @@ class UIUpdates:
                 if hashlib.sha256(code_bytes).hexdigest() != digest:
                     raise ValueError("Interface verification failed; current version kept")
                 html = ui._download(manifest.get("standalone_url", ""), 12 * 1024 * 1024)
-                if hashlib.sha256(html).hexdigest() != html_digest or f'data-nai-media-payload-version="{version}"'.encode() not in html:
+                if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){2}", standalone_version) or hashlib.sha256(html).hexdigest() != html_digest or f'data-nai-media-payload-version="{standalone_version}"'.encode() not in html:
                     raise ValueError("Standalone verification failed; current version kept")
                 code = code_bytes.decode("utf-8")
                 ui.directory.mkdir(parents=True, exist_ok=True)
@@ -3295,6 +3451,7 @@ class UIUpdates:
                     ui.checked_at = time.monotonic()
                 with self.condition:
                     self.code, self.digest, self.version = code, digest, version
+                    self.html_digest = html_digest
                     self.error = ""
                     # An activation always refers to the version prepared at the time.
                     self.activation = ""
