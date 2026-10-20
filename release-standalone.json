@@ -17,8 +17,8 @@
     "payload/userscript-2.4.5.patch01.txt",
     "payload/userscript-2.4.7.patch01.txt",
     "payload/userscript-2.8.57.video-labels.txt",
-    "payload/userscript-2.8.82.outfit-matching.txt",
-    "payload/userscript-2.8.82.set-scan.txt",
+    "payload/userscript-2.8.95.outfit-matching.txt",
+    "payload/userscript-2.8.95.set-scan.txt",
     "payload/userscript-2.8.82.set-picker.txt",
     "payload/userscript-2.8.93.sets.txt",
     "payload/userscript-2.8.76.set-import.txt",
@@ -43,6 +43,6 @@
     "payload/userscript-2.8.93.viewer-layout.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 149,
-  "version": "2.8.94"
+  "release_build": 150,
+  "version": "2.8.95"
 }

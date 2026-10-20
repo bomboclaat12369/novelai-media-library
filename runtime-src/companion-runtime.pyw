@@ -76,6 +76,11 @@ class OutfitMatcher:
     MODEL_URL = 'https://huggingface.co/Marqo/marqo-fashionSigLIP/resolve/c56244cc94f92419e8369fa71efdaf403b124ce8/onnx/vision_model.onnx'
     MODEL_SHA = 'a7e773846b27a699c45ba7e3978514b7fca420662d7e69e3b9226982f09f4a13'
     MODEL_BYTES = 371715502
+    SCENE_URL = 'https://huggingface.co/Xenova/dinov2-base/resolve/d623d125a29e343851bcedff293fdc8b6bda292b/onnx/model.onnx'
+    SCENE_SHA = 'de9c675d214f0171285f90f1d1d7716bce1c5e280e93826d071d57f7b9314d98'
+    SCENE_BYTES = 346555570
+    # Full-frame resize deliberately retains setting details that a center crop loses.
+    SCENE_RECIPE = SCENE_SHA + ':full-frame224-cls-outer-patches-v1'
 
     def __init__(self, store):
         self.store = store
@@ -84,8 +89,10 @@ class OutfitMatcher:
         self.jobs = {}
         self.contexts = {}
         self.session = None
+        self.scene_session = None
         self.thread = None
         self.vector_cache = {}
+        self.scene_vector_cache = {}
         self.query_cache = {}
         self.cache_hits = 0
         self.encoded_images = 0
@@ -115,7 +122,7 @@ class OutfitMatcher:
         query_bytes = base64.b64decode(encoded, validate=True) if encoded else None
         example_ids, example_images = body.get('example_media_ids', []), body.get('example_images', [])
         if not isinstance(example_ids, list) or not isinstance(example_images, list) or len(example_ids)+len(example_images)>4 or (scan and (example_ids or example_images)):
-            raise ValueError('Choose at most five examples of the same outfit.')
+            raise ValueError('Choose at most five examples of the same outfit or shoot.')
         if any(not isinstance(mid, str) for mid in example_ids) or any(not isinstance(value, str) or len(value)>6*1024*1024 for value in example_images):
             raise ValueError('Invalid matching example.')
         example_bytes = [base64.b64decode(value, validate=True) for value in example_images]
@@ -124,6 +131,9 @@ class OutfitMatcher:
                 raise ValueError('Another Set search is running. Wait for it to finish, then retry.')
             if not any(c['id'] == owner for c in self.store.data['characters']):
                 raise ValueError('Choose a character first.')
+            mode = body.get('matching_mode', self.store.matching_preferences(owner)['mode'])
+            if mode not in ('outfit', 'photoshoot'):
+                raise ValueError('Choose Outfit or Photoshoot matching.')
             media = {m['id']: m for m in self.store.data['media'] if m.get('character_id') == owner and m.get('media_type', 'image') == 'image'}
             if any(mid not in media for mid in example_ids) or (media_id and media_id not in media) or (source_id and source_id not in media):
                 raise ValueError('Choose an image from this character.')
@@ -138,7 +148,7 @@ class OutfitMatcher:
                 self.jobs.pop(expired)
                 self.contexts.pop(expired, None)
             ident = uuid.uuid4().hex
-            self.jobs[ident] = {'id': ident, 'character_id': owner, 'scan': scan, 'running': True, 'phase': 'Preparing Set scan' if scan else 'Preparing outfit search', 'done': 0, 'total': len(candidates), 'results': [], 'individual_results': [], 'scan_results': [], 'assigned_ids': [], 'issues': []}
+            self.jobs[ident] = {'id': ident, 'character_id': owner, 'matching_mode': mode, 'scan': scan, 'running': True, 'phase': 'Preparing Set scan' if scan else 'Preparing ' + mode + ' search', 'done': 0, 'total': len(candidates), 'results': [], 'individual_results': [], 'scan_results': [], 'assigned_ids': [], 'issues': []}
             self.contexts[ident] = {'owner': owner, 'media': candidates, 'stamps': {}, 'query_id': (media_id or source_id) if not scan else '', 'target_set_id': target_set_id, 'example_ids': list(dict.fromkeys(example_ids)), 'example_bytes': example_bytes}
             self.thread = threading.Thread(target=self._run, args=(ident, sets, candidates, query, query_bytes, revision, owner, scan), daemon=True)
             self.thread.start()
@@ -205,6 +215,64 @@ class OutfitMatcher:
         self.session = ort.InferenceSession(str(model), sess_options=options, providers=['CPUExecutionProvider'])
         self.np = np
 
+    def _prepare_scene(self, ident):
+        if self.scene_session is not None:
+            return
+        import onnxruntime as ort
+        model = self.cache / 'dinov2-base.onnx'
+        if not model.exists() or self.store._hash_file(model) != self.SCENE_SHA:
+            self.update(ident, phase='First Photoshoot search: downloading scene model (331 MB)', done=0, total=self.SCENE_BYTES)
+            temp = self.cache / 'dinov2-base.download'
+            try:
+                digest = hashlib.sha256(); received = 0
+                with urllib.request.urlopen(self.SCENE_URL, timeout=45) as response, temp.open('wb') as output:
+                    while True:
+                        self._check_cancel(ident)
+                        block = response.read(1024 * 1024)
+                        if not block:
+                            break
+                        received += len(block)
+                        if received > self.SCENE_BYTES:
+                            raise ValueError('Scene model download exceeded expected size.')
+                        output.write(block); digest.update(block)
+                        self.update(ident, done=received)
+                if received != self.SCENE_BYTES or digest.hexdigest() != self.SCENE_SHA:
+                    raise ValueError('Scene model download was incomplete. Retry Photoshoot search.')
+                os.replace(temp, model)
+            finally:
+                temp.unlink(missing_ok=True)
+        self._check_cancel(ident)
+        self.update(ident, phase='Loading scene model', done=0, total=0)
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = min(4, os.cpu_count() or 1)
+        options.inter_op_num_threads = 1
+        self.scene_session = ort.InferenceSession(str(model), sess_options=options, providers=['CPUExecutionProvider'])
+
+    def _encode_scene(self, source, angle=0):
+        if Image is None:
+            raise ValueError('Pillow is required for image matching.')
+        np = self.np
+        with Image.open(source) as original:
+            im = ImageOps.exif_transpose(original).convert('RGB')
+            if angle:
+                im = im.rotate(angle, expand=True)
+            array = np.asarray(im.resize((224, 224), Image.Resampling.BICUBIC), dtype=np.float32) / 255
+        array = (array - np.array([.485, .456, .406], dtype=np.float32)) / np.array([.229, .224, .225], dtype=np.float32)
+        tensor = np.transpose(array, (2, 0, 1))[None].copy()
+        tokens = self.scene_session.run(None, {self.scene_session.get_inputs()[0].name: tensor})[0]
+        if tokens.shape != (1, 257, 768) or not np.isfinite(tokens).all():
+            raise ValueError('Invalid scene embedding.')
+        # Context is the outer three quarters of the image, not person segmentation.
+        # Normalize patches before pooling so one high-norm patch cannot dominate.
+        patches = tokens[0, 1:].reshape(16, 16, 768)
+        patches = patches / np.maximum(np.linalg.norm(patches, axis=2, keepdims=True), 1e-8)
+        outer = np.ones((16, 16), dtype=bool); outer[4:12, 4:12] = False
+        features = np.stack([tokens[0, 0], patches[outer].mean(axis=0)])
+        norms = np.linalg.norm(features, axis=1, keepdims=True)
+        if not np.isfinite(features).all() or (norms <= 0).any():
+            raise ValueError('Invalid scene features.')
+        return (features / norms).astype(np.float32)
+
     def _encode(self, source, angle=0):
         if Image is None:
             raise ValueError('Pillow is required for image matching.')
@@ -221,31 +289,35 @@ class OutfitMatcher:
             raise ValueError('Invalid image embedding.')
         return vector / norm
 
-    def _vector(self, db, media):
+    def _vector(self, db, media, scene=False, count=True):
         path = (self.store.root / media['stored_rel']).resolve()
         if not path.is_relative_to(self.store.root.resolve()) or not path.is_file():
             raise ValueError('Original image missing or outside library.')
         stat = path.stat()
         stamp = (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
-        key = hashlib.sha256(json_bytes([self.MODEL_SHA, str(path), media.get('sha256'), stamp])).hexdigest()
-        cached = self.vector_cache.get(media['id'])
+        recipe = self.SCENE_RECIPE if scene else self.MODEL_SHA
+        shape = (2, 768) if scene else (768,)
+        cache = self.scene_vector_cache if scene else self.vector_cache
+        key = hashlib.sha256(json_bytes([recipe, str(path), media.get('sha256'), stamp])).hexdigest()
+        cached = cache.get(media['id'])
         if cached and cached[0] == key:
-            self.cache_hits += 1
+            self.cache_hits += int(count)
             return cached[1]
         row = db.execute('SELECT vector FROM embeddings WHERE key=?', (key,)).fetchone()
         if row:
             value = self.np.frombuffer(row[0], dtype=self.np.float32).copy()
-            if value.size == 768 and self.np.isfinite(value).all() and self.np.linalg.norm(value) > 0:
-                self.vector_cache[media['id']] = (key, value)
-                self.cache_hits += 1
+            if value.size == (1536 if scene else 768) and self.np.isfinite(value).all() and (self.np.linalg.norm(value.reshape(shape), axis=-1) > 0).all():
+                value = value.reshape(shape)
+                cache[media['id']] = (key, value)
+                self.cache_hits += int(count)
                 return value
-        vector = self._encode(path)
-        self.encoded_images += 1
+        vector = self._encode_scene(path) if scene else self._encode(path)
+        self.encoded_images += int(count)
         after = path.stat()
         if stamp != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
             raise ValueError('Image changed during matching. Retry search.')
         db.execute('INSERT OR REPLACE INTO embeddings VALUES (?,?)', (key, vector.astype(self.np.float32).tobytes()))
-        self.vector_cache[media['id']] = (key, vector)
+        cache[media['id']] = (key, vector)
         return vector
 
     @staticmethod
@@ -265,22 +337,37 @@ class OutfitMatcher:
             if self.jobs[ident].get('cancel_requested'):
                 raise InterruptedError('Scan stopped. Cached image descriptions are kept.')
 
-    def _orientations(self, db, query, query_bytes, base_vector):
+    def _orientations(self, db, query, query_bytes, base_vector, scene=False):
         import io
-        source_key = self.vector_cache[query['id']][0] if query else hashlib.sha256(query_bytes).hexdigest()
-        key = 'query-orientation-v1:' + self.MODEL_SHA + ':' + source_key
+        recipe = self.SCENE_RECIPE if scene else self.MODEL_SHA
+        cache = self.scene_vector_cache if scene else self.vector_cache
+        shape = (2, 768) if scene else (768,)
+        source_key = cache[query['id']][0] if query else hashlib.sha256(query_bytes).hexdigest()
+        key = 'query-orientation-v1:' + recipe + ':' + source_key
         row = db.execute('SELECT vector FROM embeddings WHERE key=?', (key,)).fetchone()
         rotated = self.np.frombuffer(row[0], dtype=self.np.float32).copy() if row else self.np.array([])
-        if rotated.size != 1536 or not self.np.isfinite(rotated).all():
+        if rotated.size != (3072 if scene else 1536) or not self.np.isfinite(rotated).all() or not (self.np.linalg.norm(rotated.reshape((2,) + shape), axis=-1) > 0).all():
             source = self.store.root / query['stored_rel'] if query else None
-            rotated = self.np.stack([self._encode(source if query else io.BytesIO(query_bytes), angle) for angle in (90, 270)])
+            encode = self._encode_scene if scene else self._encode
+            rotated = self.np.stack([encode(source if query else io.BytesIO(query_bytes), angle) for angle in (90, 270)])
             if query:
                 stat = source.stat()
-                current_key = hashlib.sha256(json_bytes([self.MODEL_SHA, str(source.resolve()), query.get('sha256'), (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)])).hexdigest()
+                current_key = hashlib.sha256(json_bytes([recipe, str(source.resolve()), query.get('sha256'), (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)])).hexdigest()
                 if current_key != source_key:
                     raise ValueError('Image changed during matching. Retry search.')
             db.execute('INSERT OR REPLACE INTO embeddings VALUES (?,?)', (key, rotated.astype(self.np.float32).tobytes()))
-        return self.np.vstack([base_vector, rotated.reshape(2, 768)])
+        return self.np.concatenate([base_vector.reshape((1,) + shape), rotated.reshape((2,) + shape)])
+
+    def _uploaded_vector(self, data, scene=False):
+        import io
+        key = (self.SCENE_RECIPE if scene else self.MODEL_SHA) + ':' + hashlib.sha256(data).hexdigest()
+        vector = self.query_cache.get(key)
+        if vector is None:
+            vector = self._encode_scene(io.BytesIO(data)) if scene else self._encode(io.BytesIO(data))
+            if len(self.query_cache) >= 32:
+                self.query_cache.pop(next(iter(self.query_cache)))
+            self.query_cache[key] = vector
+        return vector
 
     @staticmethod
     def _rank_sets(sets, scores):
@@ -312,10 +399,10 @@ class OutfitMatcher:
         return (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
 
     def _run(self, ident, sets, candidates, query, query_bytes, revision, owner, scan=False):
-        import io
         import sqlite3
         started = time.monotonic()
         self.cache_hits = self.encoded_images = 0
+        photoshoot = self.jobs[ident]['matching_mode'] == 'photoshoot'
         grouped = {mid for group in sets for mid in group.get('media_ids', [])}
         ungrouped = [mid for mid in candidates if mid not in grouped]
         try:
@@ -323,20 +410,26 @@ class OutfitMatcher:
                 self.update(ident, phase='No ungrouped images to scan' if scan and not ungrouped else 'No existing Set images to compare' if scan else 'No library images to compare', unsearchable_sets=len(sets), indexed_images=0)
                 return
             self._prepare(ident)
+            if photoshoot:
+                self._prepare_scene(ident)
             self._check_cancel(ident)
-            issues = [];vectors = {}
+            issues = [];vectors = {};scenes = {}
             self.vector_cache = {mid: value for mid, value in self.vector_cache.items() if mid in candidates}
+            self.scene_vector_cache = {mid: value for mid, value in self.scene_vector_cache.items() if mid in candidates}
             with sqlite3.connect(self.cache / 'embeddings.sqlite') as db:
                 db.execute('CREATE TABLE IF NOT EXISTS embeddings (key TEXT PRIMARY KEY, vector BLOB NOT NULL)')
-                self.update(ident, phase='Checking image cache; indexing new library images', done=0, total=len(candidates))
+                self.update(ident, phase='Checking scene cache; indexing new Photoshoot images' if photoshoot else 'Checking image cache; indexing new library images', done=0, total=len(candidates))
                 for index, (mid, media) in enumerate(candidates.items()):
                     self._check_cancel(ident)
                     try:
                         before = self._stamp(media)
-                        vector = self._vector(db, media)
+                        vector = self._vector(db, media, count=not photoshoot)
+                        scene = self._vector(db, media, scene=True) if photoshoot else None
                         if before != self._stamp(media):
                             raise ValueError('Image changed during matching.')
                         vectors[mid] = vector
+                        if photoshoot:
+                            scenes[mid] = scene
                         self.contexts[ident]['stamps'][mid] = before
                     except Exception as exc:
                         issues.append({'media_id': mid, 'message': str(exc)})
@@ -346,11 +439,29 @@ class OutfitMatcher:
                 db.commit()
                 target_ids = [mid for mid in vectors if not scan or mid in grouped]
                 matrix = self.np.stack([vectors[mid] for mid in target_ids]) if target_ids else None
-                def compare(views):
+                scene_matrix = self.np.stack([scenes[mid] for mid in target_ids]) if photoshoot and target_ids else None
+                def compare(views, scene_views=None):
                     if matrix is None:
                         return {}
-                    values = (views @ matrix.T).max(axis=0)
+                    values = views @ matrix.T
+                    if photoshoot:
+                        # Score each orientation coherently before taking the best one.
+                        # Setting and surrounding detail outweigh clothing; no skin/face classifier.
+                        values = .10 * values + .55 * (scene_views[:, 0] @ scene_matrix[:, 0].T) + .35 * (scene_views[:, 1] @ scene_matrix[:, 1].T)
+                    values = self.np.clip(values.max(axis=0), -1, 1)
                     return {mid: float(values[i]) for i, mid in enumerate(target_ids)}
+                def query_scores(item, data=None):
+                    self._check_cancel(ident)
+                    if item and item['id'] not in vectors:
+                        raise ValueError('A query or selected example could not be checked. Check its original file or remove the example.')
+                    vector = vectors[item['id']] if item else self._uploaded_vector(data)
+                    views = self._orientations(db, item, data, vector)
+                    scene_views = None
+                    if photoshoot:
+                        self._check_cancel(ident)
+                        scene = scenes[item['id']] if item else self._uploaded_vector(data, scene=True)
+                        scene_views = self._orientations(db, item, data, scene, scene=True)
+                    return compare(views, scene_views)
                 results = [];individuals = [];scan_results = []
                 if scan:
                     self.update(ident, phase='Checking non-set images against existing Sets', done=0, total=len(ungrouped))
@@ -358,9 +469,8 @@ class OutfitMatcher:
                         self._check_cancel(ident)
                         if mid in vectors:
                             try:
-                                views = self._orientations(db, candidates[mid], None, vectors[mid])
                                 targets = [s for s in sets if s["id"] == self.contexts[ident]["target_set_id"]] if self.contexts[ident].get("target_set_id") else sets
-                                ranked = self._rank_sets(targets, compare(views))
+                                ranked = self._rank_sets(targets, query_scores(candidates[mid]))
                                 row = self._description(candidates[mid])
                                 row.update(results=ranked[:5], stronger=self._stronger_lead(ranked))
                                 scan_results.append(row)
@@ -371,32 +481,16 @@ class OutfitMatcher:
                         self.update(ident, done=index+1)
                     scan_results.sort(key=lambda row: (not row['stronger'], -(row['results'][0]['score'] if row['results'] else -1), row['media_id']))
                 else:
-                    self.update(ident, phase='Analyzing query outfit and orientation', done=0, total=0)
-                    if query:
-                        if query['id'] not in vectors:
-                            raise ValueError('Query image could not be read. Check that its original file exists.')
-                        base_vector = vectors[query['id']]
-                    else:
-                        key = hashlib.sha256(query_bytes).hexdigest()
-                        base_vector = self.query_cache.get(key)
-                        if base_vector is None:
-                            base_vector = self._encode(io.BytesIO(query_bytes))
-                            if len(self.query_cache) >= 16:
-                                self.query_cache.pop(next(iter(self.query_cache)))
-                            self.query_cache[key] = base_vector
-                    views = self._orientations(db, query, query_bytes, base_vector)
-                    scores = compare(views)
+                    self.update(ident, phase='Comparing setting, surrounding details and outfit' if photoshoot else 'Analyzing query outfit and orientation', done=0, total=0)
+                    scores = query_scores(query, query_bytes)
                     evidence = [scores]
                     context = self.contexts[ident]
                     for mid in context['example_ids']:
                         if mid == context['query_id']:
                             continue
-                        if mid not in vectors:
-                            raise ValueError('A selected example could not be checked. Remove it or retry.')
-                        evidence.append(compare(self._orientations(db, candidates[mid], None, vectors[mid])))
+                        evidence.append(query_scores(candidates[mid]))
                     for data in context['example_bytes']:
-                        vector = self._encode(io.BytesIO(data))
-                        evidence.append(compare(self._orientations(db, None, data, vector)))
+                        evidence.append(query_scores(None, data))
                     if len(evidence)>1:
                         # Preserve a strong angle while rewarding agreement across outfit examples.
                         scores = {mid: .75*max(e[mid] for e in evidence)+.25*sum(e[mid] for e in evidence)/len(evidence) for mid in scores}
@@ -1949,6 +2043,29 @@ class LibraryStore:
 
     def character(self, character_id: str) -> dict[str, Any] | None:
         return next((c for c in self.data["characters"] if c["id"] == character_id), None)
+
+    def matching_preferences(self, character_id, mode=None):
+        with self.lock:
+            character = self.character(character_id)
+            if not character:
+                raise ValueError('Choose a character first.')
+            if mode is not None:
+                if mode not in ('outfit', 'photoshoot'):
+                    raise ValueError('Choose Outfit or Photoshoot matching.')
+                previous = character.get('matching_mode')
+                if previous != mode:
+                    character['matching_mode'] = mode
+                    try:
+                        self.save()
+                    except Exception:
+                        if previous is None:
+                            character.pop('matching_mode', None)
+                        else:
+                            character['matching_mode'] = previous
+                        raise
+            saved = character.get('matching_mode')
+            default = 'photoshoot' if re.match(r'^mikayla\b', character.get('name', '').strip(), re.I) else 'outfit'
+            return {'character_id': character_id, 'mode': saved if saved in ('outfit', 'photoshoot') else default}
 
     def profile_request(self, action, body):
         with self.lock:
@@ -3818,6 +3935,10 @@ class MediaHandler(BaseHTTPRequestHandler):
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._send_json(200, self.store.outfit_matcher.status(query.get("id", [""])[0]))
                 return
+            if path == "/api/sets/matching-preferences":
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._send_json(200, self.store.matching_preferences(query.get('character_id', [''])[0]))
+                return
             if path == "/api/ui-update/status":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._send_json(200, self.server.ui_updates.status(query.get("after", [None])[0]))
@@ -3837,7 +3958,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     self._send_json(200, {"revision": self.store.revision})
                 return
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "character_profiles": True, "image_set_battles": True, "outfit_matching": True, "outfit_library_scan": True, "persistent_rapid_review": True, "set_examples": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "character_profiles": True, "image_set_battles": True, "outfit_matching": True, "outfit_library_scan": True, "photoshoot_matching": True, "persistent_rapid_review": True, "set_examples": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/duplicate-review/catalog":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -4013,6 +4134,12 @@ class MediaHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/sets/scan":
                 self._send_json(200, self.store.outfit_matcher.start(self._read_json(), scan=True))
+                return
+            if path == "/api/sets/matching-preferences":
+                body = self._read_json()
+                if 'mode' not in body or body['mode'] is None:
+                    raise ValueError('Choose Outfit or Photoshoot matching.')
+                self._send_json(200, self.store.matching_preferences(str(body.get('character_id', '')), body['mode']))
                 return
             if path == "/api/sets/match-cancel":
                 self._send_json(200, self.store.outfit_matcher.cancel(str(self._read_json().get('id', ''))))

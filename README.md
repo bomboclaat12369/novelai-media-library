@@ -2,6 +2,16 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Photoshoot matching (standalone 2.8.95 / companion 2.7.58)
+
+**Match by: Outfit / Photoshoot** is saved separately for each person. Nikki and other existing people retain Outfit mode; a person named Mikayla defaults to Photoshoot unless a preference has been saved. The control is available in Find matching Sets (including import queues), Scan for Sets and Find missing Set images. The new mode prioritizes the setting and surrounding visual details while retaining outfit similarity as supporting evidence. Every readable image in every set remains eligible, as do ungrouped images in Main, Review, Purgatory and Unfiled. Results still require manual selection and never assign or import anything on their own.
+
+Photoshoot mode adds a pinned, SHA-256-verified **DINOv2 Base** ONNX model (346,555,570 bytes, approximately 331 MiB). Its full-frame feature and pooled outer-region patch features are combined with the existing FashionSigLIP feature at weights 55% / 35% / 10%. The full frame is retained instead of center-cropped; the outer regions are contextual cues, not guaranteed background segmentation. The best coherent orientation (upright or either sideways rotation) is used. Each set is ranked by its strongest matching member, without a bonus for having more images. This is visual retrieval, not face identification or a classifier for clothing removal. Similar-looking settings can still be confused; close-ups with little visible context remain harder.
+
+The first Photoshoot search downloads the additional model and indexes that person's images. Scene features and rotated query features persist in a separate, versioned cache alongside the existing outfit cache. New or replaced images are reindexed; repeat searches reuse the cache. No images are sent to a service. Failed downloads or image checks are reported instead of silently falling back to Outfit results. Photoshoot scans initially show **All remaining images**, since a weak lead is not proof that no matching set exists. Search scores are not calibrated probabilities.
+
+Validation covers unchanged Outfit retrieval, mode persistence and isolation, cache reuse/invalidation, all-member and holding-area scope, explicit assignment, scan/reverse-scan UI, and a real-model smoke check on synthetic scenes with changed foreground clothing. This does not measure recall on the user's actual photoshoots. Restart the companion for the new engine, then update standalone. NovelAI remains at UI 2.8.93.
+
 ## Faster rapid-review controls (standalone 2.8.94 / companion 2.7.57)
 
 Rapid Review now puts **Create set + assign**, **Find matching sets**, and **Add selected to Review** in a prominent, consistently ordered row with distinct colors and icons. **Add to existing set** sits beside Crop image. The selected count and selection controls stay above the actions; current-image flags and categories form a separate compact section. Whole category chips are clickable, with visible selected states, subtle category accents and a dashed treatment for ghost categories. Carry categories, category creation and the redundant Sets menu were removed from Rapid Review.

@@ -1,0 +1,100 @@
+// On-demand, same-character Set assignment review. Never assigns from a score alone.
+(() => {
+  const root=document.getElementById('nai-media-host')?.shadowRoot;if(!root)return;
+  const request=(...args)=>root.naiOutfitRequest(...args),sessions=new Map();
+  const make=(tag,cls,text)=>{const el=document.createElement(tag);if(cls)el.className=cls;if(text)el.textContent=text;return el;};
+  const style=make('style');style.textContent=`
+    .naiScanReview{display:grid;grid-template-columns:minmax(150px,220px) minmax(0,1fr);gap:18px;margin-top:16px}
+    .naiScanSource{min-width:0}.naiScanSource img{width:100%;height:330px;object-fit:contain;background:#090b18;cursor:zoom-in}
+    .naiScanSource h3{overflow-wrap:anywhere}.naiScanSuggestions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;align-items:start}
+    .naiScanSuggestions .naiMatchCard{height:auto}.naiScanTools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0}
+    .naiScanTools select{width:auto;max-width:100%}.naiScanError{color:#ffd5aa;white-space:pre-wrap;margin:8px 0}
+    @media(max-width:800px){.naiScanReview{grid-template-columns:1fr}.naiScanSource img{height:220px}.naiScanSuggestions{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}}
+  `;root.append(style);
+  root.naiScanForSets=async (owner,targetSetId=null)=>{
+    if(!owner){alert('Choose a character first.');return;}
+    if(root.querySelector('.naiScanWrap'))return;
+    let session={id:null,job:null};
+    const wrap=make('div','naiMatchWrap naiScanWrap'),dialog=make('div','naiMatchDialog');dialog.setAttribute('role','dialog');dialog.setAttribute('aria-label','Scan for Sets');dialog.setAttribute('aria-modal','true');wrap.append(dialog);
+    const head=make('div','naiMatchHead'),title=make('strong','',targetSetId?'Find missing Set images':'Scan for Sets'),close=make('button','','Close');head.append(title,close);
+    const modeControl=root.naiMatchingModeControl(),mode=modeControl.select;mode.disabled=true;
+    const info=make('p','naiMatchNote','Checks this character’s non-set images in Main, Review and Purgatory against existing Sets. Every assignment needs your approval. New images are indexed once; later scans reuse the cache. Close and reopen this window to return to the scan, or use Stop scan to end it.');
+    const tools=make('div','naiScanTools'),start=make('button','','Start scan'),stop=make('button','','Stop scan'),filter=make('select'),prev=make('button','','Previous'),next=make('button','','Next');filter.setAttribute('aria-label','Scan result filter');stop.hidden=true;filter.hidden=true;prev.hidden=true;next.hidden=true;
+    start.disabled=true;tools.append(start,stop,filter,prev,next);
+    const status=make('div','naiMatchStatus'),error=make('div','naiScanError'),progress=make('progress'),review=make('div','naiScanReview'),position=make('div','naiMatchNote');status.setAttribute('role','status');error.setAttribute('role','alert');progress.style.width='100%';progress.hidden=true;
+    const note=make('p','naiMatchNote','Stronger leads are a conservative similarity filter, not verified confidence. Other possibilities stay available. “No strong lead” does not prove an image has no matching Set.');
+    if(targetSetId)info.textContent='Uses all searchable images in this Set to find missing members among this character’s non-set images in Main, Review and Purgatory. Select matches to add; nothing is assigned automatically.';
+    dialog.append(head,modeControl.element,info,tools,status,error,progress,position,review,note);root.append(wrap);
+    let closed=false,running=false,saving=false,ready=false,index=0,expanded=false,job=null,savedMode='outfit',previousFocus=root.activeElement;
+    function selectSession(value){savedMode=value;modeControl.update(value);const key=owner+':'+(targetSetId||'')+':'+value;session=sessions.get(key)||{id:null,job:null};sessions.set(key,session);job=session.job;index=0;expanded=false;filter.replaceChildren();review.replaceChildren();position.textContent='';filter.hidden=prev.hidden=next.hidden=true;}
+    mode.onchange=async()=>{if(running||saving||!ready)return;saving=true;mode.disabled=start.disabled=true;error.textContent='';try{const pref=await root.naiMatchingPreferences(owner,mode.value);selectSession(pref.mode);}catch(e){mode.value=savedMode;error.textContent=e.message;return;}finally{saving=false;mode.disabled=start.disabled=false;}if(!closed)await resume();};
+    const finish=()=>{if(saving)return;closed=true;wrap.remove();document.removeEventListener('keydown',escape,true);if(previousFocus?.isConnected)previousFocus.focus({preventScroll:true});};
+    const escape=e=>{if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();const zoom=dialog.querySelector('.naiMatchZoom');if(zoom)zoom.remove();else finish();}};
+    document.addEventListener('keydown',escape,true);close.onclick=finish;wrap.onclick=e=>{if(e.target===wrap)finish();};
+    function image(mid,alt,container){
+      const img=make('img');img.alt=alt;container.append(img);root.naiLoadThumbnail(mid,img);
+      img.onclick=()=>{if(!img.currentSrc)return;const zoom=make('div','naiMatchZoom'),large=make('img');large.src=img.src;large.alt=alt;zoom.append(large);dialog.append(zoom);zoom.onclick=()=>zoom.remove();root.naiOutfitOriginal(mid).then(blob=>{if(zoom.isConnected){const url=URL.createObjectURL(blob);large.onload=large.onerror=()=>URL.revokeObjectURL(url);large.src=url;}}).catch(()=>{});};return img;
+    }
+    function rows(){
+      const assigned=new Set(job?.assigned_ids||[]);return (job?.scan_results||[]).filter(row=>!assigned.has(row.media_id)&&(filter.value==='all'||filter.value==='stronger'&&row.stronger||filter.value==='other'&&!row.stronger));
+    }
+    function filters(){
+      const value=filter.value||(job?.matching_mode==='photoshoot'?'all':'stronger'),pending=(job?.scan_results||[]).filter(row=>!(job.assigned_ids||[]).includes(row.media_id)),stronger=pending.filter(row=>row.stronger).length;
+      filter.replaceChildren();for(const [id,label] of [['stronger',`Stronger leads (${stronger})`],['other',`Other possibilities (${pending.length-stronger})`],['all',`All remaining images (${pending.length})`]]){const option=make('option','',label);option.value=id;filter.append(option);}filter.value=value;
+    }
+    function paint(){
+      filters();review.replaceChildren();const list=rows();index=Math.max(0,Math.min(index,list.length-1));const row=list[index];
+      filter.hidden=false;prev.hidden=next.hidden=!list.length;prev.disabled=index===0;next.disabled=index>=list.length-1;
+      position.textContent=row?`${index+1} / ${list.length} · ${job.assigned_ids.length} assigned this scan`:'';
+      if(!row){review.style.display='block';review.append(make('p','','No images in this view. Choose All remaining images to inspect weaker or ambiguous suggestions.'));return;}
+      review.style.display='';review.dataset.mediaId=row.media_id;
+      const source=make('div','naiScanSource'),suggestions=make('div','naiScanSuggestions');review.append(source,suggestions);source.append(make('h3','',row.name));image(row.media_id,row.name,source);source.append(make('p','naiMatchNote',row.placement),make('p','naiMatchNote',row.stronger?(job.matching_mode==='photoshoot'?'Stronger lead — compare the setting and shoot details.':'Stronger lead — compare the outfit details.'):'No strong lead — these are only the closest possibilities.'));
+      for(const result of row.results.slice(0,expanded?5:3)){
+        const card=make('article','naiMatchCard naiScanSuggestion');card.dataset.setId=result.set_id;card.append(make('h3','',result.name));const previews=make('div','naiMatchImages');card.append(previews);suggestions.append(card);
+        for(const mid of result.matches)image(mid,'Example from '+result.name,previews);
+        const accept=make('button','naiScanAssign','Add to '+result.name);card.append(accept);
+        accept.onclick=async()=>{
+          if(saving||running)return;saving=true;error.textContent='';const controls=[...dialog.querySelectorAll('button,select')];controls.forEach(el=>el.disabled=true);
+          try{
+            await request('/api/sets/scan-assign',{job_id:job.id,media_id:row.media_id,set_id:result.set_id});
+            job.assigned_ids.push(row.media_id);await root.naiOutfitRefreshLibrary();expanded=false;
+          }catch(e){error.textContent=e.message;}finally{saving=false;controls.forEach(el=>el.disabled=false);paint();}
+        };
+      }
+      if(!row.results.length)suggestions.append(make('p','','No searchable Set examples are available.'));
+      if(!expanded&&row.results.length>3){const more=make('button','','Show all five suggestions');more.onclick=()=>{expanded=true;paint();};source.append(more);}
+    }
+    filter.onchange=()=>{index=0;expanded=false;paint();};prev.onclick=()=>{index--;expanded=false;error.textContent='';paint();};next.onclick=()=>{index++;expanded=false;error.textContent='';paint();};
+    async function follow(initial){
+      running=true;mode.disabled=true;start.disabled=true;stop.hidden=false;progress.hidden=false;filter.hidden=prev.hidden=next.hidden=true;review.replaceChildren();position.textContent='';
+      try{
+        job=initial;
+        while(!closed){
+          session.job=job;status.textContent=(job.matching_mode==='photoshoot'?'Photoshoot · ':'Outfit · ')+job.phase+(job.running&&job.total?' · '+job.done+' / '+job.total:'');
+          if(job.cached_images!==undefined)status.textContent+=' · '+job.cached_images+' cached, '+job.new_images+' newly indexed';
+          if(job.total){progress.max=job.total;progress.value=job.done;}else progress.removeAttribute('value');
+          if(!job.running){
+            if(job.error)throw Error(job.error);
+            status.textContent+=' · '+(job.elapsed_seconds||0).toFixed(1)+'s';
+            if(job.issues?.length||job.unsearchable_sets){error.textContent='Some images could not be checked. These results are incomplete.';status.textContent+='\nIncomplete coverage: '+(job.issues?.length||0)+' image issues; '+(job.unsearchable_sets||0)+' Sets without searchable images.';}
+            if(!job.cancelled&&job.scan_results?.length)paint();
+            break;
+          }
+          await new Promise(resolve=>setTimeout(resolve,800));if(!closed)job=await request('/api/sets/match-status?id='+encodeURIComponent(job.id));
+        }
+      }catch(e){if(!closed)error.textContent=e.message;}finally{running=false;if(!closed){mode.disabled=!ready;start.disabled=!ready;start.textContent='Run new scan';stop.hidden=true;progress.hidden=true;}}
+    }
+    start.onclick=async()=>{
+      if(running||saving||!ready)return;running=true;mode.disabled=start.disabled=true;error.textContent='';
+      try{const fresh=await request('/api/sets/scan',{character_id:owner,matching_mode:mode.value,...(targetSetId?{target_set_id:targetSetId}:{})});session.id=fresh.id;index=0;expanded=false;await follow(fresh);}
+      catch(e){error.textContent=e.message;running=false;mode.disabled=start.disabled=false;}
+    };
+    stop.onclick=async()=>{stop.disabled=true;try{await request('/api/sets/match-cancel',{id:session.id});status.textContent='Stopping after the current image…';}catch(e){error.textContent=e.message;}finally{stop.disabled=false;}};
+    async function resume(){
+      if(session.id){try{await follow(await request('/api/sets/match-status?id='+encodeURIComponent(session.id)));}catch(e){session.id=null;error.textContent=e.message;}}
+      else{start.textContent='Start scan';status.textContent=mode.value==='photoshoot'?'Ready. First use downloads a 331 MB scene model and builds the scene cache. All remaining images are shown by default; each assignment needs your approval.':'Ready. The scan changes nothing until you click Add to a Set.';}
+    }
+    try{const pref=await root.naiMatchingPreferences(owner);if(closed)return;selectSession(pref.mode);ready=true;mode.disabled=start.disabled=false;await resume();}catch(e){error.textContent=e.message;}
+    if(!closed)start.focus({preventScroll:true});
+  };
+})();
