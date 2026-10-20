@@ -1,0 +1,21 @@
+// Shared viewer presentation; management remains available in standalone.
+(()=>{
+ const root=document.getElementById('nai-media-host')?.shadowRoot;if(!root)return;
+ const lite=!!root.naiViewerOnly,style=document.createElement('style');
+ style.textContent=`
+ #replacementBtn,#naiAddProfilePhoto,#naiPlaceImage,#naiViewerRemoval,#naiViewerRank,.naiPlaceSet,.naiSetRating{display:none!important}
+ .naiEditLibrary{width:min(1000px,96vw)!important;max-height:92vh!important;background:#121a29!important;border:1px solid #35435b!important;border-radius:14px!important}
+ .naiEditLibrary [hidden]{display:none!important}.naiEditLibrary .modalBody{padding:20px!important}.naiEditLibrary .modalHead{padding:18px 20px!important}.naiEditLibrary .modalTitle{font-size:18px!important;font-weight:600!important}.naiEditEyebrow{color:#94a8c5;font:10px system-ui;letter-spacing:.16em;margin-bottom:5px}
+ .naiEditLibrary .modalHead>div{flex:1;min-width:0}
+ .naiEditTabs{display:flex;gap:6px;padding:0 20px 14px;border-bottom:1px solid #2b3850}.naiEditTabs button{padding:8px 12px!important;background:transparent!important;border-color:transparent!important;color:#9eafc7!important}.naiEditTabs button[aria-pressed=true]{background:#292c47!important;border-color:#575275!important;color:#e3dafb!important}
+ .naiEditMediaHead{display:flex;gap:18px;align-items:center;margin-bottom:20px}.naiEditMediaHead img{width:88px;height:106px;object-fit:contain;border-radius:8px;background:#090f1b}.naiEditMediaHead>div{min-width:0}.naiEditMediaHead strong{display:block;font-size:13px;overflow-wrap:anywhere}.naiEditMediaHead p{margin:8px 0}.naiEditMediaHead #naiEditMembershipNames{font-size:12px;color:#c3b4eb}
+ .naiEditSection{border-top:1px solid #2a374b;padding:15px 0}.naiEditSection h3{margin:0 0 10px;font:600 12px system-ui;color:#b5c6dc}.naiEditSection p{font-size:11px!important;line-height:1.6;margin-bottom:0}.naiEditSection summary{cursor:pointer;font-size:12px;color:#a3b6cf}
+ .naiEditActions{display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin-top:8px}.naiEditLibrary button{width:auto!important;min-width:0!important;font-size:12px!important;padding:7px 10px!important}.naiEditLibrary button[aria-pressed=true]{border-color:#a48cd7!important;background:#353048!important}.naiEditChoices,.naiEditChoices #editMediaCats,.naiEditChoices .checkGrid{display:flex!important;flex-wrap:wrap;gap:7px;align-items:center}.naiEditChoices .check{width:auto!important;padding:8px 10px!important;background:#1b2639!important;border:1px solid #34425a!important;border-radius:7px!important;gap:7px!important;margin:0!important}.naiEditChoices input{width:14px!important;height:14px!important}
+ #naiCategoryOrder .row[data-order-category]{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #263248;margin:0!important}#naiCategoryOrder .row[data-order-category] .check{padding:5px 7px!important;margin:0!important;font-size:11px}#naiCategoryOrder .row[data-order-category] .grow{font-size:13px}.naiEditLibrary .modalFoot{border-top:1px solid #2b3850!important;padding:12px 20px!important}.naiEditLibrary #naiEditStatus{margin-right:auto;font-size:12px;color:#ffbdac}
+ .modalWrap[data-image-import=true] [hidden]{display:none!important}.modalWrap[data-image-import=true] .dropZone{min-height:180px}.modalWrap[data-image-import=true] .modalBody>.muted{display:none!important}
+ `;
+ if(lite)style.textContent+=`
+ #addMediaBtn,#addCharacterBtn,#addCategoryBtn,#editBtn,#editImagesBtn,#deleteBtn,#undoBtn,#naiManageSetsBtn,#naiStatsBtn,#naiSetsScanBtn,#naiAddToSetMedia,.naiViewerFindMatches,.naiRemoveMembership,.naiSetBrowserActions,#naiSetRenameBtn,#naiSetCategoriesBtn,#naiSetEditBtn,#naiArrangeSet,#naiFindMissingMembers,.naiSetCover216,.naiSetPick .naiSetCoverBtn{display:none!important}
+ `;
+ root.append(style);queueMicrotask(()=>root.append(style));
+})();

@@ -1,0 +1,6 @@
+// Small shared API adapter for profiles and viewing; no outfit/import interfaces.
+(()=>{
+ const root=document.getElementById('nai-media-host')?.shadowRoot;if(!root)return;
+ root.naiOutfitRequest=(path,body)=>new Promise((resolve,reject)=>GM_xmlhttpRequest({method:body?'POST':'GET',url:'http://127.0.0.1:8765'+path,headers:{'Content-Type':'application/json',Origin:'https://novelai.net'},data:body?JSON.stringify(body):null,timeout:30000,onload:r=>{try{const value=JSON.parse(r.responseText);if(r.status<200||r.status>=300)throw Error(value.error||'Request failed');resolve(value)}catch(e){reject(e)}},onerror:()=>reject(Error('Could not reach companion.')),ontimeout:()=>reject(Error('Companion did not respond.'))}));
+ root.naiOutfitOriginal=id=>new Promise((resolve,reject)=>GM_xmlhttpRequest({method:'GET',url:'http://127.0.0.1:8765/api/media/'+encodeURIComponent(id)+'/original',responseType:'blob',timeout:120000,onload:r=>r.status===200?resolve(r.response):reject(Error('Original image is unavailable.')),onerror:()=>reject(Error('Could not load original image.')),ontimeout:()=>reject(Error('Image loading timed out.'))}));
+})();

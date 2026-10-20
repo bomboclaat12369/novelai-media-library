@@ -2,6 +2,18 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Viewing and library management (UI 2.8.93 / companion 2.7.56)
+
+NovelAI is now a lighter viewer. Browsing, sets, sorting, profiles and profile editing remain, along with favorites, featured, image cropping, video thumbnail selection and timestamps. Imports, organization, deletion, rapid review, set detection and battles belong in standalone. Heavy management modules are omitted from the NovelAI release; shared viewing code stays shared. Versioned modules and Git history preserve the removed functionality if it is needed again.
+
+Standalone **Edit Library** separates selected-media actions from library setup. Compact controls provide placement, set membership, Review/Purgatory, removal flags and Needs replacement. File actions are collapsed. The viewer toolbar no longer repeats these controls, and **Add to Set** only appears for images without a set. Profile photos are managed from the profile page; Focus comparisons and rating history are confined to Battles.
+
+**+Media** opens image uploads directly. Dropping files anywhere while the import dialog is open adds them to the current selection; dropping files elsewhere opens it. Video and URL imports remain in Edit Library. **Remove from holding area** leaves Review/Purgatory without deleting the file, promoting it to Main or changing set membership. Unassigned files remain accessible in **Unfiled**. **Wide** provides a remembered, single viewer spanning the dual-view width.
+
+The addition-date sort is labeled for the current category and uses recorded category membership dates. Older memberships without such a date fall back to the import date. Profile photo selection now offers sorting alongside category and filename filtering. Viewer badges emphasize the rank emblem with smaller MMR text, and removal thumbnails show only a red flag.
+
+Battle preloading uses lightweight rating estimates instead of repeatedly fitting the complete comparison history. Actual votes still run the full history fit, preserving rating behavior. Library redraws are deferred while Battles is open. **Leaderboard** reliably returns from Recent movement, and rating history uses a sampled timeline without a dot for every recalculation. This reduces avoidable work; actual transition speed still depends on library size and storage.
+
 ## Collection ranking and review (UI 2.8.92 / companion 2.7.55)
 
 Normal matchmaking spreads initial comparisons across unfinished entries before refining placements. **Finish placements** prioritizes unfinished entries and stops when the eligible scope is placed. Established entries can still serve as useful opponents; equal appearance counts are not the objective. Repeats remain possible when needed, with recent-pair avoidance and opponent diversity. There are no rating bonuses, resets or inactivity decay. The joint-history rating model is unchanged.

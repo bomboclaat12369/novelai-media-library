@@ -42,6 +42,11 @@ with tempfile.TemporaryDirectory() as directory:
     owner['set_categories']=[{'id':'dresses','name':'Dresses'}]
     for i,item in enumerate(items):item['categories']=['dress' if i%2==0 else 'bikini']
     for group in store.data['sets']:group['categories']=['dresses']
+    if os.environ.get('NAI_VIEWER_DEMO') == '1':
+        import subprocess
+        clip=Path(directory)/'fixture-video.webm'
+        subprocess.run(['ffmpeg','-loglevel','error','-f','lavfi','-i','color=c=blue:s=320x240:d=2','-c:v','libvpx','-y',str(clip)],check=True)
+        store.import_bytes(clip.read_bytes(),'Fixture video.webm',owner['id'],[],{},'video/webm')
     if os.environ.get('NAI_RANKS_DEMO') == '1':
         for item in items:
             item['in_all'] = True

@@ -1,5 +1,32 @@
 # Stability regression checks
 
+## UI 2.8.93 / runtime 2.7.56 validation
+
+Three focused checks in `test_runtime_viewer_release.py` passed: leaving holding
+areas without changing set membership or promoting to Main (including Undo),
+category membership timestamps, and speculative forecasts that neither mutate
+saved state nor fit history, while a real vote fits it exactly once.
+
+`test-viewer-release.cjs` passed in Chromium for standalone and NovelAI. Coverage
+includes the redesigned editor, retained favorites/featured, actual image crop
+saving, profile editing and sorted/category-filtered photo selection, wide view,
+image-only imports and page-wide drops, Review/Purgatory removal, viewer badges,
+Recent movement returning to Leaderboard, and history without plotted circles.
+The NovelAI fixture also plays a generated video, saves a timestamp and thumbnail,
+and checks the absence of management controls. No page errors were reported.
+The editor was visually inspected, and release syntax/hashes were checked.
+
+Run the focused checks with:
+
+```sh
+python3 -m unittest discover -s tests -p test_runtime_viewer_release.py -v
+NAI_CHROMIUM=/path/to/chromium node tests/test-viewer-release.cjs
+```
+
+These use synthetic temporary libraries, not the user's installed Windows app.
+The broader historical suites were not rerun for this release. The legacy
+review-DOM baseline below remains unchanged.
+
 ## UI 2.8.92 / runtime 2.7.55 validation
 
 Focused runtime checks passed in `test_runtime_collection_ranking.py`,

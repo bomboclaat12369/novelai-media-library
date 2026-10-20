@@ -954,13 +954,12 @@ class BattleRankings:
         for outcome in ('left','right','tie','skip'):
             # Do not copy the growing history or undo buffers for previews.
             forecast={key:copy.deepcopy(board.get(key,default)) for key,default in
-                      (('ratings',{}),('session',{}),('scheduler',{}),('recent',[]),('votes',0),('history_priors',{}))}
-            forecast['history'] = list(board.get('history', []))
+                      (('ratings',{}),('session',{}),('scheduler',{}),('recent',[]),('votes',0))}
             forecast['recent']=(forecast['recent']+[[pair['left'],pair['right']]])[-32:]
             if outcome!='skip':
                 self._apply_comparison(forecast,pair,outcome)
-                forecast['history'].append({'id':'forecast','type':'vote','left':pair['left'],'right':pair['right'],'outcome':outcome})
-                self._fit_history(forecast, confidence=False)
+                # A cheap provisional estimate is sufficient for image preloading.
+                # Only the actual saved vote fits the complete comparison history.
             self._advance_pair(forecast,entries,pair,outcome)
             upcoming=forecast['session'].get('pair')
             if upcoming:
@@ -1368,6 +1367,13 @@ class LibraryStore:
             media["main_added_at"] = now_iso()
 
     def _change_media(self, media: dict[str, Any], changes: dict[str, Any], label: str) -> dict[str, Any]:
+        dates = dict(media.get('category_added_at') or {})
+        added = set(changes.get('categories', media.get('categories', []))) - set(media.get('categories', []))
+        for flag, category in [('favorite','favorites'),('featured','featured'),('in_review','review'),('in_purgatory','purgatory')]:
+            if changes.get(flag) and not media.get(flag):added.add(category)
+        if added:
+            dates.update({key:now_iso() for key in added})
+            changes = {**changes, 'category_added_at':dates}
         if not self._in_main(media) and self._in_main({**media, **changes}):
             changes = {**changes, "main_added_at": now_iso()}
         changes = {k: v for k, v in changes.items() if media.get(k) != v}
@@ -1614,6 +1620,9 @@ class LibraryStore:
                     item['in_videos'] = main and item['media_type'] == 'video'
                     if main:
                         item['main_added_at'] = now_iso()
+                    item['category_added_at'] = {key:now_iso() for key in item.get('categories',[])}
+                    if item['in_review']:item['category_added_at']['review']=now_iso()
+                    if item['in_purgatory']:item['category_added_at']['purgatory']=now_iso()
                     self.data['media'].append(item)
                     promoted.append(item['id'])
                 # Remove pending references before any Set helper persists the transaction.
@@ -2453,6 +2462,7 @@ class LibraryStore:
             }
             if not pending:
                 item["main_added_at"] = item["created_at"]
+            item['category_added_at'] = {key:item['created_at'] for key in categories}
             self._apply_resolution_flag(item)
             self.data.setdefault("rapid_queue" if pending else "media", []).append(item)
             self.save()
@@ -3040,6 +3050,13 @@ class LibraryStore:
             if bool(m.get("favorite")) == bool(favorite):
                 return m
             return self._change_media(m, {"favorite": bool(favorite)}, "Change favorite")
+
+    def clear_holding(self, media_id: str) -> dict[str, Any]:
+        with self.lock:
+            m = self.media_item(media_id)
+            if not m:raise KeyError('Media not found')
+            # Explicitly leave both holding areas without promoting or changing sets.
+            return self._change_media(m, {'in_review':False,'in_purgatory':False,'in_all':False,'in_videos':False,'main_explicit':False}, 'Remove from holding area')
 
     def set_review(self, media_id: str, in_review: bool) -> dict[str, Any]:
         with self.lock:
@@ -4149,6 +4166,11 @@ class MediaHandler(BaseHTTPRequestHandler):
                 body = self._read_json()
                 item = self.store.set_favorite(match.group(1), bool(body.get("favorite")))
                 self._send_json(200, item)
+                return
+            match = re.fullmatch(r"/api/media/([0-9a-f]+)/clear-holding", path)
+            if match:
+                self._read_json()
+                self._send_json(200,self.store.clear_holding(match.group(1)))
                 return
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/review", path)
             if match:
