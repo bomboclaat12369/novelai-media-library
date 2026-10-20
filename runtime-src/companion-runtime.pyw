@@ -2876,10 +2876,10 @@ class LibraryStore:
             for media_id in members:
                 media = self.media_item(media_id)
                 was_in_main = self._in_main(media) if media else False
-                if media and media.get("in_purgatory"):
+                if media and (media.get("in_purgatory") or media.get("in_review")):
                     media["in_purgatory"] = False
                     media["in_review"] = False
-                    media["in_videos" if media.get("media_type") == "video" else "in_all"] = self._main_categories(media)
+                    media["in_videos" if media.get("media_type") == "video" else "in_all"] = self._main_categories(media) or bool(media.get("main_explicit"))
                 elif kind == "set" and not preserve_placement and media and not self._main_categories(media) and not media.get("main_explicit"):
                     media["in_videos" if media.get("media_type") == "video" else "in_all"] = False
                 if media:
@@ -2937,7 +2937,7 @@ class LibraryStore:
             members = previous_members if media_ids is None else self._validate_set_media(character_id, list(media_ids or []))
             if media_ids is None:
                 members = self._validate_set_media(character_id, members)
-            assigned_ids = set(add_media_ids) if add_media_ids is not None else (set(members) if media_ids is not None else set())
+            assigned_ids = set(add_media_ids) if add_media_ids is not None else (set(members) - previous_member_ids if media_ids is not None else set())
             if remove_media_ids is not None:
                 assigned_ids = set()
             if kind == "set" and assigned_ids:
@@ -2946,10 +2946,10 @@ class LibraryStore:
             for media_id in members:
                 media = self.media_item(media_id)
                 was_in_main = self._in_main(media) if media else False
-                if media_id in assigned_ids and media and media.get("in_purgatory"):
+                if media_id in assigned_ids and media and (media.get("in_purgatory") or media.get("in_review")):
                     media["in_purgatory"] = False
                     media["in_review"] = False
-                    media["in_videos" if media.get("media_type") == "video" else "in_all"] = self._main_categories(media)
+                    media["in_videos" if media.get("media_type") == "video" else "in_all"] = self._main_categories(media) or bool(media.get("main_explicit"))
                 elif media_id not in previous_member_ids and kind == "set" and not preserve_placement and media and not self._main_categories(media) and not media.get("main_explicit"):
                     media["in_videos" if media.get("media_type") == "video" else "in_all"] = False
                 if media:
@@ -3036,10 +3036,12 @@ class LibraryStore:
                 changes["in_all"] = False
             if self._main_categories({**m, "categories": categories}) and explicit is None:
                 changes[flag] = True
-            # A category assignment or explicit Add to Main exits Purgatory,
-            # including clients that submit the old false placement flag.
-            if m.get("in_purgatory") and (self._main_categories({**m, "categories": categories}) or explicit is True):
-                changes.update({"in_purgatory": False, "in_review": False, flag: True})
+            # Only new assignments (or explicit Main) leave holding areas. Saving
+            # unchanged categories or removing one must not silently release Review.
+            added_categories = set(categories) - set(m.get("categories", []))
+            if (m.get("in_purgatory") or m.get("in_review")) and (added_categories or explicit is True):
+                main = self._main_categories({**m, "categories": categories}) or bool(changes.get("main_explicit", m.get("main_explicit")))
+                changes.update({"in_purgatory": False, "in_review": False, flag: main})
             return self._change_media(m, changes, "Change video categories / All" if video else "Change categories / All")
 
     def set_favorite(self, media_id: str, favorite: bool) -> dict[str, Any]:

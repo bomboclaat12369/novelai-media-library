@@ -42,6 +42,13 @@ with tempfile.TemporaryDirectory() as directory:
     owner['set_categories']=[{'id':'dresses','name':'Dresses'}]
     for i,item in enumerate(items):item['categories']=['dress' if i%2==0 else 'bikini']
     for group in store.data['sets']:group['categories']=['dresses']
+    if os.environ.get('NAI_RAPID_DEMO') == '1':
+        owner['categories'] += [{'id':name.lower(),'name':name,'media_type':'image','ghost':name=='Old'} for name in ['Lingerie','Other','Ass','Naked','Old']]
+        for i in range(60):
+            data=io.BytesIO();Image.new('RGB',(200,260),(40+i*3,80+i,120+i)).save(data,'PNG')
+            pending=Path(directory)/f'queue-{i}.tmp';pending.write_bytes(data.getvalue())
+            queued=store._register_file(pending,f'Queue {i:02d}.png',owner['id'],[],{},'image/png',pending=True)[0]
+            thumb=store.thumb_dir/(queued['id']+'.jpg');Image.open(io.BytesIO(data.getvalue())).save(thumb,'JPEG');queued['thumb_rel']=thumb.relative_to(store.root).as_posix()
     if os.environ.get('NAI_VIEWER_DEMO') == '1':
         import subprocess
         clip=Path(directory)/'fixture-video.webm'

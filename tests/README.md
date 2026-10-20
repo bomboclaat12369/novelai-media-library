@@ -1,5 +1,23 @@
 # Stability regression checks
 
+## Standalone 2.8.94 / runtime 2.7.57 validation
+
+`test_runtime_holding_assignments.py` passed four focused tests covering new
+regular/ghost category assignments from both holding areas, category Undo, set
+creation and assignment, and preservation of holding state on unrelated edits.
+All seven existing `test_runtime_rapid_queue.py` checks passed, including durable
+queue persistence, atomic failure, bulk assignment and duplicate protection.
+The ghost-category expectation now reflects automatic exit from Purgatory while
+remaining outside Main.
+
+`test-rapid-controls.cjs` passed in Chromium with a 60-image temporary queue:
+1700×1050 and 1366×768 layouts without control overflow, retained grid space,
+scroll position and thumbnail size, the matching entry point with no selection,
+creating/assigning sets, adding to Review, and assigning a ghost category from
+Review without accidental Main promotion. Both layouts were visually inspected.
+The matching service is stubbed in this UI test; the outfit model was not changed
+or retested. NovelAI's UI config and payload hash remain unchanged at 2.8.93.
+
 ## UI 2.8.93 / runtime 2.7.56 validation
 
 Three focused checks in `test_runtime_viewer_release.py` passed: leaving holding

@@ -27,7 +27,7 @@ class RapidQueueTests(unittest.TestCase):
         self.assertTrue(b['in_all']);self.assertTrue(b['rapid_edited'])
         self.resolve('purgatory',[c],choices={c['id']:{'categories':[regular['id']]}})
         self.assertTrue(c['in_purgatory']);self.assertFalse(c['in_all']);self.assertFalse(c['in_review'])
-        self.store.set_categories(c['id'],[ghost['id']]);self.assertTrue(c['in_purgatory'])
+        self.store.set_categories(c['id'],[ghost['id']]);self.assertFalse(c['in_purgatory']);self.assertFalse(c['in_all'])
         self.store.set_categories(c['id'],[ghost['id'],regular['id']]);self.assertFalse(c['in_purgatory']);self.assertTrue(c['in_all'])
         self.resolve('main',[d]);self.assertTrue(d['in_all']);self.assertEqual(d['categories'],[])
         self.store.set_category_ghost(regular['id'],True);self.assertFalse(c['in_all']);self.assertTrue(b['in_all'])

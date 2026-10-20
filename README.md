@@ -2,6 +2,14 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Faster rapid-review controls (standalone 2.8.94 / companion 2.7.57)
+
+Rapid Review now puts **Create set + assign**, **Find matching sets**, and **Add selected to Review** in a prominent, consistently ordered row with distinct colors and icons. **Add to existing set** sits beside Crop image. The selected count and selection controls stay above the actions; current-image flags and categories form a separate compact section. Whole category chips are clickable, with visible selected states, subtle category accents and a dashed treatment for ghost categories. Carry categories, category creation and the redundant Sets menu were removed from Rapid Review.
+
+The controls remain above the independently scrolling thumbnail grid. Compact spacing at smaller window heights preserves thumbnail room, while the existing thumbnail-size preference, scroll position and resumable queue remain intact. Matching starts with the current image even when no queue thumbnails are selected; assignment and Review actions use the selected images.
+
+Adding a new category or assigning a set now clears **both Review and Purgatory**. Ghost categories and set-only membership do not independently promote an image to All; ordinary categories and explicit Main placement still do. Saving unchanged categories, removing a category, renaming a set or reordering its existing members does not release unrelated held images. Rapid Review clears its Review checkbox on category assignment so saving cannot accidentally restore the old holding status. NovelAI stays at UI 2.8.93 for this standalone interface update.
+
 ## Viewing and library management (UI 2.8.93 / companion 2.7.56)
 
 NovelAI is now a lighter viewer. Browsing, sets, sorting, profiles and profile editing remain, along with favorites, featured, image cropping, video thumbnail selection and timestamps. Imports, organization, deletion, rapid review, set detection and battles belong in standalone. Heavy management modules are omitted from the NovelAI release; shared viewing code stays shared. Versioned modules and Git history preserve the removed functionality if it is needed again.
