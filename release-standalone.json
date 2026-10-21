@@ -2,7 +2,7 @@
   "parts": [
     "payload/userscript-2.8.68.transport-start.txt",
     "payload/userscript-2.8.5.reset-state.txt",
-    "payload/userscript-2.8.93.part01.txt",
+    "payload/userscript-2.8.97.part01.txt",
     "payload/userscript-2.8.77.virtual-grid.txt",
     "payload/userscript-2.3.0.patch01.txt",
     "payload/userscript-2.3.0.patch02.txt",
@@ -38,11 +38,12 @@
     "payload/userscript-2.8.76.search-fields.txt",
     "payload/userscript-2.8.92.ranks.txt",
     "payload/userscript-2.8.96.ranking-library.txt",
-    "payload/userscript-2.8.93.battles.txt",
-    "payload/userscript-2.8.93.profiles.txt",
+    "payload/userscript-2.8.97.collection.txt",
+    "payload/userscript-2.8.97.battles.txt",
+    "payload/userscript-2.8.97.profiles.txt",
     "payload/userscript-2.8.93.viewer-layout.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 151,
-  "version": "2.8.96"
+  "release_build": 152,
+  "version": "2.8.97"
 }

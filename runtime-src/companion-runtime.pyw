@@ -2067,6 +2067,106 @@ class LibraryStore:
             default = 'photoshoot' if re.match(r'^mikayla\b', character.get('name', '').strip(), re.I) else 'outfit'
             return {'character_id': character_id, 'mode': saved if saved in ('outfit', 'photoshoot') else default}
 
+    def collection_request(self, action, body):
+        """Presentation/progress metadata is independent of battle ratings and profiles."""
+        with self.lock:
+            owner = str(body.get('character_id', ''))
+            character = self.character(owner)
+            if not character:
+                raise ValueError('Choose a character first.')
+            previous = copy.deepcopy(character.get('collection'))
+            data = copy.deepcopy(previous or {})
+            data.setdefault('revision', '')
+            data.setdefault('attributes', [{'label':label, 'value':None, 'weight':1} for label in ('Face','Breasts','Butt','Style')])
+            data.setdefault('frames', {})
+            data.setdefault('reviewed', {})
+            data.setdefault('earned', {})
+            data.setdefault('finish', 'obsidian')
+            media = {m['id']:m for m in self.data['media'] if m.get('character_id') == owner and m.get('media_type') != 'video'}
+            if action not in ('state', 'save', 'frame', 'review'):
+                raise ValueError('Unknown collection action.')
+            if action != 'state' and body.get('revision', '') != data['revision']:
+                raise ValueError('Collection changed in another window. Reopen it before saving.')
+            if action == 'save':
+                attrs = body.get('attributes', data['attributes'])
+                if not isinstance(attrs, list) or len(attrs) != 4:
+                    raise ValueError('A profile card has exactly four attributes.')
+                cleaned = []
+                for a in attrs:
+                    if not isinstance(a, dict):
+                        raise ValueError('Invalid attribute.')
+                    label, value, weight = a.get('label'), a.get('value'), a.get('weight', 1)
+                    if not isinstance(label, str) or not 1 <= len(label.strip()) <= 18:
+                        raise ValueError('Attribute labels must have 1–18 characters.')
+                    if value is not None and (type(value) is not int or not 1 <= value <= 99):
+                        raise ValueError('Attribute ratings must be whole numbers from 1 to 99, or blank.')
+                    if type(weight) not in (int, float) or not math.isfinite(weight) or not 0 < weight <= 10:
+                        raise ValueError('Attribute weights must be greater than 0 and at most 10.')
+                    cleaned.append({'label':label.strip(), 'value':value, 'weight':weight})
+                data['attributes'] = cleaned
+                finish = body.get('finish', data['finish'])
+                required = {'obsidian':0, 'emerald':800, 'platinum':1600}
+                if finish not in required or len(data['earned'])*100 < required[finish]:
+                    raise ValueError('That card finish has not been unlocked.')
+                data['finish'] = finish
+            elif action == 'frame':
+                key, mid = body.get('key', ''), body.get('media_id', '')
+                if mid not in media or key not in ('image:'+mid, 'profile:'+mid):
+                    raise ValueError('Choose an image belonging to this person.')
+                frame = body.get('frame', {})
+                if not isinstance(frame, dict):
+                    raise ValueError('Invalid card framing.')
+                for name, low, high in [('x',-50,50),('y',-50,50),('zoom',1,3)]:
+                    v = frame.get(name)
+                    if type(v) not in (int,float) or not math.isfinite(v) or not low <= v <= high:
+                        raise ValueError('Invalid card position or zoom.')
+                data['frames'][key] = {name:frame[name] for name in ('x','y','zoom')}
+            elif action == 'review':
+                mid = body.get('media_id')
+                if mid not in media:
+                    raise ValueError('Image no longer exists in this collection.')
+                if body.get('reviewed'):
+                    data['reviewed'][mid] = media[mid].get('sha256') or media[mid].get('filename')
+                else:
+                    data['reviewed'].pop(mid, None)
+            # Scope mirrors battle eligibility. Holding areas remain a separate backlog.
+            boards = [self.battles.request('summary', {'character_id':owner,'kind':kind}) for kind in ('images','sets')]
+            tracks = []
+            for board in boards:
+                rows = [e for e in board['entries'] if not e.get('flagged_for_removal')]
+                placed = sum(e['rating_status'] in ('Developing','Established') for e in rows)
+                established = sum(e['rating_status'] == 'Established' for e in rows)
+                # A sole card cannot be placed: show this explicitly rather than a false 100%.
+                tracks.append({'id':board['kind']+'-placement','label':('Image' if board['kind']=='images' else 'Set')+' placements','done':placed,'total':len(rows),'kind':board['kind'],'mode':'placements'})
+                tracks.append({'id':board['kind']+'-confidence','label':('Image' if board['kind']=='images' else 'Set')+' confidence','done':established,'total':len(rows),'kind':board['kind'],'mode':'rank'})
+            saved = [m for m in media.values() if not m.get('in_review') and not m.get('in_purgatory')]
+            members = {mid for group in self.data.get('sets',[]) if group.get('character_id')==owner and group.get('kind','set')=='set' for mid in group.get('media_ids',[])}
+            checked = {m['id'] for m in saved if m['id'] in members or data['reviewed'].get(m['id']) == (m.get('sha256') or m.get('filename'))}
+            tracks.append({'id':'organization','label':'Set organization','done':len(checked),'total':len(saved)})
+            photos = [mid for mid in (character.get('profile') or {}).get('photos',[]) if mid in media]
+            tracks.append({'id':'profile','label':'Profile showcase','done':len(photos),'total':min(5,len(media))})
+            for track in tracks:
+                if track['total']:
+                    for milestone in (25,50,75,100):
+                        if track['done']*100 >= milestone*track['total']:
+                            data['earned'].setdefault(track['id']+':'+str(milestone), {'title':track['label']+' · '+str(milestone)+'%', 'at':now_iso()})
+            if action != 'state' or data != (previous or {}):
+                data['revision'] = uuid.uuid4().hex
+                character['collection'] = data
+                try:
+                    self.save()
+                except Exception:
+                    if previous is None: character.pop('collection', None)
+                    else: character['collection'] = previous
+                    raise
+            active = [t for t in tracks if t['total']]
+            return {'character_id':owner, 'name':character['name'], 'collection':copy.deepcopy(data), 'tracks':tracks,
+                    'completion':math.floor(sum(t['done']/t['total'] for t in active)/len(active)*100 + 1e-9) if active else None,
+                    'xp':len(data['earned'])*100, 'boards':boards,
+                    'stats':{'images':len(media),'sets':len(boards[1]['entries']), 'review':sum(bool(m.get('in_review')) for m in media.values()),
+                             'purgatory':sum(bool(m.get('in_purgatory')) for m in media.values()),'flags':sum(bool(m.get('flagged_for_removal')) for m in media.values()),'votes':sum(b.get('votes',0) for b in boards)},
+                    'unorganized':[m['id'] for m in saved if m['id'] not in checked]}
+
     def profile_request(self, action, body):
         with self.lock:
             owner = str(body.get('character_id', ''))
@@ -4058,6 +4158,9 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/ui-update/activate":
                 body = self._read_json()
                 self._send_json(200, self.server.ui_updates.activate(str(body.get("version", ""))))
+                return
+            if path in {"/api/collection/state", "/api/collection/save", "/api/collection/frame", "/api/collection/review"}:
+                self._send_json(200, self.store.collection_request(path.rsplit("/", 1)[1], self._read_json()))
                 return
             if path in {"/api/profile/state", "/api/profile/save"}:
                 self._send_json(200, self.store.profile_request(path.rsplit("/", 1)[1], self._read_json()))

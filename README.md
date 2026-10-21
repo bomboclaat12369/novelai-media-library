@@ -2,6 +2,50 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Collection HQ and cards (standalone 2.8.97 / companion 2.7.59)
+
+**Collection HQ** opens a per-person progress map, collection statistics, roster and
+permanent milestone cabinet. Image/set placement and confidence use the existing
+battle eligibility and evidence rules; set tasks include small sets (minimum one
+image). Profile curation and set organization are separate tracks. Unassigned
+saved images can be explicitly marked checked/standalone, with Undo for the last
+check, or investigated using Scan for Sets. Replacing their source invalidates that
+check. No image is automatically assigned or removed.
+
+Completion describes the current collection, not every photograph that exists.
+Empty tracks are excluded; new imports can reopen work. First-time 25/50/75/100%
+track milestones each earn 100 permanent XP, with levels every 400 XP. Emerald and
+Platinum card finishes unlock at 800/1,600 XP. Milestones are retained when progress
+falls or an action is undone; repeating the same milestone does not award more XP.
+
+Standalone battles, leaderboards and profiles now have thin trading-card frames
+that leave most space for the image. Set battles retain their adaptive mosaics and
+original-resolution images. Image/set OVR is a presentation scale derived from the
+placed MMR ordering within one person and battle type: 60 at the bottom, 78 around
+the median, 91 around the 90th percentile and up to 99 at the top. Tied MMR receives
+the same OVR. Fewer than five placed cards, an all-tied pool and provisional entries
+show a dash; pools of 5–19 placed cards cap at 95. These are relative preference
+ratings, not probabilities or a change to matchmaking. Ranks and MMR are unchanged.
+
+Profile cards have exactly four personal attributes, initially Face, Breasts, Butt
+and Style. Labels, ratings and weights are editable; values start blank. Overall
+is the rounded weighted average only after all four are filled. These manual
+ratings have no effect on battles. **Position card / Position image** saves pan
+and zoom per image card or profile photo without editing the source, normal
+library crop or fullscreen image. Different card shapes can reveal a wider area.
+
+**+Media → Categories** restores image/video category creation, inline rename and
+ghost controls, plus an Arrange toggle with drag insertion and accessible up/down
+buttons. Ordering saves immediately. Edit Library uses the same category manager.
+Dropping files anywhere while +Media is open returns to Upload images and keeps
+the existing file queue; standalone also opens uploads on external file drops.
+
+Restart/update the companion, then update standalone to activate these features.
+NovelAI stays at 2.8.93, and main-library image grids/viewers keep their existing
+presentation. Focused runtime and browser checks cover metadata persistence,
+validation/conflicts, rollback, unchanged MMR, category ordering/drop handling,
+card framing, full-resolution battles, keyboard voting and progress calculations.
+
 ## Faster incremental scans (Duplicate Review 1.7.5)
 
 Download [Local Duplicate Review 1.7.5](downloads/Local-Duplicate-Review-1.7.5.zip).
