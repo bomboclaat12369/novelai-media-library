@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.7.4
+LOCAL DUPLICATE REVIEW 1.7.5
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -13,6 +13,29 @@ The database is stored separately in %LOCALAPPDATA%\LocalDuplicateReview.
 Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
 Later launches, scans and image processing stay local; no cloud account or GPU.
+
+NEW IN 1.7.5: REUSE WORK WHEN ADDING FOLDERS
+- Comparison blocks now retain persistent content slots. Adding/reordering folders
+  or changing protected-reference priority no longer reshuffles established blocks.
+  New images are still compared against all existing blocks and one another.
+  Adding files can rebuild the last partial block; changed/removed contents rebuild
+  affected blocks, while unaffected completed tasks remain reusable.
+- Upgrading seeds this layout from the last scan where possible, retaining
+  compatible 1.7.4 checkpoints. Older incompatible tasks may need one recomparison;
+  this does not discard cached image preparation, review decisions or move history.
+- Image preparation uses up to four workers, bounded separately from crop workers
+  because full-resolution decoding uses more memory. Unchanged fingerprints and
+  features are reused without rewriting them to the database. Completed preparation
+  is checkpointed and survives Stop. File changes and analysis failures stay visible.
+- Reading progress distinguishes reused/prepared/failed images. A saved-comparison
+  check counts reusable tasks before estimating the remaining crop-comparison time.
+  The completed scan summary retains the cache counts.
+- No matching thresholds, fingerprint resolutions, candidate limits, crop/rotation/
+  mirror checks, or automatic-quarantine verification rules have been weakened.
+  New/changed images still require analysis; a first-ever scan is still substantial.
+- To upgrade during a scan: Stop and wait, then Quit. Extract the entire new ZIP,
+  launch its batch file, and Scan again with the same folders and matching mode.
+  Keep the existing LocalAppData state. No media-library/companion update is needed.
 
 NEW IN 1.7.4: SEPARATE EXACT AND VISUAL CLEANUP
 - Select exact duplicates (formerly Select obvious duplicates) selects identical

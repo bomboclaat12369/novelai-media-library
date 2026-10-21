@@ -38,7 +38,8 @@ class ParallelSearchTests(unittest.TestCase):
             original = e.set_status
             def progress(**kwargs):
                 original(**kwargs)
-                if kwargs.get('done', 0) > 0: e.cancel.set()
+                if e.status['phase'] == 'Comparing crops, rotations and mirrors' and kwargs.get('done', 0) > 0:
+                    e.cancel.set()
             with patch.object(e, 'set_status', side_effect=progress), patch('crop_match.candidates', return_value=[]):
                 with self.assertRaises(InterruptedError): e.match_aligned(records, 'broad', workers=4)
             with e.db() as db: saved = db.execute('SELECT COUNT(*) FROM aligned_tasks').fetchone()[0]

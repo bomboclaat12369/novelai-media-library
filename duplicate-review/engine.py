@@ -25,7 +25,7 @@ import crop_match
 import same_photo
 from search_index import SearchIndexes
 
-VERSION = '1.7.4'
+VERSION = '1.7.5'
 ALGORITHM = 1
 QUARANTINE = '_Duplicate_Review_Quarantine'
 EXTENSIONS = {'.jpg', '.jpeg', '.jpe', '.jfif', '.png', '.webp', '.bmp', '.tif', '.tiff', '.avif', '.gif'}
@@ -238,6 +238,8 @@ class Engine:
                 CREATE TABLE IF NOT EXISTS errors(path TEXT, message TEXT);
                 CREATE TABLE IF NOT EXISTS features(path TEXT PRIMARY KEY, stamp TEXT, version INTEGER, data BLOB);
                 CREATE TABLE IF NOT EXISTS aligned_tasks(key TEXT PRIMARY KEY, results TEXT);
+                CREATE TABLE IF NOT EXISTS aligned_members(identity TEXT PRIMARY KEY,
+                    position INTEGER UNIQUE NOT NULL, sha TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS verified_copies(key TEXT PRIMARY KEY, accepted INTEGER);
                 CREATE TABLE IF NOT EXISTS separations(a TEXT, b TEXT, PRIMARY KEY(a,b));
                 CREATE TABLE IF NOT EXISTS group_links(a TEXT, b TEXT, PRIMARY KEY(a,b));
@@ -321,6 +323,13 @@ class Engine:
                       'library_character': library_character, 'library_id': library_id if catalog else '',
                       'library_root': catalog['root'] if catalog else '', 'workers':workers, 'scan_kind':scan_kind}
             with self.db() as db:
+                # On upgrade, seed the stable layout from the last scan BEFORE
+                # clearing it. This preserves compatible 1.7.4 task checkpoints.
+                if not db.execute('SELECT 1 FROM aligned_members LIMIT 1').fetchone():
+                    previous = [dict(r) for r in db.execute('''SELECT files.* FROM files
+                        JOIN features ON features.path=files.path AND features.stamp=files.stamp
+                        WHERE features.version=?''', (crop_match.FEATURE_VERSION,))]
+                    self.aligned_layout(db, previous)
                 db.execute("INSERT OR REPLACE INTO settings VALUES ('config', ?)", (json.dumps(config),))
                 db.execute('DELETE FROM files')
                 db.execute('DELETE FROM pairs')
@@ -380,70 +389,133 @@ class Engine:
         with self.lock:
             self.status['errors'] += 1
 
-    def scan(self, config, catalog=None):
-        try:
-            files = self.discover(config, catalog)
-            library_items = {str(canonical(r['path'])):r for r in (catalog or {}).get('files', [])}
-            self.set_status(phase='Reading images', total=len(files), done=0)
-            records = []
-            # One decoder keeps memory/CPU demand predictable; cache makes repeated scans much cheaper.
-            with self.db() as db:
-                for index, (path, reference, root) in enumerate(files):
-                    if self.cancel.is_set():
-                        raise InterruptedError()
+    def prepare_image(self, path, stamp, cached, feature):
+        """CPU/file work only; the scan thread owns all SQLite writes."""
+        if self.cancel.is_set():
+            raise InterruptedError()
+        r = dict(cached) if cached else None
+        cache_changed = not r or not r.get('pixel')
+        if r is None:
+            digest = sha256(path, self.cancel)
+            w, h, ph, mh, sketch = fingerprint(path)
+            r = dict(path=str(path), stamp=stamp, algorithm=ALGORITHM, sha=digest,
+                     w=w, h=h, ph=ph, mh=mh, sketch=sketch, size=path.stat().st_size)
+        if not r.get('pixel'):
+            r['pixel'] = pixel_digest(path)
+        feature_error = None
+        if feature is None:
+            try:
+                image, _, _ = load_image(path, 1000)
+                feature = crop_match.describe(image)
+            except Exception as error:
+                feature_error = 'Crop analysis unavailable: '+str(error)
+        if self.cancel.is_set():
+            raise InterruptedError()
+        if stamp != stat_key(path):
+            raise ValueError('Changed during scan; run another scan after downloads finish.')
+        r['features'] = feature
+        return r, cache_changed, feature_error
+
+    def read_records(self, files, config, catalog, library_items):
+        # Full-resolution pixel hashing can allocate large decoded images. Limit
+        # preparation separately from crop workers; do not decode 24/32 at once.
+        workers = max(1, min(4, int(config.get('workers', 8)), os.cpu_count() or 1))
+        started = time.monotonic()
+        records = []
+        done = reused = prepared = failed = 0
+        self.set_status(phase='Reading images', total=len(files), done=0, workers=0,
+                        read_workers=workers, read_cached=0, read_prepared=0, read_failed=0)
+        with self.db() as db, ThreadPoolExecutor(max_workers=workers, thread_name_prefix='prepare') as pool:
+            pending = {}
+            committed = time.monotonic()
+            def progress():
+                self.set_status(done=done, read_cached=reused, read_prepared=prepared,
+                                read_failed=failed, read_seconds=round(time.monotonic()-started))
+            def error(path, message):
+                db.execute('INSERT INTO errors VALUES (?,?)', (str(path), str(message)))
+                with self.lock:
+                    self.status['errors'] += 1
+            def accept(item, result, was_cached, feature_changed):
+                nonlocal done, reused, prepared, failed
+                path, reference, root = item
+                r, cache_changed, feature_error = result
+                if r['stamp'] != stat_key(path):
+                    raise ValueError('Changed during scan; run another scan after downloads finish.')
+                if cache_changed:
+                    db.execute('INSERT OR REPLACE INTO cache(path,stamp,algorithm,sha,w,h,ph,mh,sketch,size,pixel) VALUES (:path,:stamp,:algorithm,:sha,:w,:h,:ph,:mh,:sketch,:size,:pixel)', r)
+                if feature_changed and r['features'] is not None:
+                    db.execute('INSERT OR REPLACE INTO features VALUES (?,?,?,?)',
+                               (str(path), r['stamp'], crop_match.FEATURE_VERSION, r['features']))
+                if feature_error:
+                    error(path, feature_error)
+                meta = library_items.get(str(path))
+                if meta and meta['sha'] != r['sha']:
+                    raise ValueError('Library source changed during the scan. Scan again.')
+                r.update(reference=reference, root=str(root), library=json.dumps({**meta, 'library_id':catalog['library_id']}) if meta else None)
+                cursor = db.execute('INSERT INTO files(path,stamp,sha,w,h,size,reference,root,pixel,library) VALUES (:path,:stamp,:sha,:w,:h,:size,:reference,:root,:pixel,:library)', r)
+                r['id'] = cursor.lastrowid
+                records.append(r)
+                done += 1
+                if feature_error: failed += 1
+                elif was_cached: reused += 1
+                else: prepared += 1
+            def collect():
+                nonlocal done, failed
+                ready, _ = wait(pending, timeout=.25, return_when=FIRST_COMPLETED)
+                for future in ready:
+                    item, feature_changed = pending.pop(future)
+                    try:
+                        accept(item, future.result(), False, feature_changed)
+                    except InterruptedError:
+                        raise
+                    except Exception as exc:
+                        error(item[0], exc); done += 1; failed += 1
+            try:
+                for item in files:
+                    if self.cancel.is_set(): raise InterruptedError()
+                    path = item[0]
                     try:
                         stamp = stat_key(path)
                         cached = db.execute('SELECT * FROM cache WHERE path=? AND stamp=? AND algorithm=?',
                                             (str(path), stamp, ALGORITHM)).fetchone()
-                        if cached:
-                            r = dict(cached)
+                        feature = db.execute('SELECT data FROM features WHERE path=? AND stamp=? AND version=?',
+                                             (str(path), stamp, crop_match.FEATURE_VERSION)).fetchone()
+                        data = feature[0] if feature else None
+                        if cached and cached['pixel'] and data is not None:
+                            r = dict(cached); r['features'] = data
+                            accept(item, (r, False, None), True, False)
                         else:
-                            digest = sha256(path, self.cancel)
-                            w, h, ph, mh, sketch = fingerprint(path)
-                            if stamp != stat_key(path):
-                                raise ValueError('Changed during scan; run another scan after downloads finish.')
-                            r = dict(path=str(path), stamp=stamp, algorithm=ALGORITHM, sha=digest,
-                                     w=w, h=h, ph=ph, mh=mh, sketch=sketch, size=path.stat().st_size)
-                        if not r.get('pixel'):
-                            r['pixel'] = pixel_digest(path)
-                            if stamp != stat_key(path):
-                                raise ValueError('Changed during scan; run another scan after downloads finish.')
-                        db.execute('INSERT OR REPLACE INTO cache(path,stamp,algorithm,sha,w,h,ph,mh,sketch,size,pixel) VALUES (:path,:stamp,:algorithm,:sha,:w,:h,:ph,:mh,:sketch,:size,:pixel)', r)
-                        try:
-                            feature = db.execute('SELECT data FROM features WHERE path=? AND stamp=? AND version=?',
-                                                 (str(path),stamp,crop_match.FEATURE_VERSION)).fetchone()
-                            if feature:
-                                r['features'] = feature[0]
-                            else:
-                                image,_,_ = load_image(path, 1000)
-                                r['features'] = crop_match.describe(image)
-                                if stamp != stat_key(path):
-                                    raise ValueError('Changed during scan; scan again after downloads finish.')
-                                db.execute('INSERT OR REPLACE INTO features VALUES (?,?,?,?)',
-                                           (str(path),stamp,crop_match.FEATURE_VERSION,r['features']))
-                        except Exception as error:
-                            r['features'] = None
-                            db.execute('INSERT INTO errors VALUES (?,?)',(str(path),'Crop analysis unavailable: '+str(error)))
-                            with self.lock:
-                                self.status['errors'] += 1
-                        meta = library_items.get(str(path))
-                        if meta and meta['sha'] != r['sha']:
-                            raise ValueError('Library source changed during the scan. Scan again.')
-                        r.update(reference=reference, root=str(root), library=json.dumps({**meta, 'library_id':catalog['library_id']}) if meta else None)
-                        cursor = db.execute('INSERT INTO files(path,stamp,sha,w,h,size,reference,root,pixel,library) VALUES (:path,:stamp,:sha,:w,:h,:size,:reference,:root,:pixel,:library)', r)
-                        r['id'] = cursor.lastrowid
-                        records.append(r)
+                            future = pool.submit(self.prepare_image, path, stamp, dict(cached) if cached else None, data)
+                            pending[future] = (item, data is None)
                     except InterruptedError:
                         raise
-                    except Exception as e:
-                        # Use this connection while it owns the write transaction.
-                        db.execute('INSERT INTO errors VALUES (?,?)', (str(path), str(e)))
-                        with self.lock:
-                            self.status['errors'] += 1
-                    if index % 50 == 0:
-                        db.commit()
-                    self.set_status(done=index+1)
+                    except Exception as exc:
+                        error(path, exc); done += 1; failed += 1
+                    while len(pending) >= workers*2:
+                        if self.cancel.is_set(): raise InterruptedError()
+                        collect(); progress()
+                        if time.monotonic()-committed >= .5:
+                            db.commit(); committed = time.monotonic()
+                    if time.monotonic()-committed >= .5:
+                        db.commit(); committed = time.monotonic()
+                    progress()
+                while pending:
+                    if self.cancel.is_set(): raise InterruptedError()
+                    collect(); progress()
+                    if time.monotonic()-committed >= .5:
+                        db.commit(); committed = time.monotonic()
+            finally:
+                for future in pending: future.cancel()
+                # Completed preparation is useful even if this scan is stopped.
                 db.commit()
+        progress()
+        return records
+
+    def scan(self, config, catalog=None):
+        try:
+            files = self.discover(config, catalog)
+            library_items = {str(canonical(r['path'])):r for r in (catalog or {}).get('files', [])}
+            records = self.read_records(files, config, catalog, library_items)
             self.match(records, config['mode'])
             self.match_aligned(records, config['mode'], config.get('workers',8))
             for r in records:
@@ -464,7 +536,9 @@ class Engine:
             coverage = {'scanned' :len(records),'discovered':len(files),
                         'library_expected':len(library_items), 'library_scanned':sum(bool(r.get('library')) for r in records),
                         'review':sum(bool(json.loads(r['library']).get('in_review')) for r in records if r.get('library')),
-                        'purgatory':sum(bool(json.loads(r['library']).get('in_purgatory')) for r in records if r.get('library'))}
+                        'purgatory':sum(bool(json.loads(r['library']).get('in_purgatory')) for r in records if r.get('library')),
+                        **{k:self.status.get(k, 0) for k in ('read_cached','read_prepared','read_failed','read_seconds')},
+                        'comparison_cached':self.status.get('cached_tasks', 0), 'comparison_total':self.status['total']}
             with self.db() as db:
                 db.execute("INSERT OR REPLACE INTO settings VALUES ('coverage',?)",(json.dumps(coverage),))
             self.invalidate_groups()
@@ -522,25 +596,53 @@ class Engine:
                     self.add_pair(db, a[0], b[0], 'Manually grouped', 0, ignored)
             db.commit()
 
+    @staticmethod
+    def aligned_layout(db, records):
+        """Append-only content slots: folder order and removals cannot shift blocks.
+
+        Missing images leave holes. Only the last partial block grows, so adding
+        files invalidates at most that existing block. Every active pair still
+        participates in the same unrestricted block search and verification.
+        """
+        members = {r['identity']: dict(r) for r in db.execute('SELECT * FROM aligned_members')}
+        position = max((r['position'] for r in members.values()), default=-1)+1
+        chosen = {}
+        for record in preferred(records):
+            identity = record.get('pixel') or record['sha']
+            member = members.get(identity)
+            if identity not in chosen or (member and record['sha'] == member['sha']
+                                           and chosen[identity]['sha'] != member['sha']):
+                chosen[identity] = record
+        blocks = {}
+        for identity, record in chosen.items():
+            member = members.get(identity)
+            if member is None:
+                member = dict(position=position, sha=record['sha'])
+                db.execute('INSERT INTO aligned_members VALUES (?,?,?)', (identity, position, record['sha']))
+                position += 1
+            elif member['sha'] != record['sha']:
+                db.execute('UPDATE aligned_members SET sha=? WHERE identity=?', (record['sha'], identity))
+            blocks.setdefault(member['position']//256, []).append((member['position'], record))
+        return [[r for _, r in sorted(block)] for _, block in sorted(blocks.items())]
+
     def match_aligned(self, records, mode, workers=8):
         """Same retrieval and match thresholds, bounded concurrent verification."""
         import cv2
         workers = max(1,min(int(workers),32,os.cpu_count() or 1))
-        unique, identities = [], set()
-        for record in preferred(records):
-            if not record.get('features'): continue
-            identity = record.get('pixel') or record['sha']
-            if identity not in identities:
-                unique.append(record)
-                identities.add(identity)
+        with self.db() as db:
+            blocks = self.aligned_layout(db, [r for r in records if r.get('features')])
+        unique = [r for block in blocks for r in block]
         @lru_cache(maxsize=2048)
         def feature(i):
             return crop_match.unpack(unique[i]['features'])
-        starts = list(range(0,len(unique),256))
-        total = sum(max(0,len(unique)-start-1) for start in starts)
+        starts, offset = [], 0
+        for block in blocks:
+            starts.append((offset, offset+len(block)))
+            offset += len(block)
+        total = sum(max(0,len(unique)-start-1) for start, _ in starts)
         completed, reused = 0, 0
         started = time.monotonic()
-        self.set_status(phase='Comparing crops, rotations and mirrors',done=0,total=total,
+        self.set_status(phase='Checking saved comparisons',done=0,total=total,
                         workers=workers,elapsed_seconds=0,eta_seconds=None,cached_tasks=0)
         def progress():
             elapsed = time.monotonic()-started
@@ -551,17 +653,20 @@ class Engine:
                             eta_seconds=round(eta) if eta is not None else None,cached_tasks=reused)
         with self.db() as db, ThreadPoolExecutor(max_workers=workers,thread_name_prefix='crop') as pool:
             ignored = {r[0] for r in db.execute('SELECT key FROM ignored')}
-            for start in starts:
+            plans = []
+            checked = 0
+            for start, stop in starts:
                 if self.cancel.is_set(): raise InterruptedError()
-                stop = min(start+256,len(unique))
                 block_ids = list(range(start,stop))
                 signature = hashlib.sha256(json.dumps([unique[i]['sha'] for i in block_ids]).encode()).hexdigest()
                 # Cache raw matching results, not review decisions or path-based IDs.
-                # Changing a file, mode, block membership/order or matcher version invalidates it.
+                # Stable slots retain old keys when folders are added/reordered.
+                # A changed block, content, mode or feature version still invalidates it.
                 jobs = []
                 for j in range(start+1,len(unique)):
+                    if self.cancel.is_set(): raise InterruptedError()
                     key = hashlib.sha256(json.dumps(['aligned-v2',crop_match.FEATURE_VERSION,mode,
-                                                    signature,unique[j]['sha'],min(j-start,256)]).encode()).hexdigest()
+                                                    signature,unique[j]['sha'],min(j-start,stop-start)]).encode()).hexdigest()
                     cached = db.execute('SELECT results FROM aligned_tasks WHERE key=?',(key,)).fetchone()
                     if cached:
                         for i,score,label in json.loads(cached[0]):
@@ -569,8 +674,17 @@ class Engine:
                         completed += 1; reused += 1
                     else:
                         jobs.append((j,key))
-                progress()
-                if not jobs: continue
+                checked += len(unique)-start-1
+                self.set_status(done=checked, cached_tasks=reused)
+                if jobs: plans.append((start, stop, jobs))
+                db.commit()
+            # Count cache hits up front so ETA excludes already completed work.
+            started = time.monotonic()
+            self.set_status(phase='Comparing crops, rotations and mirrors')
+            progress()
+            for start, stop, jobs in plans:
+                if self.cancel.is_set(): raise InterruptedError()
+                block_ids = list(range(start, stop))
                 arrays, owners = [], []
                 for i in block_ids:
                     desc = feature(i)['desc']

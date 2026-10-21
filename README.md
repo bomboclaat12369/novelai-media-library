@@ -2,6 +2,28 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Faster incremental scans (Duplicate Review 1.7.5)
+
+Download [Local Duplicate Review 1.7.5](downloads/Local-Duplicate-Review-1.7.5.zip).
+Stop any running scan and wait, then Quit, extract the entire package, and launch
+**Start Duplicate Review.bat**. Existing state stays in LocalAppData. Resume with
+Scan; the media-library interfaces and companion do not need updating.
+
+- Persistent comparison blocks preserve completed work when new folders are added
+  or folder/reference priority changes. New images still search all existing blocks
+  and one another. The last partial block may be rebuilt as it grows; changed or
+  removed contents invalidate their affected work without shifting every later block.
+- Compatible 1.7.4 checkpoints are migrated using the last scan's layout. Some older
+  incompatible work may need recomparison once; preparation caches, Keep/Different
+  decisions and Undo history are retained.
+- Up to four preparation workers handle new/changed files. Full cache hits bypass
+  preparation and unnecessary cache rewrites. Work is checkpointed for Stop/resume.
+- Progress reports reused/prepared/failed images and reused comparison tasks. Cache
+  hits are counted before estimating the remaining comparison time.
+- Matching resolutions, candidate searches, crop/rotation/mirror thresholds and
+  automatic-quarantine verification are unchanged. This speeds up work reuse and
+  scheduling; it does not trade detection coverage for a faster/looser scan.
+
 ## Matching-screen review actions (standalone 2.8.96)
 
 Click the reference image at the top of **Find matching Sets** to open its original-resolution fullscreen preview, just like the matching examples. Escape or clicking the fullscreen preview returns to the matching screen.
