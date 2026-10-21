@@ -2,6 +2,14 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Matching-screen review actions (standalone 2.8.96)
+
+Click the reference image at the top of **Find matching Sets** to open its original-resolution fullscreen preview, just like the matching examples. Escape or clicking the fullscreen preview returns to the matching screen.
+
+When matching unsaved Rapid Review uploads, **Discard image** removes only the currently displayed reference, regardless of the bulk selection. It closes both matching and the set-assignment dialog and returns to the next queue image; discarding the final image closes Rapid Review. Selecting another reference in the matching dropdown changes which image is discarded. Saved library images do not expose this upload-discard action. Original source files remain untouched, errors leave the dialog available to retry, and an in-progress matching job is cancelled when discarding.
+
+Set rank badges now sit above the image/video count row, with count text kept on one line at smaller thumbnail sizes. Focused browser checks cover original previews, Escape, failed-discard retry, single-image scope, dropdown selection, next/final queue navigation, cancellation of a late-starting search, saved-library preservation and badge spacing. Companion remains 2.7.58 and NovelAI remains 2.8.93; this is a standalone interface update.
+
 ## Photoshoot matching (standalone 2.8.95 / companion 2.7.58)
 
 **Match by: Outfit / Photoshoot** is saved separately for each person. Nikki and other existing people retain Outfit mode; a person named Mikayla defaults to Photoshoot unless a preference has been saved. The control is available in Find matching Sets (including import queues), Scan for Sets and Find missing Set images. The new mode prioritizes the setting and surrounding visual details while retaining outfit similarity as supporting evidence. Every readable image in every set remains eligible, as do ungrouped images in Main, Review, Purgatory and Unfiled. Results still require manual selection and never assign or import anything on their own.
