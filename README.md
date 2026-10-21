@@ -2,6 +2,27 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Sculpted trading-card artwork (standalone 2.8.98)
+
+Battle, leaderboard and profile cards now use layered metallic SVG frames with
+beveled corners, etched inserts, foil accents and inset nameplates. Large OVR
+shields and rank emblems sit in the upper corners. The illustration-inspired frame
+replaces the previous thin outline; it scales cleanly without downloads or
+continuous animation. Earned Emerald and Platinum finishes remain available.
+
+Individual battle cards fit portrait proportions to the available height, with
+roughly four-fifths of the card height retained for the image window. Set battles
+keep their adaptive multi-image mosaics in wider matching frames. Battle controls
+and MMR sit outside the artwork. Leaderboard cards keep their portrait shape;
+**Details & actions** below each card contains history, comparison focus, filenames
+and image positioning. Clicking an image still selects it in battles or opens it
+from the leaderboard; arrow keys, fullscreen and saved positioning are preserved.
+
+This is a standalone interface update only. Refresh and apply the update; companion
+2.7.59 and NovelAI 2.8.93 are unchanged. Focused browser checks cover rendered photo
+space, resizing, gallery actions, full-image browsing, card framing, click/keyboard
+voting, set mosaics, hidden ratings and profile attributes.
+
 ## Collection HQ and cards (standalone 2.8.97 / companion 2.7.59)
 
 **Collection HQ** opens a per-person progress map, collection statistics, roster and
