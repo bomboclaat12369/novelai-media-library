@@ -1,5 +1,6 @@
 """Real local API with an in-memory release source; no GitHub traffic."""
 import hashlib
+import copy
 import io
 import json
 import os
@@ -24,6 +25,12 @@ class Handler(runtime['MediaHandler']):
         super().do_GET()
 
     def do_POST(self):
+        if self.path=='/test/card-arrival' and os.environ.get('NAI_CARD_FEATURES_DEMO')=='1':
+            self._read_json()
+            with self.store.lock:
+                item=copy.deepcopy(self.store.data['media'][0]);item.update(id='new-arrival',original_name='New arrival fixture.png',in_all=True)
+                self.store.data['media'].append(item);self.store.save()
+            self._send_json(200,{'id':item['id']});return
         if self.path=='/test/advance':
             release.update(self._read_json());self.server.ui_updates.checked_at=0
             self._send_json(200,{'ok':True});return
@@ -55,11 +62,19 @@ with tempfile.TemporaryDirectory() as directory:
         subprocess.run(['ffmpeg','-loglevel','error','-f','lavfi','-i','color=c=blue:s=320x240:d=2','-c:v','libvpx','-y',str(clip)],check=True)
         store.import_bytes(clip.read_bytes(),'Fixture video.webm',owner['id'],[],{},'video/webm')
     if os.environ.get('NAI_RANKS_DEMO') == '1':
+        if os.environ.get('NAI_CARD_FEATURES_DEMO') == '1':
+            for i in range(16,360):
+                item=copy.deepcopy(items[i%16]);item.update(id='card-fixture-'+str(i),original_name=f'Card fixture {i:03d}.png')
+                store.data['media'].append(item);items.append(item)
         for item in items:
             item['in_all'] = True
         owner['profile'] = {'photos':[m['id'] for m in items[:5]], 'measurements':{'height':{'value':'67.5','status':'confirmed'},'bust':{'value':'35','status':'estimated'},'waist':{'value':'26','status':'confirmed'},'hips':{'value':'37','status':'estimated'},'bra':{'value':'34D (US)','status':'estimated'}}, 'notes':'Example profile for layout checks.', 'revision':'fixture'}
         board={'revision':'fixture', 'ratings':{m['id']:{'rating':1600-i*24.,'played':20,'rd':80.,'opponents':{o['id']:1 for o in items if o['id']!=m['id']},'wins':15-i//2,'losses':5+i//2,'ties':0,'streak':0,'best_streak':5 if i==0 else 0} for i,m in enumerate(items)}, 'recent':[], 'undo':[], 'votes':160, 'session':None}
         board['trophies']=store.battles._awards(board,store.battles._ranked_rows(board,store.battles._entries(owner['id'],'images')))
+        if os.environ.get('NAI_CARD_FEATURES_DEMO') == '1':
+            for score in board['ratings'].values():
+                score['opponents']=dict(list(score['opponents'].items())[:8]);score['wins']=15;score['losses']=5
+            board['cards']={'started_at':'2026-10-22T00:00:00Z','eligible':[m['id'] for m in items],'arrivals':{},'leaders':{items[1]['id']:'2026-10-22T00:00:00Z'},'best':{}}
         store.battles._save({'version':1,'boards':{owner['id']+':images':board}})
     store.save()
     server=runtime['MediaHTTPServer'](('127.0.0.1',8765),store);server.RequestHandlerClass=Handler

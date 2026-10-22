@@ -839,23 +839,67 @@ class BattleRankings:
     def _entries(self, owner, kind):
         media = {m['id']:m for m in self.store.data['media'] if m.get('character_id') == owner
                  and m.get('media_type') != 'video' and not m.get('in_review') and not m.get('in_purgatory')}
+        groups=[g for g in self.store.data.get('sets',[]) if g.get('character_id')==owner and g.get('kind','set')=='set']
         if kind == 'images':
+            memberships,captains={},{}
+            for group in groups:
+                label={'id':group['id'],'name':group.get('name','Set')}
+                for ident in group.get('media_ids',[]):memberships.setdefault(ident,[]).append(label)
+                captain=self._captain(owner,group,media)
+                if captain:captains.setdefault(captain,[]).append(label)
             return {ident:{'id':ident, 'name':m.get('original_name',m.get('filename','Image')), 'images':[ident], 'count':1,
-                           'categories':list(m.get('categories',[])), 'flagged_for_removal':bool(m.get('flagged_for_removal'))}
+                           'categories':list(m.get('categories',[])), 'flagged_for_removal':bool(m.get('flagged_for_removal')),
+                           'sets':memberships.get(ident,[]),'captain_sets':captains.get(ident,[])}
                     for ident,m in media.items() if self.store._in_main(m)}
         entries = {}
-        for group in self.store.data.get('sets', []):
-            if group.get('character_id') != owner or group.get('kind','set') != 'set':
-                continue
+        for group in groups:
             images = list(dict.fromkeys(i for i in group.get('media_ids',[]) if i in media))
-            if not images:
-                continue
+            if not images:continue
             cover = group.get('cover_media_id')
-            if cover in images:
-                images.remove(cover); images.insert(0,cover)
+            if cover in images:images.remove(cover);images.insert(0,cover)
             entries[group['id']] = {'id':group['id'], 'name':group.get('name','Set'), 'images':images, 'count':len(images),
-                                    'categories':list(group.get('categories',[]))}
+                                    'categories':list(group.get('categories',[])), 'captain_id':self._captain(owner,group,media)}
         return entries
+
+    def _captain(self, owner, group, media):
+        saved=(self.store.character(owner).get('collection') or {}).get('captains',{}).get(group['id'])
+        valid=[i for i in group.get('media_ids',[]) if i in media]
+        return next((i for i in (saved,group.get('cover_media_id'),*valid) if i in valid),None)
+
+    def _sync_cards(self, board, entries):
+        """Observe eligibility, never infer unrecorded historical ranks."""
+        eligible={i:e for i,e in entries.items() if not e.get('flagged_for_removal')}
+        now=now_iso();cards=board.get('cards')
+        if cards is None:
+            cards=board['cards']={'started_at':now,'eligible':list(eligible),'arrivals':{},'leaders':{},'best':{}}
+        previous=set(cards['eligible'])
+        for ident in set(eligible)-previous:
+            cards['arrivals'][ident]={'at':now,'token':uuid.uuid4().hex,'seen':False}
+        cards['eligible']=list(eligible)
+        rows=self._ranked_rows(board,entries)
+        qualified=sum(not r['provisional'] for r in rows)>=10
+        for row in rows:
+            if not row['provisional']:
+                best=cards['best'].setdefault(row['id'],{'rating':row['rating'],'position':row.get('position'),'at':now})
+                if row['rating']>best['rating']:best.update(rating=row['rating'],at=now)
+                if row.get('position'):best['position']=min(best.get('position') or row['position'],row['position'])
+            if qualified and row['leader'] and row['rating_status']=='Established' and row['id'] in eligible:
+                cards['leaders'].setdefault(row['id'],now)
+        return cards
+
+    def _card_metadata(self, board, rows, owner, kind):
+        cards=board.get('cards') or {};prefs=(self.store.character(owner).get('collection') or {}).get('titles',{})
+        for row in rows:
+            row['arrival']=copy.deepcopy(cards.get('arrivals',{}).get(row['id']))
+            row['best_recorded']=copy.deepcopy(cards.get('best',{}).get(row['id']))
+            row['titles']=[]
+            at=cards.get('leaders',{}).get(row['id'])
+            if at and not row.get('leader'):
+                row['titles'].append({'id':'former_number_one','name':'Former #1','at':at,'detail':'Recorded as outright #1 with Established confidence in a pool of at least 10 placed '+kind+'.'})
+            # Captain lettering is only for eligible main images, never set cards.
+            if kind=='images' and row.get('captain_sets'):
+                row['titles'].append({'id':'team_captain','name':'Team Captain','detail':'Captain of '+', '.join(g['name'] for g in row['captain_sets'])})
+            row['title_choice']=prefs.get(('set:' if kind=='sets' else '')+row['id'],'auto')
 
     @staticmethod
     def _in_scope(entry, session, scheduling=False):
@@ -1067,6 +1111,9 @@ class BattleRankings:
 
     def _advance_pair(self, board, entries, previous_pair, outcome):
         session=board['session']
+        if 'challenge_return' in session:
+            restored=session['challenge_return']
+            board['session']=session=restored
         if session.get('target_id') and session['done']>=10:
             self._finish_focus(session)
         champion=previous_pair[outcome] if session['mode']=='winner' and outcome in ('left','right') else None
@@ -1102,6 +1149,7 @@ class BattleRankings:
             pair=session['pair']
             session['available'] = all(i in entries and self._in_scope(entries[i],session) for i in (pair['left'],pair['right']))
         rows = self._ranked_rows(board, entries)
+        self._card_metadata(board,rows,owner,kind)
         baseline = (session or {}).get('baseline', {})
         for row in rows:
             row['round_change'] = round(row['rating'] - baseline.get(row['id'], row['rating']), 1)
@@ -1121,6 +1169,8 @@ class BattleRankings:
                 'scope_count':sum(self._in_scope(e,session or {'minimum':5 if kind=='sets' else 1},True) for e in entries.values()),
                 'unfinished_count':sum(r['provisional'] and self._in_scope(r,session or {'minimum':5 if kind=='sets' else 1},True) for r in rows),
                 'placement_batch':list(board.get('scheduler',{}).get('batch',[])),
+                'new_count':sum(bool(r.get('arrival')) and not r['arrival']['seen'] and not r.get('flagged_for_removal') for r in rows),
+                'cards_started_at':(board.get('cards') or {}).get('started_at'),
                 'recorded_votes':len(self._active_history(board)),
                 'preload_entries':self._forecast(board,entries) if preload else []}
 
@@ -1133,6 +1183,14 @@ class BattleRankings:
             board=copy.deepcopy(data['boards'].get(key,{'revision':uuid.uuid4().hex,'ratings':{},'recent':[],'undo':[],'votes':0,'session':None}))
             data['boards'][key]=board
             entries=self._entries(owner,kind)
+            if action=='cards':
+                data.setdefault('rating_model',self.MODEL)
+                before=copy.deepcopy(board.get('cards'))
+                self._sync_cards(board,entries)
+                if board['cards']!=before:
+                    board['revision']=uuid.uuid4().hex
+                    self._save(data)
+                return self._view(board,entries,owner,kind)
             if action=='history':return self._rating_path(board,str(body.get('entry_id','')),entries)
             if action=='summary':return self._view(board,entries,owner,kind,preload=False)
             if action=='state':return self._view(board,entries,owner,kind)
@@ -1145,7 +1203,21 @@ class BattleRankings:
             data['rating_model'] = self.MODEL
             board.setdefault('history', [])
             self._priors(board)
-            if action in ('start','place'):
+            if action=='seen':
+                cards=self._sync_cards(board,entries);tokens=body.get('tokens',{})
+                if not isinstance(tokens,dict) or len(tokens)>200:raise ValueError('Invalid arrival selection.')
+                for ident,token in tokens.items():
+                    arrival=cards['arrivals'].get(ident)
+                    if ident in entries and arrival and arrival['token']==token:arrival['seen']=True
+            elif action=='challenge':
+                left,right=body.get('entry_id'),body.get('opponent_id')
+                if left==right or any(i not in entries or entries[i].get('flagged_for_removal') for i in (left,right)):
+                    raise ValueError('Choose two different eligible opponents belonging to this person.')
+                previous=copy.deepcopy(board.get('session')) or {'mode':'rank','limit':0,'done':0,'minimum':1,'similar':False,'category':'','baseline':{i:self._score(board,i)['rating'] for i in entries}}
+                if 'challenge_return' in previous:previous=previous['challenge_return']
+                board['session']={'mode':'rank','limit':0,'done':0,'minimum':1,'similar':False,'category':'','baseline':previous.get('baseline',{}),
+                                  'challenge_return':previous,'pair':{'id':uuid.uuid4().hex,'left':left,'right':right,'reason':'Direct challenge'}}
+            elif action in ('start','place'):
                 target = str(body.get('entry_id','')) if action=='place' else None
                 if action=='place' and target not in entries:
                     raise ValueError('This entry is not eligible for battles. Images must be in Main; Review, Purgatory and videos are excluded.')
@@ -1184,7 +1256,7 @@ class BattleRankings:
                 if any(i not in entries or not self._in_scope(entries[i],session) for i in ids):
                     raise ValueError('An opponent is no longer eligible. Start a new round.')
                 before={'session':copy.deepcopy(session),'recent':list(board['recent']),'votes':board['votes'],
-                        'ratings':{i:copy.deepcopy(board['ratings'].get(i)) for i in ids}, 'awarded_trophy_ids':[], 'scheduler':copy.deepcopy(board.get('scheduler',{}))}
+                        'ratings':{i:copy.deepcopy(board['ratings'].get(i)) for i in ids}, 'card_record_before':{k:copy.deepcopy((board.get('cards') or {}).get(k,{})) for k in ('leaders','best')}, 'awarded_trophy_ids':[], 'scheduler':copy.deepcopy(board.get('scheduler',{}))}
                 board['recent']=(board['recent']+[ids])[-32:]
                 champion=None
                 if outcome!='skip':
@@ -1216,6 +1288,8 @@ class BattleRankings:
                     else:board['ratings'][ident]=score
                 for field in ('session','recent','votes'):board[field]=before[field]
                 board['scheduler']=before.get('scheduler',{'batch':[]})
+                if 'card_record_before' in before and 'cards' in board:
+                    board['cards'].update(copy.deepcopy(before['card_record_before']))
                 board['history'].append({'type':'undo','at':now_iso(),'vote_id':before.get('history_vote_id'),
                                          'legacy':not bool(before.get('history_vote_id'))})
                 if not before.get('history_vote_id'):
@@ -1231,6 +1305,7 @@ class BattleRankings:
                 else:
                     board['trophies'] = self._awards(board, self._ranked_rows(board, entries), legacy=True)
             else:raise ValueError('Unknown battle action.')
+            self._sync_cards(board,entries)
             board['revision']=uuid.uuid4().hex
             self._save(data)
             return self._view(board,entries,owner,kind)
@@ -2118,8 +2193,15 @@ class LibraryStore:
             data.setdefault('reviewed', {})
             data.setdefault('earned', {})
             data.setdefault('finish', 'obsidian')
+            data.setdefault('captains', {})
+            data.setdefault('titles', {})
             media = {m['id']:m for m in self.data['media'] if m.get('character_id') == owner and m.get('media_type') != 'video'}
-            if action not in ('state', 'save', 'frame', 'review'):
+            groups={g['id']:g for g in self.data.get('sets',[]) if g.get('character_id')==owner and g.get('kind','set')=='set'}
+            for ident,group in groups.items():
+                candidates=[i for i in group.get('media_ids',[]) if i in media]
+                if data['captains'].get(ident) not in candidates:
+                    data['captains'][ident]=next((i for i in (group.get('cover_media_id'),*candidates) if i in candidates),None)
+            if action not in ('state', 'save', 'frame', 'review', 'captain', 'title'):
                 raise ValueError('Unknown collection action.')
             if action != 'state' and body.get('revision', '') != data['revision']:
                 raise ValueError('Collection changed in another window. Reopen it before saving.')
@@ -2145,6 +2227,20 @@ class LibraryStore:
                 if finish not in required or len(data['earned'])*100 < required[finish]:
                     raise ValueError('That card finish has not been unlocked.')
                 data['finish'] = finish
+            elif action == 'captain':
+                ident,mid=body.get('set_id'),body.get('media_id')
+                if ident not in groups or mid not in media or mid not in groups[ident].get('media_ids',[]):
+                    raise ValueError('Choose an image belonging to this set and person.')
+                data['captains'][ident]=mid
+            elif action == 'title':
+                mid,choice=body.get('entry_id',body.get('media_id')),body.get('choice')
+                kind=body.get('kind','images')
+                if kind not in ('images','sets'):raise ValueError('Choose images or sets.')
+                rows=self.battles.request('summary',{'character_id':owner,'kind':kind})['entries']
+                row=next((r for r in rows if r['id']==mid),None)
+                if not row or choice not in ['auto','none']+[t['id'] for t in row['titles']]:
+                    raise ValueError('Choose an available title for an eligible card.')
+                data['titles'][('set:' if kind=='sets' else '')+mid]=choice
             elif action == 'frame':
                 key, mid = body.get('key', ''), body.get('media_id', '')
                 if mid not in media or key not in ('image:'+mid, 'profile:'+mid):
@@ -4195,13 +4291,13 @@ class MediaHandler(BaseHTTPRequestHandler):
                 body = self._read_json()
                 self._send_json(200, self.server.ui_updates.activate(str(body.get("version", ""))))
                 return
-            if path in {"/api/collection/state", "/api/collection/save", "/api/collection/frame", "/api/collection/review"}:
+            if path in {"/api/collection/state", "/api/collection/save", "/api/collection/frame", "/api/collection/review", "/api/collection/captain", "/api/collection/title"}:
                 self._send_json(200, self.store.collection_request(path.rsplit("/", 1)[1], self._read_json()))
                 return
             if path in {"/api/profile/state", "/api/profile/save"}:
                 self._send_json(200, self.store.profile_request(path.rsplit("/", 1)[1], self._read_json()))
                 return
-            if path in {"/api/battles/state", "/api/battles/start", "/api/battles/vote", "/api/battles/undo", "/api/battles/place", "/api/battles/resume", "/api/battles/summary", "/api/battles/history"}:
+            if path in {"/api/battles/state", "/api/battles/start", "/api/battles/vote", "/api/battles/undo", "/api/battles/place", "/api/battles/resume", "/api/battles/summary", "/api/battles/history", "/api/battles/cards", "/api/battles/seen", "/api/battles/challenge"}:
                 self._send_json(200, self.store.battles.request(path.rsplit("/",1)[1], self._read_json()))
                 return
             removal_match=re.fullmatch(r"/api/media/([0-9a-f]+)/removal-flag",path)

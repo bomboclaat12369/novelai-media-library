@@ -2,6 +2,30 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Card archives, captains and continuous leaderboard (standalone 2.9.0 / companion 2.7.61)
+
+Expanded cards now flip on click, showing comparison records, a simple rating path,
+set membership and title controls. Focus comparisons, exact-opponent Challenge,
+full rating history and framing controls sit outside the card. Challenges count as
+normal votes, preserve the previous session and support Undo.
+
+Former #1 and Team Captain use illustrated lettering on the card face. Former #1
+requires a recorded outright lead with Established confidence in a pool of at least
+10 placed entries; provisional leads do not count. Captain lettering belongs only
+to eligible main images that captain a set. Choose a title, use automatic priority,
+or hide it from the card back. Historical leads are not invented retrospectively.
+
+Set leaderboard cards show one saved captain photo. Click to unfold the members,
+view their cards or choose a captain independently of the regular library thumbnail.
+The leaderboard scrolls continuously and mounts only nearby rows. New arrivals
+tracks cards becoming eligible after the first updated load; viewing them clears
+the unread count. Needs placement includes all unfinished cards, including older
+ones, and offers focused placement sessions.
+
+Update standalone and **restart the companion**. NovelAI remains 2.8.93. Focused
+backend and browser checks cover persistence, Undo, title eligibility, captain
+independence, challenges, arrival tracking and a 360-card virtual leaderboard.
+
 ## Rank card designs and faster battles (standalone 2.8.99 / companion 2.7.60)
 
 Cards now take their frame, shield and nameplate colors from their battle rank:

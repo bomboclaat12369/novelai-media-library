@@ -17,16 +17,16 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
   await page.locator('#naiBattleLeaderboard').click();
   const appearance=await page.locator('.naiBattleRankCard .naiCardShell').evaluateAll(es=>es.map(e=>({rank:e.dataset.rank,metal:getComputedStyle(e).getPropertyValue('--metal-mid'),asset:e.querySelector('.naiCardOrnament').style.backgroundImage,nodes:e.querySelector('.naiCardOrnament').childElementCount})));
   assert(new Set(appearance.map(e=>e.metal)).size>=4);assert(appearance.every(e=>e.asset.includes('data:image/svg+xml')&&e.nodes===0));
-  assert.equal(await page.locator('.naiBattleRankCard').first().evaluate(e=>getComputedStyle(e).contentVisibility),'auto');
+  assert.equal(await page.locator('.naiBattleRankCard').first().evaluate(e=>getComputedStyle(e).contentVisibility),'visible');
   // Check every rank theme and unchanged percentile mapping without writing user data.
   const themes=await page.evaluate(()=>{const r=document.getElementById('nai-media-host').shadowRoot,rows=Array.from({length:30},(_,i)=>({id:String(i),images:[String(i)],rating:1000+i*10,played:20,provisional:false,rating_status:'Established'}));return {scores:rows.map(e=>r.naiCards.ovr(e,rows)),colors:['Bronze','Silver','Gold','Platinum','Diamond','Master','Grandmaster'].map(tier=>{const card=r.naiCards.lightCard({...rows[10],tier},rows,'',document.createElement('img'));return card.style.getPropertyValue('--metal-mid')})}});
   assert.equal(new Set(themes.colors).size,7);assert.equal(themes.scores[0],60);assert.equal(themes.scores.at(-1),99);assert(themes.scores.every((x,i,a)=>!i||x>=a[i-1]));
   const board=page.locator('.naiBattleBoard');await board.evaluate(e=>e.scrollTop=300);const scroll=await board.evaluate(e=>e.scrollTop);
-  const first=page.locator('.naiBattleGalleryVisual').first();await first.evaluate(e=>e.click());await page.locator('.naiBattleLight .naiExpandedCard img').waitFor();await page.waitForFunction(()=>document.getElementById('nai-media-host').shadowRoot.querySelector('.naiBattleLight img')?.naturalWidth>0);
-  assert.equal(await page.locator('.naiBattleLight .naiCardOrnament').count(),1);assert.equal(await page.locator('.naiBattleLight .naiCardRail').count(),1);
-  const before=await page.locator('.naiBattleLight img').getAttribute('data-media-id');await page.keyboard.press('ArrowRight');await page.waitForFunction(id=>document.getElementById('nai-media-host').shadowRoot.querySelector('.naiBattleLight img')?.dataset.mediaId!==id,before);
+  const first=page.locator('.naiBattleGalleryVisual').first();await first.evaluate(e=>e.click());await page.locator('.naiExpandedCard .naiCardPhotoWindow img').waitFor();await page.waitForFunction(()=>document.getElementById('nai-media-host').shadowRoot.querySelector('.naiExpandedCard .naiCardPhotoWindow img')?.naturalWidth>0);
+  assert.equal(await page.locator('.naiBattleLight .naiCardOrnament').count(),2);assert.equal(await page.locator('.naiBattleLight .naiCardRail').count(),1);
+  const before=await page.locator('.naiExpandedCard .naiCardPhotoWindow img').getAttribute('data-media-id');await page.keyboard.press('ArrowRight');await page.waitForFunction(id=>document.getElementById('nai-media-host').shadowRoot.querySelector('.naiExpandedCard .naiCardPhotoWindow img')?.dataset.mediaId!==id,before);
   // Clicking the photo stays open; clicking the blank area closes it.
-  await page.locator('.naiBattleLight img').click();assert.equal(await page.locator('.naiBattleLight').count(),1);
+  await page.locator('.naiExpandedCard .naiCardPhotoWindow img').click();assert.equal(await page.locator('.naiBattleLight').count(),1);
   await page.screenshot({path:(process.env.NAI_CARD_SHOTS||'/tmp')+'/card-expanded-rank.png'});
   await page.locator('.naiCardLightStage').click({position:{x:4,y:4}});assert.equal(await page.locator('.naiBattleLight').count(),0);assert.equal(await page.locator('.naiBattleBoard').evaluate(e=>e.scrollTop),scroll);
   await page.locator('.naiBattleGalleryVisual').first().click();await page.keyboard.press('Escape');assert.equal(await page.locator('.naiBattleLight').count(),0);
