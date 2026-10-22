@@ -2,6 +2,29 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Integrated card titles and framed positioning (standalone 2.9.2)
+
+Captain and Former #1 have individually sized, angled placements anchored to the
+lower frame. A compact faceted nameplate and beveled corners follow the card's
+rank colors. The portrait photo window is slightly taller, not smaller. Shared
+cached vector frames and embedded title artwork keep this free of extra network
+requests, animations or per-card SVG trees.
+
+Position card now shows the actual frame, rank, title and nameplate with the same
+proportions used by the displayed card. Profile positioning includes its signature
+frame and four attributes. The editor decodes the stored original and shows its
+pixel dimensions; zoom never substitutes a downscaled card preview. Save framing
+persists the crop; closing without saving preserves the prior framing.
+
+Unfolded sets size their tiles around two complete visible rows, then fit columns
+to the available width. Additional rows scroll. Video thumbnails have a larger
+play symbol and high-contrast VIDEO label while clicks still choose the set.
+
+Refresh and apply the standalone update. Companion remains 2.7.62 and NovelAI
+remains 2.8.93. Focused UI checks cover two-row layouts at three viewport sizes,
+consistent title/frame geometry, video markers, original-resolution positioning,
+framing save/reopen/cancel, and profile preview geometry.
+
 ## Captain artwork and set viewing (standalone 2.9.1 / companion 2.7.62)
 
 Captain uses the selected Royal Ink artwork; Former #1 uses Legacy Gold. Both are
