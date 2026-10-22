@@ -1,4 +1,5 @@
 """Build the independently versioned standalone page (including Battles)."""
+import base64
 import hashlib
 import json
 import sys
@@ -8,7 +9,9 @@ config = json.loads(Path(sys.argv[1] if len(sys.argv) > 1 else 'release-standalo
 version = config['version']
 payload = ''.join(Path(p).read_text() for p in config['parts'])
 bootstrap = Path('standalone-src/bootstrap.js').read_text()
-script = (bootstrap + '\n' + payload).replace('</script', '<\\/script')
+artwork={key:'data:image/webp;base64,'+base64.b64encode(Path(path).read_bytes()).decode('ascii') for key,path in config.get('title_artwork',{}).items()}
+asset_code='const naiCardTitleAssets=Object.freeze('+json.dumps(artwork,separators=(',',':'))+');\n'
+script = (asset_code + bootstrap + '\n' + payload).replace('</script', '<\\/script')
 html = f'''<!doctype html>
 <html lang="en" data-nai-standalone="1" data-nai-media-payload-version="{version}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">

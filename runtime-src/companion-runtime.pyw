@@ -838,7 +838,7 @@ class BattleRankings:
 
     def _entries(self, owner, kind):
         media = {m['id']:m for m in self.store.data['media'] if m.get('character_id') == owner
-                 and m.get('media_type') != 'video' and not m.get('in_review') and not m.get('in_purgatory')}
+                 and (kind=='sets' or m.get('media_type') != 'video') and not m.get('in_review') and not m.get('in_purgatory')}
         groups=[g for g in self.store.data.get('sets',[]) if g.get('character_id')==owner and g.get('kind','set')=='set']
         if kind == 'images':
             memberships,captains={},{}
@@ -858,13 +858,19 @@ class BattleRankings:
             cover = group.get('cover_media_id')
             if cover in images:images.remove(cover);images.insert(0,cover)
             entries[group['id']] = {'id':group['id'], 'name':group.get('name','Set'), 'images':images, 'count':len(images),
-                                    'categories':list(group.get('categories',[])), 'captain_id':self._captain(owner,group,media)}
+                                    'categories':list(group.get('categories',[])), 'captain_id':self._captain(owner,group,media),
+                                    'preview_id':self._captain(owner,group,media) or images[0],
+                                    'video_ids':[i for i in images if media[i].get('media_type')=='video']}
+            entries[group['id']]['video_count']=len(entries[group['id']]['video_ids'])
+            entries[group['id']]['image_count']=len(images)-entries[group['id']]['video_count']
         return entries
 
     def _captain(self, owner, group, media):
-        saved=(self.store.character(owner).get('collection') or {}).get('captains',{}).get(group['id'])
-        valid=[i for i in group.get('media_ids',[]) if i in media]
-        return next((i for i in (saved,group.get('cover_media_id'),*valid) if i in valid),None)
+        collection=self.store.character(owner).get('collection') or {}
+        # Legacy data did not distinguish a chosen captain from an automatic cover.
+        if collection.get('captain_schema')!=2:return None
+        saved=collection.get('captains',{}).get(group['id'])
+        return saved if saved in group.get('media_ids',[]) and saved in media and media[saved].get('media_type')!='video' else None
 
     def _sync_cards(self, board, entries):
         """Observe eligibility, never infer unrecorded historical ranks."""
@@ -888,7 +894,7 @@ class BattleRankings:
         return cards
 
     def _card_metadata(self, board, rows, owner, kind):
-        cards=board.get('cards') or {};prefs=(self.store.character(owner).get('collection') or {}).get('titles',{})
+        cards=board.get('cards') or {};collection=self.store.character(owner).get('collection') or {};prefs=collection.get('titles',{})
         for row in rows:
             row['arrival']=copy.deepcopy(cards.get('arrivals',{}).get(row['id']))
             row['best_recorded']=copy.deepcopy(cards.get('best',{}).get(row['id']))
@@ -898,8 +904,19 @@ class BattleRankings:
                 row['titles'].append({'id':'former_number_one','name':'Former #1','at':at,'detail':'Recorded as outright #1 with Established confidence in a pool of at least 10 placed '+kind+'.'})
             # Captain lettering is only for eligible main images, never set cards.
             if kind=='images' and row.get('captain_sets'):
-                row['titles'].append({'id':'team_captain','name':'Team Captain','detail':'Captain of '+', '.join(g['name'] for g in row['captain_sets'])})
-            row['title_choice']=prefs.get(('set:' if kind=='sets' else '')+row['id'],'auto')
+                row['titles'].append({'id':'team_captain','name':'Captain','detail':'Captain of '+', '.join(g['name'] for g in row['captain_sets'])})
+            key=('set:' if kind=='sets' else '')+row['id']
+            row['automatic_title_ids']=[t['id'] for t in row['titles']]
+            overrides=collection.get('title_overrides',{}).get(key,{})
+            allowed={'former_number_one':'Former #1',**({'team_captain':'Captain'} if kind=='images' else {})}
+            row['title_overrides']={i:v for i,v in overrides.items() if i in allowed and v in ('grant','suppress')}
+            for ident,name in allowed.items():
+                value=row['title_overrides'].get(ident)
+                if value=='suppress':row['titles']=[t for t in row['titles'] if t['id']!=ident]
+                elif value=='grant' and ident not in row['automatic_title_ids']:
+                    row['titles'].append({'id':ident,'name':name,'detail':'Manually restored in title corrections.','manual':True})
+            row['titles'].sort(key=lambda t:0 if t['id']=='former_number_one' else 1)
+            row['title_choice']=prefs.get(key,'auto')
 
     @staticmethod
     def _in_scope(entry, session, scheduling=False):
@@ -2195,13 +2212,17 @@ class LibraryStore:
             data.setdefault('finish', 'obsidian')
             data.setdefault('captains', {})
             data.setdefault('titles', {})
+            data.setdefault('title_overrides', {})
+            if data.get('captain_schema')!=2:
+                data['legacy_captains']=copy.deepcopy(data['captains'])
+                data['captains']={}
+                data['captain_schema']=2
             media = {m['id']:m for m in self.data['media'] if m.get('character_id') == owner and m.get('media_type') != 'video'}
             groups={g['id']:g for g in self.data.get('sets',[]) if g.get('character_id')==owner and g.get('kind','set')=='set'}
-            for ident,group in groups.items():
-                candidates=[i for i in group.get('media_ids',[]) if i in media]
-                if data['captains'].get(ident) not in candidates:
-                    data['captains'][ident]=next((i for i in (group.get('cover_media_id'),*candidates) if i in candidates),None)
-            if action not in ('state', 'save', 'frame', 'review', 'captain', 'title'):
+            for ident,mid in list(data['captains'].items()):
+                if ident not in groups or mid not in groups[ident].get('media_ids',[]) or mid not in media:
+                    data['captains'].pop(ident,None)
+            if action not in ('state', 'save', 'frame', 'review', 'captain', 'title', 'title-correction'):
                 raise ValueError('Unknown collection action.')
             if action != 'state' and body.get('revision', '') != data['revision']:
                 raise ValueError('Collection changed in another window. Reopen it before saving.')
@@ -2229,9 +2250,20 @@ class LibraryStore:
                 data['finish'] = finish
             elif action == 'captain':
                 ident,mid=body.get('set_id'),body.get('media_id')
-                if ident not in groups or mid not in media or mid not in groups[ident].get('media_ids',[]):
+                if ident not in groups or (mid is not None and (mid not in media or mid not in groups[ident].get('media_ids',[]))):
                     raise ValueError('Choose an image belonging to this set and person.')
-                data['captains'][ident]=mid
+                if mid is None:data['captains'].pop(ident,None)
+                else:data['captains'][ident]=mid
+            elif action == 'title-correction':
+                ident,kind=body.get('entry_id'),body.get('kind','images')
+                if kind not in ('images','sets') or ident not in self.battles._entries(owner,kind):
+                    raise ValueError('Choose an eligible card belonging to this person.')
+                overrides=body.get('overrides')
+                allowed={'former_number_one','team_captain'} if kind=='images' else {'former_number_one'}
+                if not isinstance(overrides,dict) or any(i not in allowed or v not in ('auto','grant','suppress') for i,v in overrides.items()):
+                    raise ValueError('Choose automatic, grant or suppress for each available title.')
+                key=('set:' if kind=='sets' else '')+ident
+                data['title_overrides'][key]={i:v for i,v in overrides.items() if v!='auto'}
             elif action == 'title':
                 mid,choice=body.get('entry_id',body.get('media_id')),body.get('choice')
                 kind=body.get('kind','images')
@@ -4291,7 +4323,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                 body = self._read_json()
                 self._send_json(200, self.server.ui_updates.activate(str(body.get("version", ""))))
                 return
-            if path in {"/api/collection/state", "/api/collection/save", "/api/collection/frame", "/api/collection/review", "/api/collection/captain", "/api/collection/title"}:
+            if path in {"/api/collection/state", "/api/collection/save", "/api/collection/frame", "/api/collection/review", "/api/collection/captain", "/api/collection/title", "/api/collection/title-correction"}:
                 self._send_json(200, self.store.collection_request(path.rsplit("/", 1)[1], self._read_json()))
                 return
             if path in {"/api/profile/state", "/api/profile/save"}:

@@ -42,6 +42,36 @@ class CardFeatures(unittest.TestCase):
         with self.assertRaises(ValueError):self.collection('title',revision=self.collection()['collection']['revision'],media_id=c['id'],choice='team_captain')
         other=self.store.add_character('Other');c['character_id']=other['id']
         with self.assertRaises(ValueError):self.collection('captain',revision=self.collection()['collection']['revision'],set_id=group['id'],media_id=c['id'])
+    def test_explicit_captain_migration_video_members_and_title_corrections(self):
+        a,b,video=[self.import_image(i) for i in range(3)];video['media_type']='video'
+        group=self.store.create_set(self.character['id'],'Mixed',[a['id'],b['id'],video['id']],preserve_placement=True)
+        group['cover_media_id']=a['id']
+        self.character['collection']={'revision':'old','captains':{group['id']:a['id']}}
+        self.assertIsNone(self.call('summary','sets')['entries'][0]['captain_id'])
+        data=self.collection();self.assertEqual(data['collection']['captains'],{})
+        self.assertEqual(data['collection']['legacy_captains'],{group['id']:a['id']})
+        row=self.call('summary','sets')['entries'][0]
+        self.assertEqual(row['count'],3);self.assertEqual(row['video_ids'],[video['id']]);self.assertEqual(row['preview_id'],a['id'])
+        self.assertEqual(len(self.call('summary')['entries']),2)
+        with self.assertRaises(ValueError):self.collection('captain',revision=data['collection']['revision'],set_id=group['id'],media_id=video['id'])
+        data=self.collection('captain',revision=data['collection']['revision'],set_id=group['id'],media_id=b['id'])
+        row=next(r for r in self.call('summary')['entries'] if r['id']==b['id']);self.assertEqual(row['titles'][0]['name'],'Captain')
+        before=copy.deepcopy(self.store.battles._load())
+        data=self.collection('title-correction',revision=data['collection']['revision'],entry_id=b['id'],overrides={'former_number_one':'grant','team_captain':'suppress'})
+        row=next(r for r in self.call('summary')['entries'] if r['id']==b['id']);self.assertEqual([t['id'] for t in row['titles']],['former_number_one'])
+        self.assertEqual(self.store.battles._load(),before)
+        self.assertEqual(self.call('summary','sets')['entries'][0]['captain_id'],b['id'])
+        self.store.save();loaded=type(self.store)(self.store.root)
+        row=next(r for r in loaded.battles.request('summary',{'character_id':self.character['id']})['entries'] if r['id']==b['id'])
+        self.assertEqual(row['title_overrides']['former_number_one'],'grant')
+        with self.assertRaises(ValueError):self.collection('title-correction',revision='stale',entry_id=b['id'],overrides={})
+        with self.assertRaises(ValueError):self.collection('title-correction',revision=data['collection']['revision'],entry_id=group['id'],kind='sets',overrides={'team_captain':'grant'})
+        data=self.collection('title-correction',revision=data['collection']['revision'],entry_id=b['id'],overrides={'former_number_one':'auto','team_captain':'auto'})
+        self.assertEqual(next(r for r in self.call('summary')['entries'] if r['id']==b['id'])['titles'][0]['id'],'team_captain')
+        data=self.collection('captain',revision=data['collection']['revision'],set_id=group['id'],media_id=None)
+        self.assertIsNone(self.call('summary','sets')['entries'][0]['captain_id'])
+        video['in_review']=True;self.assertEqual(self.call('summary','sets')['entries'][0]['count'],2)
+
     def test_recorded_former_leader_and_undo(self):
         images=[self.import_image(i) for i in range(12)];ids=[m['id'] for m in images];battle=self.store.battles
         board={'revision':'seed','ratings':{ident:{'rating':1400-i*1.,'rd':80.,'played':20,'opponents':{other:1 for other in ids if other!=ident},'wins':10,'losses':10,'ties':0} for i,ident in enumerate(ids)},'history':[],'recent':[],'undo':[],'votes':0,'session':None}

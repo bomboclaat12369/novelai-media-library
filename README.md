@@ -2,6 +2,37 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Captain artwork and set viewing (standalone 2.9.1 / companion 2.7.62)
+
+Captain uses the selected Royal Ink artwork; Former #1 uses Legacy Gold. Both are
+transparent, compressed static assets embedded in the verified standalone page,
+so displaying titles adds no network requests. Portrait card photos, title overlays
+and nameplates share the same proportions in battles, leaderboards and fullscreen.
+Fullscreen also retains the image's ranking number.
+
+Set members use the available screen width and an adaptive grid that fits up to
+two complete rows. Larger sets scroll. Clicking empty space closes the unfolded
+set; controls and media tiles retain their own actions. Video members now count
+in set battles, display their saved thumbnails and carry a Video marker. Image
+battles still exclude videos. Switching battle type preserves the leaderboard.
+The Close contender label is removed.
+
+Captains now require an explicit choice. A temporary library cover supplies the
+leaderboard image until then, with a prominent warning and no Captain title.
+Choose captain or Clear captain from the unfolded set. **Existing captains need
+one-time reconfirmation:** 2.9.0 saved automatic and manual assignments identically,
+so they cannot reliably be separated. The old assignments are retained internally
+as legacy metadata; library covers, memberships and ratings are unchanged.
+
+To restore a historical Former #1, open its card, flip it, and expand **Advanced ·
+Title corrections**. Automatic, Grant title and Suppress title options persist per
+card and do not change MMR or actual captain assignments. Set cards support Former
+#1; Captain lettering remains restricted to eligible main image cards.
+
+Restart the companion and refresh/apply the standalone update. NovelAI remains
+2.8.93. Focused checks cover captain migration, title correction persistence,
+video membership, two-row layouts, card alignment and leaderboard navigation.
+
 ## Card archives, captains and continuous leaderboard (standalone 2.9.0 / companion 2.7.61)
 
 Expanded cards now flip on click, showing comparison records, a simple rating path,

@@ -76,6 +76,19 @@ with tempfile.TemporaryDirectory() as directory:
                 score['opponents']=dict(list(score['opponents'].items())[:8]);score['wins']=15;score['losses']=5
             board['cards']={'started_at':'2026-10-22T00:00:00Z','eligible':[m['id'] for m in items],'arrivals':{},'leaders':{items[1]['id']:'2026-10-22T00:00:00Z'},'best':{}}
         store.battles._save({'version':1,'boards':{owner['id']+':images':board}})
+    if os.environ.get('NAI_CARD_LAYOUT_DEMO') == '1':
+        video=copy.deepcopy(items[0]);video.update(id='f'*32,media_type='video',original_name='Set video.webm')
+        image=Image.new('RGB',(1280,720),'#503e8a');target=store.thumb_dir/'video-fixture.jpg';image.save(target)
+        video['thumb_rel']=target.relative_to(store.root).as_posix();store.data['media'].append(video)
+        # Six stills plus a video, and a larger set that must scroll after two rows.
+        store.data['sets'][0]['media_ids'].append(video['id'])
+        extra=[]
+        for i,original in enumerate(items):
+            item=copy.deepcopy(original);item.update(id=f'{0xf0000000+i:032x}',in_all=False,categories=[]);store.data['media'].append(item);extra.append(item['id'])
+        store.create_set(owner['id'],'Large set',extra,preserve_placement=True)
+        owner['collection']={'revision':'legacy','captains':{g['id']:g['media_ids'][0] for g in store.data['sets']}}
+    elif os.environ.get('NAI_CARD_FEATURES_DEMO') == '1':
+        owner['collection']={'revision':'chosen','captain_schema':2,'captains':{g['id']:g['media_ids'][0] for g in store.data['sets']}}
     store.save()
     server=runtime['MediaHTTPServer'](('127.0.0.1',8765),store);server.RequestHandlerClass=Handler
     def download(url,*args):
