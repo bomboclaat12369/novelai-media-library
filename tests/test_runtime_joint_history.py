@@ -4,6 +4,7 @@ import math
 import random
 import time
 import unittest
+from unittest.mock import patch
 import test_runtime_stability as fixtures
 from test_runtime_battles import BattleTests
 
@@ -95,10 +96,33 @@ class JointHistoryTests(unittest.TestCase):
         board=self.board(220);rng=random.Random(16)
         for _ in range(1600):
             a,b=rng.sample(range(220),2);self.event(board,a,b,'left' if a<b else 'right')
+        reference=copy.deepcopy(board)
         start=time.perf_counter();self.store.battles._fit_history(board)
         elapsed=time.perf_counter()-start
         print('220 entries / 1600 comparisons joint fit: %.3fs'%elapsed)
         self.assertLess(elapsed,8)
         self.assertGreater(board['ratings']['0']['rating'],board['ratings']['219']['rating'])
+        start=time.perf_counter()
+        with patch.object(self.store.battles,'_inverse_diagonal',return_value=None):
+            self.store.battles._fit_history(reference)
+        print('Reference iterative uncertainty: %.3fs'%(time.perf_counter()-start))
+        for ident, score in board['ratings'].items():
+            self.assertEqual(score['rating'],reference['ratings'][ident]['rating'])
+            self.assertAlmostEqual(score['rd'],reference['ratings'][ident]['rd'],places=6)
+
+    def test_dense_uncertainty_with_ties_repeats_and_disconnected_entries(self):
+        board=self.board(64);rng=random.Random(9)
+        for i in range(600):
+            a,b=rng.sample(range(55),2)
+            self.event(board,a,b,('left','right','tie')[i%3])
+        reference=copy.deepcopy(board)
+        self.store.battles._fit_history(board)
+        with patch.object(self.store.battles,'_inverse_diagonal',return_value=None):
+            self.store.battles._fit_history(reference)
+        for ident,score in board['ratings'].items():
+            self.assertEqual(score['rating'],reference['ratings'][ident]['rating'])
+            self.assertAlmostEqual(score['rd'],reference['ratings'][ident]['rd'],places=6)
+        self.assertIsNone(self.store.battles._inverse_diagonal([1.]*400,[]))
+        self.assertIsNone(self.store.battles._inverse_diagonal([1.]*64,[(0,1,.1)]))
 
 if __name__=='__main__':unittest.main()

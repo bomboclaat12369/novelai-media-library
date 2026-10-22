@@ -2,6 +2,40 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Rank card designs and faster battles (standalone 2.8.99 / companion 2.7.60)
+
+Cards now take their frame, shield and nameplate colors from their battle rank:
+graphite placement, copper Bronze, brushed Silver, Gold, teal Platinum, ice-blue
+Diamond, violet Master and black/gold/crimson Grandmaster. Upper tiers add distinct
+crest details. Hiding MMR also hides rank styling. Profile finishes remain available;
+battle finishes add texture while preserving the rank color.
+
+The uncertainty calculation factors one shared matrix on medium, sufficiently
+connected boards instead of solving it separately for every rated image. It uses
+the same full history and covariance model, with the existing sparse solver retained
+for small, sparse or large boards. A 220-entry / 1,600-comparison fixture measured
+about 0.28 seconds versus 0.84 seconds for the previous calculation on the same
+machine. MMR matched exactly and uncertainty matched to six decimal places in
+comparison checks; this measures calculation time, not a guaranteed end-to-end vote
+latency. Requests also avoid copying unrelated people's ranking histories.
+
+Card frames use shared static vector assets instead of repeated inline artwork;
+percentile OVR tables are cached per response, offscreen leaderboard rendering is
+skipped, and Show more appends cards. Next-match images are decoded ahead of display
+with a separate bounded cache (128 MiB estimated decoded pixels, at most 24 retained
+images). Set layout changes are batched. Original-resolution battle images, vote
+persistence and Undo are preserved.
+
+Collection HQ now opens over the current battle/leaderboard and returns there on
+Close or Escape. Starting an HQ battle task replaces the previous battle screen.
+Enlarging a leaderboard image preserves its card frame, rank and saved positioning;
+arrows browse cards and clicking the surrounding blank area closes the viewer.
+
+Update standalone and **restart the companion** to apply the rating optimization.
+NovelAI's interface remains 2.8.93. Focused checks cover solver parity, voting/Undo,
+rank designs, HQ navigation, enlarged cards, backdrop closing and original image
+layouts.
+
 ## Sculpted trading-card artwork (standalone 2.8.98)
 
 Battle, leaderboard and profile cards now use layered metallic SVG frames with

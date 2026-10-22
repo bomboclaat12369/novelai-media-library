@@ -38,12 +38,12 @@
     "payload/userscript-2.8.76.search-fields.txt",
     "payload/userscript-2.8.92.ranks.txt",
     "payload/userscript-2.8.96.ranking-library.txt",
-    "payload/userscript-2.8.98.collection.txt",
-    "payload/userscript-2.8.98.battles.txt",
+    "payload/userscript-2.8.99.collection.txt",
+    "payload/userscript-2.8.99.battles.txt",
     "payload/userscript-2.8.97.profiles.txt",
     "payload/userscript-2.8.93.viewer-layout.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 153,
-  "version": "2.8.98"
+  "release_build": 154,
+  "version": "2.8.99"
 }

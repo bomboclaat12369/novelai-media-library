@@ -665,6 +665,37 @@ class BattleRankings:
         board['history_priors'] = priors
         return priors
 
+    @staticmethod
+    def _inverse_diagonal(diagonal, edges):
+        """Exact dense Cholesky inverse diagonal for medium-sized boards.
+
+        Factor once instead of running one iterative solve per rated entry.
+        Keep sparse PCG for large boards to bound dense memory and cubic work.
+        No change to priors, evidence, convergence or uncertainty semantics.
+        """
+        n = len(diagonal)
+        if not 24 <= n <= 384 or len(edges) < n * 3:
+            return None
+        lower = [[0.] * n for _ in range(n)]
+        for i, value in enumerate(diagonal):
+            lower[i][i] = value
+        for a, b, weight in edges:
+            lower[max(a,b)][min(a,b)] -= weight
+        for i, row in enumerate(lower):
+            for j in range(i):
+                other = lower[j]
+                row[j] = (row[j] - sum(row[k]*other[k] for k in range(j))) / other[j]
+            pivot = row[i] - sum(row[k]*row[k] for k in range(i))
+            if not math.isfinite(pivot) or pivot <= 0:
+                return None  # Retain the established solver on numerical failure.
+            row[i] = math.sqrt(pivot)
+        inverse = [[0.] * n for _ in range(n)]
+        for i, row in enumerate(lower):
+            inverse[i][i] = 1 / row[i]
+            for j in range(i):
+                inverse[i][j] = -sum(row[k]*inverse[k][j] for k in range(j,i)) / row[i]
+        return [sum(inverse[k][i]**2 for k in range(i,n)) for i in range(n)]
+
     def _fit_history(self, board, confidence=True):
         """Regularized joint Bradley-Terry fit; a tie is one half-result.
 
@@ -755,14 +786,18 @@ class BattleRankings:
         _, gradient, diagonal, edges = system(x)
         if max(abs(g) for g in gradient) > 1e-5:
             raise ValueError('Historical ratings did not converge; no vote has been saved.')
+        variances = self._inverse_diagonal(diagonal, edges) if confidence else None
         for ident,i in index.items():
             if ident not in board['ratings']:
                 continue
             score = board['ratings'][ident]
             score['rating'] = 1200 + scale*x[i]
             if confidence:
-                unit = [0.]*n; unit[i] = 1.
-                variance = solve(unit,diagonal,edges)[i]
+                if variances is None:
+                    unit = [0.]*n; unit[i] = 1.
+                    variance = solve(unit,diagonal,edges)[i]
+                else:
+                    variance = variances[i]
                 score['rd'] = max(50., min(350., scale*math.sqrt(max(0.,variance))))
 
     @staticmethod
@@ -1094,8 +1129,9 @@ class BattleRankings:
             owner=str(body.get('character_id',''));kind=body.get('kind','images')
             if not self.store.character(owner) or kind not in ('images','sets'):
                 raise ValueError('Choose one character and a valid battle type.')
-            data=copy.deepcopy(self._load());key=owner+':'+kind
-            board=data['boards'].setdefault(key,{'revision':uuid.uuid4().hex,'ratings':{},'recent':[],'undo':[],'votes':0,'session':None})
+            data=dict(self._load());data['boards']=dict(data['boards']);key=owner+':'+kind
+            board=copy.deepcopy(data['boards'].get(key,{'revision':uuid.uuid4().hex,'ratings':{},'recent':[],'undo':[],'votes':0,'session':None}))
+            data['boards'][key]=board
             entries=self._entries(owner,kind)
             if action=='history':return self._rating_path(board,str(body.get('entry_id','')),entries)
             if action=='summary':return self._view(board,entries,owner,kind,preload=False)
