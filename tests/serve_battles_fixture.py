@@ -90,6 +90,7 @@ with tempfile.TemporaryDirectory() as directory:
         video['thumb_rel']=target.relative_to(store.root).as_posix();store.data['media'].append(video)
         # Six stills plus a video, and a larger set that must scroll after two rows.
         store.data['sets'][0]['media_ids'].append(video['id'])
+        if os.environ.get('NAI_CAPTAIN_DEMO')=='1':store.create_set(owner['id'],'Video only',[video['id']],preserve_placement=True)
         extra=[]
         for i,original in enumerate(items):
             item=copy.deepcopy(original);item.update(id=f'{0xf0000000+i:032x}',in_all=False,categories=[]);store.data['media'].append(item);extra.append(item['id'])

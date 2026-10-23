@@ -2,6 +2,33 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Battle presentation and quick captain selection (standalone 2.9.5)
+
+Battles have a framed arena, static light pools, clearer typography and immediate
+vote feedback that runs alongside the save request without delaying the next
+matchup. Rank frames now have distinct materials and engravings. Set cards carry
+stacked edges and member counts, while new and unrated cards are easier to spot.
+The portrait proportions and photo opening from 2.9.4 remain intact.
+
+Leaderboards have podium medals, rank boundaries and compact Inspect/Focus or
+Captain controls. Fullscreen uses grouped controls; card backs have a collection
+emblem, clearer statistics and history, with customization tucked into a disclosure.
+Collection HQ has a stronger identity, milestone tracks and holding-area counts.
+The trophy cabinet is unchanged, and there is no pointer-driven lighting.
+
+To assign captains quickly, open **Battles → Sets → Leaderboard → Assign missing
+captains**. Clicking a loaded still image saves the choice and advances to the next
+set. Back, Skip and Finish preserve choices already saved; video-only sets are
+excluded. Individual Captain buttons also open selection directly. A failed save
+keeps the current set open for retry instead of advancing.
+
+Static, cached frame artwork and bounded leaderboard rendering keep effects
+lightweight. The captain pass refreshes rankings once at the end, rather than after
+every selection. Focused checks cover voting, fullscreen, virtual scrolling,
+captain errors/navigation/persistence, and original-resolution card positioning.
+MMR and matchmaking are unchanged. Refresh and apply the standalone update;
+companion 2.7.62 and NovelAI 2.8.93 do not need an update.
+
 ## Portrait card proportions and footer polish (standalone 2.9.4)
 
 All image cards use one portrait format again, including landscape source images.

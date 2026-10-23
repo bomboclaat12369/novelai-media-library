@@ -16,7 +16,7 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
   assert(await page.locator('.naiCardTitleArt[alt="Captain"]').count()>0);assert(await page.locator('.naiCardTitleArt[alt="Former #1"]').count()>0);
   await cards.nth(1).locator('.naiBattleGalleryVisual').click();await page.locator('.naiExpandedCard .naiCardPhotoWindow img').waitFor();
   await page.locator('.naiExpandedCard .naiCardPhotoWindow img').click();await page.waitForFunction(()=>document.getElementById('nai-media-host').shadowRoot.querySelector('.naiFlipCard')?.dataset.flipped==='true');
-  await page.getByLabel('Featured title',{exact:true}).waitFor();assert(await page.locator('.naiCardBackBody').textContent().then(s=>s.includes('Former #1')));
+  await page.locator('.naiCardUtilities > summary').click();await page.getByLabel('Featured title',{exact:true}).waitFor();assert(await page.locator('.naiCardBackBody').textContent().then(s=>s.includes('Former #1')));
   await page.locator('.naiFlipCard').evaluate(e=>Promise.all(e.getAnimations({subtree:true}).map(a=>a.finished)));
   await page.screenshot({path:(process.env.NAI_CARD_SHOTS||'/tmp')+'/card-feature-back.png'});
   await page.locator('.naiCardBackBody h2').click();assert.equal(await page.locator('.naiFlipCard').getAttribute('data-flipped'),'false');
