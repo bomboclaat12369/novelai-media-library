@@ -39,14 +39,14 @@
     "payload/userscript-2.8.92.ranks.txt",
     "payload/userscript-2.8.96.ranking-library.txt",
     "payload/userscript-2.9.5.collection.txt",
-    "payload/userscript-2.9.5.battles.txt",
+    "payload/userscript-2.9.6.battles.txt",
     "payload/userscript-2.8.97.profiles.txt",
     "payload/userscript-2.8.93.viewer-layout.txt",
-    "payload/userscript-2.9.5.presentation.txt",
+    "payload/userscript-2.9.6.presentation.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 160,
-  "version": "2.9.5",
+  "release_build": 161,
+  "version": "2.9.6",
   "title_artwork": {
     "team_captain": "assets/cards/captain-royal-ink.webp",
     "former_number_one": "assets/cards/former-number-one-legacy-gold.webp"

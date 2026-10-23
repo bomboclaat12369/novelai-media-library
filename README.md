@@ -2,6 +2,25 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Clear vote feedback and larger set images (standalone 2.9.6)
+
+The arena background now takes precedence over the older rank theme. Voting puts
+gold corner accents and a selection marker on the fitted card, rather than a
+white rectangle around its entire column. A brief saved-vote confirmation remains
+visible across the transition; it never delays the next matchup or blocks voting.
+
+Removed the extra rank-boundary labels beneath leaderboard cards and reclaimed
+their vertical space. The set browser and captain picker no longer show repeated
+image captions, instruction paragraphs or item-count summaries. A compact header,
+minimal tile padding and four-pixel gaps give more room to the images while keeping
+two complete rows visible. Video markers, captain crests and save-error feedback
+remain available. Keyboard and screen-reader action labels are retained.
+
+Focused browser checks cover the rendered vote feedback, effective arena styles,
+two-row sizing at three viewport sizes, captain saving/retry/navigation, and bounded
+leaderboard scrolling. Refresh and apply standalone 2.9.6; companion and NovelAI
+versions are unchanged.
+
 ## Battle presentation and quick captain selection (standalone 2.9.5)
 
 Battles have a framed arena, static light pools, clearer typography and immediate
