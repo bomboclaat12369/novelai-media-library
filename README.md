@@ -2,6 +2,23 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Portrait proportions and landscape cards (standalone 2.9.3)
+
+Portrait cards restore the earlier photo window and taller, raised footer while
+keeping the faceted frame and angled title artwork. The bottom ranking label is
+now simply #1, #7, #120, etc.; unranked cards do not invent a ranking number.
+
+Landscape photos automatically use a matching horizontal 3:2 frame in battles,
+the leaderboard, fullscreen and Position card. Decoded image dimensions account
+for EXIF rotation. Landscape covers span two leaderboard columns when space
+allows; the mixed grid remains virtualized and keeps ranking order. Profile
+signature cards and set battle mosaics retain their existing formats.
+
+Positioning continues to decode the stored original, with saved zoom and position
+applied consistently in every card view. No additional image requests are needed
+to determine orientation. Refresh and apply the standalone update; the companion
+and NovelAI versions are unchanged.
+
 ## Integrated card titles and framed positioning (standalone 2.9.2)
 
 Captain and Former #1 have individually sized, angled placements anchored to the

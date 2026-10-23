@@ -38,14 +38,14 @@
     "payload/userscript-2.8.76.search-fields.txt",
     "payload/userscript-2.8.92.ranks.txt",
     "payload/userscript-2.8.96.ranking-library.txt",
-    "payload/userscript-2.9.2.collection.txt",
-    "payload/userscript-2.9.2.battles.txt",
+    "payload/userscript-2.9.3.collection.txt",
+    "payload/userscript-2.9.3.battles.txt",
     "payload/userscript-2.8.97.profiles.txt",
     "payload/userscript-2.8.93.viewer-layout.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 157,
-  "version": "2.9.2",
+  "release_build": 158,
+  "version": "2.9.3",
   "title_artwork": {
     "team_captain": "assets/cards/captain-royal-ink.webp",
     "former_number_one": "assets/cards/former-number-one-legacy-gold.webp"

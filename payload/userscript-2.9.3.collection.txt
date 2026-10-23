@@ -1,0 +1,392 @@
+// Standalone-only card presentation. All scores remain separate from battle MMR.
+(()=>{
+'use strict';
+const root=document.getElementById('nai-media-host')?.shadowRoot;
+if(!root||document.documentElement.dataset.naiStandalone!=='1')return;
+const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;};
+const btn=(text,fn)=>{const b=el('button','',text);b.type='button';b.onclick=fn;return b;};
+const api=(action,owner,extra={})=>root.naiOutfitRequest('/api/collection/'+action,{character_id:owner,...extra});
+const cache=new Map();
+const load=async owner=>{const data=await api('state',owner);cache.set(owner,data);return data;};
+const thumb=id=>'http://127.0.0.1:8765/api/media/'+encodeURIComponent(id)+'/thumb?size=1200';
+const palette={Bronze:'#c39977',Silver:'#c5d4df',Gold:'#e6c376',Platinum:'#a5dcce',Diamond:'#89d9f3',Master:'#c6a5f4',Grandmaster:'#f2d193'};
+const style=el('style');style.textContent=`
+.naiCardShell{--card-accent:#cdb47c;position:relative;border:1px solid var(--card-accent)!important;border-radius:12px!important;background:linear-gradient(135deg,#262b35,#10151d 45%,#282b33)!important;box-shadow:inset 0 0 0 2px #ffffff08,0 8px 24px #0003;overflow:hidden;padding:5px!important;isolation:isolate}
+.naiCardShell[data-finish=emerald]{background:linear-gradient(135deg,#183b34,#101b21 50%,#395747)!important}.naiCardShell[data-finish=platinum]{background:linear-gradient(135deg,#414b5c,#111923 48%,#516579)!important}
+.naiCardRail{display:flex;align-items:center;gap:8px;min-height:27px;padding:2px 5px 6px;color:var(--card-accent);font:600 10px/1.1 system-ui;letter-spacing:1.5px;text-transform:uppercase;flex-shrink:0!important;pointer-events:none}.naiCardRail strong{font-size:25px;letter-spacing:-1.5px;line-height:1}.naiCardRail small{font-size:8px;letter-spacing:1px}.naiCardRail .naiRankBadge{margin-left:auto;padding:0;border:0;background:transparent;font-size:9px;letter-spacing:.3px}.naiCardRail .naiRankEmblem{width:25px!important;height:25px!important}
+.naiCardPhotoWindow{position:relative;overflow:hidden;background:#070b11;border-radius:6px;min-height:0;min-width:0}.naiCardPhotoWindow img{transform-origin:center;object-fit:contain;display:block;width:100%;height:100%;max-width:none;max-height:none}
+.naiBattleCard>.naiCardPhotoWindow{flex:1 1 0px!important;min-height:0}.naiBattleCard .naiCardPhotoWindow .naiBattlePhoto{height:100%;width:100%}.naiBattleRankCard>.naiCardRail{min-height:34px}.naiBattleRankCard .naiGalleryPosition{top:auto;bottom:7px;left:7px;font-size:12px}.naiBattleRankCard .naiGalleryInfo{padding:9px 5px 5px}.naiBattleCard>.naiCardRail{padding:0 5px 2px}.naiBattleCard h3{font-size:12px!important;padding:0 4px}.naiBattleCard .naiBattleMmr{font-size:11px}.naiBattleCard .naiBattleFooter{padding:2px}
+.naiProfileCard{padding:6px!important}.naiProfileCard .naiCardPhotoWindow{height:46vh;min-height:240px}.naiProfileCard .naiProfileHero{height:100%;border-radius:0}.naiCardName{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:9px 7px;color:#eee;font:600 18px system-ui;letter-spacing:.5px}.naiCardName small{font:9px system-ui;letter-spacing:2px;color:var(--card-accent)}
+.naiCardAttributes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding:3px 3px 7px}.naiCardAttributes>div{text-align:center;border-left:1px solid #ffffff16;min-width:0}.naiCardAttributes>div:first-child{border:0}.naiCardAttributes strong{display:block;font:600 23px system-ui;color:var(--card-accent)}.naiCardAttributes span{display:block;overflow:hidden;text-overflow:ellipsis;font:9px system-ui;text-transform:uppercase;letter-spacing:1px;color:#bdc6d5}.naiCardControl{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.naiCardControl button{font-size:12px!important}
+.naiCollectionOverlay{position:fixed;inset:0;z-index:2147483647;background:#080d17;color:#e5eaf3;font:14px/1.5 system-ui;overflow:auto;padding:24px;box-sizing:border-box}.naiCollectionOverlay *{box-sizing:border-box}.naiCollectionOverlay [hidden]{display:none!important}.naiCollectionOverlay button,.naiCollectionOverlay input,.naiCollectionOverlay select{font:inherit;border:1px solid #45536c;background:#1c293d;color:#e5eaf3;border-radius:7px;padding:8px 12px;width:auto;max-width:100%}.naiCollectionOverlay button{cursor:pointer}.naiCollectionOverlay button:disabled{opacity:.45;cursor:default}.naiCollectionOverlay button:focus-visible,.naiCollectionOverlay input:focus-visible{outline:2px solid #e5c481;outline-offset:3px}.naiCollectionOverlay button[data-primary=true]{background:#d5bd88;color:#151a22;border-color:#d5bd88;font-weight:650}.naiCollectionOverlay h1,.naiCollectionOverlay h2,.naiCollectionOverlay h3,.naiCollectionOverlay p{margin:0}.naiCollectionOverlay small,.naiCollectionMuted{color:#a9b7cb;font-size:12px}.naiCollectionInner{width:min(1350px,100%);margin:auto}.naiCollectionHeader{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px}.naiCollectionEyebrow{font-size:10px;letter-spacing:3px;color:#d8bf87;font-weight:650}.naiCollectionHeader h1{font-size:30px;letter-spacing:-.8px}.naiCollectionHeader h2{font-size:22px}.naiCollectionTools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.naiCollectionHero{display:grid;grid-template-columns:1fr auto;gap:24px;padding:28px;border:1px solid #68705e;border-radius:16px;background:radial-gradient(ellipse at top right,#535e483d,transparent 65%),linear-gradient(120deg,#172230,#101722);margin-bottom:22px;position:relative;overflow:hidden}.naiCollectionHero h2{font-size:34px;font-weight:600;letter-spacing:-1px;margin:10px 0}.naiCollectionRing{width:145px;height:145px;border-radius:50%;background:conic-gradient(#dcc38d var(--progress),#2b3545 0);padding:6px;align-self:center}.naiCollectionRing>div{height:100%;border-radius:50%;background:#111c28;display:flex;flex-direction:column;justify-content:center;align-items:center}.naiCollectionRing strong{font-size:36px;letter-spacing:-1px}.naiCollectionRing small{text-transform:uppercase;font-size:9px;letter-spacing:1px}.naiCollectionXP{margin-top:18px;max-width:500px}.naiCollectionXP progress,.naiCollectionNode progress{width:100%;height:7px;accent-color:#cbb989;display:block;margin:10px 0}.naiCollectionXP span{font-size:11px;color:#c1cbd8}.naiCollectionStats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin:20px 0 26px}.naiCollectionStats>div{padding:14px;border-radius:10px;background:#121d2c;border:1px solid #2d394d}.naiCollectionStats strong{display:block;font-size:25px;font-weight:550}.naiCollectionStats span{font-size:11px;color:#9caec5}.naiCollectionMap{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:18px 0 28px}.naiCollectionNode{padding:22px;border:1px solid #374962;border-radius:12px;background:linear-gradient(150deg,#1b293d,#111b2a);position:relative;display:flex;flex-direction:column;gap:12px}.naiCollectionNode[data-complete=true]{border-color:#6a8065;background:linear-gradient(150deg,#253b32,#111c26)}.naiCollectionNode header{display:flex;justify-content:space-between;align-items:center;color:#d9c694;font-size:11px;letter-spacing:2px}.naiCollectionNode header b{display:grid;place-items:center;width:36px;height:36px;border:1px solid currentColor;transform:rotate(45deg);border-radius:6px}.naiCollectionNode header b span{transform:rotate(-45deg)}.naiCollectionNode h3{font-size:19px;font-weight:550}.naiCollectionNode p{font-size:12px;color:#abb9cc;min-height:36px}.naiCollectionNode button{align-self:flex-start;margin-top:auto}.naiCollectionNode footer{font-size:12px;display:flex;justify-content:space-between;color:#acbdd0}.naiCollectionAwards{display:flex;gap:12px;overflow:auto;padding:14px 0 20px}.naiCollectionAward{flex:0 0 190px;border:1px solid #4b493d;background:linear-gradient(135deg,#252b31,#171d28);border-radius:10px;padding:16px}.naiCollectionAward strong{font-size:11px;display:block;margin:9px 0;color:#e2c78d}.naiCollectionAward small{font-size:10px}.naiCollectionRoster{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin:15px 0}.naiCollectionRoster button{text-align:left;display:flex;gap:12px;align-items:center;background:#121e2e}.naiCollectionRoster img{width:60px;height:80px;object-fit:contain;border-radius:6px}.naiCollectionRoster strong{display:block;font-size:18px}.naiCollectionRoster small{display:block}.naiCollectionError{color:#ffb6a1;white-space:pre-wrap;margin:12px 0}.naiCardEditor{max-width:840px;margin:0 auto}.naiCardEditLayout{display:grid;grid-template-columns:minmax(200px,1fr) minmax(180px,1fr);gap:24px}.naiCardEditPreview{aspect-ratio:4/5;max-height:65vh}.naiCardEditLayout label{display:block;margin:14px 0}.naiCardEditLayout input[type=range]{width:100%;padding:0;accent-color:#d8bd86}.naiAttributeRow{display:grid;grid-template-columns:minmax(100px,1fr) 85px 85px;gap:8px;margin:12px 0}.naiAttributeRow input{min-width:0;width:100%}.naiOrganizeGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;margin:18px 0}.naiOrganizeGrid article{background:#152034;border:1px solid #36445c;border-radius:10px;padding:8px}.naiOrganizeGrid img{width:100%;height:220px;object-fit:contain}.naiOrganizeGrid button{width:100%;margin:4px 0;font-size:12px}
+@media(max-width:800px){.naiCollectionOverlay{padding:14px}.naiCollectionMap{grid-template-columns:repeat(2,minmax(0,1fr))}.naiCollectionStats{grid-template-columns:repeat(3,minmax(0,1fr))}.naiCollectionHero{padding:20px}.naiCollectionHero h2{font-size:25px}.naiCollectionRing{width:110px;height:110px}.naiCardEditLayout{grid-template-columns:1fr}.naiCardEditPreview{max-height:45vh}.naiCollectionHeader{flex-wrap:wrap}}@media(max-width:480px){.naiCollectionMap{grid-template-columns:1fr}.naiCollectionHero{grid-template-columns:1fr}.naiCollectionRing{display:none}}
+
+/* Sculpted card artwork stays independent of the library and battle controls. */
+.naiCardShell{--metal-light:#fff0bf;--metal-mid:#c6a76c;--metal-dark:#69502f;--card-accent:#e2c58c;position:relative;isolation:isolate;container-type:inline-size;border:0!important;border-radius:0!important;background:repeating-linear-gradient(117deg,#ffffff03 0 1px,transparent 1px 5px),linear-gradient(135deg,#24262a,#0c1018 40%,#262a31)!important;box-shadow:none!important;padding:3.8% 4.8% 4.3%!important;overflow:hidden;clip-path:polygon(4% 0,26% 0,28% 1.4%,72% 1.4%,74% 0,96% 0,100% 2.7%,100% 97.3%,96% 100%,4% 100%,0 97.3%,0 2.7%)}
+.naiCardShell[data-finish=emerald]{--metal-light:#e4f6ca;--metal-mid:#8bad80;--metal-dark:#345646;background:repeating-linear-gradient(117deg,#ffffff03 0 1px,transparent 1px 5px),linear-gradient(135deg,#19372c,#091619 55%,#304239)!important}.naiCardShell[data-finish=platinum]{--metal-light:#f3faff;--metal-mid:#b6c9dc;--metal-dark:#4b5c78;background:repeating-linear-gradient(117deg,#ffffff03 0 1px,transparent 1px 5px),linear-gradient(135deg,#333b49,#101722 55%,#343d51)!important}
+.naiCardOrnament{position:absolute;inset:0;z-index:5;pointer-events:none}.naiCardOrnament>svg{width:100%;height:100%;display:block}.naiTradingCard{display:flex;flex-direction:column;min-width:0;min-height:0;gap:0!important;box-sizing:border-box;filter:drop-shadow(0 8px 14px #0008)}
+.naiCardRail{position:absolute;top:3.4%;left:4.5%;right:4.5%;height:auto;display:flex;justify-content:space-between;align-items:flex-start;gap:0;z-index:6;padding:0;pointer-events:none;letter-spacing:1.3px;text-transform:uppercase;color:var(--metal-light)}
+.naiCardRatingShield,.naiCardRankShield{width:22%;aspect-ratio:.84;position:relative;padding:3px;filter:drop-shadow(0 3px 3px #000a);background:linear-gradient(135deg,var(--metal-light),var(--metal-dark) 38%,var(--metal-light) 55%,var(--metal-mid) 80%,var(--metal-dark));clip-path:polygon(13% 0,87% 0,100% 11%,100% 76%,50% 100%,0 76%,0 11%)}
+.naiCardRankShield{width:22%;aspect-ratio:.9}.naiCardShieldInner{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:3% 0 21%;background:repeating-linear-gradient(45deg,#ffffff05 0 1px,transparent 1px 4px),linear-gradient(155deg,#32363c,#090c11 60%,#22272e);clip-path:polygon(13% 0,87% 0,100% 11%,100% 76%,50% 100%,0 76%,0 11%);box-shadow:inset 0 0 12px #000b}
+.naiCardRail .naiCardRatingShield strong{font-family:Impact,'Arial Black',system-ui;font-weight:900;font-size:clamp(30px,14cqw,90px);line-height:1;letter-spacing:-.04em;color:#f2d599;background:linear-gradient(160deg,#fff6d3 8%,#ecd098 35%,#aa7f42 48%,#f7e1ac 54%,#c29a58 90%);background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(1px 2px 0 #000b)}
+.naiCardRail small{font:600 clamp(7px,2.5cqw,14px)/1.2 system-ui;letter-spacing:.22em;margin-top:3px;color:var(--metal-light)}
+.naiCardRankShield .naiRankBadge{flex-direction:column!important;align-items:center;gap:1px!important;justify-content:center;margin:0!important;padding:0!important;border:0!important;background:transparent!important;letter-spacing:0!important;font:700 clamp(6px,1.8cqw,12px)/1.1 system-ui!important;max-width:100%;color:var(--card-accent)!important}.naiCardRankShield .naiRankEmblem{width:clamp(30px,14cqw,82px)!important;height:clamp(30px,14cqw,82px)!important;filter:drop-shadow(0 2px 2px #000)}.naiCardJewel{width:70%;display:block}.naiCardJewel svg{width:100%;display:block}.naiCardRankShield:after,.naiCardRatingShield:after{content:'◆';position:absolute;bottom:10%;left:0;right:0;text-align:center;font-size:clamp(5px,1.6cqw,9px);color:var(--metal-light)}
+.naiCardShell .naiCardPhotoWindow,.naiCardShell>.naiBattlePhoto{flex:1 1 0px;min-height:0!important;width:100%;height:0;overflow:hidden;background:#080c12!important;border-radius:0!important}.naiCardShell .naiCardPhotoWindow img{display:block;width:100%;height:100%!important;object-fit:contain;transform-origin:center;max-width:none;max-height:none;border-radius:0!important}.naiCardShell .naiCardPhotoWindow{padding:0;border:1px solid #c6b28666;box-shadow:0 0 0 2px #000}
+.naiCardName{position:relative;z-index:4;display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0;gap:3px;min-width:0;margin:0 -1.5%!important;padding:3% 8% 2.5%;color:var(--metal-light);background:linear-gradient(0deg,#10141d,#24272b 48%,#10141b);border-top:2px solid var(--metal-mid);border-bottom:1px solid var(--metal-dark);clip-path:polygon(3% 0,97% 0,100% 50%,97% 100%,3% 100%,0 50%);box-shadow:inset 0 2px 0 #ffffff2b,inset 0 -2px 0 #000}
+.naiCardName strong,.naiCardName>span{font:600 clamp(12px,5cqw,29px)/1.12 Georgia,'Times New Roman',serif;letter-spacing:.06em;text-align:center;text-transform:uppercase;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 2px #000}
+.naiCardName small{font:600 clamp(6px,1.65cqw,10px)/1.2 system-ui;letter-spacing:.24em;color:var(--metal-mid)}
+.naiBattleWrap .naiBattleCard{border:0;background:transparent!important;padding:0!important;gap:5px;align-items:stretch;border-radius:0;box-shadow:none;overflow:visible}.naiBattleCard>.naiCardStage{flex:1 1 0px!important;min-height:0;min-width:0;display:flex;align-items:center;justify-content:center;overflow:hidden}.naiCardStage .naiTradingCard{flex-shrink:0;padding:12px 16px var(--card-bottom,28px)!important}.naiCardStage .naiTradingCard[data-card-kind=set]{padding:12px 17px var(--card-bottom,24px)!important}.naiCardStage .naiTradingCard[data-card-kind=set] .naiCardRail{top:12px;left:18px;right:18px}.naiCardStage .naiTradingCard[data-card-kind=set] .naiCardRatingShield,.naiCardStage .naiTradingCard[data-card-kind=set] .naiCardRankShield{width:64px;height:76px;aspect-ratio:auto}.naiCardStage .naiTradingCard[data-card-kind=set] .naiCardRail strong{font-size:36px}.naiCardStage .naiTradingCard[data-card-kind=set] .naiCardRail small{font-size:8px}.naiCardStage .naiTradingCard[data-card-kind=set] .naiRankEmblem{width:38px!important;height:38px!important}.naiCardStage .naiTradingCard[data-card-kind=set] .naiRankBadge{font-size:7px!important}.naiCardStage .naiTradingCard[data-card-kind=set] .naiCardName{padding:8px 12%;}.naiCardStage .naiTradingCard[data-card-kind=set] .naiCardName strong{font-size:19px}.naiCardStage .naiTradingCard[data-card-kind=set] .naiCardName small{font-size:8px}
+.naiBattleWrap .naiTradingCard>.naiBattleMosaic{flex:1 1 0px;min-height:0;width:100%;margin-top:68px;border-radius:0;border:1px solid #c6b28655;padding:3px}.naiBattleWrap .naiCardBlind>.naiBattleMosaic{margin-top:0}.naiBattleWrap .naiCardBattleRating{align-self:center;font-size:11px;min-height:16px;max-width:100%;margin:0}.naiBattleWrap .naiBattleFooter{justify-content:center;gap:5px}.naiBattleWrap .naiBattleFooter .naiBattleChoose{flex:0 1 auto!important;min-width:145px}.naiBattleWrap .naiBattleFooter button{font-size:11px!important;padding:6px 8px!important}.naiBattleWrap .naiBattleSetMeta{justify-content:center;min-height:14px}.naiBattleCard .naiCardBlind~.naiCardBattleRating{display:none}
+.naiBattleWrap .naiBattleRankCard{background:transparent!important;border:0!important;border-radius:0!important;box-shadow:none!important;overflow:visible}.naiBattleRankCard>.naiTradingCard{width:100%;aspect-ratio:2/3;padding:3.8% 4.8% 7%!important}.naiBattleWrap .naiTradingCard>.naiBattleGalleryVisual{flex:1 1 0px;width:100%;height:0;min-height:0;aspect-ratio:auto;border:1px solid #c6b28666;border-radius:0;padding:0;box-shadow:0 0 0 2px #000}.naiBattleGalleryVisual img{border:0}.naiBattleRankCard .naiGalleryCount{bottom:4px;right:4px;font-size:9px;padding:3px 5px}.naiCardPosition{display:inline-block;font-size:12px;color:#cbb78d;margin:8px 7px 2px;font-weight:650}.naiCardPosition svg{width:17px;height:17px;vertical-align:middle;margin-left:5px}.naiCardDetails{background:#131b28;border:1px solid #354051;border-radius:7px;margin:5px 0 10px;color:#c5cfdf}.naiCardDetails>summary{cursor:pointer;padding:9px 11px;font-size:11px;font-weight:550}.naiCardDetails>.naiGalleryInfo{padding:5px 11px 11px}.naiCardDetails .naiGalleryName{display:block;font-size:10px;margin:3px 0 8px}.naiCardDetails .naiGalleryRating .naiRankEmblem{width:30px!important;height:30px!important}.naiCardDetails .naiGalleryRating>.naiRankBadge{font-size:10px}.naiCardDetails .naiGalleryFocus{display:inline-block!important;width:auto!important;font-size:10px!important;margin:5px 5px 0 0!important}.naiCardDetails .naiGalleryDetail{font-size:10px}
+.naiProfileCard{width:min(100%,440px);aspect-ratio:2/3.25;margin:0 auto;display:flex;flex-direction:column;min-height:0;padding:3.8% 4.8% 6.5%!important}.naiProfileCard .naiCardPhotoWindow{height:0!important;min-height:0!important;flex:1 1 0px}.naiProfileCard .naiProfileHero{height:100%!important;min-height:0}.naiProfileCard .naiCardName{flex-shrink:0}.naiProfileCard .naiCardAttributes{flex-shrink:0;margin:0;gap:0;padding:4% 0 1%;background:repeating-linear-gradient(45deg,#ffffff03 0 1px,transparent 1px 5px),#121720;border-bottom:1px solid #c6a76c55}.naiProfileCard .naiCardAttributes>div{border-left:1px solid #c6a76c44}.naiProfileCard .naiCardAttributes strong{font:900 clamp(19px,7cqw,35px)/1 Impact,'Arial Black',system-ui;color:var(--metal-light);text-shadow:1px 2px 0 #000}.naiProfileCard .naiCardAttributes span{font:600 clamp(6px,1.9cqw,10px)/1.5 system-ui;margin-top:6px;letter-spacing:.09em;color:#d5c9ae}.naiProfileCard+.naiCardControl{justify-content:center}.naiCardBlind .naiCardName:before{content:'◆';font-size:9px;color:var(--metal-light);position:absolute;top:0}
+@media(max-width:700px){.naiBattleWrap .naiBattleFooter{gap:4px}.naiBattleWrap .naiBattleFooter button{font-size:10px!important;padding:5px!important}.naiBattleWrap .naiBattleFooter .naiBattleChoose{min-width:0}.naiCardStage .naiTradingCard{padding:8px 10px var(--card-bottom,20px)!important}.naiCardStage .naiTradingCard[data-card-kind=set] .naiCardRatingShield,.naiCardStage .naiTradingCard[data-card-kind=set] .naiCardRankShield{width:47px;height:57px}.naiCardStage .naiTradingCard[data-card-kind=set] .naiCardRail strong{font-size:28px}.naiCardStage .naiTradingCard[data-card-kind=set] .naiRankEmblem{width:28px!important;height:28px!important}.naiCardStage .naiTradingCard[data-card-kind=set] .naiRankBadge{font-size:6px!important}.naiBattleWrap .naiTradingCard>.naiBattleMosaic{margin-top:52px}.naiCardStage .naiTradingCard[data-card-kind=set] .naiCardName strong{font-size:14px}}
+
+/* Shared vector assets replace dozens of repeated SVG nodes per card. */
+.naiCardOrnament{background-size:100% 100%;background-repeat:no-repeat}
+.naiCardShell,.naiCardShell[data-finish=emerald],.naiCardShell[data-finish=platinum]{background:linear-gradient(135deg,var(--metal-base),#0b1018 55%,var(--metal-dark))!important}
+.naiCardShell[data-finish=emerald]{background:repeating-linear-gradient(125deg,#ffffff06 0 1px,transparent 1px 7px),linear-gradient(135deg,var(--metal-base),#0b1018 55%,var(--metal-dark))!important}
+.naiCardShell[data-finish=platinum]{background:linear-gradient(115deg,transparent 30%,#ffffff0c 48%,transparent 60%),linear-gradient(135deg,var(--metal-base),#0b1018 55%,var(--metal-dark))!important}
+.naiTradingCard,.naiCardRatingShield,.naiCardRankShield,.naiCardRankShield .naiRankEmblem,.naiCardRail .naiCardRatingShield strong{filter:none!important}
+.naiCardRail .naiCardRatingShield strong{background-image:linear-gradient(160deg,var(--metal-light) 8%,var(--metal-mid) 40%,var(--metal-dark) 48%,var(--metal-light) 56%,var(--metal-mid) 90%)}
+.naiCardShell .naiCardPhotoWindow,.naiBattleWrap .naiTradingCard>.naiBattleGalleryVisual{border-color:var(--metal-mid)}
+.naiBattleRankCard{content-visibility:auto;contain-intrinsic-size:auto 440px}
+.naiBattleLight .naiCardLightStage{width:100%;flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+.naiBattleLight .naiExpandedCard{width:min(66vh,90vw);height:100%;max-width:100%;padding:14px 18px 34px!important;box-sizing:border-box}
+.naiBattleLight .naiCardPhotoWindow img{max-width:none;max-height:none;width:100%;height:100%!important}
+.naiBattleLight .naiCardName{padding:7px 10%}
+.naiBattleLight .naiCardName strong{font-size:clamp(16px,4cqw,28px)}
+
+.naiCardTitleArt{position:absolute!important;z-index:7;bottom:12.5%;left:4.2%;width:61%!important;height:auto!important;max-width:none!important;max-height:none!important;pointer-events:none;object-fit:contain;transform:rotate(-7deg)!important;transform-origin:12% 85%}
+.naiCardTitleArt[data-title=former_number_one]{width:65%!important;left:4.5%;bottom:12.7%;transform:rotate(-5deg)!important}
+.naiVirtualCards{position:relative!important;display:block!important;padding:0!important;min-height:1px}.naiVirtualCards>.naiBattleRankCard{content-visibility:visible;contain:layout paint}
+.naiVirtualCards .naiCardDetails{display:none}.naiGalleryInspect{display:block!important;width:100%!important;text-align:center;font-size:11px!important;margin-top:6px}
+.naiFlipCard{position:relative;perspective:1600px;flex-shrink:0}.naiFlipCard>.naiExpandedCard,.naiFlipCard>.naiCardBack{position:absolute!important;inset:0;width:100%!important;height:100%!important;max-width:none;backface-visibility:hidden;transition:transform .24s ease;cursor:pointer}
+.naiFlipCard>.naiCardBack{transform:rotateY(-180deg);padding:8% 9%!important}.naiFlipCard[data-flipped=true]>.naiExpandedCard{transform:rotateY(180deg)}.naiFlipCard[data-flipped=true]>.naiCardBack{transform:rotateY(0)}
+.naiCardBackBody{position:relative;z-index:6;height:100%;overflow:auto;cursor:pointer;display:flex;flex-direction:column;gap:12px;font-size:clamp(12px,2.4cqw,16px)}
+.naiCardBackBody h2{font:800 clamp(20px,5cqw,32px)/1.1 Georgia,serif;color:var(--metal-light);margin:0}.naiCardBackBody p{margin:0;line-height:1.5;color:#becbdb}.naiCardBackKicker{letter-spacing:.18em;font-size:10px;color:var(--metal-mid)}
+.naiCardBackStats{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.naiCardBackStats>div{background:#070c13a8;border:1px solid #ffffff1b;border-radius:5px;padding:10px;text-align:center}.naiCardBackStats strong{font-size:clamp(18px,5cqw,30px);display:block;color:var(--metal-light)}.naiCardBackStats small{font-size:10px;color:#b5c4d5}
+.naiCardBackBody svg.naiMiniHistory{width:100%;height:95px;background:#060c1677;border-radius:8px}.naiCardBackBody label{display:flex;flex-direction:column;gap:6px}.naiCardBackBody .naiBackTitle{border-left:3px solid var(--metal-mid);padding:8px;background:#ffffff06}.naiBackTitle strong{display:block;color:var(--metal-light)}
+.naiSetUnfoldPanel,.naiChallengePanel{width:min(1200px,100%);height:100%;min-height:0;display:flex;flex-direction:column;gap:12px}.naiUnfoldHead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.naiUnfoldHead h2{flex:1;margin:0}.naiUnfoldScroll{flex:1;min-height:0;overflow:auto}.naiUnfoldTile{background:#111b2c;border:1px solid #36465e;border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:5px}.naiUnfoldTile img{width:100%;flex:1;min-height:0;object-fit:contain;max-width:none;max-height:none}.naiUnfoldTile small{font-size:11px;color:#c7d4e6}.naiUnfoldTile[data-captain=true]{border-color:#e3bd6e}.naiUnfoldTile button{font-size:11px}.naiCardFlipHint{color:#99a9c0;font-size:11px}.naiNewBadge{color:#9de3da;font-size:11px}.naiArrivalTools{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+
+.naiPhotoCard{padding:0!important;aspect-ratio:2/3}
+.naiPhotoCard>.naiCardPhotoWindow,.naiPhotoCard>.naiBattleGalleryVisual{position:absolute!important;left:4.8%;top:3.8%;width:90.4%!important;height:84%!important;margin:0!important;box-sizing:border-box}
+.naiTradingCard>.naiCardName{position:absolute!important;left:15%;right:15%;top:87.8%;height:7.7%;min-height:0;box-sizing:border-box;margin:0!important;padding:0 1%!important;gap:.3cqw;overflow:hidden;background:transparent;border:0;box-shadow:none;clip-path:none;z-index:6}
+.naiTradingCard>.naiCardName strong,.naiBattleLight .naiExpandedCard>.naiCardName strong{font:600 clamp(10px,4.4cqw,28px)/1.12 Georgia,serif;letter-spacing:.1em}
+.naiTradingCard>.naiCardName small{font:600 clamp(5px,1.8cqw,11px)/1.1 system-ui;letter-spacing:.18em}
+.naiCardStage .naiTradingCard[data-card-kind=set]>.naiCardName{padding:0 1%!important;gap:1px}
+.naiCardStage .naiTradingCard[data-card-kind=set]>.naiCardName strong{font-size:clamp(10px,2cqw,16px)}
+.naiCardStage .naiTradingCard[data-card-kind=set]>.naiCardName small{font-size:7px}
+.naiCardStage .naiTradingCard[data-card-kind=set]>.naiCardTitleArt{width:min(48%,340px)!important}
+.naiCardEditor{max-width:1000px}.naiCardEditLayout{grid-template-columns:minmax(0,1.1fr) minmax(240px,.9fr);align-items:start}
+.naiCardEditor .naiCardEditPreview{width:min(100%,calc((100dvh - 175px)*2/3));height:auto;aspect-ratio:2/3;max-height:none;justify-self:center;margin:0}
+.naiCardEditor .naiCardEditPreview.naiProfileCard{width:min(100%,calc((100dvh - 175px)*2/3.25));aspect-ratio:2/3.25}
+.naiCardOriginalSize{display:block;margin:14px 0;color:#a8cbbf!important;font-size:12px}
+.naiCardRankShield .naiCardShieldInner>small{font-size:clamp(5px,1.5cqw,9px);letter-spacing:.12em}
+.naiProfileCard{padding:0!important}.naiProfileCard>.naiCardPhotoWindow{position:absolute;left:4.8%;top:3.8%;width:90.4%;height:74.6%!important;margin:0}
+.naiProfileCard>.naiCardAttributes{position:absolute;left:4.8%;right:4.8%;top:78.4%;height:9.4%;box-sizing:border-box;padding:1.5% 0!important;margin:0!important}.naiProfileCard>.naiCardAttributes>div{display:flex;flex-direction:column;justify-content:center}
+@media(max-width:800px){.naiCardEditLayout{grid-template-columns:1fr}.naiCardEditor .naiCardEditPreview{width:min(100%,30vh)}.naiCardEditor .naiCardEditPreview.naiProfileCard{width:min(100%,28vh)}}
+.naiSetUnfoldPanel{width:100%;max-width:none}.naiSetUnfold .naiUnfoldScroll{width:100%;scrollbar-gutter:stable}
+.naiSetUnfold .naiUnfoldTile{position:absolute;padding:6px;gap:4px;box-sizing:border-box;overflow:hidden}.naiSetUnfold .naiUnfoldTile img{max-width:100%;max-height:none;width:100%;height:0;flex:1 1 0px}.naiSetUnfold .naiUnfoldTile small{flex:none;line-height:20px;white-space:nowrap}
+.naiMissingCaptain{position:absolute;left:50%;top:47%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 14px;border:1px solid #ffc465;background:#211606e8;border-radius:10px;color:#ffda8c;pointer-events:none;max-width:85%;box-sizing:border-box;text-align:center;font:600 11px/1.3 system-ui;z-index:3}.naiMissingCaptain b{font-size:42px;line-height:1}.naiMissingCaptain small{font:inherit}
+.naiBattleSetCell{position:relative;min-height:0;min-width:0;overflow:hidden}.naiMediaVideoMark{position:absolute;left:8px;bottom:8px;z-index:2;display:flex;align-items:center;gap:7px;background:#08111df2;border:2px solid #edd39c;border-radius:7px;color:#fff;padding:5px 8px;font:800 clamp(10px,.9vw,14px)/1 system-ui;letter-spacing:.08em;pointer-events:none;box-shadow:0 2px 6px #0009;max-width:calc(100% - 16px);box-sizing:border-box}
+.naiMediaVideoMark:before{content:'▶';display:grid;place-items:center;width:30px;height:30px;flex-shrink:0;border:1px solid #edd39c;border-radius:50%;font:18px/1 system-ui;color:#ffe5ad;padding-left:2px;box-sizing:border-box}.naiUnfoldTile>.naiMediaVideoMark{bottom:36px}
+.naiTitleCorrections{border-top:1px solid #ffffff24;padding-top:10px;margin-top:auto;font:12px system-ui}.naiTitleCorrections summary{cursor:pointer;color:#a9b7cb;font-size:11px}.naiTitleCorrections label{margin:12px 0}.naiTitleCorrections p{font-size:11px!important;margin:8px 0!important}.naiTitleCorrections button{font-size:11px!important}
+
+
+/* Landscape frames preserve the portrait card's relative photo and footer heights. */
+.naiPhotoCard.naiLandscapeCard,.naiBattleRankCard>.naiTradingCard.naiLandscapeCard{aspect-ratio:3/2}
+.naiPhotoCard.naiLandscapeCard>.naiCardPhotoWindow,.naiPhotoCard.naiLandscapeCard>.naiBattleGalleryVisual{left:2.8%;width:94.4%!important}
+.naiLandscapeCard>.naiCardRail{left:2.8%;right:2.8%}
+.naiLandscapeCard .naiCardRatingShield,.naiLandscapeCard .naiCardRankShield{width:12.5%}
+.naiLandscapeCard .naiCardRail .naiCardRatingShield strong{font-size:clamp(22px,7cqw,80px)}
+.naiLandscapeCard .naiCardRail small{font-size:clamp(5px,1.2cqw,12px);letter-spacing:.16em}
+.naiLandscapeCard .naiCardRankShield .naiRankEmblem{width:clamp(20px,7.5cqw,76px)!important;height:clamp(20px,7.5cqw,76px)!important}
+.naiLandscapeCard .naiCardRankShield .naiRankBadge{font-size:clamp(5px,1cqw,11px)!important}
+.naiLandscapeCard>.naiCardTitleArt{left:2.7%;width:30%!important}
+.naiLandscapeCard>.naiCardTitleArt[data-title=former_number_one]{width:33%!important}
+.naiTradingCard.naiLandscapeCard>.naiCardName{left:12%;right:12%;gap:.2cqw}
+.naiTradingCard.naiLandscapeCard>.naiCardName strong,.naiBattleLight .naiExpandedCard.naiLandscapeCard>.naiCardName strong{font-size:clamp(10px,2.4cqw,26px)}
+.naiTradingCard.naiLandscapeCard>.naiCardName small{font-size:clamp(5px,1.2cqw,11px)}
+.naiFlipCard>.naiCardBack.naiLandscapeCard{padding:4% 6%!important}
+.naiCardEditLayout.naiLandscapeEditor{grid-template-columns:1fr;gap:12px}
+.naiCardEditor .naiCardEditPreview.naiLandscapeCard{width:min(100%,calc((100dvh - 330px)*1.5));aspect-ratio:3/2}
+.naiLandscapeEditor>.naiCardEditTools{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:center}
+.naiLandscapeEditor>.naiCardEditTools>.naiCardOriginalSize{grid-column:1/-1;margin:0}
+.naiLandscapeEditor>.naiCardEditTools>label{margin:0}
+@media(max-width:600px){.naiLandscapeEditor>.naiCardEditTools{grid-template-columns:1fr}.naiCardEditor .naiCardEditPreview.naiLandscapeCard{width:100%}}
+
+@media(prefers-reduced-motion:reduce){.naiFlipCard>.naiExpandedCard,.naiFlipCard>.naiCardBack{transition:none}}
+
+`;root.append(style);queueMicrotask(()=>root.append(style));
+// One percentile table per immutable rankings response, shared by every card.
+const overallTables=new WeakMap();
+function ovr(entry,rows){
+ let table=overallTables.get(rows);
+ if(!table){
+  const values=rows.filter(e=>!e.provisional&&['Developing','Established'].includes(e.rating_status)).map(e=>Math.round(e.rating*1e8)).sort((a,b)=>a-b),mids=new Map();
+  for(let i=0;i<values.length;){let end=i+1;while(end<values.length&&values[end]===values[i])end++;mids.set(values[i],i+(end-i-1)/2);i=end;}
+  table={count:values.length,mids,lo:mids.get(values[0]),hi:mids.get(values.at(-1))};overallTables.set(rows,table);
+ }
+ if(entry.provisional||!entry.played||table.count<5||table.hi===table.lo)return null;
+ const mid=table.mids.get(Math.round(entry.rating*1e8));if(mid===undefined)return null;
+ const p=(mid-table.lo)/(table.hi-table.lo),anchors=[[0,60],[.5,78],[.8,87],[.9,91],[.97,95],[1,99]];
+ let value=99;for(let i=1;i<anchors.length;i++)if(p<=anchors[i][0]){const [x,a]=anchors[i-1],[y,b]=anchors[i];value=a+(b-a)*(p-x)/(y-x);break;}
+ return Math.min(table.count<20?95:99,Math.max(60,Math.round(value)));
+}
+const themes={
+ Unranked:['#d1d8e0','#7c8899','#384453','#111822'],
+ Bronze:['#f5d6b0','#b67c4c','#5e3523','#241910'],
+ Silver:['#f2f7ff','#b0bdcc','#56657a','#17202b'],
+ Gold:['#fff0bf','#d9ad55','#745020','#241d12'],
+ Platinum:['#e2fff4','#89cdbd','#386b68','#102925'],
+ Diamond:['#f2fdff','#7bd8f4','#376eac','#10243c'],
+ Master:['#f3dfff','#bc8cf3','#624191','#251335'],
+ Grandmaster:['#fff2c2','#e9b85b','#87472e','#300f1c']
+};
+const frameAssets=new Map();
+function ornament(tier='Unranked',landscape=false){
+ const key=tier+':'+landscape,art=el('div','naiCardOrnament');art.setAttribute('aria-hidden','true');
+ if(frameAssets.has(key)){art.style.backgroundImage=frameAssets.get(key);return art;}
+ const id='nai-frame',colors=themes[tier]||themes.Unranked;
+ let svg=`<svg viewBox="0 0 700 1000" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+ <defs>
+ <linearGradient id="${id}-metal" x1="0" y1="0" x2="1" y2="1"><stop stop-color="var(--metal-light)"/><stop offset=".12" stop-color="var(--metal-mid)"/><stop offset=".21" stop-color="var(--metal-dark)"/><stop offset=".28" stop-color="var(--metal-light)"/><stop offset=".38" stop-color="var(--metal-mid)"/><stop offset=".5" stop-color="var(--metal-dark)"/><stop offset=".62" stop-color="var(--metal-light)"/><stop offset=".69" stop-color="var(--metal-mid)"/><stop offset=".83" stop-color="var(--metal-dark)"/><stop offset="1" stop-color="var(--metal-light)"/></linearGradient>
+ <linearGradient id="${id}-edge"><stop stop-color="#fff9dd"/><stop offset=".18" stop-color="var(--metal-mid)"/><stop offset=".48" stop-color="var(--metal-dark)"/><stop offset=".75" stop-color="var(--metal-light)"/><stop offset="1" stop-color="#fff9dd"/></linearGradient>
+ <linearGradient id="${id}-foil" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#ffe9b7"/><stop offset=".24" stop-color="#9ecfd8"/><stop offset=".45" stop-color="#b3a0d2"/><stop offset=".63" stop-color="#e9d18e"/><stop offset=".82" stop-color="#cae5df"/><stop offset="1" stop-color="#e9c68a"/></linearGradient>
+ <pattern id="${id}-etch" width="13" height="13" patternUnits="userSpaceOnUse"><path d="M0 0L13 13M13 0L0 13M6.5 0V13" stroke="#ffffff" stroke-opacity=".12" stroke-width=".6"/></pattern>
+ </defs>
+ <path d="M27 3H179L195 16H505L521 3H673L697 27V973L673 997H27L3 973V27Z M32 40V943L48 960H652L668 943V40Z" fill="#080a0f" fill-rule="evenodd"/>
+ <path d="M27 6H178L194 20H506L522 6H673L694 27V973L673 994H27L6 973V27Z" fill="none" stroke="url(#${id}-metal)" stroke-width="10"/>
+ <path d="M29 14H174L190 28H510L526 14H671L686 29V971L671 986H29L14 971V29Z" fill="none" stroke="#fff5d5" stroke-opacity=".7" stroke-width="1.3"/>
+ <path d="M37 34H663V943L647 960H53L37 943Z" fill="none" stroke="url(#${id}-edge)" stroke-width="3"/>
+ <path d="M43 40H657V941L644 953H56L43 941Z" fill="none" stroke="#020406" stroke-width="4"/>
+ <g fill="#11151c" stroke="url(#${id}-metal)" stroke-width="4">
+ <path d="M19 43L43 19H166L186 36H48V146L19 178Z"/><path d="M681 43L657 19H534L514 36H652V146L681 178Z"/>
+ <path d="M19 957L43 981H166L186 964H48V854L19 822Z"/><path d="M681 957L657 981H534L514 964H652V854L681 822Z"/>
+ </g>
+ <g fill="url(#${id}-etch)"><path d="M21 46L46 22H163L174 32H45V145L21 170Z"/><path d="M679 46L654 22H537L526 32H655V145L679 170Z"/><path d="M21 954L46 978H163L174 968H45V855L21 830Z"/><path d="M679 954L654 978H537L526 968H655V855L679 830Z"/></g>
+ <g fill="url(#${id}-metal)" stroke="#fff6d6" stroke-width=".8">
+ <path d="M9 194L23 180V366L9 380Z"/><path d="M691 194L677 180V366L691 380Z"/><path d="M9 620L23 634V820L9 806Z"/><path d="M691 620L677 634V820L691 806Z"/>
+ <path d="M27 395L37 382V426L27 439Z"/><path d="M673 395L663 382V426L673 439Z"/><path d="M27 605L37 618V574L27 561Z"/><path d="M673 605L663 618V574L673 561Z"/>
+ </g>
+ <g fill="url(#${id}-foil)"><path d="M11 211L17 203V350L11 358Z"/><path d="M689 211L683 203V350L689 358Z"/><path d="M11 642L17 650V797L11 789Z"/><path d="M689 642L683 650V797L689 789Z"/></g>
+ <g fill="url(#${id}-metal)" stroke="#ffeabc" stroke-width="1"><path d="M317 19L350 47L383 19L367 18L350 32L333 18Z"/><path d="M317 980L350 952L383 980L367 982L350 967L333 982Z"/></g>
+ <g stroke="#fff1c8" stroke-width="1.1"><path d="M350 8L362 22L350 36L338 22Z" fill="url(#${id}-foil)"/><path d="M350 962L362 976L350 990L338 976Z" fill="url(#${id}-foil)"/></g>
+ <path d="M350 10V34M340 22H360M350 964V988M340 976H360" stroke="#ffffff" stroke-opacity=".8" stroke-width=".9"/>
+ <!-- Restored footer height with the faceted lower-frame design. -->
+ <g transform="translate(0 -174.9333) scale(1 1.1777778)">
+ <path d="M44 894H656L675 914V962L652 984H48L25 962V914Z" fill="#090d15"/>
+ <path d="M44 895H656L672 914V959L650 981H50L28 959V914Z" fill="none" stroke="url(#${id}-metal)" stroke-width="4"/>
+ <path d="M91 901H609L640 930L609 962H91L60 930Z" fill="#111720" stroke="url(#${id}-edge)" stroke-width="3"/>
+ <path d="M99 906H601L627 930L601 956H99L73 930Z" fill="none" stroke="var(--metal-dark)" stroke-width="1"/>
+ <g fill="url(#${id}-metal)" stroke="var(--metal-light)" stroke-width=".8">
+ <path d="M18 868L40 890L78 928L117 974H49L18 946Z"/><path d="M682 868L660 890L622 928L583 974H651L682 946Z"/>
+ <path d="M43 901L72 929L104 966H78L43 934Z"/><path d="M657 901L628 929L596 966H622L657 934Z"/>
+ </g>
+ <path d="M24 878L44 903L68 927L103 969H116L76 919L44 887Z M676 878L656 903L632 927L597 969H584L624 919L656 887Z" fill="var(--metal-dark)"/>
+ <path d="M28 889L48 912L71 935L100 969 M672 889L652 912L629 935L600 969" fill="none" stroke="var(--metal-mid)" stroke-width="3"/>
+ <path d="M47 975H653M122 900H578" stroke="var(--metal-light)" stroke-opacity=".65" stroke-width="1.2"/>
+ <path d="M350 881L363 895L350 909L337 895Z" fill="url(#${id}-metal)" stroke="var(--metal-light)" stroke-width="1"/>
+ <path d="M350 886L358 895L350 904L342 895Z" fill="var(--metal-mid)"/><path d="M350 886L350 895L342 895Z" fill="var(--metal-light)"/>
+ </g></svg>`;
+ const crest=tier==='Grandmaster'?'<path d="M200 12L239 25L270 11L295 31M500 12L461 25L430 11L405 31" fill="none" stroke="var(--metal-mid)" stroke-width="6"/><path d="M335 19L350 4L365 19L350 40Z" fill="#a52f49" stroke="var(--metal-light)" stroke-width="2"/>':tier==='Master'?'<path d="M222 10L250 31L278 10M478 10L450 31L422 10" fill="none" stroke="var(--metal-mid)" stroke-width="5"/>':tier==='Diamond'?'<path d="M225 20L244 6L263 20L244 35ZM437 20L456 6L475 20L456 35Z" fill="var(--metal-mid)" stroke="var(--metal-light)" stroke-width="2"/>':'';
+ if(landscape){
+  const defs=svg.match(/<defs>[\s\S]*?<\/defs>/)[0];
+  svg=`<svg viewBox="0 0 1000 667" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">${defs}
+  <path d="M40 4H260L280 13H720L740 4H960L996 19V648L960 663H40L4 648V19Z" fill="none" stroke="url(#${id}-metal)" stroke-width="10"/>
+  <path d="M41 12H258L279 21H721L742 12H959L987 24V643L958 654H42L13 643V24Z" fill="none" stroke="var(--metal-light)" stroke-opacity=".7"/>
+  <path d="M29 26H971V628L950 641H50L29 628Z" fill="none" stroke="url(#${id}-edge)" stroke-width="3"/>
+  <g fill="#11151c" stroke="url(#${id}-metal)" stroke-width="3"><path d="M16 31L43 17H198L214 27H31V106L16 125Z"/><path d="M984 31L957 17H802L786 27H969V106L984 125Z"/></g>
+  <g fill="url(#${id}-etch)"><path d="M18 33L44 19H196L207 25H30V104L18 119Z"/><path d="M982 33L956 19H804L793 25H970V104L982 119Z"/></g>
+  <g fill="url(#${id}-metal)"><path d="M8 151L19 140V276L8 288Z M992 151L981 140V276L992 288Z M8 406L19 417V551L8 540Z M992 406L981 417V551L992 540Z"/></g>
+  <g fill="url(#${id}-foil)"><path d="M10 163L15 157V264L10 270Z M990 163L985 157V264L990 270Z M10 423L15 429V532L10 526Z M990 423L985 429V532L990 526Z"/></g>
+  <path d="M40 586H960L980 601V640L955 656H45L20 640V601Z" fill="#090d15" stroke="url(#${id}-metal)" stroke-width="3"/>
+  <path d="M110 590H890L926 613L890 641H110L74 613Z" fill="#111720" stroke="url(#${id}-edge)" stroke-width="2"/>
+  <path d="M118 594H882L915 613L882 636H118L85 613Z" fill="none" stroke="var(--metal-dark)"/>
+  <g fill="url(#${id}-metal)" stroke="var(--metal-light)" stroke-width=".7"><path d="M16 571L40 588L86 615L126 649H48L16 629Z"/><path d="M984 571L960 588L914 615L874 649H952L984 629Z"/></g>
+  <path d="M24 580L46 596L82 617L117 646 M976 580L954 596L918 617L883 646" fill="none" stroke="var(--metal-dark)" stroke-width="5"/>
+  <path d="M44 650H956M139 590H861" stroke="var(--metal-light)" stroke-opacity=".65"/>
+  <path d="M500 577L510 586L500 596L490 586Z" fill="url(#${id}-metal)" stroke="var(--metal-light)"/><path d="M500 580L506 586L500 592L494 586Z" fill="var(--metal-mid)"/>
+  <g transform="translate(150 0)">${crest}<path d="M350 6L360 15L350 25L340 15Z" fill="url(#${id}-foil)" stroke="var(--metal-light)"/></g>
+  </svg>`;
+ }else svg=svg.replace('</svg>',crest+'</svg>');
+ for(const [i,name]of ['light','mid','dark'].entries())svg=svg.replaceAll('var(--metal-'+name+')',colors[i]);
+ svg=svg.replaceAll('#fff9dd',colors[0]).replaceAll('#fff5d5',colors[0]).replaceAll('#fff6d6',colors[0]).replaceAll('#ffeabc',colors[0]).replaceAll('#fff1c8',colors[0]);
+ if(['Unranked','Bronze','Silver'].includes(tier))svg=svg.replace(/<g fill="url\(#nai-frame-foil\)">.*?<\/g>/s,'');
+ const asset='url("data:image/svg+xml,'+encodeURIComponent(svg)+'")';frameAssets.set(key,asset);art.style.backgroundImage=asset;return art;
+}
+function jewel(){const gem=el('span','naiCardJewel');gem.setAttribute('aria-hidden','true');gem.innerHTML='<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path d="M50 2L98 50L50 98L2 50Z" fill="#8b6940" stroke="#ffe7aa" stroke-width="2"/><path d="M50 8L89 50L50 88L11 50Z" fill="#f4deaa"/><path d="M50 8L50 50L11 50Z" fill="#fff9df"/><path d="M50 8L89 50L50 50Z" fill="#b8d2dc"/><path d="M89 50L50 88L50 50Z" fill="#9e89b6"/><path d="M11 50L50 88L50 50Z" fill="#d6ab61"/><path d="M50 20L68 50L50 76L32 50Z" fill="#eaf9ff" opacity=".65"/><path d="M50 9V88M12 50H89" stroke="white" stroke-width="1.5"/><path d="M50 31L53 47L69 50L53 53L50 69L47 53L31 50L47 47Z" fill="white"/></svg>';return gem;}
+function rail(score,tier,caption='OVR'){
+ const bar=el('div','naiCardRail'),shield=el('div','naiCardRatingShield'),inside=el('div','naiCardShieldInner');
+ inside.append(el('strong','',score??'—'),el('small','','OVR'));shield.append(inside);shield.title=score===null?'Awaiting placement · no overall rating yet':caption==='OVR'?'Overall · '+score:'Your weighted profile overall · '+score;bar.append(shield);
+ const rank=el('div','naiCardRankShield'),rankInner=el('div','naiCardShieldInner');if(tier)rankInner.append(root.naiRanks.badge(tier));else rankInner.append(jewel(),el('small','','SIGNATURE'));rank.append(rankInner);bar.append(rank);return bar;
+}
+function apply(im,frame){const f=frame||{x:0,y:0,zoom:1};im.style.transform=`translate(${f.x}%,${f.y}%) scale(${f.zoom})`;}
+function shell(node,owner,tier){
+ node.classList.add('naiCardShell');node.dataset.finish=cache.get(owner)?.collection.finish||'obsidian';
+ const theme=tier?(themes[tier]?tier:'Unranked'):(node.dataset.finish==='emerald'?'Platinum':node.dataset.finish==='platinum'?'Silver':'Gold');
+ node.dataset.rank=tier||'Signature';const colors=themes[theme];
+ for(const [i,name]of ['light','mid','dark','base'].entries())node.style.setProperty('--metal-'+name,colors[i]);
+ node.style.setProperty('--card-accent',colors[1]);node.dataset.frameTier=theme;node.append(ornament(theme,node.dataset.orientation==='landscape'));
+}
+
+let mediaSource=null,mediaIndex=new Map();const decodedShapes=new Map();
+function mediaShape(mid){const source=root.naiGetLibrary?.()?.media;if(source!==mediaSource){mediaSource=source;mediaIndex=new Map((source||[]).map(m=>[m.id,m]));}const m=mediaIndex.get(mid);return {m,key:mid+':'+(m?.sha256||m?.stored_rel||'')+':'+m?.width+':'+m?.height};}
+function isLandscape(mid){const {m,key}=mediaShape(mid);return decodedShapes.has(key)?decodedShapes.get(key):Number(m?.width)>Number(m?.height);}
+function cardRatio(card){return card?.dataset.orientation==='landscape'?1.5:2/3;}
+function setOrientation(card,landscape){const next=landscape?'landscape':'portrait';if(card.dataset.orientation===next)return;card.dataset.orientation=next;card.classList.toggle('naiLandscapeCard',landscape);const old=card.querySelector(':scope > .naiCardOrnament');if(old)old.replaceWith(ornament(card.dataset.frameTier,landscape));card.dispatchEvent(new CustomEvent('naiCardOrientation',{bubbles:true}));}
+function watchOrientation(card,mid,im){
+ setOrientation(card,isLandscape(mid));if(!im)return;
+ if(im.naiShapeListener)im.removeEventListener('load',im.naiShapeListener);
+ const read=()=>{if(im.dataset.mediaId!==mid||!im.naturalWidth||!im.naturalHeight)return;const landscape=im.naturalWidth>im.naturalHeight;decodedShapes.set(mediaShape(mid).key,landscape);setOrientation(card,landscape);};
+ im.naiShapeListener=read;im.addEventListener('load',read);if(im.complete)read();
+}
+
+function nameplate(name,detail){const plate=el('div','naiCardName');plate.append(el('strong','',name));if(detail)plate.append(el('small','',detail));plate.title=name;return plate;}
+function battle(node,entry,rows,owner,show=true){
+ const person=root.naiGetLibrary?.()?.characters?.find(c=>c.id===owner)?.name||'Collection',isBattle=node.classList.contains('naiBattleCard'),isSet=entry.count>1||entry.id!==entry.images[0],card=el('div','naiTradingCard');if(!isBattle||!isSet)card.classList.add('naiPhotoCard');card.dataset.cardKind=isSet?'set':'image';shell(card,owner,show?entry.tier:'Unranked');
+ if(show){card.append(rail(ovr(entry,rows),entry.tier));addTitle(card,entry);}else card.classList.add('naiCardBlind');
+ const plate=nameplate(isSet?entry.name:person,show&&entry.position?'#'+entry.position:'');
+ if(isBattle){
+  const heading=node.querySelector('h3'),rating=heading?.querySelector('.naiBattleMmr'),photo=node.querySelector('.naiBattlePhoto,.naiBattleMosaic'),stage=el('div','naiCardStage');
+  card.append(photo,plate);stage.append(card);heading?.remove();node.prepend(stage);if(rating){rating.classList.add('naiCardBattleRating');node.querySelector('.naiBattleFooter')?.before(rating);}
+ }else{
+  const visual=node.querySelector('.naiBattleGalleryVisual'),info=node.querySelector('.naiGalleryInfo');card.append(visual,plate);node.prepend(card);
+  const summary=el('summary','','Details & actions'),details=el('details','naiCardDetails');details.append(summary,info);node.append(details);
+  const position=visual.querySelector('.naiGalleryPosition');if(position){position.className='naiCardPosition';node.insertBefore(position,details);}
+ }
+ if(!isBattle||!isSet){const im=card.querySelector('img[data-media-id]');watchOrientation(card,im?.dataset.mediaId||entry.images[0],im);}
+ return card;
+}
+function fitBattle(stage,isSet){const card=stage.firstElementChild;if(!card)return;const w=stage.clientWidth,h=stage.clientHeight,ratio=cardRatio(card),key=w+':'+h+':'+isSet+':'+ratio;if(stage.dataset.fit===key)return;stage.dataset.fit=key;card.style.setProperty('--card-bottom',Math.max(16,isSet?h*.122:Math.min(h,w/ratio)*.045)+'px');const width=isSet?w:Math.min(w,h*ratio);card.style.width=width+'px';card.style.height=(isSet?h:width/ratio)+'px';}
+const titleAssets=typeof naiCardTitleAssets==='undefined'?{}:naiCardTitleAssets;
+function titleGraphic(entry){
+ const titles=entry.titles||[],choice=entry.title_choice||'auto';if(choice==='none'||!titles.length)return null;
+ const title=titles.find(t=>t.id===choice)||titles[0];if(!titleAssets[title.id])return null;
+ const art=el('img','naiCardTitleArt');art.dataset.title=title.id;art.src=titleAssets[title.id];art.alt=title.name;art.title=title.detail;art.draggable=false;return art;
+}
+function addTitle(card,entry){const art=titleGraphic(entry);if(art)card.append(art);}
+function backShell(entry,owner){const card=el('div','naiCardBack naiCardShell');shell(card,owner,entry.tier||'Unranked');return card;}
+// Fixed-height rows with a bounded DOM. Offscreen cards and images are detached.
+function virtualGrid(scroller,grid,render,options={}){
+ if(options.span)return spanningGrid(scroller,grid,render,options);
+ let items=[],frame=0,dead=false,cols=1,rowHeight=1,width=1;const mounted=new Map();grid.classList.add('naiVirtualCards');
+ const schedule=()=>{if(!frame&&!dead)frame=requestAnimationFrame(draw)};
+ function clear(){for(const node of mounted.values()){options.remove?.(node);node.remove()}mounted.clear()}
+ function draw(){frame=0;if(dead||!grid.isConnected)return;const available=grid.clientWidth;if(!available)return;
+  const gap=options.gap||16,size=options.size?.()||240;cols=Math.max(1,Math.floor((available+gap)/(size+gap)));width=(available-gap*(cols-1))/cols;rowHeight=(options.height?.(width)||width*1.5+86)+gap;
+  const custom=options.layout?.({width:available,height:scroller.clientHeight,count:items.length,gap});if(custom){cols=custom.cols;width=custom.width;rowHeight=custom.rowHeight;}
+  grid.style.height=Math.max(0,Math.ceil(items.length/cols)*rowHeight-gap)+'px';const offset=scroller.scrollTop+grid.getBoundingClientRect().top-scroller.getBoundingClientRect().top;
+  const first=Math.max(0,Math.floor((scroller.scrollTop-offset)/rowHeight)),last=Math.max(first,Math.ceil((scroller.scrollTop+scroller.clientHeight-offset)/rowHeight));
+  const from=Math.max(0,first-2)*cols,to=Math.min(items.length,(last+2)*cols),wanted=new Set(items.slice(from,to).map(e=>e.id));
+  for(const [id,node]of mounted)if(!wanted.has(id)){options.remove?.(node);node.remove();mounted.delete(id)}
+  for(let i=from;i<to;i++){const item=items[i];let node=mounted.get(item.id);if(!node){node=render(item,i);mounted.set(item.id,node);grid.append(node)}node.style.cssText+=`;position:absolute;left:${(i%cols)*(width+gap)}px;top:${Math.floor(i/cols)*rowHeight}px;width:${width}px;height:${rowHeight-gap}px`;}
+  options.visible?.(items.slice(first*cols,Math.min(items.length,last*cols)));
+ }
+ scroller.addEventListener('scroll',schedule,{passive:true});const observer=new ResizeObserver(schedule);observer.observe(scroller);observer.observe(grid);
+ return {setItems(next){items=next;clear();schedule()},refresh:schedule,disconnect(){dead=true;cancelAnimationFrame(frame);observer.disconnect();scroller.removeEventListener('scroll',schedule);clear()}};
+}
+
+// Pack wide cards across two columns; cache geometry so scrolling only visits visible rows.
+function spanningGrid(scroller,grid,render,options){
+ let items=[],rows=[],frame=0,dead=false,dirty=true,lastWidth=0,lastSize=0;const mounted=new Map();grid.classList.add('naiVirtualCards');
+ const schedule=()=>{if(!frame&&!dead)frame=requestAnimationFrame(draw);};
+ const invalidate=()=>{dirty=true;schedule();};
+ function clear(){for(const node of mounted.values()){options.remove?.(node);node.remove();}mounted.clear();}
+ function layout(available,size){const gap=options.gap||16,cols=Math.max(1,Math.floor((available+gap)/(size+gap))),unit=(available-gap*(cols-1))/cols;rows=[];let row={top:0,height:0,cells:[]},col=0;
+  for(const item of items){const span=Math.min(cols,options.span(item));if(col&&col+span>cols){rows.push(row);row={top:row.top+row.height+gap,height:0,cells:[]};col=0;}const width=unit*span+gap*(span-1),height=options.itemHeight(item,width);row.cells.push({item,left:col*(unit+gap),width,height});row.height=Math.max(row.height,height);col+=span;}
+  if(row.cells.length)rows.push(row);grid.style.height=(rows.length?row.top+row.height:0)+'px';dirty=false;lastWidth=available;lastSize=size;
+ }
+ function firstRow(y){let lo=0,hi=rows.length;while(lo<hi){const mid=(lo+hi)>>1;if(rows[mid].top+rows[mid].height<y)lo=mid+1;else hi=mid;}return lo;}
+ function draw(){frame=0;if(dead||!grid.isConnected)return;const available=grid.clientWidth,size=options.size?.()||240;if(!available)return;if(dirty||available!==lastWidth||size!==lastSize)layout(available,size);
+  const offset=scroller.scrollTop+grid.getBoundingClientRect().top-scroller.getBoundingClientRect().top,y=scroller.scrollTop-offset,first=firstRow(y),last=Math.min(rows.length,firstRow(y+scroller.clientHeight)+1),wanted=new Set(),visible=[];
+  for(let i=Math.max(0,first-2);i<Math.min(rows.length,last+2);i++)for(const cell of rows[i].cells){const {item,width,height,left}=cell;wanted.add(item.id);let node=mounted.get(item.id);if(!node){node=render(item);mounted.set(item.id,node);grid.append(node);}Object.assign(node.style,{position:'absolute',left:left+'px',top:rows[i].top+'px',width:width+'px',height:height+'px'});if(i>=first&&i<last)visible.push(item);}
+  for(const [id,node]of mounted)if(!wanted.has(id)){options.remove?.(node);node.remove();mounted.delete(id);}options.visible?.(visible);
+ }
+ scroller.addEventListener('scroll',schedule,{passive:true});grid.addEventListener('naiCardOrientation',invalidate);const observer=new ResizeObserver(schedule);observer.observe(scroller);observer.observe(grid);
+ return {setItems(next){items=next;clear();invalidate();},refresh:invalidate,disconnect(){dead=true;cancelAnimationFrame(frame);observer.disconnect();scroller.removeEventListener('scroll',schedule);grid.removeEventListener('naiCardOrientation',invalidate);clear();}};
+}
+
+function lightCard(entry,rows,owner,im,show=true,mid=entry.images[0]){
+ const card=el('div','naiTradingCard naiPhotoCard naiExpandedCard');shell(card,owner,show?entry.tier:'Unranked');if(show){card.append(rail(ovr(entry,rows),entry.tier));addTitle(card,entry);}
+ const box=el('div','naiCardPhotoWindow');box.append(im);const isSet=entry.id!==entry.images[0];card.dataset.cardKind=isSet?'set':'image';card.append(box,nameplate(isSet?entry.name:(root.naiGetLibrary?.()?.characters?.find(c=>c.id===owner)?.name||'Collection'),show&&entry.position?'#'+entry.position:''));
+ watchOrientation(card,mid,im);apply(im,cache.get(owner)?.collection.frames['image:'+mid]);return card;
+}
+function frameImage(im,owner,key){const box=el('div','naiCardPhotoWindow');im.before(box);box.append(im);apply(im,cache.get(owner)?.collection.frames[key]);return box;}
+function modal(title,onClose){
+ const wrap=el('section','naiCollectionOverlay'),inner=el('div','naiCollectionInner'),head=el('div','naiCollectionHeader'),heading=el('h2','',title),body=el('div'),error=el('p','naiCollectionError'),previous=root.activeElement;
+ wrap.setAttribute('role','dialog');wrap.setAttribute('aria-modal','true');wrap.setAttribute('aria-label',title);error.setAttribute('role','alert');let busy=false;
+ const close=()=>{if(busy)return;wrap.remove();onClose?.();previous?.focus?.();};head.append(heading,btn('Close',close));inner.append(head,error,body);wrap.append(inner);root.append(wrap);
+ wrap.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Escape'){e.preventDefault();close()}if(e.key==='Tab'){const all=[...wrap.querySelectorAll('button,input,select,[tabindex="0"]')].filter(x=>!x.disabled&&x.getClientRects().length),first=all[0],last=all.at(-1);if(e.shiftKey&&root.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&root.activeElement===last){e.preventDefault();first?.focus()}}});head.querySelector('button').focus();
+ return {wrap,inner,head,heading,body,error,close,async run(fn){if(busy)return;busy=true;error.textContent='';const controls=[...wrap.querySelectorAll('button,input,select')];for(const c of controls)c.disabled=true;try{await fn()}catch(e){error.textContent=e.message||String(e)}finally{busy=false;for(const c of controls)c.disabled=false;}}};
+}
+async function adjust(owner,mid,key,onSaved,context={}){
+ let url;const cleanup=()=>{if(url){URL.revokeObjectURL(url);url=null;}};
+ const m=modal('Position card image',cleanup);m.inner.classList.add('naiCardEditor');m.body.textContent='Loading original image…';
+ await m.run(async()=>{
+  const data=await load(owner);url=URL.createObjectURL(await root.naiOutfitOriginal(mid));if(!m.wrap.isConnected){cleanup();return;}
+  const saved=data.collection.frames[key]||{x:0,y:0,zoom:1},frame={...saved},layout=el('div','naiCardEditLayout'),im=el('img'),tools=el('div','naiCardEditTools');im.dataset.mediaId=mid;im.src=url;im.alt='Card framing preview';im.draggable=false;
+  try{await im.decode();}catch{cleanup();throw Error('The original image could not be decoded. No thumbnail was substituted.');}
+  if(!m.wrap.isConnected){cleanup();return;}
+  const person=root.naiGetLibrary?.()?.characters?.find(c=>c.id===owner)?.name||'Collection';let preview;
+  if(key.startsWith('profile:')){im.className='naiProfileHero';preview=profileCard(im,owner,person,data);}
+  else{
+   let entry=context.entry,rows=context.rows;if(!entry){const result=await root.naiOutfitRequest('/api/battles/summary',{character_id:owner,kind:'images'});rows=result.entries;entry=rows.find(e=>e.id===mid);}
+   if(!m.wrap.isConnected){cleanup();return;}
+   entry=entry||{id:mid,images:[mid],count:1,tier:'Unranked',provisional:true,played:0,rating:1200,titles:[]};preview=lightCard(entry,rows||[entry],owner,im,context.show!==false,mid);
+  }
+  preview.classList.add('naiCardEditPreview');layout.classList.toggle('naiLandscapeEditor',preview.dataset.orientation==='landscape');layout.append(preview,tools);m.body.replaceChildren(el('p','naiCollectionMuted','Position the original image inside its card frame. Save applies this framing to the card; the library image is unchanged.'),layout);apply(im,frame);
+  tools.append(el('small','naiCardOriginalSize',`Original image · ${im.naturalWidth.toLocaleString()} × ${im.naturalHeight.toLocaleString()} pixels`));
+  const inputs=[];for(const [name,label,min,max,step]of [['x','Horizontal position',-50,50,1],['y','Vertical position',-50,50,1],['zoom','Zoom',1,3,.01]]){const l=el('label','',label),input=el('input');input.type='range';input.min=min;input.max=max;input.step=step;input.value=frame[name];input.setAttribute('aria-label',label);input.oninput=()=>{frame[name]=Number(input.value);apply(im,frame)};inputs.push([name,input]);l.append(input);tools.append(l);}
+  tools.append(btn('Reset to full image',()=>{Object.assign(frame,{x:0,y:0,zoom:1});for(const [key,input]of inputs)input.value=frame[key];apply(im,frame)}),btn('Save framing',()=>m.run(async()=>{const next=await api('frame',owner,{revision:data.collection.revision,key,media_id:mid,frame});cache.set(owner,next);onSaved?.();m.wrap.remove();cleanup();})));
+  const observer=new MutationObserver(()=>{if(!m.wrap.isConnected){cleanup();observer.disconnect()}});observer.observe(root,{childList:true});
+ });
+}
+async function attributes(owner,onSaved){const m=modal('Profile card attributes');m.inner.classList.add('naiCardEditor');await m.run(async()=>{
+ const data=await load(owner),attrs=structuredClone(data.collection.attributes);m.body.append(el('p','naiCollectionMuted','Your personal ratings, independent of battle MMR. Rename any of the four attributes. Overall is their weighted average once all four have ratings. Typical sports-card ratings run roughly 60–99; lower values are allowed.'));
+ const headings=el('div','naiAttributeRow');headings.append(el('small','','Attribute'),el('small','','Rating / 99'),el('small','','Weight'));m.body.append(headings);
+ for(const [i,a]of attrs.entries()){const row=el('div','naiAttributeRow');for(const [key,type,min,max]of [['label','text',null,18],['value','number',1,99],['weight','number',.1,10]]){const input=el('input');input.type=type;input.value=a[key]??'';input.setAttribute('aria-label',`Attribute ${i+1} ${key}`);if(type==='text'){input.maxLength=max;input.required=true}else{input.min=min;input.max=max;input.step=key==='weight'?'.1':'1';input.required=key==='weight'}input.oninput=()=>{a[key]=key==='label'?input.value:input.value===''?null:Number(input.value)};row.append(input)}m.body.append(row)}
+ const finish=el('select');finish.setAttribute('aria-label','Card finish');for(const [value,label,xp]of [['obsidian','Obsidian · default',0],['emerald','Emerald · 800 XP',800],['platinum','Platinum · 1,600 XP',1600]]){const o=el('option','',label);o.value=value;o.disabled=data.xp<xp;finish.append(o)}finish.value=data.collection.finish;m.body.append(el('p','naiCollectionMuted','Finish styles your profile card and the subtle texture on battle cards. Battle frame colors always follow rank.'),finish,btn('Save card',()=>{const invalid=m.body.querySelector('input:invalid');if(invalid){invalid.reportValidity();return}m.run(async()=>{const next=await api('save',owner,{revision:data.collection.revision,attributes:attrs,finish:finish.value});cache.set(owner,next);onSaved?.();m.wrap.remove()})}));
+ });}
+function profileCard(hero,owner,name,data){
+ const {attributes:attrs}=data.collection,all=attrs.every(a=>a.value!==null),score=all?Math.round(attrs.reduce((s,a)=>s+a.value*a.weight,0)/attrs.reduce((s,a)=>s+a.weight,0)):null;
+ const card=el('article','naiTradingCard naiProfileCard');card.append(hero);shell(card,owner,null);card.prepend(rail(score,null,'PROFILE OVR · PERSONAL'));frameImage(hero,owner,'profile:'+hero.dataset.cardMediaId);
+ card.append(nameplate(name,'SIGNATURE · PERSONAL COLLECTION'));const grid=el('div','naiCardAttributes');for(const a of attrs){const v=el('div');v.append(el('strong','',a.value??'—'),el('span','',a.label));grid.append(v)}card.append(grid);
+ return card;
+}
+function profile(hero,photos,owner,name,repaint){
+ const data=cache.get(owner);if(!data)return;const anchor=document.createComment('profile card');hero.before(anchor);const card=profileCard(hero,owner,name,data);anchor.replaceWith(card);
+ const controls=el('div','naiCardControl');controls.append(btn('Edit card',()=>attributes(owner,repaint)),btn('Position image',()=>adjust(owner,hero.dataset.cardMediaId,'profile:'+hero.dataset.cardMediaId,repaint)));photos.append(controls);
+}
+async function openHQ(initialOwner,options={}){
+ if(root.querySelector('[data-collection-hq]'))return;const m=modal('Collection HQ',options.onClose);m.wrap.dataset.collectionHq='1';let owner=initialOwner||root.getElementById('characterSelect')?.value,serial=0;
+ const characters=()=>root.naiGetLibrary?.()?.characters||[];
+ const choose=el('select');choose.setAttribute('aria-label','Collection person');for(const c of characters()){const o=el('option','',c.name);o.value=c.id;choose.append(o)}if(!characters().some(c=>c.id===owner))owner=choose.value;choose.value=owner;choose.onchange=()=>{owner=choose.value;paint()};m.head.insertBefore(choose,m.head.lastChild);
+ const launchBattle=(kind,mode,entryId)=>{const sel=root.getElementById('characterSelect');if(sel.value!==owner){sel.value=owner;sel.dispatchEvent(new Event('change',{bubbles:true}))}m.close();options.onLaunch?.();root.naiOpenBattles({kind,mode,entryId,minimum:1,autoStart:!entryId});};
+ async function paint(){const seq=++serial;m.body.textContent='Loading collection…';m.error.textContent='';try{
+  const data=await load(owner);if(seq!==serial||!m.wrap.isConnected)return;const {tracks,stats,xp}=data,level=1+Math.floor(xp/400),earned=Object.values(data.collection.earned);m.body.replaceChildren();
+  const hero=el('div','naiCollectionHero'),copy=el('div');copy.append(el('div','naiCollectionEyebrow','COLLECTION JOURNEY'),el('h2','',data.name),el('p','naiCollectionMuted','Organize the collection. Discover favorites. Build a showcase.'));
+  const xpBox=el('div','naiCollectionXP'),bar=el('progress');bar.max=400;bar.value=xp%400;xpBox.append(el('span','',`LEVEL ${level} · ${xp.toLocaleString()} lifetime XP`),bar,el('span','',`${400-xp%400} XP to next level · 100 XP per first-time milestone`));copy.append(xpBox);const ring=el('div','naiCollectionRing'),inside=el('div');ring.style.setProperty('--progress',(data.completion||0)+'%');inside.append(el('strong','',data.completion===null?'—':data.completion+'%'),el('small','','Current collection'));ring.append(inside);hero.append(copy,ring);m.body.append(hero);
+  const statGrid=el('div','naiCollectionStats');for(const [key,label]of [['images','Images collected'],['sets','Sets collected'],['votes','Battle votes'],['review','Awaiting review'],['purgatory','In purgatory'],['flags','Removal flags']]){const stat=el('div');stat.append(el('strong','',stats[key].toLocaleString()),el('span','',label));statGrid.append(stat)}m.body.append(statGrid,el('h2','','Progress map'),el('p','naiCollectionMuted','Completion measures the images you currently own, not every photo that exists. New imports can lower completion; earned XP stays. Empty tracks are excluded.'));
+  const map=el('div','naiCollectionMap');for(const [i,t]of tracks.entries()){
+   const node=el('article','naiCollectionNode'),done=t.total>0&&t.done===t.total,header=el('header'),diamond=el('b');diamond.append(el('span','',done?'✓':String(i+1).padStart(2,'0')));header.append(el('span','',done?'COMPLETE':t.total?'IN PROGRESS':'NOT STARTED'),diamond);node.dataset.complete=done;
+   const desc=t.id==='organization'?'In a set, or explicitly checked and kept as a standalone image.':t.id==='profile'?'Curate up to five signature profile photos.':t.mode==='placements'?'Give every eligible card enough comparisons to leave provisional status.':'Build a broad comparison history until ratings become established.';
+   const progress=el('progress');progress.max=Math.max(1,t.total);progress.value=t.done;const footer=el('footer');footer.append(el('span','',`${t.done} / ${t.total}`),el('span','',t.total?Math.floor(t.done/t.total*100)+'%':'No eligible images'));
+   node.append(header,el('h3','',t.label),el('p','',desc),progress,footer);
+   if(t.kind){const action=btn(t.mode==='placements'?'Continue placements':'Strengthen ratings',()=>{const target=t.mode==='rank'?data.boards.find(b=>b.kind===t.kind)?.entries.filter(e=>!e.flagged_for_removal&&e.rating_status!=='Established').sort((a,b)=>(a.played||0)-(b.played||0))[0]?.id:null;launchBattle(t.kind,t.mode,target)});action.disabled=t.total<2;node.append(action);if(t.total===1)node.append(el('small','','Needs another eligible opponent.'));else if(t.total<(t.mode==='placements'?5:9))node.append(el('small','',t.mode==='placements'?'Full placement needs at least 5 eligible cards.':'Established confidence needs at least 9 eligible cards.'));}
+   else if(t.id==='organization')node.append(btn('Review unassigned',()=>organization(data)),btn('Scan for sets',()=>{m.close();root.naiScanForSets?.(owner)}));
+   else node.append(btn('Choose profile photos',()=>{const sel=root.getElementById('characterSelect');if(sel.value!==owner){sel.value=owner;sel.dispatchEvent(new Event('change',{bubbles:true}))}m.close();root.getElementById('naiProfileBtn')?.click()}));map.append(node);
+  }m.body.append(map);
+  m.body.append(el('h2','','Milestone cabinet'),el('p','naiCollectionMuted','Permanent milestones reward progress, never change MMR. Emerald finish unlocks at 800 XP; Platinum at 1,600 XP.'));
+  const awards=el('div','naiCollectionAwards');for(const a of earned.slice().reverse()){const tile=el('div','naiCollectionAward');tile.append(el('div','naiCollectionEyebrow','◆ 100 XP'),el('strong','',a.title),el('small','',new Date(a.at).toLocaleDateString()));awards.append(tile)}if(!earned.length)awards.append(el('p','naiCollectionMuted','Your first milestone is waiting. Complete 25% of any progress track.'));m.body.append(awards,btn('Card attributes & finishes',()=>attributes(owner,paint)),el('h2','','Your roster'));
+  const roster=el('div','naiCollectionRoster');for(const c of characters()){const b=btn('',()=>{owner=c.id;choose.value=owner;paint()}),info=el('div'),photo=c.profile?.photos?.[0];if(photo){const im=el('img');im.src=thumb(photo);im.alt='';im.loading='lazy';b.append(im)}const images=(root.naiGetLibrary()?.media||[]).filter(x=>x.character_id===c.id&&x.media_type!=='video');info.append(el('strong','',c.name),el('small','',images.length+' images · '+(c.id===owner?'Current collection':'Open progress map')));b.append(info);roster.append(b)}m.body.append(roster,el('p','naiCollectionMuted','Card OVR is a 60–99 display of your placed rankings within one person and battle type. At least 5 placed cards and a rating spread are required; fewer than 20 placed cards cap at 95. Equal MMR receives equal OVR. Profile attributes are personal ratings and do not affect battles.'));
+ }catch(e){m.body.textContent='Collection could not be loaded.';m.error.textContent=e.message;}}
+ async function organization(data){m.body.replaceChildren();const bar=el('div','naiCollectionTools');bar.append(btn('Back to progress map',paint),btn('Scan for matching sets',()=>{m.close();root.naiScanForSets?.(owner)}));m.body.append(bar,el('h2','','Unassigned images'),el('p','naiCollectionMuted','Only mark an image checked when you have decided it can stay outside a set. This does not move or remove it. Replacing the source image makes it unchecked again.'));
+  const undo=btn('Undo last check',()=>m.run(async()=>{current=await api('review',owner,{revision:current.collection.revision,media_id:lastChecked,reviewed:false});cache.set(owner,current);lastChecked=null;undo.hidden=true;draw()}));undo.hidden=true;bar.append(undo);let lastChecked=null;const grid=el('div','naiOrganizeGrid');m.body.append(grid);let limit=60;const more=btn('Show more',()=>{limit+=60;draw()});m.body.append(more);let current=data;
+  function draw(){grid.replaceChildren();for(const mid of current.unorganized.slice(0,limit)){const card=el('article'),im=el('img');im.src=thumb(mid);im.loading='lazy';im.alt='Unassigned image';card.append(im,btn('Keep standalone · checked',()=>m.run(async()=>{current=await api('review',owner,{revision:current.collection.revision,media_id:mid,reviewed:true});cache.set(owner,current);lastChecked=mid;undo.hidden=false;draw()})));grid.append(card)}more.hidden=current.unorganized.length<=limit;if(!current.unorganized.length)grid.textContent='All saved images are organized or checked.';}draw();
+ }
+ await paint();
+}
+root.naiCards={isLandscape,cardRatio,setOrientation,load,ovr,battle,fitBattle,lightCard,backShell,virtualGrid,frameImage,adjust,profile,openHQ,cache};
+const launch=btn('Collection HQ',()=>openHQ());launch.id='naiCollectionBtn';(root.getElementById('naiBattlesBtn')||root.getElementById('randomBtn'))?.after(launch);
+})();

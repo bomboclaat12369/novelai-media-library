@@ -39,8 +39,15 @@ with tempfile.TemporaryDirectory() as directory:
     store=runtime['LibraryStore'](Path(directory));store._queue_image_thumbnail=lambda *a:None
     owner=store.add_character('Nikki fixture');items=[]
     for i in range(16):
-        data=io.BytesIO();Image.new('RGB',(1600+i,2400),['#4182be','#f29463','#7a97bf','#61b18f'][i%4]).save(data,'PNG')
-        items.append(store.import_bytes(data.getvalue(),f'Image {i}.png',owner['id'],[],{},'image/png')[0])
+        data=io.BytesIO();size=(1600+i,2400)
+        if os.environ.get('NAI_LANDSCAPE_DEMO')=='1':
+            if i%4==1:size=(2400,1600+i)
+            elif i%4==2:size=(1800+i,1800+i)
+        image=Image.new('RGB',size,['#4182be','#f29463','#7a97bf','#61b18f'][i%4]);fmt='PNG';mime='image/png'
+        if os.environ.get('NAI_LANDSCAPE_DEMO')=='1' and i==3:
+            image=Image.new('RGB',(2403,1600),'#61b18f');exif=Image.Exif();exif[274]=6;image.save(data,'JPEG',exif=exif);fmt='JPEG';mime='image/jpeg'
+        else:image.save(data,'PNG')
+        items.append(store.import_bytes(data.getvalue(),f'Image {i}.{fmt.lower()}',owner['id'],[],{},mime)[0])
         items[-1]['in_all']=i<4
     store.create_set(owner['id'],'Blue dress',[items[i]['id'] for i in [0,4,5,6,7]],preserve_placement=True)
     store.create_set(owner['id'],'White dress',[items[i]['id'] for i in [1,8,9,10,11,12]],preserve_placement=True)
