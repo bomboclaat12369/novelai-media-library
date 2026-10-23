@@ -31,6 +31,9 @@ from engine import Engine, VERSION, load_image
 def make_server(engine, port=0, token=None):
     token = token or secrets.token_urlsafe(32)
     html = (Path(__file__).parent / 'ui.html').read_text(encoding='utf-8')
+    from bulk.workbench import Workbench
+    bulk = Workbench(engine)
+    bulk_html = (Path(__file__).parent / 'bulk' / 'ui.html').read_text(encoding='utf-8')
 
     image_slots = threading.Semaphore(2)
 
@@ -66,11 +69,27 @@ def make_server(engine, port=0, token=None):
                 return self.send(403, {'error': 'Local access only'})
             url = urlparse(self.path)
             params = parse_qs(url.query)
+            if url.path == '/bulk':
+                return self.send(200, bulk_html.replace('__TOKEN__', token).encode(), 'text/html; charset=utf-8')
             if url.path == '/':
                 return self.send(200, html.replace('__TOKEN__', token).replace('__VERSION__', VERSION).encode(), 'text/html; charset=utf-8')
             if self.headers.get('X-Review-Token') != token and params.get('token', [''])[0] != token:
                 return self.send(403, {'error': 'Reopen the app using its launcher.'})
             try:
+                if url.path == '/api/bulk/state':
+                    return self.send(200, bulk.status())
+                if url.path == '/api/bulk/context':
+                    return self.send(200, bulk.context())
+                if url.path == '/api/bulk/group':
+                    return self.send(200, bulk.detail(params['id'][0]))
+                if url.path == '/api/bulk/export':
+                    return self.send(200, bulk.export())
+                if url.path == '/api/bulk/image':
+                    path = bulk.preview_path(params['id'][0])
+                    with image_slots:
+                        image, _, _ = load_image(path, min(2000,max(160,int(params.get('size',[800])[0]))))
+                        output = io.BytesIO(); image.save(output, format='JPEG', quality=92)
+                    return self.send(200, output.getvalue(), 'image/jpeg')
                 if url.path == '/api/state':
                     return self.send(200, engine.view(int(params.get('offset', [0])[0]), params.get('filter', ['all'])[0]))
                 if url.path == '/api/groups':
@@ -104,7 +123,19 @@ def make_server(engine, port=0, token=None):
                     raise ValueError('Invalid request size')
                 body = json.loads(self.rfile.read(length))
                 path = urlparse(self.path).path
-                if path == '/api/scan':
+                if bulk.current and bulk.current['running'] and path not in ('/api/bulk/cancel','/api/pick','/api/quit'):
+                    raise ValueError('Stop the bulk evaluation before changing files or starting another operation.')
+                if path == '/api/bulk/start':
+                    result = bulk.start(body)
+                elif path == '/api/bulk/cancel':
+                    bulk.cancel.set();result = {'message':'Stopping after the current operation…'}
+                elif path == '/api/bulk/activate':
+                    result = bulk.activate(str(body['id']))
+                elif path == '/api/bulk/split':
+                    result = bulk.split(body)
+                elif path == '/api/bulk/review':
+                    result = bulk.review(body)
+                elif path == '/api/scan':
                     engine.start(body.get('incoming', []), body.get('reference', []), body.get('mode', 'balanced'),
                                  body.get('library_character',''), body.get('library_id',''), body.get('workers',8), body.get('scan_kind','folders'))
                     result = {'message': 'Scan started'}
@@ -169,6 +200,7 @@ def make_server(engine, port=0, token=None):
                         subprocess.Popen(['xdg-open', str(file)])
                     result = {'message': 'Opened the original in your image viewer.'}
                 elif path == '/api/quit':
+                    bulk.cancel.set()
                     engine.cancel.set()
                     result = {'message': 'App closed. You can close this tab.'}
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -179,6 +211,7 @@ def make_server(engine, port=0, token=None):
                 self.send(400, {'error': str(e)})
 
     server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    server.bulk = bulk
     server.daemon_threads = True
     return server
 
@@ -224,6 +257,9 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        server.bulk.cancel.set()
+        if server.bulk.thread:
+            server.bulk.thread.join(timeout=10)
         engine.cancel.set()
         if engine.thread:
             engine.thread.join(timeout=10)

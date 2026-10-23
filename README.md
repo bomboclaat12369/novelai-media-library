@@ -2,6 +2,25 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Bulk set preparation evaluation (Duplicate Review 1.8.0)
+
+The duplicate reviewer now includes a **Bulk set preparation · Pilot** screen.
+It reconstructs image origins across quarantine and surviving copies, identifies
+forum posts by forum + post ID across download batches, and proposes set drafts
+using outfit and scene evidence. Shared folders alone do not establish a match.
+
+Start with a 400-image pilot, inspect representative proposals, and export the
+evaluation report. Draft names, colors, categories, acceptance and corrections
+persist across restarts. This stage **does not move files or import sets into the
+library**. Real-collection accuracy has not been validated; direct imports and the
+Batch Imports library section follow that evaluation. Synthetic workflow tests do
+not establish photoshoot accuracy.
+
+Extract the complete repository ZIP (including `runtime-src`), then launch
+`duplicate-review/Start Duplicate Review.bat`. Existing duplicate-review state is
+retained. See [pilot instructions and limitations](duplicate-review/README.txt).
+Standalone, companion and NovelAI versions are unchanged.
+
 ## Clear vote feedback and larger set images (standalone 2.9.6)
 
 The arena background now takes precedence over the older rank theme. Voting puts

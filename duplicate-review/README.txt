@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.7.5
+LOCAL DUPLICATE REVIEW 1.8.0
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -12,7 +12,65 @@ The database is stored separately in %LOCALAPPDATA%\LocalDuplicateReview.
 
 Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
-Later launches, scans and image processing stay local; no cloud account or GPU.
+Duplicate scans and image processing stay local; no cloud account or GPU is required.
+The optional set-preparation pilot downloads matching models on first use.
+
+NEW IN 1.8.0: BULK SET PREPARATION — LOCAL EVALUATION PILOT
+- Open "Bulk set preparation · Pilot" from the duplicate-review screen. This is
+  the first evaluation stage of the combined duplicate/source/set workflow.
+  It creates persistent review drafts. It does NOT import images, create library
+  sets, move files, or delete originals/quarantined files. The existing duplicate
+  reviewer remains available, with unchanged matching and quarantine rules.
+- Extract the COMPLETE repository ZIP, including its runtime-src directory. Run
+  duplicate-review/Start Duplicate Review.bat. The pilot reuses the companion's
+  outfit and scene encoders; extracting duplicate-review alone is insufficient.
+- Start the media companion if you want existing library images as references.
+  Pick the person in the reference dropdown. All image placements supplied by the
+  companion catalog are included: Main, Sets, Review and Purgatory. Video grouping
+  is not part of this pilot. Without the companion, choose Folders only.
+- Select the top-level cleaned collection folder, including its quarantine folder.
+  For example: C:\Users\Empathy\Desktop\SMG\Mikayla. Start with about 400 incoming
+  images. All source files are inventoried; only the pilot sample and library
+  references receive visual grouping. "Outside pilot" is NOT a processed count.
+  The sample tries to retain whole source posts. A later full run can reuse caches.
+- Keep forum identity set to smg for SMG downloads. Same forum + post number is
+  one source regardless of date, download batch, or quarantine move ID. Instagram
+  username + case-sensitive post shortcode is another source identity. Different
+  forums require separate evaluations with different forum labels.
+- Reconstructs all available origins from exact copies and directly verified
+  visual-copy relationships. Unresolved quarantine files are counted separately;
+  manual quarantine membership alone is not proof of a surviving duplicate.
+  Original review.sqlite3 is read locally; there is no need to upload it.
+- Outfit similarity is evaluated without blending it down with background scores.
+  Scene/context evidence provides additional connections, supported by post origin
+  where available. A shared post alone never forms a set. Mixed posts can split
+  into several proposals; known different library sets are not merged together.
+  Scores/thresholds are hypotheses for evaluation, NOT accuracy percentages.
+- Inspect the large grid, click an image to enlarge, then Accept draft & next.
+  Edit name/colors/categories before accepting. Categories come from the selected
+  person's library. Select part of a proposal and Split selected if necessary;
+  deselected members return to Unassigned. Details shows recovered sources and
+  competing candidate images. Enter in the name/colors field accepts the draft.
+- Review decisions and completed identity/visual caches persist in the separate
+  bulk-preparation.sqlite3 beside review.sqlite3. Closing the browser does not stop
+  the local server. Use Stop before quitting; a stopped/interrupted scan must be
+  started again, but completed cached work is reused. Saved drafts can be reopened
+  through the evaluation dropdown. Avoid simultaneous matching/model downloads
+  in the companion while the pilot is preparing its shared model cache.
+- First use may download approximately 686 MiB of models and install ONNX Runtime
+  if not already available. Later visual work is content-cached. Source inventory
+  and unchanged-file checks still run; initial quarantine recovery can take time.
+- Export evaluation writes a JSON report with paths, source relationships, draft
+  metadata and correction counts; it contains no image bytes or feature vectors.
+  The report cannot establish visual correctness by itself. Inspect representative
+  proposals and report false members/missing members before relying on bulk import.
+- Candidate search is bounded: visual nearest neighbors, exhaustive post candidates
+  only up to 200 images per source, and at most 120 members per proposal. Larger
+  sources still receive visual search and are flagged. "Unassigned" does not prove
+  that no matching set exists, especially outside a limited pilot sample.
+- Direct approved-set imports and the separate Batch Imports library section are
+  the next stage, after real-collection evaluation. No standalone, companion or
+  NovelAI version change is required for this pilot.
 
 NEW IN 1.7.5: REUSE WORK WHEN ADDING FOLDERS
 - Comparison blocks now retain persistent content slots. Adding/reordering folders
