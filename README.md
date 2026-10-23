@@ -2,6 +2,26 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Portrait card proportions and footer polish (standalone 2.9.4)
+
+All image cards use one portrait format again, including landscape source images.
+The card is slightly wider/shorter at 7:10, with a 3:4 photo opening. Standard 3:4
+portraits fill the opening without automatic zoom or top/bottom letterboxing;
+other source ratios remain contained, and manual framing still applies.
+
+The name and ranking number are centered together within the footer's inner
+facet. Stronger metallic lettering and fine rules around the number match the
+frame. The raised faceted footer and existing title artwork are retained.
+
+The horizontal card variant and mixed-width leaderboard layout from 2.9.3 are
+removed. Battles, fullscreen, leaderboard and Position card share the new portrait
+proportions. The leaderboard retains bounded rendering while scrolling, and the
+position editor continues to use original-resolution images.
+
+Refresh and apply the standalone update. Companion 2.7.62 and NovelAI 2.8.93 are
+unchanged. Focused UI checks cover the photo opening, centered typography,
+consistent card geometry, saved framing, and responsive scrolling.
+
 ## Portrait proportions and landscape cards (standalone 2.9.3)
 
 Portrait cards restore the earlier photo window and taller, raised footer while

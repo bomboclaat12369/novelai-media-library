@@ -41,7 +41,8 @@ with tempfile.TemporaryDirectory() as directory:
     for i in range(16):
         data=io.BytesIO();size=(1600+i,2400)
         if os.environ.get('NAI_LANDSCAPE_DEMO')=='1':
-            if i%4==1:size=(2400,1600+i)
+            if i==0:size=(1800,2400)
+            elif i%4==1:size=(2400,1600+i)
             elif i%4==2:size=(1800+i,1800+i)
         image=Image.new('RGB',size,['#4182be','#f29463','#7a97bf','#61b18f'][i%4]);fmt='PNG';mime='image/png'
         if os.environ.get('NAI_LANDSCAPE_DEMO')=='1' and i==3:

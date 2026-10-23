@@ -1,0 +1,34 @@
+const assert=require('assert/strict'),{spawn}=require('child_process');
+const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwright');
+(async()=>{
+ const server=spawn('python3',['tests/serve_battles_fixture.py'],{env:{...process.env,NAI_RANKS_DEMO:'1',NAI_CARD_FEATURES_DEMO:'1',NAI_LANDSCAPE_DEMO:'1'}});let browser,stderr='';server.stderr.on('data',b=>stderr+=b);
+ try{
+  await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.on('exit',c=>reject(Error(stderr+c)))});
+  browser=await chromium.launch({executablePath:process.env.NAI_CHROMIUM,headless:true,args:['--no-sandbox','--disable-gpu']});const page=await browser.newPage({viewport:{width:1600,height:1000}});page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto('http://127.0.0.1:8765/library/');await page.getByText('Local library connected',{exact:true}).waitFor();await page.locator('#naiBattlesBtn').click();await page.locator('#naiBattleLeaderboard').click();
+  const board=page.locator('.naiBattleBoard'),cards=page.locator('.naiBattleRankCard');await cards.first().waitFor();
+  const ids=await page.evaluate(()=>document.getElementById('nai-media-host').shadowRoot.naiGetLibrary().media.slice(0,4).map(m=>m.id));
+  const portrait=page.locator('.naiBattleRankCard[data-entry-id="'+ids[0]+'"]'),land=page.locator('.naiBattleRankCard[data-entry-id="'+ids[1]+'"]');
+  const ratio=loc=>loc.evaluate(e=>e.clientWidth/e.clientHeight);
+  for(const item of [portrait,land])assert(Math.abs(await ratio(item.locator('.naiTradingCard'))-.7)<.005);
+  assert.equal(await land.evaluate(e=>e.clientWidth),await portrait.evaluate(e=>e.clientWidth));assert.equal(await page.locator('.naiLandscapeCard').count(),0);
+  assert.match(await portrait.locator('.naiCardName small').textContent(),/^#\d+$/);
+  const geometry=loc=>loc.evaluate(e=>{const r=e.getBoundingClientRect(),p=e.querySelector('.naiCardPhotoWindow,.naiBattleGalleryVisual').getBoundingClientRect(),plate=e.querySelector('.naiCardName'),n=plate.getBoundingClientRect(),name=plate.querySelector('strong').getBoundingClientRect(),rank=plate.querySelector('small').getBoundingClientRect();return {photo:p.height/r.height,photoAspect:p.width/p.height,footerTop:(n.top-r.top)/r.height,footerHeight:n.height/r.height,textCenter:(name.top+rank.bottom)/2,facetCenter:r.top+r.height*.922,xError:Math.abs((name.left+name.right)/2-(r.left+r.right)/2),nameClip:plate.querySelector('strong').scrollHeight>plate.querySelector('strong').clientHeight+1};});
+  const base=await geometry(portrait.locator('.naiTradingCard'));assert(Math.abs(base.photoAspect-.75)<.003);assert(Math.abs(base.footerTop-.886)<.003);assert(Math.abs(base.textCenter-base.facetCenter)<2);assert(base.xError<1);assert(!base.nameClip);
+  await portrait.locator('.naiBattleGalleryVisual').click();const front=page.locator('.naiExpandedCard'),flipper=page.locator('.naiFlipCard');
+  await page.waitForFunction(()=>{const im=document.getElementById('nai-media-host').shadowRoot.querySelector('.naiExpandedCard .naiCardPhotoWindow img');return im?.complete&&im.naturalWidth===1800;});
+  assert(Math.abs(await ratio(flipper)-.7)<.005);const full=await geometry(front);for(const k of ['photoAspect','footerTop','footerHeight'])assert(Math.abs(full[k]-base[k])<.003,k);assert(Math.abs(full.textCenter-full.facetCenter)<2);assert(full.xError<1);
+  // A 3:4 original fills the photo opening without zoom/cropping or top/bottom letterboxing.
+  assert(await front.locator('.naiCardPhotoWindow img').evaluate(im=>{const r=im.getBoundingClientRect(),scale=Math.min(r.width/im.naturalWidth,r.height/im.naturalHeight);return r.height-im.naturalHeight*scale<2&&getComputedStyle(im).objectFit==='contain'&&im.style.transform.includes('scale(1)');}));
+  await page.screenshot({path:'/tmp/card-proportions-full.png'});
+  await page.locator('.naiBattleLight').getByRole('button',{name:'Position card',exact:true}).click();const editor=page.getByRole('dialog',{name:'Position card image',exact:true}),preview=editor.locator('.naiCardEditPreview');await preview.waitFor();assert(Math.abs(await ratio(preview)-.7)<.005);assert(await preview.locator('.naiCardPhotoWindow img').evaluate(im=>im.naturalWidth===1800&&im.naturalHeight===2400));
+  for(const k of ['photoAspect','footerTop','footerHeight'])assert(Math.abs((await geometry(preview))[k]-base[k])<.003,'position '+k);
+  await editor.getByLabel('Zoom',{exact:true}).fill('1.75');await editor.getByLabel('Horizontal position',{exact:true}).fill('-14');await editor.getByRole('button',{name:'Save framing',exact:true}).click();await editor.waitFor({state:'detached'});assert(await front.locator('.naiCardPhotoWindow img').evaluate(im=>im.style.transform.includes('scale(1.75)')));
+  // Landscape photos remain contained in the common portrait frame, also on navigation.
+  await page.locator('.naiBattleBrowse').getByRole('button',{name:'→',exact:true}).click();await front.locator('img[data-media-id="'+ids[1]+'"]').waitFor();assert(Math.abs(await ratio(flipper)-.7)<.005);await page.screenshot({path:'/tmp/card-portrait-landscape-source.png'});
+  await page.locator('.naiBattleLight').getByRole('button',{name:'Focus comparisons',exact:true}).click();const battle=page.locator('.naiBattleCard[data-entry-id="'+ids[1]+'"] .naiTradingCard');await battle.waitFor();await page.waitForFunction(id=>{const e=document.getElementById('nai-media-host').shadowRoot.querySelector('.naiBattleCard[data-entry-id="'+id+'"] .naiTradingCard');return e&&Math.abs(e.clientWidth/e.clientHeight-.7)<.005;},ids[1]);
+  await page.locator('#naiBattleLeaderboard').click();await cards.first().waitFor();await board.evaluate(e=>e.scrollTop=e.scrollHeight);await page.waitForFunction(()=>[...document.getElementById('nai-media-host').shadowRoot.querySelectorAll('.naiCardPosition')].some(e=>e.textContent.startsWith('#360')));assert(await cards.count()<65);await board.evaluate(e=>e.scrollTop=0);await portrait.waitFor();await page.screenshot({path:'/tmp/card-proportions-board.png'});
+  for(const viewport of [{width:700,height:760},{width:2560,height:1440}]){await page.setViewportSize(viewport);await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));assert(await cards.count()<65);assert(await cards.evaluateAll(nodes=>{const boxes=nodes.map(e=>e.getBoundingClientRect());return boxes.every((a,i)=>boxes.slice(i+1).every(b=>a.right<=b.left+1||b.right<=a.left+1||a.bottom<=b.top+1||b.bottom<=a.top+1));}));}
+  assert.deepEqual(errors,[]);console.log('3:4 photo opening without forced zoom, centered footer typography, common portrait format for landscape sources, matching fullscreen/editor/battle geometry, original-resolution saved framing, and bounded leaderboard scrolling passed.');
+ }finally{await browser?.close();server.kill();}
+})().catch(e=>{console.error(e);process.exitCode=1});
