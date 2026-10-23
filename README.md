@@ -2,6 +2,24 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Bulk set pilot refinement (Duplicate Review 1.8.1)
+
+**Re-evaluate same images** creates a new evaluation from the exact saved cohort,
+including unassigned images, while preserving the original review. Cached image
+features are reused without another whole-folder scan or model load when complete.
+Changed/missing files stop the replay instead of silently changing the sample.
+
+Clothing cues now gate outfit-only matches; uncertain or limited clothing needs
+setting/source support. Coherent subsets inside mixed posts support viewpoint
+changes. Additional passes reconcile supported fragments and check unassigned
+images against established groups. New exports include the supporting signals
+and before/after counts. Crowded unassigned grids retain full thumbnail height.
+
+Focused workflow tests and the supplied screenshot examples were checked. These
+are **not** a full-collection accuracy measurement; rerun the same pilot to compare.
+The tool remains draft-only. Main library matching and all app versions are unchanged.
+See [instructions](duplicate-review/README.txt) and [model feature attribution](duplicate-review/bulk/THIRD-PARTY.txt).
+
 ## Bulk set preparation evaluation (Duplicate Review 1.8.0)
 
 The duplicate reviewer now includes a **Bulk set preparation · Pilot** screen.

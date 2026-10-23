@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.8.0
+LOCAL DUPLICATE REVIEW 1.8.1
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -14,6 +14,44 @@ Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
 Duplicate scans and image processing stay local; no cloud account or GPU is required.
 The optional set-preparation pilot downloads matching models on first use.
+
+NEW IN 1.8.1: RE-EVALUATE THE SAME IMAGES, BETTER SHOOT GROUPING
+- Click Re-evaluate same images while viewing your completed pilot. This creates
+  a NEW evaluation from exactly the saved image cohort, including Unassigned.
+  The old evaluation and every accepted/skipped decision stay in the dropdown.
+  New proposals start pending; old acceptance is not assumed to prove new groups.
+- No new folder inventory or random sample is needed. Existing compatible outfit
+  and scene features are reused without loading the neural models when all are
+  cached. An unchanged 400-image rerun should therefore be much quicker than the
+  initial scan. Missing/changed images stop the rerun explicitly; no substitutions.
+  If interrupted, select the original completed evaluation and re-evaluate again.
+- An outfit-model score alone is no longer sufficient when clothing evidence is
+  limited or uncertain. A small bundled set of text features gates that route
+  using the existing image vectors. Clear clothing matches keep the original
+  outfit threshold; other images require setting/source corroboration. The gate
+  is fallible, and its scores are NOT confidence percentages or a nudity detector.
+  No additional large model download or per-image neural pass is introduced.
+- Posts can contain multiple coherent visual subsets. Consistent scene evidence
+  within each subset supports changed poses/viewpoints without treating an entire
+  mixed forum post as one shoot. Unknown folders still supply no post boost.
+- A second pass reconciles fragments with support across several members on both
+  sides. A third pass checks unassigned images against established cores, requiring
+  two supporting members and a margin over competing groups. A lone bridge cannot
+  join unrelated sets; newly attached images do not seed a chain of attachments.
+- The new export records source consistency, clothing cues, appearance/full-scene/
+  outer-scene scores, merge/attachment counts and before/after cohort counts.
+  An unchanged membership group displays its earlier review status for reference.
+  A lower Unassigned count by itself is not evidence of improved accuracy.
+- Fixed compressed/clipped unassigned thumbnails: rows retain their image height,
+  the grid scrolls, and pagination spans the row. Unassigned no longer presents
+  unusable set-selection/edit controls. Image fullscreen and source details remain.
+- Validation includes focused grouping/replay tests, crowded-grid browser checks,
+  and a limited check on supplied screenshot crops. The screenshot examples now
+  assemble the four window images and separate the mixed group into the confirmed
+  pair plus three unassigned images. This does NOT validate the full collection or
+  guarantee identical results from originals in the complete 400-image context.
+- This is still a draft-only evaluation tool: no library import, source movement,
+  automatic cleanup, or changes to the main library's set finder are introduced.
 
 NEW IN 1.8.0: BULK SET PREPARATION — LOCAL EVALUATION PILOT
 - Open "Bulk set preparation · Pilot" from the duplicate-review screen. This is

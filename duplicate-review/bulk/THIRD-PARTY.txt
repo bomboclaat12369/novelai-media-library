@@ -1,0 +1,19 @@
+Clothing prompt features
+========================
+clothing-anchors.json contains normalized text embeddings generated from:
+Marqo/marqo-fashionSigLIP by Marqo (Apache License 2.0).
+https://huggingface.co/Marqo/marqo-fashionSigLIP
+Pinned revision: c56244cc94f92419e8369fa71efdaf403b124ce8
+The model's ONNX conversion is credited upstream to Xenova / Hugging Face.
+
+The output features, prompt selection and grouping logic are modifications for
+this application. They are not calibrated clothing/nudity classifications.
+No user images or image-derived vectors are included in this asset.
+
+Reproduce with tools/build-clothing-anchors.py and the pinned text_model.onnx
+and tokenizer.json. Model/tokenizer SHA-256 checksums and prompt texts are
+recorded in the generated JSON. The tokenizer uses EOS padding to 64 tokens;
+text embeddings are L2-normalized. Runtime inference uses the existing pinned
+FashionSigLIP vision model; no text model or tokenizer is downloaded by the app.
+
+A copy of the Apache License 2.0 follows in Apache-2.0.txt.

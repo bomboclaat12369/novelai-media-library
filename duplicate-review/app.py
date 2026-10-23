@@ -127,6 +127,8 @@ def make_server(engine, port=0, token=None):
                     raise ValueError('Stop the bulk evaluation before changing files or starting another operation.')
                 if path == '/api/bulk/start':
                     result = bulk.start(body)
+                elif path == '/api/bulk/reevaluate':
+                    result = bulk.reevaluate(body)
                 elif path == '/api/bulk/cancel':
                     bulk.cancel.set();result = {'message':'Stopping after the current operation…'}
                 elif path == '/api/bulk/activate':

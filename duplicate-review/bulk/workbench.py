@@ -23,8 +23,13 @@ import numpy as np
 from engine import linked, sha256, stat_key, pixel_digest, QUARANTINE, BKTree
 from .sources import source_of
 from .grouping import propose, RECIPE
+from .clothing import classify
 
 EXTENSIONS={'.jpg','.jpeg','.png','.webp','.bmp','.tif','.tiff','.avif','.gif'}
+
+
+class PreparationError(RuntimeError):
+    """One model preparation failure stops the job, not one retry per image."""
 
 
 class Workbench:
@@ -69,7 +74,7 @@ class Workbench:
     def status(self):
         with self.lock:
             if not self.current:return {'running':False,'phase':'Ready for a local evaluation','groups':[], 'jobs':self.jobs()}
-            out={k:copy.deepcopy(v) for k,v in self.current.items() if k not in ('items','proposals','unassigned','duplicate_families')}
+            out={k:copy.deepcopy(v) for k,v in self.current.items() if k not in ('items','proposals','unassigned','duplicate_families','source_profiles')}
             out['groups']=[{k:v for k,v in g.items() if k not in ('members','original_members','sources','evidence')}|{'count':len(g['members'])} for g in self.current.get('proposals',[])]
             reviews=[g for g in self.current.get('proposals',[]) if g.get('review')=='accepted']
             out['evaluation']={'accepted':len(reviews),'unchanged':sum(set(g['members'])==set(g['original_members']) for g in reviews),
@@ -119,6 +124,24 @@ class Workbench:
                     'person':str(body.get('person','Collection'))[:120], 'character_id':str(body.get('character_id',''))}
             self.current={'id':uuid.uuid4().hex,'config':config,'recipe':RECIPE,'running':True,'phase':'Inventorying original and quarantined files',
                           'done':0,'total':0,'issues':[],'items':{},'proposals':[],'unassigned':[], 'created':time.time()}
+            self.cancel.clear();self.persist()
+            self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
+            return self.status()
+
+    def reevaluate(self,body):
+        """Create a new run from a saved, immutable image cohort, not a new sample."""
+        with self.engine.lock,self.lock:
+            if self.engine.status['running'] or (self.current and self.current['running']):
+                raise ValueError('Wait for the current operation to finish.')
+            if not self.current or body.get('job')!=self.current['id'] or not self.current.get('complete'):
+                raise ValueError('Open a completed evaluation before re-evaluating its images.')
+            old=self.current
+            if not old.get('items'):raise ValueError('This evaluation has no saved image cohort.')
+            self.persist()
+            self.current={k:copy.deepcopy(old[k]) for k in ('config','library_sets','model_root','inventory','sampled','outside_evaluation') if k in old}
+            self.current.update(id=uuid.uuid4().hex,recipe=RECIPE,replay_of=old['id'],
+                expected_images=len(old['items']),inherited_issues=copy.deepcopy(old.get('inherited_issues',old.get('issues',[]))),running=True,phase='Re-evaluating the same saved images',
+                done=0,total=len(old['items']),issues=[],items={},proposals=[],unassigned=[],created=time.time())
             self.cancel.clear();self.persist()
             self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
             return self.status()
@@ -317,12 +340,12 @@ class Workbench:
             def update(self,ident,**fields):work.update(**fields)
             def _check_cancel(self,ident):work.check()
         store=SimpleNamespace(root=Path(self.current.get('model_root') or self.engine.state_dir/'bulk-models'),_hash_file=sha256)
-        enc=LocalEncoder(store);enc._prepare('bulk');enc._prepare_scene('bulk')
-        return enc
+        return LocalEncoder(store)
 
-    def encode(self,items):
+    def encode(self,items,strict=False):
         enc=self.encoder();recipe=enc.MODEL_SHA+':'+enc.SCENE_RECIPE
-        kept=[];outfits=[];scenes=[];hits=0
+        self.current['feature_model']=enc.MODEL_SHA
+        kept=[];outfits=[];scenes=[];hits=0;models_ready=not hasattr(enc,'_prepare')
         with self.db() as db:
             for at,item in enumerate(items):
                 self.check()
@@ -333,25 +356,45 @@ class Workbench:
                     value=np.frombuffer(row[0],dtype=np.float32).copy() if row else np.array([])
                     if value.size==2304 and np.isfinite(value).all():hits+=1
                     else:
+                        if not models_ready:
+                            try:enc._prepare('bulk');enc._prepare_scene('bulk')
+                            except InterruptedError:raise
+                            except Exception as e:raise PreparationError('Matching engine preparation failed: '+str(e)) from e
+                            models_ready=True
                         value=np.concatenate((enc._encode(path),enc._encode_scene(path).reshape(-1))).astype(np.float32)
                         if value.size!=2304 or not np.isfinite(value).all():raise ValueError('Invalid matching features')
                         if stat_key(path)!=item['stamp']:raise ValueError('File changed during analysis')
                         db.execute('INSERT OR REPLACE INTO vectors VALUES (?,?,?)',(item['sha'],recipe,value.tobytes()));db.commit()
                     kept.append(item);outfits.append(value[:768]);scenes.append(value[768:].reshape(2,768))
                 except InterruptedError:raise
-                except Exception as e:self.issue(item['path'],e)
+                except PreparationError:raise
+                except Exception as e:
+                    self.issue(item['path'],e)
+                    if strict:raise ValueError('The saved image cohort changed or could not be read. The original evaluation is preserved. '+str(e)) from e
                 self.update(phase='Indexing outfits and photoshoot details',done=at+1,total=len(items),cached_features=hits)
         if not kept:return [],np.zeros((0,768)),np.zeros((0,2,768))
         return kept,np.stack(outfits),np.stack(scenes)
 
     def run(self):
         try:
-            config=self.current['config'];found=self.inventory(config);items=self.identities(found)
-            chosen=self.sample(items,config['limit'])
+            config=self.current['config'];previous=None
+            if self.current.get('replay_of'):
+                with self.db() as db:
+                    row=db.execute('SELECT data FROM jobs WHERE id=?',(self.current['replay_of'],)).fetchone()
+                if not row:raise ValueError('The original evaluation could not be found.')
+                previous=json.loads(row[0]);chosen=copy.deepcopy(list(previous['items'].values()))
+            else:
+                found=self.inventory(config);items=self.identities(found)
+                chosen=self.sample(items,config['limit'])
+                self.current['sampled']=sum(not i['reference'] for i in chosen)
+                self.current['outside_evaluation']=sum(not i['reference'] for i in items)-self.current['sampled']
             if not chosen:raise ValueError('No readable surviving images found. Choose the parent containing the cleaned image folders, not quarantine alone.')
-            self.current['sampled']=sum(not i['reference'] for i in chosen)
-            self.current['outside_evaluation']=sum(not i['reference'] for i in items)-self.current['sampled']
-            self.persist();chosen,outfit,scene=self.encode(chosen)
+            self.persist();chosen,outfit,scene=self.encode(chosen,strict=previous is not None)
+            if not chosen:raise ValueError('No images could be analyzed. See Issues for details.')
+            self.check()
+            for item,cue in zip(chosen,classify(outfit,None if self.encoder_factory else self.current['feature_model'])):
+                item['clothing_cue']=cue
+            self.current['clothing_cues']={state:sum(i['clothing_cue']['state']==state for i in chosen) for state in ('present','limited','uncertain')}
             groups,singles,capped=propose(chosen,outfit,scene,self.update,self.check)
             proposals=[]
             for n,g in enumerate(groups):
@@ -365,6 +408,17 @@ class Workbench:
                     'members':ids,'original_members':ids[:],'evidence':evidence,'priority':g['priority'],'existing_sets':existing,
                     'categories':existing[0].get('categories') or [] if len(existing)==1 else [],'colors':existing[0].get('colors') or [] if len(existing)==1 else [],
                     'notes':'','review':'pending','sources':source_names})
+            if previous is not None:
+                old_groups={frozenset(g['members']):g for g in previous['proposals'] if g['members']}
+                for group in proposals:
+                    prior=old_groups.get(frozenset(group['members']))
+                    if prior:group['previous_review']=prior['review']
+                was=set(previous.get('unassigned',[]));now={chosen[i]['id'] for i in singles}
+                self.current['comparison']={'previous_job':previous['id'],'same_images':len(chosen),
+                    'unchanged_groups':sum('previous_review' in g for g in proposals),
+                    'changed_or_new_groups':sum('previous_review' not in g for g in proposals),
+                    'previous_unassigned':len(was),'now_unassigned':len(now),
+                    'assigned_from_unassigned':len(was-now),'newly_unassigned':len(now-was)}
             self.current.update(items={i['id']:i for i in chosen},proposals=proposals,unassigned=[chosen[i]['id'] for i in singles],
                                 source_candidate_caps=capped,phase='Evaluation ready — review draft sets',done=len(chosen),total=len(chosen),complete=True)
         except InterruptedError as e:self.update(phase=str(e),interrupted=True)
@@ -384,7 +438,7 @@ class Workbench:
 
     def image_info(self,mid):
         item=self.current['items'][mid]
-        return {k:copy.deepcopy(item.get(k)) for k in ('id','path','sources','origins','reference','existing_sets')}
+        return {k:copy.deepcopy(item.get(k)) for k in ('id','path','sources','origins','reference','existing_sets','clothing_cue')}
 
     def preview_path(self,mid):
         with self.lock:

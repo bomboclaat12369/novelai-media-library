@@ -71,7 +71,9 @@ class Grouping(unittest.TestCase):
 
     def test_original_outfit_match_not_diluted_by_context(self):
         o=np.stack([unit(0),unit(0)]);scene=np.stack([np.stack([unit(i),unit(i)]) for i in (2,3)])
-        groups,_,_=propose(self.items(2,False),o,scene)
+        items=self.items(2,False)
+        for item in items:item['clothing_cue']={'state':'present'}
+        groups,_,_=propose(items,o,scene)
         self.assertEqual(len(groups),1)
 
     def test_bridge_does_not_merge_distinct_groups(self):
@@ -79,6 +81,54 @@ class Grouping(unittest.TestCase):
         scene=np.stack([np.stack([unit(i+10),unit(i+10)]) for i in range(5)])
         groups,_,_=propose(self.items(5),o,scene)
         self.assertTrue(all(len(g['members'])<5 for g in groups))
+
+
+    def test_bare_or_uncertain_appearance_cannot_group_unrelated_settings(self):
+        o=np.stack([unit(0)]*5)
+        # Only members 3 and 4 share a scene. All five look alike to the outfit encoder.
+        scene=np.stack([np.stack([unit(i),unit(i)]) for i in (5,6,7,7,8)])
+        items=self.items(5)
+        for i,item in enumerate(items):item['clothing_cue']={'state':'limited' if i%2 else 'uncertain'}
+        groups,singles,_=propose(items,o,scene)
+        self.assertEqual([{r['index'] for r in g['members']} for g in groups],[{2,3}])
+        self.assertEqual(set(singles),{0,1,4})
+
+    def scene_from_gram(self,full,outer):
+        def vectors(gram):
+            a=np.linalg.cholesky(np.array(gram,dtype=np.float64)).astype(np.float32)
+            return np.pad(a,((0,0),(0,768-a.shape[1])))
+        return np.stack([vectors(full),vectors(outer)],axis=1)
+
+    def test_consistent_post_reunites_fragments_without_all_to_all_matches(self):
+        full=[[1,.94,.69,.75],[.94,1,.75,.76],[.69,.75,1,.94],[.75,.76,.94,1]]
+        outer=[[1,.98,.88,.88],[.98,1,.88,.88],[.88,.88,1,.98],[.88,.88,.98,1]]
+        scene=self.scene_from_gram(full,outer);o=np.stack([unit(i) for i in range(4)])
+        stats={};groups,singles,_=propose(self.items(4),o,scene,lambda **k:stats.update(k))
+        self.assertEqual([{r['index'] for r in g['members']} for g in groups],[{0,1,2,3}])
+        self.assertFalse(singles);self.assertEqual(stats['grouping_changes']['fragment_merges'],1)
+        # Without the shared consistent source, these weaker scene links cannot seed/merge a set.
+        groups,_,_=propose(self.items(4,False),o,scene)
+        self.assertTrue(all(len(g['members'])<4 for g in groups))
+
+    def test_mixed_post_retains_two_coherent_shoots(self):
+        full=np.array([[1,.94,.69,.75],[.94,1,.75,.76],[.69,.75,1,.94],[.75,.76,.94,1]])
+        outer=np.array([[1,.98,.88,.88],[.98,1,.88,.88],[.88,.88,1,.98],[.88,.88,.98,1]])
+        blank=np.zeros((4,4))
+        scene=self.scene_from_gram(np.block([[full,blank],[blank,full]]),np.block([[outer,blank],[blank,outer]]))
+        o=np.stack([unit(i) for i in range(8)]);stats={}
+        groups,singles,_=propose(self.items(8),o,scene,lambda **k:stats.update(k))
+        self.assertEqual({frozenset(r['index'] for r in g['members']) for g in groups},{frozenset(range(4)),frozenset(range(4,8))})
+        self.assertFalse(singles)
+        profile=stats['source_profiles']['forum:smg:1']
+        self.assertFalse(profile['coherent']);self.assertEqual(sorted(profile['coherent_subgroups']),[4,4])
+
+    def test_unassigned_gets_two_independent_core_supports(self):
+        full=[[1,.95,.95,.74],[.95,1,.95,.74],[.95,.95,1,.68],[.74,.74,.68,1]]
+        outer=[[1,.98,.98,.88],[.98,1,.98,.88],[.98,.98,1,.88],[.88,.88,.88,1]]
+        scene=self.scene_from_gram(full,outer);o=np.stack([unit(i) for i in range(4)])
+        stats={};groups,singles,_=propose(self.items(4),o,scene,lambda **k:stats.update(k))
+        self.assertEqual(len(groups),1);self.assertEqual(len(groups[0]['members']),4);self.assertFalse(singles)
+        self.assertEqual(stats['grouping_changes']['unassigned_attached'],1)
 
 
 class WorkbenchChecks(unittest.TestCase):
@@ -111,6 +161,44 @@ class WorkbenchChecks(unittest.TestCase):
             # Export contains no vectors/image bytes and explicitly describes drafts.
             exported=reopened.export();self.assertIn('No files were moved',exported['notice'])
             self.assertNotIn('vectors',exported)
+
+    def test_model_preparation_failure_stops_once_and_cached_replay_needs_no_prepare(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);incoming=root/'incoming';engine=Engine(root/'state')
+            create(incoming/'A1.png',(20,50,80));create(incoming/'A2.png',(30,60,90))
+            class Encoder(FakeEncoder):
+                attempts=0
+                def _prepare(self,_):
+                    self.attempts+=1;raise ValueError('Fixture download failure')
+                def _prepare_scene(self,_):raise AssertionError('Must not reach scene preparation')
+            enc=Encoder();w=Workbench(engine,lambda _:enc)
+            w.start({'roots':[str(incoming)],'limit':200});w.thread.join(20)
+            self.assertEqual(enc.attempts,1);self.assertIn('preparation failed',w.current['error'])
+            w.encoder_factory=lambda _:FakeEncoder();w.start({'roots':[str(incoming)],'limit':200});w.thread.join(20)
+            self.assertNotIn('error',w.current);ident=w.current['id'];w.encoder_factory=lambda _:enc
+            w.reevaluate({'job':ident});w.thread.join(20)
+            self.assertNotIn('error',w.current);self.assertEqual(enc.attempts,1);self.assertEqual(w.current['cached_features'],2)
+
+    def test_reevaluate_preserves_cohort_reviews_and_caches_without_inventory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);incoming=root/'incoming';engine=Engine(root/'state')
+            create(incoming/'Post 1'/'A1.png',(20,50,80));create(incoming/'Post 1'/'A2.png',(30,60,90))
+            w=Workbench(engine,lambda _:FakeEncoder());w.start({'roots':[str(incoming)],'limit':200});w.thread.join(20)
+            original=copy.deepcopy(w.current);group=w.current['proposals'][0]
+            w.review({'job':original['id'],'group':group['id'],'action':'accepted','name':'Keep this review'})
+            create(incoming/'Post 1'/'B-new.png',(40,70,100))
+            with patch.object(w,'inventory',side_effect=AssertionError('Must not resample')):
+                w.reevaluate({'job':original['id']});w.thread.join(20)
+            self.assertNotIn('error',w.current);self.assertEqual(set(w.current['items']),set(original['items']))
+            self.assertEqual(w.current['cached_features'],2);self.assertEqual(w.current['comparison']['same_images'],2)
+            self.assertEqual(w.status()['evaluation']['accepted'],0)
+            rerun=w.current['id'];w.activate(original['id'])
+            self.assertEqual(w.current['proposals'][0]['name'],'Keep this review');self.assertEqual(w.status()['evaluation']['accepted'],1)
+            # Changed originals fail explicitly rather than substituting a new image or silently shrinking the cohort.
+            create(incoming/'Post 1'/'A1.png',(100,110,120))
+            w.reevaluate({'job':original['id']});w.thread.join(20)
+            self.assertIn('error',w.current);self.assertFalse(w.current.get('complete',False))
+            w.activate(rerun);self.assertEqual(len(w.current['items']),2)
 
     def test_new_source_links_require_verification_and_reuse_results(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -13,7 +13,9 @@ class Encoder:
     MODEL_SHA='test-only';SCENE_RECIPE='test-only'
     def _encode(self,path):
         time.sleep(.025)
-        a=np.zeros(768,np.float32);a[0 if Path(path).name.startswith('A') else 1]=1
+        name=Path(path).stem
+        axis=0 if name.startswith('A') else 1 if name.startswith('B') else 2+int(name[1:])
+        a=np.zeros(768,np.float32);a[axis]=1
         return a
     def _encode_scene(self,path):
         a=self._encode(path);return np.stack([a,a])
@@ -25,6 +27,9 @@ with tempfile.TemporaryDirectory() as temp:
             path=incoming/'Mikayla-Images-By-Post'/'2024-10-01 - Post 3672997'/f'{kind}{n}.png'
             path.parent.mkdir(parents=True,exist_ok=True)
             Image.new('RGB',(400,600),tuple(v+n*9 for v in color)).save(path)
+    for n in range(70):
+        path=incoming/'compilation'/f'C{n}.png';path.parent.mkdir(parents=True,exist_ok=True)
+        Image.new('RGB',(160,240),(n,60+n,180)).save(path)
     copy=incoming/'_Duplicate_Review_Quarantine'/'abc'/'Mikayla-Videos-And-ImagePond'/'2025-10-01 - Post 3672997'/'A0.png'
     copy.parent.mkdir(parents=True);copy.write_bytes((incoming/'Mikayla-Images-By-Post'/'2024-10-01 - Post 3672997'/'A0.png').read_bytes())
     engine=Engine(root/'state');server=make_server(engine)
