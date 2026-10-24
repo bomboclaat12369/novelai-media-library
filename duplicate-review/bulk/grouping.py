@@ -8,10 +8,10 @@ from collections import defaultdict
 import numpy as np
 from .shoots import complete
 
-RECIPE = 'bulk-evaluation-4'
+RECIPE = 'bulk-evaluation-5'
 
 
-def propose(items, outfit, scene, update=lambda **kw: None, check=lambda: None):
+def propose(items, outfit, scene, update=lambda **kw: None, check=lambda: None, fixed_groups=(), exclusions=None):
     n=len(items)
     if n<2:return [],list(range(n)),[]
     clothing=[i.get('clothing_cue',{}).get('state')=='present' for i in items]
@@ -126,18 +126,33 @@ def propose(items, outfit, scene, update=lambda **kw: None, check=lambda: None):
     groups={i:{i} for i in range(n)};membership=list(range(n))
     labels={i:set(items[i].get('existing_sets',[])) for i in range(n)}
 
+    protected=set()
+    rejected=exclusions or {}
     def allowed(a,b):
+        if a in protected and b in protected:return False
+        if rejected and any(items[j]['id'] in rejected.get(items[i]['id'],()) or items[i]['id'] in rejected.get(items[j]['id'],())
+               for i in groups[a] for j in groups[b]):return False
         return len(groups[a])+len(groups[b])<=120 and not (labels[a] and labels[b] and labels[a]!=labels[b])
 
     def merge(a,b):
+        if b in protected:protected.discard(b);protected.add(a)
         members=groups.pop(b);groups[a]|=members;labels[a]|=labels.pop(b)
         for member in members:membership[member]=a
+
+    lookup={item['id']:i for i,item in enumerate(items)}
+    for ids in fixed_groups:
+        members=[lookup[mid] for mid in ids if mid in lookup]
+        if len(members)<2:continue
+        root=members[0]
+        for other in members[1:]:
+            if membership[other]!=root:merge(root,membership[other])
+        protected.add(root)
 
     # First build reliable cores, retaining the anti-bridge safeguard.
     for step,(_,i,j) in enumerate(links):
         if step%1000==0:check();update(phase='Building reliable set cores',done=step,total=len(links))
         a,b=membership[i],membership[j]
-        if a==b or not allowed(a,b):continue
+        if a==b or a in protected or b in protected or not allowed(a,b):continue
         good=True
         for left,right in ((groups[a],groups[b]),(groups[b],groups[a])):
             for member in left:

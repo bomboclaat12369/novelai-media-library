@@ -11,6 +11,7 @@ import numpy as np
 def complete(items, outfit, scene, groups, membership, allowed, merge, candidates, check, update):
     sources=[{k for k,s in item['sources'].items() if s['kind'] in ('forum','instagram')} for item in items]
     kinds={k:s['kind'] for item in items for k,s in item['sources'].items()}
+    present=np.array([item.get('clothing_cue',{}).get('state')=='present' for item in items])
     limited=np.array([item.get('clothing_cue',{}).get('state')=='limited' for item in items])
     by_source=defaultdict(set)
     for i,keys in enumerate(sources):
@@ -45,6 +46,13 @@ def complete(items, outfit, scene, groups, membership, allowed, merge, candidate
         weight=np.where(limited[a,None]&limited[None,b],.15,
                         np.where(limited[a,None]|limited[None,b],.45,.70))
         visual=np.maximum(weight*o+(1-weight)*(.5*f+.5*c),.25*f+.75*c)
+        # Match the original outfit rule for positively clothed images. A room
+        # change must not dilute a clear outfit match. Uncertain cues still need
+        # contextual support; appearance alone is unsafe for skin/face matches.
+        garment=present[a,None]&present[None,b]
+        visual=np.maximum(visual,np.where(garment & (o>=.86),o,0))
+        contextual=(~limited[a,None])&(~limited[None,b])&(o>=.84)&(np.maximum(f,c)>=.60)
+        visual=np.maximum(visual,np.where(contextual,.85*o+.15*np.maximum(f,c),0))
         rows=visual.max(axis=1);cols=visual.max(axis=0)
         views=(np.sort(rows)[-2:].mean()+np.sort(cols)[-2:].mean())/2
         score=float(.65*visual.max()+.35*views)
@@ -58,6 +66,8 @@ def complete(items, outfit, scene, groups, membership, allowed, merge, candidate
         best=np.unravel_index(int(visual.argmax()),visual.shape)
         return {'score':score,'boost':boost,'shared':bool(shared),'sources':sorted(shared),
                 'context':float(max(f.max(),c.max())), 'appearance':float(o.max()),
+                'outfit_support':float(np.where(garment|contextual,o,0).max()),
+                'scene_support':float((.25*f+.75*c).max()),
                 'weak':float(visual.max())<.50,
                 'best_pair':[items[a[best[0]]]['id'],items[b[best[1]]]['id']]}
 
@@ -72,6 +82,33 @@ def complete(items, outfit, scene, groups, membership, allowed, merge, candidate
     for i,j in candidates:
         a=original_owner.get(i);b=original_owner.get(j)
         if a is not None and b is not None and a!=b:pairs.add(tuple(sorted((a,b))))
+    # Rank alternative outfit connections BEFORE applying any merge. Keep the
+    # original cores available so a strong small cluster cannot be swallowed by
+    # a merely similar room while a materially better outfit match is waiting.
+    preferred={}
+    for at,(a,b) in enumerate(sorted(pairs)):
+        if at%128==0:check()
+        ev=relation(a,b)
+        if ev['outfit_support']>=.84:
+            for x,y in ((a,b),(b,a)):
+                if ev['outfit_support']>preferred.get(x,(-1,None))[0]:
+                    preferred[x]=(ev['outfit_support'],y)
+
+    def source_boundary(left,right,ev):
+        iga={k for i in left for k in sources[i] if kinds[k]=='instagram'}
+        igb={k for i in right for k in sources[i] if kinds[k]=='instagram'}
+        return not (iga!=igb and (iga or igb) and not (iga&igb)
+                    and max(ev['outfit_support'],ev['scene_support'])<.88)
+
+    def compatible(a,b,ev):
+        for x,y in ((a,b),(b,a)):
+            strength,target=preferred.get(x,(-1,None))
+            if target is not None and membership[target]!=membership[y] and strength>ev['outfit_support']+.025:
+                return False
+        # A coherent Instagram cluster is more specific than its surrounding
+        # forum compilation. Crossing that boundary needs stronger visual proof.
+        return source_boundary(frozen[a],frozen[b],ev)
+
     proposals=[]
     for at,(a,b) in enumerate(sorted(pairs)):
         if at%128==0:check();update(phase='Connecting photoshoot viewpoints',done=at,total=len(pairs))
@@ -92,9 +129,9 @@ def complete(items, outfit, scene, groups, membership, allowed, merge, candidate
         for x in blocks[ga]:
             for y in blocks[gb]:
                 other=relation(x,y)
-                if other['score']<(.60 if other['shared'] else .66):conflicts.append((x,y))
+                if other['score']<(.60 if other['shared'] else .66) or not compatible(x,y,other):conflicts.append((x,y))
         if conflicts:
-            if len(decisions)<200:decisions.append({'action':'separate','reason':'incompatible original shoot cores',
+            if len(decisions)<200:decisions.append({'action':'separate','reason':'conflicting core or stronger competing outfit/source match',
                 'left':[items[i]['id'] for i in sorted(groups[ga])],'right':[items[i]['id'] for i in sorted(groups[gb])]})
             continue
         combined=blocks[ga]|blocks[gb]
@@ -104,11 +141,46 @@ def complete(items, outfit, scene, groups, membership, allowed, merge, candidate
         if len(decisions)<200:decisions.append({'action':'merge','reason':'representative views and source context',
             'score':round(score,4),'sources':ev['sources'],'best_pair':ev['best_pair']})
 
+    # Discover small shoots BEFORE attachment, so they can compete with large
+    # existing drafts. Reciprocal source-local neighbors can use a lower boundary
+    # than arbitrary pairs in a compilation; each still needs visual evidence.
+    remaining={i for i,ids in groups.items() if len(ids)==1}
+    proposals=[];single_relations={}
+    def single_relation(i,j):
+        key=tuple(sorted((i,j)))
+        if key not in single_relations:single_relations[key]=compare({i},{j})
+        return single_relations[key]
+    source_best={}
+    for at,(i,j) in enumerate(sorted(candidates)):
+        if at%2000==0:check()
+        if i not in remaining or j not in remaining or not (sources[i]&sources[j]):continue
+        ev=single_relation(i,j)
+        for x,y in ((i,j),(j,i)):
+            if ev['score']>source_best.get(x,(-1,None))[0]:source_best[x]=(ev['score'],y)
+    for at,(i,j) in enumerate(sorted(candidates)):
+        if at%2000==0:check()
+        if i not in remaining or j not in remaining or not (sources[i]&sources[j]):continue
+        ev=single_relation(i,j);score=ev['score']+ev['boost']
+        reciprocal=source_best.get(i,(-1,None))[1]==j and source_best.get(j,(-1,None))[1]==i
+        repeated=len(ev['sources'])>=2 or any(kinds[k]=='instagram' for k in ev['sources'])
+        threshold=.74 if repeated else .76
+        if reciprocal and ev['appearance']>=.72 and ev['context']>=.55:threshold=.68
+        if not ev['weak'] and ev['context']>=.50 and score>=threshold:proposals.append((score,i,j))
+    new_roots=set()
+    for _,i,j in sorted(proposals,key=lambda r:(-r[0],r[1],r[2])):
+        a,b=membership[i],membership[j]
+        if a==b or not allowed(a,b):continue
+        if any(single_relation(x,y)['score']<.60 for x in groups[a] for y in groups[b]):continue
+        merge(a,b);new_roots.discard(b);new_roots.add(a)
+        for member in groups[a]:notes[member]={'tentative':True,'review_hint':'Check grouping','reason':'New shoot proposed from combined visual and shared-post evidence.'}
+    counts['unassigned_seed_groups']=len(new_roots)
+
     # Freeze the resulting anchor hypotheses BEFORE assigning any new image.
-    anchors={g:frozenset(groups[g]) for g in blocks}
+    anchors={g:frozenset(ids) for g,ids in groups.items() if len(ids)>=2}
     source_mass={key:Counter() for key in by_source}
     for g,ids in anchors.items():
         for i in ids:
+            if i not in original_owner:continue
             for key in sources[i]:source_mass[key][g]+=1
     profiles={}
     for key,mass in source_mass.items():
@@ -169,27 +241,37 @@ def complete(items, outfit, scene, groups, membership, allowed, merge, candidate
         g=winner['anchor']
         if i in groups and g in groups and allowed(g,i):merge(g,i);counts['unassigned_attached']+=1
 
-    # Remaining same-source images can establish their own shoot. Use a signed
-    # group check on original images rather than plain connected components.
-    remaining={i for i,ids in groups.items() if len(ids)==1}
-    proposals=[];single_relations={}
-    def single_relation(i,j):
-        key=tuple(sorted((i,j)))
-        if key not in single_relations:single_relations[key]=compare({i},{j})
-        return single_relations[key]
-    for at,(i,j) in enumerate(sorted(candidates)):
-        if at%2000==0:check()
-        if i not in remaining or j not in remaining or not (sources[i]&sources[j]):continue
-        ev=single_relation(i,j);score=ev['score']+ev['boost']
-        if not ev['weak'] and ev['context']>=.30 and score>=.80:proposals.append((score,i,j))
-    new_roots=set()
-    for _,i,j in sorted(proposals,key=lambda r:(-r[0],r[1],r[2])):
-        a,b=membership[i],membership[j]
-        if a==b or not allowed(a,b):continue
-        if any(single_relation(x,y)['score']<.60 for x in groups[a] for y in groups[b]):continue
-        merge(a,b);new_roots.discard(b);new_roots.add(a)
-        for member in groups[a]:notes[member]={'tentative':True,'review_hint':'Check grouping','reason':'New shoot proposed from combined visual and shared-post evidence.'}
-    counts['unassigned_seed_groups']=len(new_roots)
+    # One bounded reconciliation after placement. Only frozen core members may
+    # justify a merge. New additions can expose candidates but never recruit a
+    # chain of further guesses. Reciprocal preferences limit competing merges.
+    final_pairs=set()
+    for i,j in candidates:
+        a=membership[i];b=membership[j]
+        if a!=b and a in anchors and b in anchors:final_pairs.add(tuple(sorted((a,b))))
+    ranked=[];best={}
+    for at,(a,b) in enumerate(sorted(final_pairs)):
+        if at%128==0:check()
+        if not allowed(a,b):continue
+        ev=compare(anchors[a],anchors[b]);score=ev['score']+ev['boost']
+        # Multiple recovered posts / same carousel strengthen a viewpoint bridge.
+        threshold=.77 if len(ev['sources'])>=2 else .80
+        if not ev['shared'] or score<threshold or not source_boundary(anchors[a],anchors[b],ev):continue
+        original_a={original_owner[i] for i in anchors[a] if i in original_owner}
+        original_b={original_owner[i] for i in anchors[b] if i in original_owner}
+        if any(not compatible(x,y,relation(x,y)) or relation(x,y)['score']<.60
+               for x in original_a for y in original_b):continue
+        ranked.append((score,a,b,ev))
+        for x,y in ((a,b),(b,a)):
+            if score>best.get(x,(-1,None))[0]:best[x]=(score,y)
+    used=set()
+    for score,a,b,ev in sorted(ranked,key=lambda r:(-r[0],r[1],r[2])):
+        if a in used or b in used or best[a][1]!=b or best[b][1]!=a or not allowed(a,b):continue
+        for i in groups[a]|groups[b]:notes.setdefault(i,{'tentative':True,'review_hint':'Check grouping',
+            'reason':'Shoot fragments reconsidered against frozen representative views and shared origins.'})
+        merge(a,b);used.update((a,b));counts['fragment_merges']+=1
+        if len(decisions)<200:decisions.append({'action':'merge','reason':'bounded final reconciliation',
+            'score':round(score,4),'sources':ev['sources'],'best_pair':ev['best_pair']})
+
     final_owner={items[i]['id']:g for g,ids in groups.items() for i in ids}
     decisions=[r for r in decisions if r['action']!='separate' or final_owner[r['left'][0]]!=final_owner[r['right'][0]]]
     unresolved={ident:r for ident,r in unresolved.items() if len(groups[final_owner[ident]])==1}

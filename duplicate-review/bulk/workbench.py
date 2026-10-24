@@ -74,7 +74,7 @@ class Workbench:
     def status(self):
         with self.lock:
             if not self.current:return {'running':False,'phase':'Ready for a local evaluation','groups':[], 'jobs':self.jobs()}
-            out={k:copy.deepcopy(v) for k,v in self.current.items() if k not in ('items','proposals','unassigned','duplicate_families','source_profiles','match_diagnostics','source_shoots')}
+            out={k:copy.deepcopy(v) for k,v in self.current.items() if k not in ('items','proposals','unassigned','duplicate_families','source_profiles','match_diagnostics','source_shoots','review_exclusions')}
             out['groups']=[{k:v for k,v in g.items() if k not in ('members','original_members','sources','evidence')}|{'count':len(g['members'])} for g in self.current.get('proposals',[])]
             reviews=[g for g in self.current.get('proposals',[]) if g.get('review')=='accepted']
             out['evaluation']={'accepted':len(reviews),'unchanged':sum(set(g['members'])==set(g['original_members']) for g in reviews),
@@ -137,10 +137,17 @@ class Workbench:
                 raise ValueError('Open a completed evaluation before re-evaluating its images.')
             old=self.current
             if not old.get('items'):raise ValueError('This evaluation has no saved image cohort.')
+            if body.get('remaining'):
+                occupied=set()
+                for draft in old.get('proposals',[]):
+                    if draft['review'] not in ('accepted','pending'):continue
+                    ids=set(draft['members'])
+                    if occupied&ids:raise ValueError('Some drafts share images. Resolve overlapping memberships before rechecking unassigned.')
+                    occupied.update(ids)
             self.persist()
             self.current={k:copy.deepcopy(old[k]) for k in ('config','library_sets','model_root','inventory','sampled','outside_evaluation') if k in old}
             self.current.update(id=uuid.uuid4().hex,recipe=RECIPE,replay_of=old['id'],
-                expected_images=len(old['items']),inherited_issues=copy.deepcopy(old.get('inherited_issues',old.get('issues',[]))),running=True,phase='Re-evaluating the same saved images',
+                recheck_remaining=bool(body.get('remaining')),expected_images=len(old['items']),inherited_issues=copy.deepcopy(old.get('inherited_issues',old.get('issues',[]))),running=True,phase='Re-evaluating the same saved images',
                 done=0,total=len(old['items']),issues=[],items={},proposals=[],unassigned=[],created=time.time())
             self.cancel.clear();self.persist()
             self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
@@ -395,7 +402,24 @@ class Workbench:
             for item,cue in zip(chosen,classify(outfit,None if self.encoder_factory else self.current['feature_model'])):
                 item['clothing_cue']=cue
             self.current['clothing_cues']={state:sum(i['clothing_cue']['state']==state for i in chosen) for state in ('present','limited','uncertain')}
-            groups,singles,capped=propose(chosen,outfit,scene,self.update,self.check)
+            fixed=[];exclusions={}
+            if previous is not None and self.current.get('recheck_remaining'):
+                exclusions={k:set(v) for k,v in previous.get('review_exclusions',{}).items()}
+                for draft in previous['proposals']:
+                    if draft['review'] in ('accepted','pending') and len(draft['members'])>=2:
+                        fixed.append(draft['members'])
+                    if draft['review']!='accepted':continue
+                    # Only explicit membership corrections are negative evidence.
+                    # Skips do not label pairs, and acceptance never means complete.
+                    for mid in set(draft['original_members'])-set(draft['members']):
+                        exclusions.setdefault(mid,set()).update(draft['members'])
+                for ids in fixed:
+                    for mid in ids:
+                        if mid in exclusions:exclusions[mid].difference_update(ids)
+                exclusions={k:sorted(v) for k,v in exclusions.items() if v}
+                self.current['review_exclusions']=exclusions
+            groups,singles,capped=propose(chosen,outfit,scene,self.update,self.check,
+                fixed_groups=fixed,exclusions=exclusions)
             proposals=[]
             for n,g in enumerate(groups):
                 ids=[chosen[r['index']]['id'] for r in g['members']]
@@ -412,11 +436,22 @@ class Workbench:
                 old_groups={frozenset(g['members']):g for g in previous['proposals'] if g['members']}
                 for group in proposals:
                     prior=old_groups.get(frozenset(group['members']))
-                    if prior:group['previous_review']=prior['review']
+                    if prior:
+                        group['previous_review']=prior['review']
+                        if self.current.get('recheck_remaining') and prior['review'] in ('accepted','pending'):
+                            for key in ('name','colors','categories','notes','review','reviewed_at','original_members'):
+                                if key in prior:group[key]=copy.deepcopy(prior[key])
+                    elif self.current.get('recheck_remaining'):
+                        parent=next((g for g in previous['proposals'] if g['review'] in ('accepted','pending')
+                            and len(g['members'])>=2 and set(g['members'])<set(group['members'])),None)
+                        if parent:
+                            for key in ('name','colors','categories','notes'):group[key]=copy.deepcopy(parent[key])
+                            group['previous_review']=parent['review']
+                            group['review']='pending'  # Added members always require confirmation.
                 was=set(previous.get('unassigned',[]));now={chosen[i]['id'] for i in singles}
                 self.current['comparison']={'previous_job':previous['id'],'same_images':len(chosen),
-                    'unchanged_groups':sum('previous_review' in g for g in proposals),
-                    'changed_or_new_groups':sum('previous_review' not in g for g in proposals),
+                    'unchanged_groups':sum(frozenset(g['members']) in old_groups for g in proposals),
+                    'changed_or_new_groups':sum(frozenset(g['members']) not in old_groups for g in proposals),
                     'previous_unassigned':len(was),'now_unassigned':len(now),
                     'assigned_from_unassigned':len(was-now),'newly_unassigned':len(now-was)}
             self.current.update(items={i['id']:i for i in chosen},proposals=proposals,unassigned=[chosen[i]['id'] for i in singles],

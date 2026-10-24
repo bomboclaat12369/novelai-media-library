@@ -2,6 +2,34 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## More complete shoot drafts and review recovery (Duplicate Review 1.9.1)
+
+Outfit-supported alternatives are compared before fragment merges, and a coherent
+Instagram group needs stronger evidence before joining an unrelated forum group.
+Shared-post images can establish tentative new shoots before competing with large
+existing groups. A bounded final pass revisits remaining fragments using frozen
+representatives; tentative additions cannot inflate folder counts or create chains.
+These changes favor completeness, with questionable members marked for inspection.
+
+**Unassigned → Recheck unassigned** creates a new saved evaluation using cached
+features. Existing pending/accepted drafts remain separate; explicit removals are
+respected, and skipped images can be reconsidered without treating skips as negative
+labels. Unchanged accepted drafts retain their review. Any added members require
+confirmation. **Re-evaluate same images** remains the independent full regrouping
+option for evaluating algorithm changes; it does not apply your membership corrections.
+
+**Show file details** displays filename, recorded post origins and a short image ID,
+with the preference remembered. The full path is available on hover. No source files
+are modified, imported or deleted; previous evaluations remain available.
+
+Validation: 31 focused grouping/workflow checks and a browser check of removal,
+recovery and persistent file details. This release does not change the image models
+or duplicate-verification rules. No full-cohort accuracy claim is made; improvement
+on the original photos still needs the next evaluation export.
+
+[Download the complete repository ZIP](https://github.com/bomboclaat12369/novelai-media-library/archive/refs/heads/main.zip),
+extract it, and launch `duplicate-review/Start Duplicate Review.bat`.
+
 ## Photoshoot grouping rework (Duplicate Review 1.9.0)
 
 The pilot now assembles shoots using representative views and the sets established

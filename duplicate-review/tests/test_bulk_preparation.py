@@ -140,7 +140,9 @@ class Grouping(unittest.TestCase):
         self.assertEqual(groups[0]['members'][0]['method'],'outfit + setting + post')
         for item in items:item['clothing_cue']['state']='limited'
         groups,singles,_=propose(items,o,scene)
-        self.assertFalse(groups);self.assertEqual(len(singles),2)
+        # With the completeness policy, this reciprocal same-post pair is a
+        # tentative scene/source draft, not an appearance-only match.
+        self.assertFalse(singles);self.assertTrue(groups[0]['members'][0]['tentative'])
 
     def test_unassigned_triplet_can_seed_without_strong_pair(self):
         gram=lambda c:np.eye(3)*(1-c)+np.ones((3,3))*c
@@ -223,6 +225,61 @@ class Grouping(unittest.TestCase):
         self.assertFalse(singles)
         self.assertEqual({frozenset(r['index'] for r in g['members']) for g in groups},{frozenset([0,1]),frozenset([2,3])})
 
+    def test_carousel_core_is_not_swallowed_by_similar_forum_scene(self):
+        items=self.items(4)
+        for item in items:item['clothing_cue']={'state':'present'}
+        for item in items[:2]:item['sources']['instagram:person:carousel']={'kind':'instagram'}
+        o=np.stack([unit(0)]*2+[.75*unit(0)+np.sqrt(1-.75**2)*unit(1)]*2)
+        v=np.stack([unit(2)]*2+[.82*unit(2)+np.sqrt(1-.82**2)*unit(3)]*2)
+        groups,_,_=propose(items,o,np.stack([v,v],axis=1))
+        self.assertEqual({frozenset(r['index'] for r in g['members']) for g in groups},
+                         {frozenset([0,1]),frozenset([2,3])})
+
+    def test_reciprocal_same_post_pair_survives_pose_change(self):
+        items=self.items(3)
+        for item in items:item['clothing_cue']={'state':'limited'}
+        o=np.stack([unit(0),.81*unit(0)+np.sqrt(1-.81**2)*unit(1),unit(2)])
+        v=np.stack([unit(3),.68*unit(3)+np.sqrt(1-.68**2)*unit(4),unit(5)])
+        groups,singles,_=propose(items,o,np.stack([v,v],axis=1))
+        self.assertEqual([{r['index'] for r in g['members']} for g in groups],[{0,1}])
+        self.assertEqual(singles,[2]);self.assertTrue(groups[0]['members'][0]['tentative'])
+        for item in items:item['sources']={}
+        self.assertFalse(propose(items,o,np.stack([v,v],axis=1))[0])
+
+    def test_prefer_matching_outfit_cluster_over_similar_room(self):
+        items=self.items(6)
+        for item in items:item['clothing_cue']={'state':'uncertain'}
+        def repeated(gram):
+            v=np.linalg.cholesky(np.array(gram)).astype(np.float32)
+            return np.repeat(np.pad(v,((0,0),(0,765))),2,axis=0)
+        o=repeated([[1,.90,.70],[.90,1,.65],[.70,.65,1]])
+        f=repeated([[1,.65,.80],[.65,1,.60],[.80,.60,1]])
+        c=repeated([[1,.65,.85],[.65,1,.60],[.85,.60,1]])
+        groups,_,_=propose(items,o,np.stack([f,c],axis=1))
+        self.assertEqual({frozenset(r['index'] for r in g['members']) for g in groups},
+                         {frozenset([0,1,2,3]),frozenset([4,5])})
+
+    def test_final_pass_reconsiders_shared_source_fragments(self):
+        o=np.stack([unit(10)]*2+[unit(11)]*2)
+        a=unit(0);b=.78*a+np.sqrt(1-.78**2)*unit(1)
+        v=np.stack([a,a,b,b]);stats={}
+        groups,singles,_=propose(self.items(4),o,np.stack([v,v],axis=1),lambda **kw:stats.update(kw))
+        self.assertFalse(singles);self.assertEqual(len(groups),1)
+        self.assertTrue(any(r['reason']=='bounded final reconciliation' for r in stats['source_shoots']['decisions']))
+
+    def test_recovery_constraints_keep_rejected_cluster_separate(self):
+        items=self.items(5);o=np.stack([unit(0)]*5);scene=np.stack([o,o],axis=1)
+        groups,singles,_=propose(items,o,scene,fixed_groups=[['0','1']],
+            exclusions={'2':['0','1'],'3':['0','1'],'4':['0','1']})
+        self.assertFalse(singles)
+        self.assertEqual({frozenset(r['index'] for r in g['members']) for g in groups},
+                         {frozenset([0,1]),frozenset([2,3,4])})
+
+    def test_recovery_does_not_merge_existing_drafts(self):
+        items=self.items(4);o=np.stack([unit(0)]*4);scene=np.stack([o,o],axis=1)
+        groups,_,_=propose(items,o,scene,fixed_groups=[['0','1'],['2','3']])
+        self.assertEqual(len(groups),2)
+
 
 class WorkbenchChecks(unittest.TestCase):
     def test_recovery_review_restart_and_readonly_sources(self):
@@ -292,6 +349,26 @@ class WorkbenchChecks(unittest.TestCase):
             w.reevaluate({'job':original['id']});w.thread.join(20)
             self.assertIn('error',w.current);self.assertFalse(w.current.get('complete',False))
             w.activate(rerun);self.assertEqual(len(w.current['items']),2)
+
+    def test_recheck_recovers_removed_cluster_and_preserves_accepted_review(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);incoming=root/'incoming';engine=Engine(root/'state')
+            for i in range(4):create(incoming/'Post 1'/('A'+str(i)+'.png'),(20+i,50,80))
+            w=Workbench(engine,lambda _:FakeEncoder());w.start({'roots':[str(incoming)],'limit':200});w.thread.join(20)
+            group=w.current['proposals'][0];kept=group['members'][:2];removed=group['members'][2:];old=w.current['id']
+            w.review({'job':old,'group':group['id'],'action':'accepted','members':kept,'name':'Reviewed name','colors':['blue']})
+            with patch.object(w,'inventory',side_effect=AssertionError('Must use cached cohort')):
+                w.reevaluate({'job':old,'remaining':True});w.thread.join(20)
+            self.assertNotIn('error',w.current);self.assertFalse(w.current['unassigned'])
+            accepted=next(g for g in w.current['proposals'] if g['review']=='accepted')
+            recovered=next(g for g in w.current['proposals'] if g['review']=='pending')
+            self.assertEqual(set(accepted['members']),set(kept));self.assertEqual(accepted['name'],'Reviewed name')
+            self.assertEqual(accepted['colors'],['blue']);self.assertEqual(set(recovered['members']),set(removed))
+            self.assertEqual(w.current['cached_features'],4)
+            w.reevaluate({'job':w.current['id'],'remaining':True});w.thread.join(20)
+            self.assertNotIn('error',w.current);self.assertEqual(len(w.current['proposals']),2)
+            self.assertTrue(w.current['review_exclusions']);w.activate(old)
+            self.assertEqual(set(w.current['unassigned']),set(removed))
 
     def test_new_source_links_require_verification_and_reuse_results(self):
         with tempfile.TemporaryDirectory() as temp:

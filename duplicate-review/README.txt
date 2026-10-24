@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.9.0
+LOCAL DUPLICATE REVIEW 1.9.1
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -14,6 +14,26 @@ Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
 Duplicate scans and image processing stay local; no cloud account or GPU is required.
 The optional set-preparation pilot downloads matching models on first use.
+
+NEW IN 1.9.1: SHOOT COMPLETENESS AND REVIEW RECOVERY
+- Compare competing outfit-supported cores before merging; require stronger visual
+  evidence before a coherent Instagram cluster joins another forum-post group.
+- Discover tentative small shoots among shared-post leftovers before assigning
+  single images. Reciprocal visual neighbors and repeated origins support these
+  drafts. Shared sources alone cannot group visually unrelated images.
+- Revisit fragments once at the end with frozen representatives. New suggestions
+  do not increase the population prior or create repeated chains of guesses.
+- Unassigned: Recheck unassigned creates a NEW saved evaluation, preserving existing
+  drafts while retrying leftovers and skipped images. Explicit removals block the
+  rejected membership; skips are not negative labels. Unchanged accepted drafts
+  stay accepted; added members require confirmation. No automatic imports/moves.
+- Show file details: filename, post origins, short ID and full path on hover.
+  Preference persists. Exported IDs connect screenshots to recorded decisions.
+- Re-evaluate same images remains a fresh algorithm evaluation without applying
+  review corrections. Both modes reuse cached features and preserve the old job.
+- 31 focused grouping/workflow checks and targeted browser validation passed.
+  Models and duplicate verification are unchanged. Full-collection accuracy has
+  not been established; suggestions remain reviewable drafts.
 
 NEW IN 1.9.0: PHOTOSHOOT GROUPING AND FOLDER COMPLETION
 - Replaced the fragment reconciliation/attachment strategy with shoot hypotheses
