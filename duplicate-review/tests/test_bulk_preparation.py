@@ -149,9 +149,9 @@ class Grouping(unittest.TestCase):
         groups,singles,_=propose(self.items(3),o,scene,lambda **k:stats.update(k))
         self.assertFalse(singles);self.assertEqual(len(groups[0]['members']),3)
         self.assertEqual(stats['grouping_changes']['unassigned_seed_groups'],1)
-        # No source or only a pair does not license weak scene-only seeds.
+        # No source does not license weak scene-only seeds; a shared-post pair can now form a draft.
         self.assertFalse(propose(self.items(3,False),o,scene)[0])
-        self.assertFalse(propose(self.items(2),o[:2],scene[:2])[0])
+        self.assertEqual(len(propose(self.items(2),o[:2],scene[:2])[0]),1)
 
     def test_shared_source_fragments_merge_with_multiple_soft_links(self):
         full=[[1,.94,.66,.66],[.94,1,.66,.66],[.66,.66,1,.94],[.66,.66,.94,1]]
@@ -170,8 +170,8 @@ class Grouping(unittest.TestCase):
         groups,singles,_=propose(items,o,scene,lambda **k:stats.update(k))
         self.assertEqual({frozenset(r['index'] for r in g['members']) for g in groups},{frozenset(range(3)),frozenset(range(3,6))})
         self.assertEqual(singles,[6])
-        reasons=stats['match_diagnostics']['unassigned_group_rejections']['6']
-        self.assertTrue(all(r['reason']=='competing groups within score margin' for r in reasons))
+        reason=stats['source_shoots']['unresolved']['6']['reason']
+        self.assertEqual(reason,'competing shoot hypotheses')
 
     def test_export_diagnostics_include_rejected_candidates(self):
         o=np.stack([unit(i) for i in range(3)])
@@ -181,6 +181,47 @@ class Grouping(unittest.TestCase):
         self.assertEqual(len(rows),2);self.assertTrue(all(not r['soft'] for r in rows))
         self.assertTrue(all(r['reason']=='insufficient combined visual evidence' for r in rows))
         json.dumps(stats)  # numpy scalars must not break persistent job/export JSON.
+
+    def test_dominant_folder_recovers_missing_members_without_prior_feedback(self):
+        items=self.items(13);o=np.stack([unit(20)]*9+[unit(i+30) for i in range(4)])
+        vectors=np.stack([unit(0)]*9+[.65*unit(0)+np.sqrt(1-.65**2)*unit(i+1) for i in range(3)]+[unit(10)])
+        scene=np.stack([vectors,vectors],axis=1);stats={}
+        groups,singles,_=propose(items,o,scene,lambda **k:stats.update(k))
+        self.assertEqual([{r['index'] for r in g['members']} for g in groups],[set(range(12))])
+        self.assertEqual(singles,[12])  # Contrary visual evidence beats folder majority.
+        profile=stats['source_shoots']['profiles']['forum:smg:1']
+        self.assertEqual(profile['anchor_members'],9);self.assertEqual(profile['evaluated_members'],13)
+        self.assertEqual(profile['shoots'][0]['members'],9)
+        additions=[r for g in groups for r in g['members'] if r.get('review_hint')=='Check addition']
+        self.assertEqual({r['index'] for r in additions},{9,10,11})
+        self.assertEqual(len({r['mixture_bonus'] for r in additions}),1)
+
+    def test_two_shoot_folder_places_remaining_images_in_the_correct_shoot(self):
+        o=np.stack([unit(20)]*10+[unit(21)]*8+[unit(30),unit(31)])
+        x=.66*unit(0)+.1*unit(1)+np.sqrt(1-.66**2-.1**2)*unit(2)
+        y=.1*unit(0)+.66*unit(1)+np.sqrt(1-.66**2-.1**2)*unit(3)
+        vectors=np.stack([unit(0)]*10+[unit(1)]*8+[x,y]);scene=np.stack([vectors,vectors],axis=1);stats={}
+        groups,singles,_=propose(self.items(20),o,scene,lambda **k:stats.update(k))
+        self.assertFalse(singles)
+        self.assertEqual({frozenset(r['index'] for r in g['members']) for g in groups},
+                         {frozenset(list(range(10))+[18]),frozenset(list(range(10,18))+[19])})
+        self.assertEqual(stats['source_shoots']['profiles']['forum:smg:1']['anchor_members'],18)
+
+    def test_one_good_member_match_with_shared_post_can_complete_a_set(self):
+        scene=self.scene_from_gram([[1,.9,.7],[.9,1,.4],[.7,.4,1]],[[1,.9,.85],[.9,1,.65],[.85,.65,1]])
+        o=np.stack([unit(0)]*3);items=self.items(3)
+        for item in items:item['clothing_cue']={'state':'uncertain'}
+        groups,singles,_=propose(items,o,scene)
+        self.assertFalse(singles);self.assertEqual(len(groups[0]['members']),3)
+
+    def test_same_carousel_does_not_override_completely_unrelated_images(self):
+        items=self.items(4)
+        for item in items:item['sources']={'instagram:person:Post':{'kind':'instagram'}}
+        o=np.stack([unit(0)]*2+[unit(1)]*2)
+        scene=np.stack([np.stack([unit(i),unit(i)]) for i in (0,0,1,1)])
+        groups,singles,_=propose(items,o,scene)
+        self.assertFalse(singles)
+        self.assertEqual({frozenset(r['index'] for r in g['members']) for g in groups},{frozenset([0,1]),frozenset([2,3])})
 
 
 class WorkbenchChecks(unittest.TestCase):

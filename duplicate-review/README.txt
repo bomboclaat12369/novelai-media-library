@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.8.2
+LOCAL DUPLICATE REVIEW 1.9.0
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -14,6 +14,41 @@ Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
 Duplicate scans and image processing stay local; no cloud account or GPU is required.
 The optional set-preparation pilot downloads matching models on first use.
+
+NEW IN 1.9.0: PHOTOSHOOT GROUPING AND FOLDER COMPLETION
+- Replaced the fragment reconciliation/attachment strategy with shoot hypotheses
+  built from established visual cores and all recovered post origins. Outfit and
+  setting evidence is combined across representative views; changed framing no
+  longer has to pass a fixed fraction of every possible cross-image comparison.
+- Source influence depends on the shoots already found in the evaluated post.
+  A dominant shoot supports plausible remaining members; a post with several
+  shoots compares the remaining images against those alternatives. Compilations
+  with many unrelated groups receive less completion support. Instagram post
+  identity receives a stronger initial prior, but can still contain multiple sets.
+- Source counts are frozen before missing-member placement. Newly assigned images
+  cannot strengthen their own prior or recruit further images in the same run.
+  Counts describe the evaluated cohort, not unexamined files outside the sample.
+- Strong matches to one representative can now support membership when source
+  context agrees. Competing near-ties and clear visual conflicts can still remain
+  unassigned. Source evidence alone does not force unrelated images into a shoot.
+- Check addition / Check grouping badges identify source-assisted suggestions.
+  Uncheck an incorrect member before accepting; it remains available in Unassigned.
+  Details explain the suggestion. Acceptance is not treated as proof a set is
+  complete; previous review decisions remain preserved and do not train a model.
+- The export includes observed source mixtures, merge decisions, and unresolved
+  placements with visual and source contributions. These are heuristics, not
+  confidence percentages. Routine polling excludes these diagnostic details.
+- Validation: 24 focused grouping/workflow checks and a browser check of tentative
+  badges, explanations and persisted member removal. On 27 supplied screenshot
+  crops, the actual models reproduced 10 old fragments; the new strategy produced
+  the four user-identified shoots with no unassigned or mixed members. It also
+  kept those four shoots when all 27 were assigned one synthetic mixed forum post.
+  This is a limited screenshot check, not a full 400-image accuracy measurement.
+- Quit the old app, extract the COMPLETE repository ZIP, then launch the batch
+  file. Select your completed evaluation and click Re-evaluate same images.
+  Compatible cached features are reused; no new model inference is required when
+  all are cached. Old evaluations and accepted/skipped decisions remain intact.
+- Draft-only: no file moves/imports, duplicate-rule changes, or main-library update.
 
 NEW IN 1.8.2: COMPLETE SETS AND UNASSIGNED RECOVERY
 - Uncertain clothing cues no longer disable outfit evidence when corroborated

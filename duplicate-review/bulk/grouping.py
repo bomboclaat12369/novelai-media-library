@@ -5,10 +5,10 @@ its own when BOTH images have positive clothing cues. Folder co-occurrence never
 suffices. All source cohesion is measured within this evaluation's image cohort.
 """
 from collections import defaultdict
-import math
 import numpy as np
+from .shoots import complete
 
-RECIPE = 'bulk-evaluation-3'
+RECIPE = 'bulk-evaluation-4'
 
 
 def propose(items, outfit, scene, update=lambda **kw: None, check=lambda: None):
@@ -146,115 +146,8 @@ def propose(items, outfit, scene, update=lambda **kw: None, check=lambda: None):
             if not good:break
         if good:merge(a,b)
 
-    reconciled=0;recovered=0;new_cores=0
-    # Three mutually supporting remaining images can establish a new shoot even
-    # when none passes a strong pair threshold. Shared post alone never suffices;
-    # every edge needs visual support and all three need ONE common source.
-    singleton_ids={i for i,ids in groups.items() if len(ids)==1}
-    triangles={}
-    for step,i in enumerate(sorted(singleton_ids)):
-        check()
-        if step%64==0:update(phase='Finding sets among unassigned images',done=step,total=len(singleton_ids))
-        neighbors=[j for _,j in sorted(adjacency[i],reverse=True) if j in singleton_ids and j>i][:32]
-        local_triangles=[]
-        for at,j in enumerate(neighbors):
-            for k in neighbors[at+1:]:
-                triple=tuple(sorted((i,j,k)))
-                common=items[i]['sources'].keys() & items[j]['sources'].keys() & items[k]['sources'].keys() & profiles.keys()
-                if not common:continue
-                edges=[evidence(i,j),evidence(i,k),evidence(j,k)]
-                if all(e['soft'] for e in edges):local_triangles.append((sum(e['score'] for e in edges)/3,triple))
-        # Bounded proposal memory for full-library runs, not O(N * 32 squared).
-        for score,triple in sorted(local_triangles,reverse=True)[:8]:triangles[triple]=score
-    for ids,_ in sorted(triangles.items(),key=lambda row:(-row[1],row[0])):
-        a,b,c=ids
-        if any(i not in groups or len(groups[i])!=1 for i in ids):continue
-        combined_labels=labels[a]|labels[b]|labels[c]
-        if any(labels[i] and labels[i]!=combined_labels for i in ids):continue
-        merge(a,b);merge(a,c);new_cores+=1
-
-    merge_rejections={}
-    # Bounded reconciliation rounds. Require support across multiple members
-    # on BOTH sides, so a single similar-looking bridge cannot join two shoots.
-    for round_number in range(8):
-        choices={}
-        for score,i,j in soft_links:
-            a,b=membership[i],membership[j]
-            if a!=b and len(groups[a])>=2 and len(groups[b])>=2:
-                key=(min(a,b),max(a,b));choices[key]=max(score,choices.get(key,0))
-        changed=False
-        for at,((a,b),_) in enumerate(sorted(choices.items(),key=lambda x:(-x[1],x[0]))):
-            if at%100==0:check();update(phase='Reuniting supported set fragments',done=at,total=len(choices))
-            if a not in groups or b not in groups or not allowed(a,b):continue
-            ga,gb=sorted(groups[a]),sorted(groups[b])
-            edges=[[evidence(i,j) for j in gb] for i in ga]
-            soft=np.array([[e['soft'] for e in row] for row in edges])
-            strong=np.array([[e['strong'] for e in row] for row in edges])
-            # Shared origin must cover most of each fragment, not one alias.
-            origin=np.array([[e['shared'] for e in row] for row in edges])
-            source_supported=origin.any(axis=1).mean()>=.6 and origin.any(axis=0).mean()>=.6
-            required=.6 if source_supported else .8
-            connected=soft if source_supported else strong
-            def rejected(reason):
-                # Bounded details, kept outside the UI; no image vectors exported.
-                key=(a,b)
-                if key in merge_rejections or len(merge_rejections)<200:
-                    merge_rejections[key]={'left':[items[i]['id'] for i in ga],
-                        'right':[items[i]['id'] for i in gb],'reason':reason,
-                        'strong_edges':int(strong.sum()),'support_edges':int(connected.sum()),
-                        'shared_source':bool(source_supported)}
-            if connected.any(axis=1).sum()<2 or connected.any(axis=0).sum()<2:
-                rejected('fewer than two supported members on each side');continue
-            if connected.any(axis=1).mean()<required or connected.any(axis=0).mean()<required:
-                rejected('insufficient member coverage');continue
-            # Multiple independent source-backed visual links can substitute for
-            # strong edges. One bridge still cannot unite unrelated shoots.
-            if source_supported:
-                if connected.mean()<.5:
-                    rejected('sparse cross-group support');continue
-            elif strong.sum()<max(3,math.ceil(.25*len(ga)*len(gb))):
-                rejected('insufficient strong evidence without shared source');continue
-            # Compare whole-group context too; outfit-only merges still need
-            # pervasive positive clothing evidence and direct outfit agreement.
-            fa=scene[ga,0].mean(axis=0);fb=scene[gb,0].mean(axis=0)
-            oa=scene[ga,1].mean(axis=0);ob=scene[gb,1].mean(axis=0)
-            cosine=lambda x,y:float(x@y/max(1e-8,np.linalg.norm(x)*np.linalg.norm(y)))
-            scene_agreement=cosine(fa,fb)>=(.64 if source_supported else .72) and cosine(oa,ob)>=(.80 if source_supported else .86)
-            garment_agreement=all(clothing[i] for i in ga+gb) and np.mean([[e['outfit']>=.86 for e in row] for row in edges])>=.6
-            if not scene_agreement and not garment_agreement:
-                rejected('group setting and outfit agreement insufficient');continue
-            merge(a,b);reconciled+=1;changed=True
-        if not changed:break
-
-    # Evaluate unassigned images against established cores simultaneously. Newly
-    # attached images cannot act as bridges for additional attachments in this pass.
-    attachments=[];attachment_rejections={}
-    for at,i in enumerate(sorted(g for g,ids in groups.items() if len(ids)==1)):
-        if at%64==0:check();update(phase='Checking unassigned images against set cores',done=at,total=n)
-        possible={membership[j] for _,j in adjacency[i] if len(groups[membership[j]])>=2}
-        matches=[]
-        for group in sorted(possible):
-            edges=sorted((evidence(i,j) for j in groups[group]),key=lambda e:-e['score'])
-            supporting=[e for e in edges if e['soft']]
-            reason=None
-            if not allowed(group,i):reason='conflicting existing sets or group size limit'
-            elif len(supporting)<2:reason='fewer than two supporting members'
-            elif not any(e['strong'] for e in supporting) and sum(e['shared'] for e in supporting)<2:reason='weak support without shared source'
-            elif len(supporting)/len(edges)<.4:reason='insufficient group coverage'
-            if reason:
-                attachment_rejections.setdefault(i,[]).append({'group':[items[j]['id'] for j in sorted(groups[group])],
-                    'reason':reason,'support':len(supporting),'score':round(edges[0]['score'],4)})
-                attachment_rejections[i].sort(key=lambda r:-r['score']);del attachment_rejections[i][5:]
-                continue
-            score=sum(e['score'] for e in supporting[:2])/2
-            matches.append((score,group))
-        matches.sort(reverse=True)
-        if matches and (len(matches)==1 or matches[0][0]-matches[1][0]>=.025):attachments.append((matches[0][0],i,matches[0][1]))
-        elif matches:attachment_rejections[i]=[{'group':[items[j]['id'] for j in sorted(groups[g])],
-            'reason':'competing groups within score margin','score':round(score,4)} for score,g in matches[:5]]
-    for _,i,group in sorted(attachments,reverse=True):
-        if i in groups and group in groups and allowed(group,i):merge(group,i);recovered+=1
-    update(grouping_changes={'fragment_merges':reconciled,'unassigned_attached':recovered,'unassigned_seed_groups':new_cores})
+    notes,changes=complete(items,outfit,scene,groups,membership,allowed,merge,candidates,check,update)
+    update(grouping_changes=changes)
 
     result=[];singles=[]
     for ids in groups.values():
@@ -269,8 +162,9 @@ def propose(items, outfit, scene, update=lambda **kw: None, check=lambda: None):
             support=sum(e['soft'] for e in inside)
             rows.append({'index':i,'support':support,'method':best['method'],
                 **{k:round(best[k],4) for k in ('score','outfit','full','outer')},
-                'ambiguous':margin<.025 or support/max(1,len(inside))<.5,
-                'alternatives':[j for _,j in rivals[:3]]})
+                'ambiguous':bool(notes.get(i)) or margin<.025 or support/max(1,len(inside))<.5,
+                **notes.get(i,{}),
+                'alternatives':list(dict.fromkeys([j for _,j in rivals[:3]]+notes.get(i,{}).get('alternatives',[])))[:5]})
         result.append({'members':rows,'priority':'inspect' if any(r['ambiguous'] for r in rows) else 'review',
             'existing_sets':sorted(set().union(*(set(items[i].get('existing_sets',[])) for i in ids)))})
     result.sort(key=lambda g:(g['priority']=='inspect',-len(g['members'])))
@@ -291,6 +185,5 @@ def propose(items, outfit, scene, update=lambda **kw: None, check=lambda: None):
             del nearest[left][5:]
     update(match_diagnostics={'recipe':RECIPE,
         'unassigned_candidates':{items[i]['id']:nearest[i] for i in singles},
-        'unassigned_group_rejections':{items[i]['id']:attachment_rejections.get(i,[]) for i in singles},
-        'fragment_rejections':[r for (a,b),r in merge_rejections.items() if membership[a]!=membership[b]]})
+        'note':'Source-conditioned decisions and unresolved placements are recorded in source_shoots.'})
     return result,singles,capped

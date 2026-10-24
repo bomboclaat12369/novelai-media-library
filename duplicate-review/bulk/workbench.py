@@ -74,7 +74,7 @@ class Workbench:
     def status(self):
         with self.lock:
             if not self.current:return {'running':False,'phase':'Ready for a local evaluation','groups':[], 'jobs':self.jobs()}
-            out={k:copy.deepcopy(v) for k,v in self.current.items() if k not in ('items','proposals','unassigned','duplicate_families','source_profiles','match_diagnostics')}
+            out={k:copy.deepcopy(v) for k,v in self.current.items() if k not in ('items','proposals','unassigned','duplicate_families','source_profiles','match_diagnostics','source_shoots')}
             out['groups']=[{k:v for k,v in g.items() if k not in ('members','original_members','sources','evidence')}|{'count':len(g['members'])} for g in self.current.get('proposals',[])]
             reviews=[g for g in self.current.get('proposals',[]) if g.get('review')=='accepted']
             out['evaluation']={'accepted':len(reviews),'unchanged':sum(set(g['members'])==set(g['original_members']) for g in reviews),

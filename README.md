@@ -2,6 +2,30 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Photoshoot grouping rework (Duplicate Review 1.9.0)
+
+The pilot now assembles shoots using representative views and the sets established
+within each post. Dominant and multi-shoot folders help place missing members;
+newly assigned images cannot reinforce their own guesses. Recovered origins are
+preserved across folders, and Instagram sources receive a stronger initial prior.
+Clearly conflicting images and unresolved near-ties can still remain unassigned.
+
+**Check addition / Check grouping** badges identify tentative suggestions. Uncheck
+an incorrect image before accepting the draft. Diagnostic exports explain source
+mixtures, merge decisions, and unresolved placements. Source counts apply only to
+the evaluated cohort; accepted drafts are not assumed complete or used for training.
+
+Validation: 24 focused grouping/workflow checks, a targeted browser review check,
+and an actual-model check on 27 supplied screenshot crops. The old logic produced
+10 fragments; the rework produced the four identified shoots with no mixed or
+unassigned members in that check. All four also remained separate when treated as
+one synthetic mixed forum post. This does not establish full-collection accuracy.
+
+[Download the complete repository ZIP](https://github.com/bomboclaat12369/novelai-media-library/archive/refs/heads/main.zip),
+extract it, and launch `duplicate-review/Start Duplicate Review.bat`. Select the
+completed pilot and **Re-evaluate same images** to reuse cached analysis. Previous
+reviews stay intact. Still draft-only: no image moves/imports or main-library update.
+
 ## Bulk set completeness iteration (Duplicate Review 1.8.2)
 
 The pilot now combines uncertain outfit evidence with setting and source support,
