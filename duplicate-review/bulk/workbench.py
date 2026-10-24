@@ -43,6 +43,7 @@ class Workbench:
             db.executescript('''CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, updated REAL, data TEXT);
                 CREATE TABLE IF NOT EXISTS hashes(path TEXT PRIMARY KEY, stamp TEXT, sha TEXT, pixel TEXT);
                 CREATE TABLE IF NOT EXISTS vectors(sha TEXT, recipe TEXT, data BLOB, PRIMARY KEY(sha,recipe));
+                CREATE TABLE IF NOT EXISTS confirmed_origins(target TEXT PRIMARY KEY, keeper TEXT, created REAL);
                 CREATE TABLE IF NOT EXISTS aliases(target TEXT, keeper TEXT, recipe TEXT, accepted INTEGER, PRIMARY KEY(target,keeper,recipe));''')
             row=db.execute('SELECT data FROM jobs ORDER BY updated DESC LIMIT 1').fetchone()
         if row:
@@ -74,7 +75,7 @@ class Workbench:
     def status(self):
         with self.lock:
             if not self.current:return {'running':False,'phase':'Ready for a local evaluation','groups':[], 'jobs':self.jobs()}
-            out={k:copy.deepcopy(v) for k,v in self.current.items() if k not in ('items','proposals','unassigned','duplicate_families','source_profiles','match_diagnostics','source_shoots','review_exclusions')}
+            out={k:copy.deepcopy(v) for k,v in self.current.items() if k not in ('items','proposals','unassigned','duplicate_families','source_profiles','match_diagnostics','source_shoots','review_exclusions','source_catalog','review_undo','origin_undo')}
             out['groups']=[{k:v for k,v in g.items() if k not in ('members','original_members','sources','evidence')}|{'count':len(g['members'])} for g in self.current.get('proposals',[])]
             reviews=[g for g in self.current.get('proposals',[]) if g.get('review')=='accepted']
             out['evaluation']={'accepted':len(reviews),'unchanged':sum(set(g['members'])==set(g['original_members']) for g in reviews),
@@ -145,7 +146,7 @@ class Workbench:
                     if occupied&ids:raise ValueError('Some drafts share images. Resolve overlapping memberships before rechecking unassigned.')
                     occupied.update(ids)
             self.persist()
-            self.current={k:copy.deepcopy(old[k]) for k in ('config','library_sets','model_root','inventory','sampled','outside_evaluation') if k in old}
+            self.current={k:copy.deepcopy(old[k]) for k in ('config','library_sets','model_root','inventory','sampled','outside_evaluation','source_catalog') if k in old}
             self.current.update(id=uuid.uuid4().hex,recipe=RECIPE,replay_of=old['id'],
                 recheck_remaining=bool(body.get('remaining')),expected_images=len(old['items']),inherited_issues=copy.deepcopy(old.get('inherited_issues',old.get('issues',[]))),running=True,phase='Re-evaluating the same saved images',
                 done=0,total=len(old['items']),issues=[],items={},proposals=[],unassigned=[],created=time.time())
@@ -254,11 +255,48 @@ class Workbench:
                     item['origins'].append(r['source']);item['sources'][r['source']['key']]=r['source']
                     item['copies'].append({'path':r['path'],'sha':r['sha'],'quarantine':True,'reference':False,'proof':'verified visual copy'})
                 resolved.add(target)
+        # Follow explicit keeper decisions, including a keeper later replaced by
+        # another survivor. Undo/failed moves never contribute an edge.
+        with closing(sqlite3.connect(uri,uri=True,timeout=30)) as old:
+            edges={}
+            for target,keeper in old.execute("SELECT sha,keeper_sha FROM moves WHERE state='moved' AND keeper_sha IS NOT NULL"):
+                if target!=keeper:edges.setdefault(target,set()).add(keeper)
+        with self.db() as db:
+            for target,keeper in db.execute('SELECT target,keeper FROM confirmed_origins'):
+                if target!=keeper:edges.setdefault(target,set()).add(keeper)
+        def destinations(start,trail=frozenset()):
+            if start in live_sha:return {start}
+            if start in trail or len(edges.get(start,()))!=1:return set()
+            result=set()
+            for target in edges.get(start,()):result.update(destinations(target,trail|{start}))
+            return result
+        decision_links=0
+        for digest,records in unmatched.items():
+            if digest in resolved:continue
+            ends=destinations(digest)
+            if len(ends)!=1:continue
+            item=live_sha[next(iter(ends))]
+            for row in records:
+                item['origins'].append(row['source']);item['sources'][row['source']['key']]=row['source']
+                item['copies'].append({'path':row['path'],'sha':row['sha'],'quarantine':True,'reference':False,'proof':'recorded keeper decision'})
+            resolved.add(digest);decision_links+=1
         recovered=self.recover_visual_aliases(active,unmatched,resolved,uri)
+        # Retain the full inventory for folder browsing, including outside-pilot
+        # survivors and unlinked quarantine. Never silently label it a full pilot.
+        self.current['source_catalog']={i['id']:copy.deepcopy(i) for i in active}
+        for digest,records in unmatched.items():
+            if digest in resolved:continue
+            for row in records:
+                ident='q:'+hashlib.sha256(row['path'].encode()).hexdigest()
+                self.current['source_catalog'][ident]={'id':ident,'path':row['path'],'stamp':row['stamp'],
+                    'sha':digest,'sources':{row['source']['key']:row['source']},'origins':[row['source']],
+                    'quarantine_only':True,'reference':False}
+
         self.current['inventory']={'files':len(found),'readable':len(hashed),'unique_survivors':len(active),
+            'exact_linked_quarantine_files':sum(c['quarantine'] and not c.get('proof') for i in active for c in i['copies']),
             'quarantined_files':sum(r['source']['quarantine'] for r in hashed),
             'unlinked_quarantine':sum(len(v) for k,v in unmatched.items() if k not in resolved),
-            'verified_visual_links':len(resolved),'newly_verified_links':recovered,'multiple_source_images':sum(len(i['sources'])>1 for i in active),
+            'recorded_decision_links':decision_links,'verified_visual_links':len(resolved)-decision_links,'newly_verified_links':recovered,'multiple_source_images':sum(len(i['sources'])>1 for i in active),
             'repeated_live_copies':sum(max(0,sum(not c['quarantine'] for c in i['copies'])-1) for i in active)}
         return active
 
@@ -472,13 +510,15 @@ class Workbench:
             return result
 
     def image_info(self,mid):
-        item=self.current['items'][mid]
+        item=self.current['items'].get(mid) or self.current.get('source_catalog',{})[mid]
         return {k:copy.deepcopy(item.get(k)) for k in ('id','path','sources','origins','reference','existing_sets','clothing_cue')}
 
     def preview_path(self,mid):
         with self.lock:
-            if not self.current or mid not in self.current['items']:raise ValueError('Unknown evaluation image')
-            item=self.current['items'][mid];path=Path(item['path'])
+            if not self.current:raise ValueError('Unknown evaluation image')
+            item=self.current['items'].get(mid) or self.current.get('source_catalog',{}).get(mid)
+            if not item:raise ValueError('Unknown evaluation image')
+            path=Path(item['path'])
             if linked(path) or stat_key(path)!=item['stamp']:raise ValueError('Image changed or moved. Run a fresh evaluation.')
             return path
 
@@ -500,6 +540,14 @@ class Workbench:
             categories=body.get('categories',group['categories']);colors=body.get('colors',group['colors']);notes=body.get('notes',group['notes'])
             if not isinstance(categories,list) or not isinstance(colors,list) or any(not isinstance(v,str) or len(v)>150 for v in categories+colors):raise ValueError('Invalid categories or colors')
             if not isinstance(notes,str) or len(notes)>5000:raise ValueError('Notes are too long')
+            self.current['review_undo']=copy.deepcopy({k:self.current[k] for k in ('proposals','unassigned')})
+            if action=='accepted':
+                for other in self.current['proposals']:
+                    if other is group:continue
+                    other['members']=[m for m in other['members'] if m not in members]
+                    if len(other['members'])==1:
+                        self.current['unassigned'].extend(other['members']);other['members']=[]
+                    if not other['members']:other['review']='skipped'
             removed=set(group['members'])-set(members)
             self.current['unassigned']=list(dict.fromkeys([i for i in self.current['unassigned'] if i not in members]+sorted(removed)))
             group.update(name=name,members=members,review=action,categories=categories,colors=colors,notes=notes,reviewed_at=time.time())
@@ -518,6 +566,116 @@ class Workbench:
                 self.current['unassigned'].extend(group['members']);group['members']=[];group['review']='skipped'
             self.current['proposals'].append(new);self.current['splits']=self.current.get('splits',0)+1
             self.persist();return self.status()
+
+    def origin_audit(self,offset=0):
+        with self.lock:
+            if not self.current or self.current['running']:raise ValueError('Finish the evaluation first.')
+            catalog=self.current.get('source_catalog',{})
+            pending=[i for i in catalog.values() if i.get('quarantine_only')]
+            at=max(0,min(int(offset),max(0,len(pending)-1)))
+            if not pending:return {'total':0,'complete_inventory':bool(catalog),'candidates':[]}
+            item=pending[at];digest=item['sha']
+            with self.engine.db() as db:
+                hashes={r[0]:(int(r[1]),int(r[2])) for r in db.execute('SELECT sha,ph,mh FROM cache') if r[1] is not None and r[2] is not None}
+                neighbors=set()
+                for a,b in db.execute('SELECT a.sha,b.sha FROM pairs p JOIN files a ON a.id=p.a JOIN files b ON b.id=p.b WHERE a.sha=? OR b.sha=?',(digest,digest)):
+                    neighbors.update((a,b))
+            def rank(other):
+                distance=min((a^b).bit_count() for a,b in zip(hashes[digest],hashes[other['sha']])) if digest in hashes and other['sha'] in hashes else 100
+                return (other['sha'] not in neighbors,distance,other['id'])
+            candidates=sorted((i for i in catalog.values() if not i.get('quarantine_only')),key=rank)[:12]
+            return {'total':len(pending),'offset':at,'image':self.image_info(item['id']),
+                'candidates':[self.image_info(i['id']) for i in candidates],'complete_inventory':True}
+
+    def confirm_origin(self,body):
+        with self.lock:
+            if not self.current or self.current['running'] or body.get('job')!=self.current['id']:raise ValueError('Evaluation changed.')
+            catalog=self.current.get('source_catalog',{})
+            target=catalog.get(body.get('target'));keeper=catalog.get(body.get('keeper'))
+            if not target or not target.get('quarantine_only') or not keeper or keeper.get('quarantine_only'):raise ValueError('Choose an unresolved copy and surviving image.')
+            for item in (target,keeper):
+                if sha256(self.preview_path(item['id']))!=item['sha']:raise ValueError('File changed. Build a fresh evaluation.')
+            previous_keeper=copy.deepcopy(keeper)
+            with self.db() as db:
+                prior=db.execute('SELECT keeper,created FROM confirmed_origins WHERE target=?',(target['sha'],)).fetchone()
+                db.execute('INSERT OR REPLACE INTO confirmed_origins VALUES (?,?,?)',(target['sha'],keeper['sha'],time.time()))
+            matching=[i for i in catalog.values() if i.get('quarantine_only') and i['sha']==target['sha']]
+            self.current['origin_undo']={'keeper':previous_keeper,'rows':copy.deepcopy(matching),'prior':prior,'target':target['sha']}
+            for row in matching:
+                keeper['sources'].update(row['sources']);keeper['origins'].extend(row['origins'])
+                keeper.setdefault('copies',[]).append({'path':row['path'],'sha':row['sha'],'quarantine':True,'reference':False,'proof':'confirmed origin recovery'})
+                del catalog[row['id']]
+            if keeper['id'] in self.current['items']:
+                self.current['items'][keeper['id']]=copy.deepcopy(keeper)
+            self.current['inventory']['unlinked_quarantine']-=len(matching)
+            self.persist();return self.status()
+
+    def undo_origin(self,body):
+        with self.lock:
+            if not self.current or self.current['running'] or body.get('job')!=self.current['id']:raise ValueError('Evaluation changed.')
+            undo=self.current.get('origin_undo')
+            if not undo:raise ValueError('No recovered connection to undo in this evaluation.')
+            with self.db() as db:
+                db.execute('DELETE FROM confirmed_origins WHERE target=?',(undo['target'],))
+                if undo['prior']:db.execute('INSERT INTO confirmed_origins VALUES (?,?,?)',(undo['target'],*undo['prior']))
+            catalog=self.current['source_catalog'];keeper=undo['keeper'];catalog[keeper['id']]=keeper
+            for row in undo['rows']:catalog[row['id']]=row
+            if keeper['id'] in self.current['items']:self.current['items'][keeper['id']]=copy.deepcopy(keeper)
+            self.current['inventory']['unlinked_quarantine']+=len(undo['rows'])
+            del self.current['origin_undo'];self.persist();return self.status()
+
+    def neighbors(self,ident,offset=0):
+        with self.lock:
+            group=self.detail(ident)
+            keys={key for item in group['images'] for key in item['sources']}
+            catalog=self.current.get('source_catalog',self.current['items'])
+            owners={mid:g for g in self.current['proposals'] for mid in g['members']}
+            rows=[]
+            for mid,item in catalog.items():
+                shared=keys & item['sources'].keys()
+                if not shared or mid in group['members']:continue
+                owner=owners.get(mid)
+                status=('Quarantine — connection unresolved' if item.get('quarantine_only') else
+                    (owner['review']+' · '+owner['name']) if owner else
+                    'Unassigned' if mid in self.current['items'] else 'Outside pilot — view only')
+                rows.append({**self.image_info(mid),'status':status,'group':owner['id'] if owner else None,
+                    'can_add':mid in self.current['items'],'folders':[item['sources'][k]['label'] for k in sorted(shared)]})
+            rows.sort(key=lambda x:(' / '.join(x['folders']),x['path']))
+            offset=max(0,int(offset))
+            related=[]
+            alternatives={mid for ev in group.get('evidence',{}).values() for mid in ev.get('alternatives',[])}
+            for other in self.current['proposals']:
+                if other['id']==ident or not other['members']:continue
+                shared=keys & {k for mid in other['members'] for k in self.current['items'][mid]['sources']}
+                if shared or alternatives.intersection(other['members']):
+                    related.append({'id':other['id'],'name':other['name'],'review':other['review'],
+                        'members':other['members'],'reason':'Shared original post' if shared else 'Visual alternative'})
+            return {'images':rows[offset:offset+60],'total':len(rows),'offset':offset,'related':related,
+                'complete_inventory':bool(self.current.get('source_catalog'))}
+
+    def transfer(self,body):
+        with self.lock:
+            if not self.current or self.current['running'] or body.get('job')!=self.current['id']:raise ValueError('Evaluation changed.')
+            target=next((g for g in self.current['proposals'] if g['id']==body.get('group')),None)
+            members=set(body.get('members',[]))
+            if not target or not members or not members<=self.current['items'].keys():raise ValueError('Choose evaluated images.')
+            for mid in members:self.preview_path(mid)
+            self.current['review_undo']=copy.deepcopy({k:self.current[k] for k in ('proposals','unassigned')})
+            for other in self.current['proposals']:
+                if other is target or not members.intersection(other['members']):continue
+                other['members']=[m for m in other['members'] if m not in members];other['review']='pending'
+                if len(other['members'])<2:
+                    self.current['unassigned'].extend(other['members']);other['members']=[];other['review']='skipped'
+            target['members']=list(dict.fromkeys(target['members']+sorted(members)));target['review']='pending'
+            self.current['unassigned']=[m for m in self.current['unassigned'] if m not in target['members']]
+            self.persist();return self.status()
+
+    def undo_review(self,body):
+        with self.lock:
+            if not self.current or self.current['running'] or body.get('job')!=self.current['id']:raise ValueError('Evaluation changed.')
+            previous=self.current.pop('review_undo',None)
+            if not previous:raise ValueError('No review change to undo.')
+            self.current.update(previous);self.persist();return self.status()
 
     def export(self):
         with self.lock:

@@ -10,6 +10,15 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
   await page.route('**/api/bulk/group?*',async route=>{const response=await route.fetch();const data=await response.json();if(data.members?.length&&data.evidence?.[data.members[0]]){const ev=data.evidence[data.members[0]];Object.assign(ev,{tentative:true,review_hint:'Check addition',reason:'Likely member based on matching views and the shoots established in this post.'})}await route.fulfill({response,json:data})});
   await page.goto(info.url+'/bulk');await page.locator('#phase').filter({hasText:'Ready'}).waitFor();await page.locator('#roots').fill(info.incoming);await page.locator('#start').click();await page.locator('#phase').filter({hasText:'Evaluation ready'}).waitFor();
   await page.locator('.group').first().click();await page.locator('#grid .chip').filter({hasText:'Check addition'}).waitFor();
+  await page.locator('#folderContext').click();await page.locator('#folders[open]').waitFor();
+  assert((await page.locator('#folderNotice').innerText()).includes('Full readable inventory'));
+  assert.equal(await page.locator('#folderGrid .tile').count(),4);
+  await page.locator('#relatedDrafts').getByRole('button',{name:'Inspect',exact:true}).first().click();
+  await page.locator('#inspect[open]').waitFor();assert.equal(await page.locator('#alternatives .tile').count(),4);await page.locator('#closeInspect').click();
+  page.once('dialog',d=>d.accept());await page.locator('#relatedDrafts').getByRole('button',{name:'Combine into current draft'}).first().click();
+  await page.waitForFunction(()=>current.members.length===8);await page.locator('#closeFolders').click();
+  await page.locator('#undoReview').click();await page.waitForFunction(()=>current.members.length===4);
+  await page.locator('#originAudit').click();await page.locator('#audit[open]').waitFor();assert((await page.locator('#auditNotice').innerText()).includes('No unresolved'));await page.locator('#closeAudit').click();
   const tile=page.locator('#grid .tile').first();const removed=await tile.getAttribute('data-id');
   await tile.getByRole('button',{name:'Details',exact:true}).click();assert((await page.locator('#evidence').innerText()).includes('Uncheck this image if it does not belong.'));await page.locator('#closeInspect').click();
   await tile.getByRole('checkbox',{name:'Include image'}).uncheck();assert.equal(await page.locator('#selected').textContent(),'3 selected');await page.locator('#accept').click();

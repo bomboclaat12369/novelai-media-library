@@ -25,7 +25,7 @@ import crop_match
 import same_photo
 from search_index import SearchIndexes
 
-VERSION = '1.9.1'
+VERSION = '1.9.2'
 ALGORITHM = 1
 QUARANTINE = '_Duplicate_Review_Quarantine'
 EXTENSIONS = {'.jpg', '.jpeg', '.jpe', '.jfif', '.png', '.webp', '.bmp', '.tif', '.tiff', '.avif', '.gif'}
@@ -249,6 +249,9 @@ class Engine:
             ''')
             if 'batch' not in {r[1] for r in db.execute('PRAGMA table_info(moves)')}:
                 db.execute('ALTER TABLE moves ADD COLUMN batch TEXT')
+            for column in ('keeper_sha','keeper_path'):
+                if column not in {r[1] for r in db.execute('PRAGMA table_info(moves)')}:
+                    db.execute(f'ALTER TABLE moves ADD COLUMN {column} TEXT')
             for table in ('cache','files'):
                 if 'pixel' not in {r[1] for r in db.execute(f'PRAGMA table_info({table})')}:
                     db.execute(f'ALTER TABLE {table} ADD COLUMN pixel TEXT')
@@ -837,7 +840,7 @@ class Engine:
                 target, survivor = (a, b) if action == 'left' else (b, a)
                 return self._move_records(db, target, survivor)
 
-    def _move_records(self, db, target, survivor, batch=None):
+    def _move_records(self, db, target, survivor, batch=None, record_link=True):
         pending = db.execute("SELECT operation FROM replacements WHERE state NOT IN ('complete','undone','cancelled')").fetchall()
         if any(r['operation'] != batch for r in pending):
             raise ValueError('Resume or undo the unfinished replacement before moving other copies.')
@@ -858,8 +861,9 @@ class Engine:
         destination = qroot / move_id / source.relative_to(root)
         destination.parent.mkdir(parents=True, exist_ok=False)
         # Commit the journal BEFORE rename, so an interrupted move can be recovered.
-        db.execute('INSERT INTO moves(id,src,dst,sha,state,created,batch) VALUES (?,?,?,?,?,?,?)',
-                   (move_id, str(source), str(destination), target['sha'], 'pending', time.time(), batch))
+        db.execute('INSERT INTO moves(id,src,dst,sha,state,created,batch,keeper_sha,keeper_path) VALUES (?,?,?,?,?,?,?,?,?)',
+                   (move_id, str(source), str(destination), target['sha'], 'pending', time.time(), batch,
+                    survivor['sha'] if survivor and record_link else None, survivor['path'] if survivor and record_link else None))
         db.commit()
         try:
             source.rename(destination)  # Same-volume; no copy/delete fallback.
@@ -1285,7 +1289,7 @@ class Engine:
                         if proof == 'pixels' and (not target.get('pixel') or target['pixel'] != keeper.get('pixel')):
                             raise ValueError('Files are not pixel-identical. Scan again.')
                         # Rehash BOTH actual files before each move, not just cached fingerprints.
-                        self._move_records(db, target, keeper, batch=batch)
+                        self._move_records(db, target, keeper, batch=batch, record_link=not keep_records or len(keep_records)==1)
                     moved += 1
                 except Exception as e:
                     failed += 1

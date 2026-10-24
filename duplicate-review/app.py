@@ -82,6 +82,10 @@ def make_server(engine, port=0, token=None):
                     return self.send(200, bulk.context())
                 if url.path == '/api/bulk/group':
                     return self.send(200, bulk.detail(params['id'][0]))
+                if url.path == '/api/bulk/origin-audit':
+                    return self.send(200, bulk.origin_audit(int(params.get('offset',[0])[0])))
+                if url.path == '/api/bulk/neighbors':
+                    return self.send(200, bulk.neighbors(params['id'][0],int(params.get('offset',[0])[0])))
                 if url.path == '/api/bulk/export':
                     return self.send(200, bulk.export())
                 if url.path == '/api/bulk/image':
@@ -133,6 +137,14 @@ def make_server(engine, port=0, token=None):
                     bulk.cancel.set();result = {'message':'Stopping after the current operation…'}
                 elif path == '/api/bulk/activate':
                     result = bulk.activate(str(body['id']))
+                elif path == '/api/bulk/undo-origin':
+                    result = bulk.undo_origin(body)
+                elif path == '/api/bulk/confirm-origin':
+                    result = bulk.confirm_origin(body)
+                elif path == '/api/bulk/transfer':
+                    result = bulk.transfer(body)
+                elif path == '/api/bulk/undo-review':
+                    result = bulk.undo_review(body)
                 elif path == '/api/bulk/split':
                     result = bulk.split(body)
                 elif path == '/api/bulk/review':

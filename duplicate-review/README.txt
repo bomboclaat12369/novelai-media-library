@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.9.1
+LOCAL DUPLICATE REVIEW 1.9.2
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -14,6 +14,28 @@ Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
 Duplicate scans and image processing stay local; no cloud account or GPU is required.
 The optional set-preparation pilot downloads matching models on first use.
+
+NEW IN 1.9.2: ORIGINAL FOLDER CONNECTIONS AND RELATED-DRAFT REVIEW
+- Single-keeper quarantine decisions now journal the kept image's hash and path
+  before moving files. Completed links follow later keeper replacements; undone
+  moves do not supply links. Keep-multiple actions do not guess which kept image
+  a removed image belongs to. Quarantine-all does not imply a duplicate link.
+- Build a fresh evaluation to recover recorded decisions, reuse existing visual
+  recovery, and retain the complete readable folder inventory. Old saved pilots
+  remain usable but cannot show outside-pilot files they never saved.
+- Recover folder connections shows unresolved quarantine images and up to 12
+  candidate survivors. Candidates are suggestions, not proof. Confirm only the
+  same photograph. Skip if none fits (discarded images may have no counterpart).
+  Connections persist across future scans; the latest confirmation can be undone.
+  Build a fresh evaluation after recovery to regroup with those additional origins.
+- Related drafts & folder images shows other images from the same original posts,
+  including outside-pilot and unresolved quarantine files. Outside-pilot images
+  are view-only. Full-collection evaluation makes all readable survivors editable.
+- Inspect related drafts, transfer members or combine drafts. Affected accepted
+  drafts require confirmation again. Undo review change restores the prior state.
+  Accepting an image removes its pending membership elsewhere, avoiding overlaps.
+- No automatic import, file restoration, new quarantine operations, or changed
+  visual matching thresholds. Related posts are leads, never proof of one shoot.
 
 NEW IN 1.9.1: SHOOT COMPLETENESS AND REVIEW RECOVERY
 - Compare competing outfit-supported cores before merging; require stronger visual

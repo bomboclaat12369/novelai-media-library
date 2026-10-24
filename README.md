@@ -2,6 +2,14 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Folder connections and related-draft review (Duplicate Review 1.9.2)
+
+Duplicate decisions with one keeper now record the chosen survivor alongside the quarantine journal. Bulk preparation recovers these links, follows later keeper decisions, and excludes undone moves. Existing exact/visual recovery still handles older decisions; unresolved files can be inspected under **Recover folder connections** and connected manually without moving files. The last recovery confirmation can be undone.
+
+**Related drafts & folder images** shows the rest of each original post, including outside-pilot survivors and unresolved quarantine. Inspect and combine related drafts or move individual members with undo. Changed accepted drafts return to pending review. Shared posts are suggestions, not automatic proof that two groups are one shoot.
+
+Build a **fresh evaluation** once after updating to populate the full folder inventory and recover new decisions. Re-evaluating an old pilot reuses its saved inventory. Images outside the pilot are view-only; select Full collection to evaluate them. This remains a draft-only pilot: no automatic library import or file restoration. Visual thresholds are unchanged; this release improves provenance and completeness review rather than claiming measured model-accuracy gains.
+
 ## More complete shoot drafts and review recovery (Duplicate Review 1.9.1)
 
 Outfit-supported alternatives are compared before fragment merges, and a coherent
