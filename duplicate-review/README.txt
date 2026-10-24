@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.8.1
+LOCAL DUPLICATE REVIEW 1.8.2
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -14,6 +14,34 @@ Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
 Duplicate scans and image processing stay local; no cloud account or GPU is required.
 The optional set-preparation pilot downloads matching models on first use.
+
+NEW IN 1.8.2: COMPLETE SETS AND UNASSIGNED RECOVERY
+- Uncertain clothing cues no longer disable outfit evidence when corroborated
+  by the setting. Shared recognized posts allow combined appearance/context
+  evidence without first requiring the whole post to be visually consistent.
+  Clearly limited clothing still needs setting evidence; a post alone is not proof.
+- Remaining images can form a new set from three mutually supported images with
+  a common post, even when no single comparison established a strong initial pair.
+- Fragment reconciliation accepts multiple source-backed visual links across
+  both groups rather than demanding three strong cross-links in every case.
+  Reconciliation runs up to eight rounds, stopping as soon as no merges occur.
+  Unassigned attachment accepts corroborating source/scene evidence from two
+  members. Coverage and competing-group checks remain in place.
+- New exports include up to five candidate matches per unassigned image (including
+  rejected pairs), attachment rejection reasons, and up to 200 rejected fragment
+  comparisons. These are diagnostic scores, not confidence percentages. Details
+  stay out of routine UI polling, and triangle candidate storage is bounded.
+- Update, then choose the completed pilot and click Re-evaluate same images.
+  Compatible cached features are reused. Original decisions stay in the old run;
+  the new run is pending review. Acceptance does not imply a set was complete,
+  and skipping does not train the matcher to reject those image relationships.
+- This iteration prioritizes recovering complete shoots. It can introduce more
+  incorrect memberships; final review is still required. Focused synthetic and
+  workflow checks pass, but originals from the 400-image evaluation were not
+  available for an end-to-end accuracy measurement. Compare both completeness
+  and incorrect members, not only proposal count or acceptance count.
+- Draft-only: no imports or file moves; duplicate-checking/quarantine rules and
+  the main library set finder remain unchanged. No new neural-model pass is needed.
 
 NEW IN 1.8.1: RE-EVALUATE THE SAME IMAGES, BETTER SHOOT GROUPING
 - Click Re-evaluate same images while viewing your completed pilot. This creates

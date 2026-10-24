@@ -130,6 +130,58 @@ class Grouping(unittest.TestCase):
         self.assertEqual(len(groups),1);self.assertEqual(len(groups[0]['members']),4);self.assertFalse(singles)
         self.assertEqual(stats['grouping_changes']['unassigned_attached'],1)
 
+    def test_uncertain_clothing_combines_outfit_scene_and_source(self):
+        items=self.items(2)
+        for item in items:item['clothing_cue']={'state':'uncertain','margin':.014}
+        o=np.stack([unit(0),.90*unit(0)+np.sqrt(1-.90**2)*unit(1)])
+        scene=self.scene_from_gram([[1,.67],[.67,1]],[[1,.77],[.77,1]])
+        groups,singles,_=propose(items,o,scene)
+        self.assertFalse(singles);self.assertEqual(len(groups),1)
+        self.assertEqual(groups[0]['members'][0]['method'],'outfit + setting + post')
+        for item in items:item['clothing_cue']['state']='limited'
+        groups,singles,_=propose(items,o,scene)
+        self.assertFalse(groups);self.assertEqual(len(singles),2)
+
+    def test_unassigned_triplet_can_seed_without_strong_pair(self):
+        gram=lambda c:np.eye(3)*(1-c)+np.ones((3,3))*c
+        scene=self.scene_from_gram(gram(.65),gram(.81))
+        o=np.stack([unit(i) for i in range(3)]);stats={}
+        groups,singles,_=propose(self.items(3),o,scene,lambda **k:stats.update(k))
+        self.assertFalse(singles);self.assertEqual(len(groups[0]['members']),3)
+        self.assertEqual(stats['grouping_changes']['unassigned_seed_groups'],1)
+        # No source or only a pair does not license weak scene-only seeds.
+        self.assertFalse(propose(self.items(3,False),o,scene)[0])
+        self.assertFalse(propose(self.items(2),o[:2],scene[:2])[0])
+
+    def test_shared_source_fragments_merge_with_multiple_soft_links(self):
+        full=[[1,.94,.66,.66],[.94,1,.66,.66],[.66,.66,1,.94],[.66,.66,.94,1]]
+        outer=[[1,.97,.83,.83],[.97,1,.83,.83],[.83,.83,1,.97],[.83,.83,.97,1]]
+        scene=self.scene_from_gram(full,outer);o=np.stack([unit(i) for i in range(4)]);stats={}
+        groups,singles,_=propose(self.items(4),o,scene,lambda **k:stats.update(k))
+        self.assertFalse(singles);self.assertEqual(len(groups),1)
+        self.assertEqual(stats['grouping_changes']['fragment_merges'],1)
+        self.assertEqual(len(propose(self.items(4,False),o,scene)[0]),2)
+
+    def test_ambiguous_bridge_does_not_join_shoots(self):
+        a=unit(0);b=.4*a+np.sqrt(1-.4**2)*unit(1);bridge=(a+b)/np.linalg.norm(a+b)
+        vectors=np.stack([a]*3+[b]*3+[bridge]);scene=np.stack([vectors,vectors],axis=1)
+        o=np.stack([unit(10)]*7);items=self.items(7);stats={}
+        for item in items:item['clothing_cue']={'state':'limited'}
+        groups,singles,_=propose(items,o,scene,lambda **k:stats.update(k))
+        self.assertEqual({frozenset(r['index'] for r in g['members']) for g in groups},{frozenset(range(3)),frozenset(range(3,6))})
+        self.assertEqual(singles,[6])
+        reasons=stats['match_diagnostics']['unassigned_group_rejections']['6']
+        self.assertTrue(all(r['reason']=='competing groups within score margin' for r in reasons))
+
+    def test_export_diagnostics_include_rejected_candidates(self):
+        o=np.stack([unit(i) for i in range(3)])
+        scene=np.stack([np.stack([unit(i),unit(i)]) for i in range(3)]);stats={}
+        propose(self.items(3),o,scene,lambda **k:stats.update(k))
+        rows=stats['match_diagnostics']['unassigned_candidates']['0']
+        self.assertEqual(len(rows),2);self.assertTrue(all(not r['soft'] for r in rows))
+        self.assertTrue(all(r['reason']=='insufficient combined visual evidence' for r in rows))
+        json.dumps(stats)  # numpy scalars must not break persistent job/export JSON.
+
 
 class WorkbenchChecks(unittest.TestCase):
     def test_recovery_review_restart_and_readonly_sources(self):

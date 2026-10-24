@@ -2,6 +2,25 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Bulk set completeness iteration (Duplicate Review 1.8.2)
+
+The pilot now combines uncertain outfit evidence with setting and source support,
+reunites fragments with multiple corroborating links, and can discover new sets
+among unassigned images without requiring an existing group. Shared posts alone
+still do not establish a shoot. Exports include rejected candidate/merge reasons.
+
+Choose **Re-evaluate same images** on the completed pilot to reuse the exact cohort
+and cached analysis. Previous reviews remain intact; new proposals require review.
+The goal is fewer missing members and split shoots, accepting that some additional
+incorrect memberships may need correction. Focused grouping/workflow checks pass;
+accuracy on the original 400 images still requires evaluation. No image bytes or
+private evaluation files are included in the repository.
+
+[Download the complete repository ZIP](https://github.com/bomboclaat12369/novelai-media-library/archive/refs/heads/main.zip),
+extract it, then run `duplicate-review/Start Duplicate Review.bat`. The complete
+repository (including `runtime-src`) is required. This remains a draft-only pilot;
+no source files are moved and the media-library/duplicate matching rules are unchanged.
+
 ## Bulk set pilot refinement (Duplicate Review 1.8.1)
 
 **Re-evaluate same images** creates a new evaluation from the exact saved cohort,
