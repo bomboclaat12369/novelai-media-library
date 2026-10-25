@@ -42,6 +42,47 @@ class OriginWorkflow(unittest.TestCase):
                 w.start({'roots':[str(incoming)],'limit':200});w.thread.join(20)
             self.assertEqual(w.current['inventory']['unlinked_quarantine'],0)
 
+    def test_targeted_queue_keeps_all_origins_and_resumes_without_padding(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);incoming=root/'incoming';engine=Engine(root/'state')
+            for i in range(30):create(incoming/'Post 1'/('A'+str(i)+'.png'),(i,10,20))
+            q1=incoming/'_Duplicate_Review_Quarantine'/'one'/'Post 2'/'missing.png'
+            q2=incoming/'_Duplicate_Review_Quarantine'/'two'/'Post 3'/'missing-copy.png'
+            q3=incoming/'_Duplicate_Review_Quarantine'/'three'/'Post 4'/'other.png'
+            create(q1,(230,110,20));q2.parent.mkdir(parents=True);q2.write_bytes(q1.read_bytes());create(q3,(240,110,20))
+            w=Workbench(engine,lambda _:FakeEncoder())
+            with patch.object(w,'recover_visual_aliases',return_value=0):
+                w.start({'roots':[str(incoming)],'limit':200});w.thread.join(20)
+            d=w.origin_audit();self.assertEqual(d['total_files'],3);self.assertEqual(d['total'],2)
+            self.assertEqual(d['candidates'],[])  # No fingerprints: never pad with random survivors.
+            allrows=w.origin_audit(mode='all');self.assertEqual(allrows['candidate_count'],30)
+            self.assertEqual(len(allrows['candidates']),24);self.assertEqual(len(w.origin_audit(mode='all',page=1)['candidates']),6)
+            search=w.origin_audit(query='A29.png');self.assertEqual(search['candidate_count'],1)
+            selected=w.origin_audit(offset=1)
+            reopened=Workbench(engine,lambda _:FakeEncoder());self.assertEqual(reopened.origin_audit()['digest'],selected['digest'])
+            reopened.mark_origin({'job':w.current['id'],'target':selected['image']['id'],'status':'deferred'})
+            self.assertEqual(reopened.origin_audit()['total_files'],3)
+            self.assertEqual(reopened.origin_audit(review_filter='deferred')['total'],1)
+            self.assertIn(selected['digest'],reopened.export()['origin_review'])
+            reopened.mark_origin({'job':w.current['id'],'target':selected['image']['id'],'status':'no_counterpart'})
+            self.assertEqual(reopened.origin_audit()['counts']['no_counterpart'],selected['copy_count'])
+            pair=reopened.origin_audit(target=sha256(q1));self.assertEqual(pair['copy_count'],2)
+            self.assertEqual({o['post_id'] for o in pair['origins']},{'2','3'})
+            keeper=search['candidates'][0]['id'];before=reopened.current['inventory']['unlinked_quarantine']
+            # A changed second physical copy must fail without attaching any origins.
+            old=q2.read_bytes();q2.write_bytes(b'changed')
+            with self.assertRaises(ValueError):reopened.confirm_origin({'job':w.current['id'],'target':pair['image']['id'],'keeper':keeper})
+            self.assertEqual(reopened.current['inventory']['unlinked_quarantine'],before)
+            q2.write_bytes(old)
+            from engine import stat_key
+            for row in reopened.current['source_catalog'].values():
+                if row['path']==str(q2):row['stamp']=stat_key(q2)
+            reopened.confirm_origin({'job':w.current['id'],'target':pair['image']['id'],'keeper':keeper})
+            survivor=reopened.current['source_catalog'][keeper]
+            self.assertEqual({o['post_id'] for o in survivor['origins']},{'1','2','3'})
+            self.assertEqual(reopened.origin_audit()['total_files'],1)
+            reopened.undo_origin({'job':w.current['id']});self.assertEqual(reopened.origin_audit()['total_files'],3)
+
     def test_context_transfer_and_undo_preserve_unique_membership(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);incoming=root/'incoming'

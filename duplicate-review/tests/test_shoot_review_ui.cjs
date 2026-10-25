@@ -18,7 +18,7 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
   page.once('dialog',d=>d.accept());await page.locator('#relatedDrafts').getByRole('button',{name:'Combine into current draft'}).first().click();
   await page.waitForFunction(()=>current.members.length===8);await page.locator('#closeFolders').click();
   await page.locator('#undoReview').click();await page.waitForFunction(()=>current.members.length===4);
-  await page.locator('#originAudit').click();await page.locator('#audit[open]').waitFor();assert((await page.locator('#auditNotice').innerText()).includes('No unresolved'));await page.locator('#closeAudit').click();
+  await page.locator('#originAudit').click();await page.locator('#audit[open]').waitFor();assert((await page.locator('#auditNotice').innerText()).includes('No entries in this filter'));await page.locator('#closeAudit').click();
   const tile=page.locator('#grid .tile').first();const removed=await tile.getAttribute('data-id');
   await tile.getByRole('button',{name:'Details',exact:true}).click();assert((await page.locator('#evidence').innerText()).includes('Uncheck this image if it does not belong.'));await page.locator('#closeInspect').click();
   await tile.getByRole('checkbox',{name:'Include image'}).uncheck();assert.equal(await page.locator('#selected').textContent(),'3 selected');await page.locator('#accept').click();

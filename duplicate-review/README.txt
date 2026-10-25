@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.9.2
+LOCAL DUPLICATE REVIEW 1.9.3
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -14,6 +14,32 @@ Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
 Duplicate scans and image processing stay local; no cloud account or GPU is required.
 The optional set-preparation pilot downloads matching models on first use.
+
+NEW IN 1.9.3: TARGETED DUPLICATE-HISTORY REPAIR
+1. Finish pending groups in regular Duplicate Review after updating. Single-keeper
+   choices record the keeper relationship; keeping several images does not guess
+   which kept photo a removed copy belongs to.
+2. Build proposed sets once to refresh the full inventory after those decisions.
+   Keep quarantine and both databases. No restoration or re-download is needed.
+3. Open Repair duplicate history. Only unresolved quarantine is queued; exact,
+   verified visual and recorded-keeper links are excluded automatically.
+- Byte-identical unresolved copies share one review entry, with ALL their original
+  locations displayed and retained. Counts distinguish photos from physical files.
+- Progress and review labels survive restarts. Defer never resolves a connection.
+  No surviving copy is an explicit, reversible label, not a deletion or proof.
+  All unresolved includes both labels; exports retain them for auditing.
+- Suggested counterparts use saved comparisons (including a two-edge search) and
+  fingerprints. Weak/unsupported fillers are omitted. Search filename/path/post
+  across ALL survivors or choose Browse all survivors, with paginated results.
+  Empty suggestions do not prove that no surviving copy exists.
+- Confirming validates every matching physical quarantine file and the survivor,
+  preserves all origins, moves no files, and supports Undo connection.
+- The screen reports remaining regular groups/images and file-processing issues.
+  Missing/changed files stop confirmation rather than silently losing an origin.
+- Original paths from the move journal are preferred when available, while the
+  quarantine location is retained separately. Old path-wrapper recovery still works.
+- Finish repair, then Build proposed sets to use the added origins in grouping.
+  This release does not change set-grouping thresholds or restore quarantine.
 
 NEW IN 1.9.2: ORIGINAL FOLDER CONNECTIONS AND RELATED-DRAFT REVIEW
 - Single-keeper quarantine decisions now journal the kept image's hash and path

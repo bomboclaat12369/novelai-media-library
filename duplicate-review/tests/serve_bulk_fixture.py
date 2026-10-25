@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -32,6 +33,10 @@ with tempfile.TemporaryDirectory() as temp:
         Image.new('RGB',(160,240),(n,60+n,180)).save(path)
     copy=incoming/'_Duplicate_Review_Quarantine'/'abc'/'Mikayla-Videos-And-ImagePond'/'2025-10-01 - Post 3672997'/'A0.png'
     copy.parent.mkdir(parents=True);copy.write_bytes((incoming/'Mikayla-Images-By-Post'/'2024-10-01 - Post 3672997'/'A0.png').read_bytes())
+    if os.environ.get('RECOVERY_FIXTURE'):
+        for n in range(2):
+            q=incoming/'_Duplicate_Review_Quarantine'/('extra'+str(n))/('Post '+str(900+n))/('orphan'+str(n)+'.png')
+            q.parent.mkdir(parents=True);Image.new('RGB',(160,240),(250,n,1)).save(q)
     engine=Engine(root/'state');server=make_server(engine)
     server.bulk.encoder_factory=lambda _:Encoder()
     # UI still works without a connected companion; avoid connecting to an

@@ -2,6 +2,12 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Targeted duplicate-history repair (Duplicate Review 1.9.3)
+
+**Repair duplicate history** now queues only unresolved quarantine, groups byte-identical copies while retaining every original location, and remembers your place across restarts. Deferred and explicitly marked no-survivor entries remain counted as unresolved and can be revisited. Unsupported filler candidates are gone; filename/path/post search and paginated browsing cover all inventoried survivors. Every physical copy is checked before its origins are attached, and the last connection can be undone.
+
+Finish existing regular duplicate groups first using the updated checker, then **Build proposed sets** once to refresh the inventory. The repair screen shows remaining regular groups and file issues separately. Exact and verified visual connections are excluded from repair. Do not restore quarantine or reset the databases. After repair, rebuild to apply the recovered origins to grouping. Set-grouping thresholds are unchanged.
+
 ## Folder connections and related-draft review (Duplicate Review 1.9.2)
 
 Duplicate decisions with one keeper now record the chosen survivor alongside the quarantine journal. Bulk preparation recovers these links, follows later keeper decisions, and excludes undone moves. Existing exact/visual recovery still handles older decisions; unresolved files can be inspected under **Recover folder connections** and connected manually without moving files. The last recovery confirmation can be undone.

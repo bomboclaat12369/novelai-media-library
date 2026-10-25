@@ -43,6 +43,8 @@ class Workbench:
             db.executescript('''CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, updated REAL, data TEXT);
                 CREATE TABLE IF NOT EXISTS hashes(path TEXT PRIMARY KEY, stamp TEXT, sha TEXT, pixel TEXT);
                 CREATE TABLE IF NOT EXISTS vectors(sha TEXT, recipe TEXT, data BLOB, PRIMARY KEY(sha,recipe));
+                CREATE TABLE IF NOT EXISTS origin_review(sha TEXT PRIMARY KEY, status TEXT, updated REAL);
+                CREATE TABLE IF NOT EXISTS origin_cursor(scope TEXT PRIMARY KEY, sha TEXT);
                 CREATE TABLE IF NOT EXISTS confirmed_origins(target TEXT PRIMARY KEY, keeper TEXT, created REAL);
                 CREATE TABLE IF NOT EXISTS aliases(target TEXT, keeper TEXT, recipe TEXT, accepted INTEGER, PRIMARY KEY(target,keeper,recipe));''')
             row=db.execute('SELECT data FROM jobs ORDER BY updated DESC LIMIT 1').fetchone()
@@ -208,6 +210,10 @@ class Workbench:
                     stamp=stat_key(path)
                     previous=db.execute('SELECT sha,pixel FROM hashes WHERE path=? AND stamp=?',(str(path),stamp)).fetchone()
                     origin=moves.get(str(path),str(path));known=cached.get(origin)
+                    if str(path) in moves:
+                        original=source_of(origin,self.current['config']['forum'],self.current['config']['person'])
+                        original.update(quarantine=True,original_path=origin,quarantine_path=str(path))
+                        record['source']=original
                     if previous: digest,pixel=previous
                     else:
                         digest=known[1] if known and known[0]==stamp else sha256(path,self.cancel)
@@ -567,33 +573,76 @@ class Workbench:
             self.current['proposals'].append(new);self.current['splits']=self.current.get('splits',0)+1
             self.persist();return self.status()
 
-    def origin_audit(self,offset=0):
-        with self.lock:
-            if not self.current or self.current['running']:raise ValueError('Finish the evaluation first.')
+    def origin_audit(self,offset=None,query='',page=0,mode='suggested',review_filter='all',target=None):
+        # Lock order matches start/reevaluate: engine before workbench.
+        with self.engine.lock,self.lock:
+            if not self.current or self.current['running'] or self.engine.status['running']:raise ValueError('Finish the current operation first.')
             catalog=self.current.get('source_catalog',{})
-            pending=[i for i in catalog.values() if i.get('quarantine_only')]
-            at=max(0,min(int(offset),max(0,len(pending)-1)))
-            if not pending:return {'total':0,'complete_inventory':bool(catalog),'candidates':[]}
-            item=pending[at];digest=item['sha']
+            families={}
+            for item in catalog.values():
+                if item.get('quarantine_only'):families.setdefault(item['sha'],[]).append(item)
+            scope=json.dumps(self.current['config'].get('roots',[]),sort_keys=True)
+            with self.db() as db:
+                statuses=dict(db.execute('SELECT sha,status FROM origin_review'))
+                cursor=db.execute('SELECT sha FROM origin_cursor WHERE scope=?',(scope,)).fetchone()
+            counts={key:sum(len(rows) for sha,rows in families.items() if statuses.get(sha,'pending')==key)
+                    for key in ('pending','deferred','no_counterpart')}
+            pending=[rows for sha,rows in sorted(families.items()) if review_filter=='all' or statuses.get(sha,'pending')==review_filter]
+            regular=self.engine.groups()
+            summary={'total_files':sum(map(len,families.values())),'counts':counts,
+                'regular_groups':len(regular['groups']),'regular_images':sum(g['count'] for g in regular['groups']),
+                'complete_inventory':bool(catalog),'inventory':self.current.get('inventory',{}),
+                'issues':self.current.get('issues',[])}
+            if not pending:return {**summary,'total':0,'candidates':[]}
+            wanted=target or (cursor[0] if cursor else None)
+            at=next((i for i,rows in enumerate(pending) if rows[0]['sha']==wanted),0) if offset is None else max(0,min(int(offset),len(pending)-1))
+            rows=pending[at];item=rows[0];digest=item['sha']
+            with self.db() as db:db.execute('INSERT OR REPLACE INTO origin_cursor VALUES (?,?)',(scope,digest))
             with self.engine.db() as db:
                 hashes={r[0]:(int(r[1]),int(r[2])) for r in db.execute('SELECT sha,ph,mh FROM cache') if r[1] is not None and r[2] is not None}
-                neighbors=set()
-                for a,b in db.execute('SELECT a.sha,b.sha FROM pairs p JOIN files a ON a.id=p.a JOIN files b ON b.id=p.b WHERE a.sha=? OR b.sha=?',(digest,digest)):
-                    neighbors.update((a,b))
+                edges={}
+                for a,b in db.execute('SELECT a.sha,b.sha FROM pairs p JOIN files a ON a.id=p.a JOIN files b ON b.id=p.b'):
+                    edges.setdefault(a,set()).add(b);edges.setdefault(b,set()).add(a)
+            direct=edges.get(digest,set());neighbors=set(direct)
+            for other in direct:neighbors.update(edges.get(other,set()))
             def rank(other):
-                distance=min((a^b).bit_count() for a,b in zip(hashes[digest],hashes[other['sha']])) if digest in hashes and other['sha'] in hashes else 100
-                return (other['sha'] not in neighbors,distance,other['id'])
-            candidates=sorted((i for i in catalog.values() if not i.get('quarantine_only')),key=rank)[:12]
-            return {'total':len(pending),'offset':at,'image':self.image_info(item['id']),
-                'candidates':[self.image_info(i['id']) for i in candidates],'complete_inventory':True}
+                digests={other['sha']}|{c['sha'] for c in other.get('copies',[]) if not c['quarantine']}
+                distance=min((a^b).bit_count() for sha in digests if sha in hashes for a,b in zip(hashes[digest],hashes[sha])) if digest in hashes and digests.intersection(hashes) else 100
+                return (not bool(digests&direct),not bool(digests&neighbors),distance,other['id'])
+            candidates=[];query=str(query).strip().casefold()
+            for other in catalog.values():
+                if other.get('quarantine_only'):continue
+                score=rank(other)
+                if query:
+                    text=' '.join([other['path']]+[o['path'] for o in other.get('origins',[])])
+                    if query not in text.casefold():continue
+                elif mode!='all' and score[1] and score[2]>20:continue
+                candidates.append((score,other))
+            candidates.sort(key=lambda pair:pair[0]);page=max(0,int(page));start=page*24
+            return {**summary,'total':len(pending),'offset':at,'digest':digest,
+                'review_status':statuses.get(digest,'pending'),'copy_count':len(rows),
+                'image':self.image_info(item['id']),'origins':[o for row in rows for o in row['origins']],
+                'candidate_count':len(candidates),'page':page,
+                'candidates':[self.image_info(i['id']) for _,i in candidates[start:start+24]]}
 
-    def confirm_origin(self,body):
+    def mark_origin(self,body):
         with self.lock:
             if not self.current or self.current['running'] or body.get('job')!=self.current['id']:raise ValueError('Evaluation changed.')
+            item=self.current.get('source_catalog',{}).get(body.get('target'))
+            status=body.get('status')
+            if not item or not item.get('quarantine_only') or status not in ('pending','deferred','no_counterpart'):raise ValueError('Invalid recovery review.')
+            with self.db() as db:db.execute('INSERT OR REPLACE INTO origin_review VALUES (?,?,?)',(item['sha'],status,time.time()))
+            # A review label never removes an image or fabricates a keeper link.
+            return self.status()
+
+    def confirm_origin(self,body):
+        with self.engine.lock,self.lock:
+            if not self.current or self.current['running'] or self.engine.status['running'] or body.get('job')!=self.current['id']:raise ValueError('Evaluation changed or file operation running.')
             catalog=self.current.get('source_catalog',{})
             target=catalog.get(body.get('target'));keeper=catalog.get(body.get('keeper'))
             if not target or not target.get('quarantine_only') or not keeper or keeper.get('quarantine_only'):raise ValueError('Choose an unresolved copy and surviving image.')
-            for item in (target,keeper):
+            matching=[i for i in catalog.values() if i.get('quarantine_only') and i['sha']==target['sha']]
+            for item in [keeper]+matching:
                 if sha256(self.preview_path(item['id']))!=item['sha']:raise ValueError('File changed. Build a fresh evaluation.')
             previous_keeper=copy.deepcopy(keeper)
             with self.db() as db:
@@ -681,5 +730,7 @@ class Workbench:
         with self.lock:
             if not self.current:raise ValueError('No evaluation to export.')
             out=copy.deepcopy(self.current);out['evaluation']=self.status().get('evaluation',{})
+            unresolved={i['sha'] for i in self.current.get('source_catalog',{}).values() if i.get('quarantine_only')}
+            with self.db() as db:out['origin_review']={r[0]:{'status':r[1],'updated':r[2]} for r in db.execute('SELECT sha,status,updated FROM origin_review') if r[0] in unresolved}
             out['notice']='Evaluation drafts only. No files were moved or imported. Scores are not calibrated probabilities. Contains local paths; no image bytes.'
             return out
