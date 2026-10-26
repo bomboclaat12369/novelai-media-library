@@ -30,7 +30,22 @@ class OriginWorkflow(unittest.TestCase):
             w.confirm_origin({'job':w.current['id'],'target':d['image']['id'],'keeper':keeper})
             self.assertEqual(q.read_bytes(),before);self.assertTrue(live.exists())
             self.assertEqual(len(w.current['source_catalog'][keeper]['origins']),2)
-            w.undo_origin({'job':w.current['id']});self.assertEqual(w.origin_audit()['total_files'],1)
+            # Reopen a completed history job without preparing or comparing any
+            # images again. Saved candidates, links, cursor and undo all survive.
+            from bulk.history_matching import HistoryMatcher
+            import copy
+            saved=copy.deepcopy(w.current)
+            with patch.object(Engine,'start',side_effect=AssertionError('No rescan')),patch.object(Engine,'prepare_image',side_effect=AssertionError('No image preparation')),patch.object(HistoryMatcher,'run',side_effect=AssertionError('No comparisons')):
+                reopened=Workbench(Engine(root/'state'))
+                self.assertEqual(reopened.current,saved)
+                self.assertTrue(reopened.origin_audit()['matching_ready'])
+                result=reopened.undo_origin({'job':saved['id']})
+                self.assertEqual(result['restored_target'],d['digest'])
+                audit=reopened.origin_audit()
+                self.assertEqual(audit['total_files'],1)
+                self.assertEqual(audit['digest'],d['digest'])
+                self.assertEqual(reopened.current['history_matches'],saved['history_matches'])
+            self.assertEqual(q.read_bytes(),before);self.assertTrue(live.exists())
 
     def test_recorded_keeper_chain_undo_and_full_folder_inventory(self):
         with tempfile.TemporaryDirectory() as temp:

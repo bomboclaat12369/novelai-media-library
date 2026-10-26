@@ -689,7 +689,9 @@ class Workbench:
             for row in undo['rows']:catalog[row['id']]=row
             if keeper['id'] in self.current['items']:self.current['items'][keeper['id']]=copy.deepcopy(keeper)
             self.current['inventory']['unlinked_quarantine']+=len(undo['rows'])
-            del self.current['origin_undo'];self.persist();return self.status()
+            scope=json.dumps(self.current['config'].get('roots',[]),sort_keys=True)
+            with self.db() as db:db.execute('INSERT OR REPLACE INTO origin_cursor VALUES (?,?)',(scope,undo['target']))
+            del self.current['origin_undo'];self.persist();return {**self.status(),'restored_target':undo['target']}
 
     def neighbors(self,ident,offset=0):
         with self.lock:

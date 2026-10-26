@@ -22,16 +22,41 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  assert.equal(await page.locator('#grid .card').count(),25);
  await page.locator('#historyCandidateNext').click();await page.waitForFunction(()=>historyPage===1&&!busy);
  await page.locator('#historySearch').fill('A0.png');await page.locator('#historySearchButton').click();await page.waitForFunction(()=>historyData.candidate_count===1&&!busy);
- await page.locator('#grid .card').nth(1).getByRole('button',{name:'Keep',exact:true}).click();
- assert.equal(await page.locator('#finishGroup').isEnabled(),true);
+ assert.equal(await page.locator('#finishGroup').isVisible(),false);
+ assert.equal(await page.locator('#grid').getByRole('button',{name:'Keep',exact:true}).count(),0);
+ const savedJob=await page.evaluate(()=>historyData.job),savedTarget=await page.evaluate(()=>historyData.digest);
+ const refreshes=mutations.filter(p=>p==='/api/history/inventory').length;
+ await page.reload();await page.waitForFunction(()=>snapshot!==null);await page.locator('#reviewQueue').selectOption('history');await page.waitForFunction(()=>historyData?.total===2&&!busy);
+ assert.equal(await page.evaluate(()=>historyData.job),savedJob);
+ assert.equal(await page.evaluate(()=>historyData.digest),savedTarget);
+ assert.equal(await page.evaluate(()=>historyData.matching_ready),true);
+ assert.equal(mutations.filter(p=>p==='/api/history/inventory').length,refreshes);
+ await page.locator('#historySearch').fill('A0.png');await page.locator('#historySearchButton').click();await page.waitForFunction(()=>historyData.candidate_count===1&&!busy);
  await page.locator('#compare').click();await page.locator('#compareDialog[open]').waitFor();
  assert.equal(await page.locator('#keepLeft').isEnabled(),false);assert.equal(await page.locator('#keepRight').isEnabled(),true);
+ assert.equal(await page.locator('#keepRight').textContent(),'Keep & next');
+ assert.equal(await page.locator('#rightKeepChoice').isVisible(),false);
  assert.equal(await page.locator('#compareDialog button').filter({hasText:'Different image'}).count(),2);
  assert.equal(await page.locator('#compareDialog button').filter({hasText:'Different image'}).first().isVisible(),false);
  await page.locator('#zoom').selectOption('100');await page.locator('#closeCompare').click();
  const target=await page.evaluate(()=>historyData.digest);
- await page.locator('#finishGroup').click();await page.waitForFunction(()=>historyData.total===1&&!busy);
+ const confirms=mutations.filter(p=>p==='/api/bulk/confirm-origin').length;
+ await page.locator('#grid .card').nth(1).getByRole('button',{name:'Keep & next',exact:true}).click();await page.waitForFunction(()=>historyData.total===1&&!busy);
+ assert.equal(mutations.filter(p=>p==='/api/bulk/confirm-origin').length,confirms+1);
+ assert.notEqual(await page.evaluate(()=>historyData.digest),target);
  await page.locator('#undo').click();await page.waitForFunction(()=>historyData.total===2&&!busy);
+ assert.equal(await page.evaluate(()=>historyData.digest),target);
+ // Confirm the other entry in large comparison; undo must return to that exact
+ // entry, including after reloading and changing the status filter.
+ await page.locator('#next').click();await page.waitForFunction(()=>historyData.offset===1&&!busy);
+ const second=await page.evaluate(()=>historyData.digest);
+ await page.locator('#compare').click();await page.locator('#keepRight').click();await page.waitForFunction(()=>historyData.total===1&&!busy);
+ assert.equal(await page.locator('#compareDialog').evaluate(e=>e.open),false);
+ await page.reload();await page.waitForFunction(()=>snapshot!==null);await page.locator('#reviewQueue').selectOption('history');await page.waitForFunction(()=>historyData?.total===1&&!busy);
+ await page.locator('#historyFilter').selectOption('deferred');await page.waitForFunction(()=>historyData.total===0&&!busy);
+ await page.locator('#undo').click();await page.waitForFunction(()=>historyData.total===2&&!busy);
+ assert.equal(await page.evaluate(()=>historyData.digest),second);
+ assert.equal(mutations.filter(p=>p==='/api/history/inventory').length,refreshes);
  await page.locator('#keepGroup').click();await page.waitForFunction(()=>historyData.counts.deferred===1&&!busy);
  await page.locator('#historyFilter').selectOption('deferred');await page.waitForFunction(()=>historyData.total===1&&!busy);
  await page.locator('#historyDiscard').click();await page.locator('#dialogYes').click();await page.waitForFunction(()=>historyData.total===0&&!busy);
@@ -43,9 +68,11 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  await page.locator('#reviewQueue').selectOption('regular');await page.waitForFunction(()=>!busy&&!historyModeActive());
  assert.equal(await page.locator('#scan').isEnabled(),true);assert.equal(await page.locator('#mode').inputValue(),'balanced');assert.equal(await page.locator('#autoToolbar').isVisible(),true);
  assert.equal(await page.locator('#keepGroup').textContent(),'Keep all / dismiss group');
+ assert.equal(await page.locator('#finishGroup').evaluate(e=>e.classList.contains('hidden')),false);
+ assert.equal(await page.locator('#keepRight').textContent(),'Keep only this');
  await page.goto(info.url+'/bulk');await page.locator('#originAudit').click();await page.waitForURL('**/#history');await page.waitForFunction(()=>historyModeActive()&&historyData?.total===2&&!busy);
  assert.deepEqual(errors,[]);
  assert(!mutations.some(p=>/^\/api\/(selection|group|undo|scan|verified)/.test(p)),mutations.join(','));
- console.log('Shared history review passed: inventory-only, familiar cards/comparison, keep/confirm/undo, defer/discard, paging/search, saved cursor, regular-mode restoration, old-menu redirect, no file-move calls.');
+ console.log('Shared history review passed: single-click grid/large confirmation, undo returns to exact entry after reload/filter change, saved matching job without refresh, defer/discard, paging/search, regular-mode restoration, no file-move calls.');
  }finally{await browser?.close();server.kill()}
 })().catch(e=>{console.error(e);process.exitCode=1});

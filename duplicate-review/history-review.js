@@ -1,6 +1,6 @@
 // Historical duplicate review shares the normal cards, comparison viewer and
 // Keep controls. Only confirmation differs: record origins, never move files.
-let historyData=null,historyState=null,historyConfig={},historyKeeper=null;
+let historyData=null,historyState=null,historyConfig={};
 let historyPage=0,historyTarget=null,historyLoadedJob=null,historyListOffset=0,regularMatching=null;
 const historyHidden=new Map();
 function historyModeActive(){return $('reviewQueue').value==='history'}
@@ -13,7 +13,7 @@ function historyControls(){
  for(const id of ['mode','workers','historyRefresh','historyPick','historyRoots','historyMode','historyFilter','historySearch','historySearchButton','connectLibrary','libraryCharacter','reviewQueue'])$(id).disabled=locked;
  $('historyStop').classList.toggle('hidden',!historyState?.running);$('historyStop').disabled=busy;
  $('undo').textContent='Undo last connection';$('undo').disabled=locked||!historyData?.can_undo;
- $('finishGroup').textContent='Finish group · save keeper connection';$('finishGroup').disabled=locked||!historyKeeper;
+ $('finishGroup').disabled=true;
  $('keepGroup').textContent='Defer / next';$('keepGroup').disabled=locked||!historyData?.image;
  for(const id of ['historyDiscard','historyPending'])$(id).disabled=locked||!historyData?.image;
  $('prev').disabled=locked||!historyData?.offset;$('next').disabled=locked||!historyData||historyData.offset+1>=historyData.total;
@@ -30,33 +30,31 @@ function adaptHistoryCard(r,bottom){
  if(r.match){const proof=document.createElement('p');proof.className='note';proof.textContent=r.match.kind+' · match score '+r.match.score;bottom.append(proof)}
  if(r.unavailable){const warning=document.createElement('p');warning.className='note';warning.textContent='File unavailable: '+r.unavailable;bottom.append(warning)}
  if(r.quarantined){const note=document.createElement('p');note.className='note';note.textContent=historyData.copy_count+' quarantined file(s) represented. Choose the same photograph among the surviving copies.';bottom.append(note)}
- else {const keep=button(r.keep?'✓ Keep':'Keep',()=>selectHistoryKeeper(r),r.keep?'primary':'keep-choice');keep.dataset.protected=r.unavailable?'1':'0';bottom.append(keep);const confirm=button('Keep only this',()=>confirmHistoryKeeper(r),'primary');confirm.dataset.protected=r.unavailable?'1':'0';bottom.append(confirm)}
+ else {const confirm=button('Keep & next',()=>confirmHistoryKeeper(r),'primary');confirm.title='Save this keeper connection and advance. Undo last connection reverses it.';confirm.dataset.protected=r.unavailable?'1':'0';bottom.append(confirm)}
  const actions=document.createElement('div');actions.className='row row-actions';actions.append(button('Open original',()=>task(()=>openReviewFile(r))),button('Show in folder',()=>task(()=>openReviewFile(r,true))));bottom.append(actions);
  const origins=document.createElement('details'),summary=document.createElement('summary'),text=document.createElement('div');summary.textContent='Original locations';text.style.overflowWrap='anywhere';text.textContent=(r.quarantined?historyData.origins:r.origins||[]).map(o=>o.original_path||o.path).join('\n');text.style.whiteSpace='pre-wrap';origins.append(summary,text);bottom.append(origins);
 }
 function selectHistoryKeeper(r){
- if(busy||historyState?.running||r.quarantined||r.unavailable)return;
- historyKeeper=historyKeeper===r.origin_id?null:r.origin_id;
- members.forEach(m=>m.keep=m.origin_id===historyKeeper);renderCards();controls();
- if($('compareDialog').open){refreshComparisonResolution();historyCompareControls()}
+ return confirmHistoryKeeper(r,$('compareDialog').open);
 }
 function historyCompareControls(){
  for(const side of ['left','right']){
   const r=members.find(m=>m.id===Number($(side+'Choice').value));
   const row=$(side+'Details').parentElement;
-  row.querySelectorAll('button').forEach(b=>b.classList.toggle('hidden',!['keep'+side[0].toUpperCase()+side.slice(1),'open'+side[0].toUpperCase()+side.slice(1),side+'KeepChoice'].includes(b.id)));
-  const disabled=busy||!r||r.quarantined||!!r.unavailable;
+  row.querySelectorAll('button').forEach(b=>b.classList.toggle('hidden',!['keep'+side[0].toUpperCase()+side.slice(1),'open'+side[0].toUpperCase()+side.slice(1)].includes(b.id)));
+  const disabled=busy||historyState?.running||snapshot?.status.running||!r||r.quarantined||!!r.unavailable;
   $(side+'KeepChoice').disabled=disabled;
-  const keep=$('keep'+side[0].toUpperCase()+side.slice(1));keep.disabled=disabled;keep.textContent='Keep only this';
+  const keep=$('keep'+side[0].toUpperCase()+side.slice(1));keep.disabled=disabled;keep.textContent=r?.quarantined?'Already quarantined':'Keep & next';
  }
 }
 async function confirmHistoryKeeper(r,fromCompare=false){
- if(!r||r.quarantined||r.unavailable||busy)return;
+ if(!r||r.quarantined||r.unavailable||busy||historyState?.running||snapshot?.status.running)return;
  // Candidate grids contain suggestions, not a claim that every candidate is a duplicate.
  return task(async()=>{
+  const offset=historyData.offset;
   await api('/api/bulk/confirm-origin',{job:historyData.job,target:historyData.image.id,keeper:r.origin_id});
-  if(fromCompare)closeCompare();historyTarget=null;historyPage=0;await loadHistory();
-  toast('Keeper connection saved. All original locations retained; no files moved.');
+  if(fromCompare)closeCompare();historyTarget=null;historyPage=0;await loadHistory(offset);
+  toast('Connection saved. Use Undo last connection to reverse it. No files moved.');
  });
 }
 async function markHistory(status){
@@ -79,7 +77,7 @@ async function loadHistory(offset=null){
  if(offset!==null)params.set('offset',offset);else if(historyTarget)params.set('target',historyTarget);
  const data=await api('/api/bulk/origin-audit?'+params);
  if(!historyModeActive())return;
- historyData=data;historyLoadedJob=data.job;historyTarget=data.digest||null;historyKeeper=null;
+ historyData=data;historyLoadedJob=data.job;historyTarget=data.digest||null;
  historyListOffset=Math.floor((data.offset||0)/50)*50;
  members=data.image?[data.image,...data.candidates].map((r,i)=>({...r,origin_id:r.id,id:i+1,quarantined:i===0,keep:false})):[];
  $('files').textContent=data.inventory.readable||0;$('groupCount').textContent=data.total;
@@ -90,7 +88,7 @@ async function loadHistory(offset=null){
  $('groupTitle').textContent=data.image?data.copy_count+' quarantined file(s) · choose surviving copy':'';
  $('groupKind').textContent=data.image?historyLabel(data.review_status):'';
  $('position').textContent=data.total?(data.offset+1)+' / '+data.total:'';
- $('reviewHelp').textContent='First card: already quarantined. The other cards are possible matches, not confirmed duplicates. Mark the matching survivor Keep, then Finish group. Defer if unsure; no files move.';
+ $('reviewHelp').textContent='First card: already quarantined. Click Keep & next on the matching survivor to save its connection and advance immediately. Undo last connection brings the comparison back. Defer if unsure; no files move.';
  $('historyOrigins').textContent=(data.origins||[]).map(o=>'Original: '+(o.original_path||o.path)+(o.quarantine_path?'\nQuarantine: '+o.quarantine_path:'')).join('\n\n');
  $('historyCandidateCount').textContent=data.candidate_count?((historyPage*24+1)+'–'+Math.min((historyPage+1)*24,data.candidate_count)+' of '+data.candidate_count+' candidates'):(data.matching_ready?'No matches at '+data.matching_mode+'. Try Broad and refresh, or search/browse manually. The entry remains unresolved.':'Refresh duplicate history to run the original duplicate matcher on this inventory.');
  const c=data.counts;$('status').textContent='Duplicate history · '+data.matching_mode+' matching · '+data.total_files+' unlinked files · '+c.pending+' pending · '+c.deferred+' deferred · '+(c.discarded||0)+' intentionally discarded'+(c.no_counterpart?' · '+c.no_counterpart+' previously marked no counterpart':'');
@@ -112,9 +110,9 @@ async function refreshHistory(force=false){
  }catch(e){toast(e.message,true)}finally{polling=false}
 }
 async function switchReviewQueue(){
- closeCompare();selected.clear();historyKeeper=null;
+ closeCompare();selected.clear();
  const active=historyModeActive();$('historySetup').classList.toggle('hidden',!active);
- const ids=['autoToolbar','autoInfo','selectionCount','moveSelected','clearSelection','sort','quarantineGroup','viewVerified','cancel'];
+ const ids=['autoToolbar','autoInfo','selectionCount','moveSelected','clearSelection','sort','quarantineGroup','viewVerified','cancel','finishGroup'];
  const nodes=[...ids.map($),document.querySelector('label[for="sort"]')];
  if(active){
   regularMatching={mode:$('mode').value,workers:$('workers').value};
@@ -129,6 +127,7 @@ async function switchReviewQueue(){
   if(regularMatching){$('mode').value=regularMatching.mode;$('workers').value=regularMatching.workers;}
   $('undo').textContent='Undo last action';$('keepGroup').textContent='Keep all / dismiss group';$('groupCount').nextElementSibling.textContent='groups to review';
   document.querySelectorAll('#compareDialog .row button').forEach(b=>b.classList.remove('hidden'));
+  for(const side of ['Left','Right'])$('keep'+side).textContent='Keep only this';
   $('reviewQueue').disabled=false;seenRevision=-1;await refresh(true);
  }
 }
@@ -150,9 +149,9 @@ $('historyPending').onclick=()=>task(()=>markHistory('pending'));
 $('historyDiscard').onclick=()=>dialog('Mark intentionally discarded?','Use this only if you recognize this as a photo you intentionally discarded. If unsure, use Defer. This keeps all files and original paths; it does not create a keeper connection.',()=>task(()=>markHistory('discarded')));
 // Preserve the regular handlers; historical confirmation never calls move/restore.
 for(const [id,action] of Object.entries({
- finishGroup:()=>confirmHistoryKeeper(members.find(r=>r.origin_id===historyKeeper)),
+ finishGroup:()=>{},
  keepGroup:()=>task(()=>markHistory('deferred')),
- undo:()=>task(async()=>{await api('/api/bulk/undo-origin',{job:historyData.job});historyTarget=null;await loadHistory()}),
+ undo:()=>task(async()=>{const restored=await api('/api/bulk/undo-origin',{job:historyData.job});historyTarget=restored.restored_target;historyPage=0;$('historyFilter').value='all';await loadHistory();toast('Connection undone. The restored comparison is ready to review.')}),
  prev:()=>task(async()=>{historyPage=0;await loadHistory(historyData.offset-1)}),
  next:()=>task(async()=>{historyPage=0;await loadHistory(historyData.offset+1)}),
  listPrev:()=>{historyListOffset=Math.max(0,historyListOffset-50);renderHistoryList();controls()},

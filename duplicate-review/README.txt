@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.9.5
+LOCAL DUPLICATE REVIEW 1.9.6
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -15,7 +15,18 @@ Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private
 Duplicate scans and image processing stay local; no cloud account or GPU is required.
 The optional set-preparation pilot downloads matching models on first use.
 
-NEW IN 1.9.5: USE THE ORIGINAL DUPLICATE MATCHER FOR HISTORY
+NEW IN 1.9.6: ONE-CLICK HISTORY REVIEW, NO RESCAN
+- Click Keep & next on the matching survivor to save the connection and advance
+  immediately. The same button works in Compare large. No Finish group step.
+- Undo last connection restores the last connection's comparison, including after
+  restarting. Every original location is retained; no files move.
+- Updating from a completed 1.9.5 history scan requires NO refresh or rescan.
+  Quit, replace the program files, relaunch, and choose Unresolved quarantine
+  copies. Continue from the saved queue. Keep both databases in their existing
+  location; matching settings, recipes and cached results are unchanged.
+- Regular duplicate groups retain their existing Keep/Finish group controls.
+
+PREVIOUS 1.9.5: USE THE ORIGINAL DUPLICATE MATCHER FOR HISTORY
 - Unresolved quarantine copies now use the SAME whole-image similarity and
   crop/rotation/mirror verification routines as normal duplicate review.
 - Strict / Balanced / Broad and CPU workers are available on the left. Refresh
@@ -23,7 +34,8 @@ NEW IN 1.9.5: USE THE ORIGINAL DUPLICATE MATCHER FOR HISTORY
 - Suggested matches must pass the normal manual-review matcher. Loose hashes and
   indirect links no longer populate the grid. This is not verified-only cleanup;
   difficult copies remain eligible for manual judgment at the chosen setting.
-- Update, choose Unresolved quarantine copies, and Refresh duplicate history once.
+- When upgrading a pre-1.9.5 inventory, choose Unresolved quarantine copies and
+  Refresh duplicate history once. Already completed 1.9.5 scans need no refresh.
   Old inventory suggestions require this refresh. The first pass may take longer;
   existing image analysis and completed targeted comparisons are reused.
 - Only unresolved quarantine enters the queue. Trusted matches stay excluded.

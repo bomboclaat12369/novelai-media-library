@@ -2,11 +2,17 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## One-click history review (Duplicate Review 1.9.6)
+
+**Keep & next** on a surviving candidate now saves the keeper connection and advances immediately, in both the grid and large comparison. **Undo last connection** reverses the choice and returns to that exact comparison, including after restarting. All original paths remain preserved and no files move. Regular duplicate review retains its existing controls.
+
+**No refresh or rescan is required for an already completed 1.9.5 history scan.** Quit the app, replace its program files, relaunch, and select **Unresolved quarantine copies** to continue the saved queue. Existing matching results, confirmations, deferred labels, regular groups and caches carry over from the databases stored separately in `%LOCALAPPDATA%\LocalDuplicateReview`. This release does not change matching algorithms, cache keys or database formats.
+
 ## Original duplicate matching for history repair (Duplicate Review 1.9.5)
 
 Historical review now uses the original duplicate checker's whole-image and crop/rotation/mirror matching routines, with the same **Strict / Balanced / Broad** thresholds. Only unresolved quarantined photos are compared against survivors for review. Exact, verified visual and recorded keeper connections remain excluded. The suggested grid no longer admits loose fingerprint matches or indirect matches through other photos. These are manual-review matches, not automatic same-photo guarantees.
 
-After updating, select **Unresolved quarantine copies** in the normal screen and click **Refresh duplicate history** once. Choose matching mode and CPU workers on the left before refreshing. This rebuilds suggestions for the full inventory without set grouping. Existing history confirmations, origins, deferred/discarded labels and regular duplicate groups are retained; no files move. Missing matches remain unresolved. Explicit search and **Browse all survivors (manual)** remain available.
+When upgrading a pre-1.9.5 inventory, select **Unresolved quarantine copies** in the normal screen and click **Refresh duplicate history** once. Already completed 1.9.5 scans need no refresh for 1.9.6. Choose matching mode and CPU workers on the left before refreshing. This rebuilds suggestions for the full inventory without set grouping. Existing history confirmations, origins, deferred/discarded labels and regular duplicate groups are retained; no files move. Missing matches remain unresolved. Explicit search and **Browse all survivors (manual)** remain available.
 
 The first matching refresh may take longer while preparing any missing fingerprints. Original fingerprints are reused by content, and targeted crop comparisons are cached separately so regular review state is untouched. Stop and refresh reuse completed analysis. Old inventories show a refresh prompt instead of using the former weak recovery suggestions.
 
