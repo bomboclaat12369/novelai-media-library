@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "version": "2.0.0",
+  "sha256": "9d117303861a6d115e900301bcf3b952e58b139838e3944f25f9f24fa11fc0f7",
+  "notes": "Folder-first organization, persistent review and analysis, stage ETA, and verified in-app updates. No rescan required.",
+  "parts": [
+    {
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/d061a8832e49f093b3e7d8910793789c5ad83161/payload/duplicate-review-2.0.0.part01.txt",
+      "sha256": "92b2b77c1c2f8fcd9be35963b48a439ba7012e7a1599e095d7e7741f72600d38"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/d061a8832e49f093b3e7d8910793789c5ad83161/payload/duplicate-review-2.0.0.part02.txt",
+      "sha256": "52c6a3934bcccedb264dd2bffd15313b73c7e1b72c98f0d7b51a515d099dcdf5"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/d061a8832e49f093b3e7d8910793789c5ad83161/payload/duplicate-review-2.0.0.part03.txt",
+      "sha256": "0ed1018cc650dd2f6a770e46060d81c9eefdbb9dfa304f8411d40f92e01f7af2"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/d061a8832e49f093b3e7d8910793789c5ad83161/payload/duplicate-review-2.0.0.part04.txt",
+      "sha256": "9238f5133b78f68d890549f76888a9826065e0324a21fa2ea5d85696f3a05d04"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/d061a8832e49f093b3e7d8910793789c5ad83161/payload/duplicate-review-2.0.0.part05.txt",
+      "sha256": "dccb63fc85fd3403e49fbc17104c99bedb88d678a432a9dbf9742f4c4c80f8bc"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/d061a8832e49f093b3e7d8910793789c5ad83161/payload/duplicate-review-2.0.0.part06.txt",
+      "sha256": "2ed1236b376df9b52c17968d1b475edc0f45f606115922e491a6db94a18857a2"
+    }
+  ]
+}
