@@ -20,7 +20,8 @@ from functools import lru_cache
 import same_photo
 
 import numpy as np
-from engine import linked, sha256, stat_key, pixel_digest, QUARANTINE, BKTree
+from engine import linked, sha256, stat_key, pixel_digest, QUARANTINE, BKTree, MODES
+from .history_matching import HistoryMatcher, RECIPE as HISTORY_RECIPE
 from .sources import source_of
 from .grouping import propose, RECIPE
 from .clothing import classify
@@ -77,7 +78,7 @@ class Workbench:
     def status(self):
         with self.lock:
             if not self.current:return {'running':False,'phase':'Ready for a local evaluation','groups':[], 'jobs':self.jobs()}
-            out={k:copy.deepcopy(v) for k,v in self.current.items() if k not in ('items','proposals','unassigned','duplicate_families','source_profiles','match_diagnostics','source_shoots','review_exclusions','source_catalog','review_undo','origin_undo')}
+            out={k:copy.deepcopy(v) for k,v in self.current.items() if k not in ('items','proposals','unassigned','duplicate_families','source_profiles','match_diagnostics','source_shoots','review_exclusions','source_catalog','review_undo','origin_undo','history_matches')}
             out['groups']=[{k:v for k,v in g.items() if k not in ('members','original_members','sources','evidence')}|{'count':len(g['members'])} for g in self.current.get('proposals',[])]
             reviews=[g for g in self.current.get('proposals',[]) if g.get('review')=='accepted']
             out['evaluation']={'accepted':len(reviews),'unchanged':sum(set(g['members'])==set(g['original_members']) for g in reviews),
@@ -125,6 +126,9 @@ class Workbench:
             if not forum or len(forum)>80:raise ValueError('Give the source forum a short unique label.')
             config={'roots':list(dict.fromkeys(roots)), 'limit':limit, 'forum':forum,
                     'person':str(body.get('person','Collection'))[:120], 'character_id':str(body.get('character_id',''))}
+            mode=body.get('duplicate_mode',self.engine.config().get('mode','balanced'))
+            if mode not in MODES:raise ValueError('Choose Strict, Balanced or Broad duplicate matching.')
+            config.update(duplicate_mode=mode,workers=max(1,min(32,int(body.get('workers',8)))))
             self.current={'id':uuid.uuid4().hex,'config':config,'recipe':RECIPE,'running':True,'phase':'Inventorying original and quarantined files',
                           'done':0,'total':0,'issues':[],'items':{},'proposals':[],'unassigned':[], 'created':time.time()}
             self.current['inventory_only']=inventory_only
@@ -438,6 +442,8 @@ class Workbench:
             else:
                 found=self.inventory(config);items=self.identities(found)
                 if self.current.get('inventory_only'):
+                    self.current['history_matches']=HistoryMatcher(self).run()
+                    self.current['history_match_recipe']=HISTORY_RECIPE
                     self.update(phase='Duplicate history ready',inventory_complete=True,done=len(found),total=len(found))
                     return
                 chosen=self.sample(items,config['limit'])
@@ -595,6 +601,8 @@ class Workbench:
             regular=self.engine.groups()
             summary={'total_files':sum(map(len,families.values())),'counts':counts,
                 'job':self.current['id'],'can_undo':bool(self.current.get('origin_undo')),
+                'matching_ready':self.current.get('history_match_recipe')==HISTORY_RECIPE,
+                'matching_mode':self.current['config'].get('duplicate_mode','balanced'),
                 'entries':[{'digest':rows[0]['sha'],'name':Path(rows[0]['path']).name,'count':len(rows),
                     'status':statuses.get(rows[0]['sha'],'pending')} for rows in pending],
                 'regular_groups':len(regular['groups']),'regular_images':sum(g['count'] for g in regular['groups']),
@@ -605,30 +613,25 @@ class Workbench:
             at=next((i for i,rows in enumerate(pending) if rows[0]['sha']==wanted),0) if offset is None else max(0,min(int(offset),len(pending)-1))
             rows=pending[at];item=rows[0];digest=item['sha']
             with self.db() as db:db.execute('INSERT OR REPLACE INTO origin_cursor VALUES (?,?)',(scope,digest))
-            with self.engine.db() as db:
-                hashes={r[0]:(int(r[1]),int(r[2])) for r in db.execute('SELECT sha,ph,mh FROM cache') if r[1] is not None and r[2] is not None}
-                edges={}
-                for a,b in db.execute('SELECT a.sha,b.sha FROM pairs p JOIN files a ON a.id=p.a JOIN files b ON b.id=p.b'):
-                    edges.setdefault(a,set()).add(b);edges.setdefault(b,set()).add(a)
-            direct=edges.get(digest,set());neighbors=set(direct)
-            for other in direct:neighbors.update(edges.get(other,set()))
-            def rank(other):
-                digests={other['sha']}|{c['sha'] for c in other.get('copies',[]) if not c['quarantine']}
-                distance=min((a^b).bit_count() for sha in digests if sha in hashes for a,b in zip(hashes[digest],hashes[sha])) if digest in hashes and digests.intersection(hashes) else 100
-                return (not bool(digests&direct),not bool(digests&neighbors),distance,other['id'])
+            # Suggestions require an actual direct result from the ordinary
+            # duplicate matcher. Never fill this grid with hash-only neighbors
+            # or matches-of-matches. Explicit search/all browsing stays available.
+            matches={r['id']:r for r in self.current.get('history_matches',{}).get(digest,[])} if summary['matching_ready'] else {}
             candidates=[];query=str(query).strip().casefold()
             for other in catalog.values():
                 if other.get('quarantine_only'):continue
-                score=rank(other)
+                match=matches.get(other['id'])
+                score=(match is None,-match['score'] if match else 0,other['id'])
                 if query:
-                    text=' '.join([other['path']]+[o['path'] for o in other.get('origins',[])])
+                    text=' '.join([other['path']]+[o.get('original_path',o['path']) for o in other.get('origins',[])])
                     if query not in text.casefold():continue
-                elif mode!='all' and score[1] and score[2]>20:continue
+                elif mode!='all' and match is None:continue
                 candidates.append((score,other))
             candidates.sort(key=lambda pair:pair[0]);page=max(0,int(page));start=page*24
             def review_image(ident):
                 from PIL import Image
                 result=self.image_info(ident)
+                if ident in matches:result['match']=matches[ident]
                 try:
                     path=self.preview_path(ident)
                     with Image.open(path) as im:result.update(w=im.width,h=im.height,size=path.stat().st_size)

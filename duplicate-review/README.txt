@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.9.4
+LOCAL DUPLICATE REVIEW 1.9.5
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -14,6 +14,22 @@ Requires 64-bit Python 3.11-3.14 (3.13 recommended), including tkinter and the
 Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private .venv.
 Duplicate scans and image processing stay local; no cloud account or GPU is required.
 The optional set-preparation pilot downloads matching models on first use.
+
+NEW IN 1.9.5: USE THE ORIGINAL DUPLICATE MATCHER FOR HISTORY
+- Unresolved quarantine copies now use the SAME whole-image similarity and
+  crop/rotation/mirror verification routines as normal duplicate review.
+- Strict / Balanced / Broad and CPU workers are available on the left. Refresh
+  duplicate history to apply them. Set grouping is not run.
+- Suggested matches must pass the normal manual-review matcher. Loose hashes and
+  indirect links no longer populate the grid. This is not verified-only cleanup;
+  difficult copies remain eligible for manual judgment at the chosen setting.
+- Update, choose Unresolved quarantine copies, and Refresh duplicate history once.
+  Old inventory suggestions require this refresh. The first pass may take longer;
+  existing image analysis and completed targeted comparisons are reused.
+- Only unresolved quarantine enters the queue. Trusted matches stay excluded.
+  Regular review groups/decisions, existing connections and every origin remain
+  intact. No files move. Unmatched entries stay unresolved; manual search and
+  Browse all survivors are still available and explicitly separate from matches.
 
 NEW IN 1.9.4: FAMILIAR DUPLICATE REVIEW FOR QUARANTINE HISTORY
 1. Finish your remaining Regular duplicate groups as usual.

@@ -8,13 +8,15 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  const page=await browser.newPage({viewport:{width:1600,height:1100}}),errors=[],mutations=[];
  page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.method()==='POST')mutations.push(new URL(r.url()).pathname)});page.setDefaultTimeout(20000);
  await page.goto(info.url);await page.waitForFunction(()=>snapshot!==null);
- await page.locator('#reviewQueue').selectOption('history');await page.locator('#historyRoots').fill(info.incoming);await page.locator('#historyRefresh').click();
+ await page.locator('#reviewQueue').selectOption('history');await page.locator('#historyRoots').fill(info.incoming);await page.locator('#mode').selectOption('strict');await page.locator('#historyRefresh').click();
  await page.waitForFunction(()=>historyData?.total===2&&!busy);
  assert.equal(await page.locator('#grid .card').count(),1);
  assert((await page.locator('#historyOrigins').textContent()).includes('Post 90'));
  assert.equal(await page.locator('#moveSelected').isVisible(),false);
  assert.equal(await page.locator('#autoToolbar').isVisible(),false);
  assert.equal(await page.evaluate(()=>historyState.inventory_only),true);
+ assert.equal(await page.evaluate(()=>historyData.matching_ready),true);assert.equal(await page.evaluate(()=>historyData.matching_mode),'strict');
+ assert.equal(await page.locator('#mode').isEnabled(),true);
  assert.equal(await page.evaluate(()=>historyState.feature_model),undefined);
  await page.locator('#historyMode').selectOption('all');await page.waitForFunction(()=>historyData.candidate_count===78&&!busy);
  assert.equal(await page.locator('#grid .card').count(),25);
@@ -39,7 +41,7 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  await page.reload();await page.waitForFunction(()=>snapshot!==null);await page.locator('#reviewQueue').selectOption('history');await page.waitForFunction(()=>historyData?.total===2&&!busy);
  assert.equal(await page.evaluate(()=>historyData.digest),digest);
  await page.locator('#reviewQueue').selectOption('regular');await page.waitForFunction(()=>!busy&&!historyModeActive());
- assert.equal(await page.locator('#scan').isEnabled(),true);assert.equal(await page.locator('#autoToolbar').isVisible(),true);
+ assert.equal(await page.locator('#scan').isEnabled(),true);assert.equal(await page.locator('#mode').inputValue(),'balanced');assert.equal(await page.locator('#autoToolbar').isVisible(),true);
  assert.equal(await page.locator('#keepGroup').textContent(),'Keep all / dismiss group');
  await page.goto(info.url+'/bulk');await page.locator('#originAudit').click();await page.waitForURL('**/#history');await page.waitForFunction(()=>historyModeActive()&&historyData?.total===2&&!busy);
  assert.deepEqual(errors,[]);

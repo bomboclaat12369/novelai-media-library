@@ -2,6 +2,14 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Original duplicate matching for history repair (Duplicate Review 1.9.5)
+
+Historical review now uses the original duplicate checker's whole-image and crop/rotation/mirror matching routines, with the same **Strict / Balanced / Broad** thresholds. Only unresolved quarantined photos are compared against survivors for review. Exact, verified visual and recorded keeper connections remain excluded. The suggested grid no longer admits loose fingerprint matches or indirect matches through other photos. These are manual-review matches, not automatic same-photo guarantees.
+
+After updating, select **Unresolved quarantine copies** in the normal screen and click **Refresh duplicate history** once. Choose matching mode and CPU workers on the left before refreshing. This rebuilds suggestions for the full inventory without set grouping. Existing history confirmations, origins, deferred/discarded labels and regular duplicate groups are retained; no files move. Missing matches remain unresolved. Explicit search and **Browse all survivors (manual)** remain available.
+
+The first matching refresh may take longer while preparing any missing fingerprints. Original fingerprints are reused by content, and targeted crop comparisons are cached separately so regular review state is untouched. Stop and refresh reuse completed analysis. Old inventories show a refresh prompt instead of using the former weak recovery suggestions.
+
 ## Familiar duplicate-history review (Duplicate Review 1.9.4)
 
 The normal duplicate-review screen now includes **Review queue → Unresolved quarantine copies**. Historical comparisons reuse the image cards, Keep choices, and large comparison viewer. **Finish group** saves the chosen survivor's connection to every represented quarantine origin; it does not move or restore files. The other candidates are suggestions, not copies to remove.

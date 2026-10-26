@@ -1,7 +1,7 @@
 // Historical duplicate review shares the normal cards, comparison viewer and
 // Keep controls. Only confirmation differs: record origins, never move files.
 let historyData=null,historyState=null,historyConfig={},historyKeeper=null;
-let historyPage=0,historyTarget=null,historyLoadedJob=null,historyListOffset=0;
+let historyPage=0,historyTarget=null,historyLoadedJob=null,historyListOffset=0,regularMatching=null;
 const historyHidden=new Map();
 function historyModeActive(){return $('reviewQueue').value==='history'}
 function reviewPreview(r,size){return (historyModeActive()?'/api/bulk/image?id='+encodeURIComponent(r.origin_id):'/api/preview?id='+r.id)+'&size='+size+'&token='+token}
@@ -9,8 +9,8 @@ function openReviewFile(r,reveal=false){return api(historyModeActive()?'/api/his
 function historyLabel(s){return ({pending:'Unresolved',deferred:'Deferred',discarded:'Intentionally discarded',no_counterpart:'Previously marked no counterpart — unresolved'})[s]||s}
 function historyControls(){
  const running=!!historyState?.running||!!snapshot?.status.running,locked=busy||running;
- for(const id of ['scan','scanKind','workers','incoming','reference','mode','addIncoming','addReference','reset','resumeCleanup','resumeReplacement'])$(id).disabled=true;
- for(const id of ['historyRefresh','historyPick','historyRoots','historyMode','historyFilter','historySearch','historySearchButton','connectLibrary','libraryCharacter','reviewQueue'])$(id).disabled=locked;
+ for(const id of ['scan','scanKind','incoming','reference','addIncoming','addReference','reset','resumeCleanup','resumeReplacement'])$(id).disabled=true;
+ for(const id of ['mode','workers','historyRefresh','historyPick','historyRoots','historyMode','historyFilter','historySearch','historySearchButton','connectLibrary','libraryCharacter','reviewQueue'])$(id).disabled=locked;
  $('historyStop').classList.toggle('hidden',!historyState?.running);$('historyStop').disabled=busy;
  $('undo').textContent='Undo last connection';$('undo').disabled=locked||!historyData?.can_undo;
  $('finishGroup').textContent='Finish group · save keeper connection';$('finishGroup').disabled=locked||!historyKeeper;
@@ -27,6 +27,7 @@ function historyControls(){
 }
 function adaptHistoryCard(r,bottom){
  const meta=bottom.querySelector('.metadata');bottom.replaceChildren(meta);
+ if(r.match){const proof=document.createElement('p');proof.className='note';proof.textContent=r.match.kind+' · match score '+r.match.score;bottom.append(proof)}
  if(r.unavailable){const warning=document.createElement('p');warning.className='note';warning.textContent='File unavailable: '+r.unavailable;bottom.append(warning)}
  if(r.quarantined){const note=document.createElement('p');note.className='note';note.textContent=historyData.copy_count+' quarantined file(s) represented. Choose the same photograph among the surviving copies.';bottom.append(note)}
  else {const keep=button(r.keep?'✓ Keep':'Keep',()=>selectHistoryKeeper(r),r.keep?'primary':'keep-choice');keep.dataset.protected=r.unavailable?'1':'0';bottom.append(keep);const confirm=button('Keep only this',()=>confirmHistoryKeeper(r),'primary');confirm.dataset.protected=r.unavailable?'1':'0';bottom.append(confirm)}
@@ -91,9 +92,9 @@ async function loadHistory(offset=null){
  $('position').textContent=data.total?(data.offset+1)+' / '+data.total:'';
  $('reviewHelp').textContent='First card: already quarantined. The other cards are possible matches, not confirmed duplicates. Mark the matching survivor Keep, then Finish group. Defer if unsure; no files move.';
  $('historyOrigins').textContent=(data.origins||[]).map(o=>'Original: '+(o.original_path||o.path)+(o.quarantine_path?'\nQuarantine: '+o.quarantine_path:'')).join('\n\n');
- $('historyCandidateCount').textContent=data.candidate_count?((historyPage*24+1)+'–'+Math.min((historyPage+1)*24,data.candidate_count)+' of '+data.candidate_count+' candidates'):'No convincing candidates. Search or browse all survivors; this does not mean the copy is gone.';
- const c=data.counts;$('status').textContent='Duplicate history · '+data.total_files+' unlinked files · '+c.pending+' pending · '+c.deferred+' deferred · '+(c.discarded||0)+' intentionally discarded'+(c.no_counterpart?' · '+c.no_counterpart+' previously marked no counterpart':'');
- $('coverage').textContent=(data.complete_inventory?'Full inventory available. ':'Inventory incomplete — refresh before relying on totals. ')+data.regular_groups+' regular duplicate groups remain. Exact, verified visual and saved keeper links are excluded. '+(data.issues.length?data.issues.length+' file issues need inspection.':'');
+ $('historyCandidateCount').textContent=data.candidate_count?((historyPage*24+1)+'–'+Math.min((historyPage+1)*24,data.candidate_count)+' of '+data.candidate_count+' candidates'):(data.matching_ready?'No matches at '+data.matching_mode+'. Try Broad and refresh, or search/browse manually. The entry remains unresolved.':'Refresh duplicate history to run the original duplicate matcher on this inventory.');
+ const c=data.counts;$('status').textContent='Duplicate history · '+data.matching_mode+' matching · '+data.total_files+' unlinked files · '+c.pending+' pending · '+c.deferred+' deferred · '+(c.discarded||0)+' intentionally discarded'+(c.no_counterpart?' · '+c.no_counterpart+' previously marked no counterpart':'');
+ $('coverage').textContent=(data.complete_inventory?'Full inventory available. '+(data.matching_ready?'Original duplicate matcher applied. ':'Refresh required for original duplicate matching. '):'Inventory incomplete — refresh before relying on totals. ')+data.regular_groups+' regular duplicate groups remain. Exact, verified visual and saved keeper links are excluded. '+(data.issues.length?data.issues.length+' file issues need inspection.':'');
  $('errors').classList.toggle('hidden',!data.issues.length);$('progress').classList.add('hidden');
  renderHistoryList();renderCards();controls();
 }
@@ -102,7 +103,7 @@ async function refreshHistory(force=false){
  try{
   const state=await api('/api/bulk/state');if(!historyModeActive())return;
   historyState=state;
-  if(state.running){$('status').textContent=state.phase;$('progress').classList.remove('hidden');$('progress').max=state.total||1;$('progress').value=state.done;$('review').classList.add('hidden');$('empty').classList.remove('hidden');$('empty').querySelector('h2').textContent='Refreshing full duplicate history';$('empty').querySelector('p').textContent='Reading survivors and quarantine; no set grouping and no files moved.'}
+  if(state.running){$('status').textContent=state.phase;$('progress').classList.remove('hidden');$('progress').max=state.total||1;$('progress').value=state.done;$('review').classList.add('hidden');$('empty').classList.remove('hidden');$('empty').querySelector('h2').textContent='Refreshing full duplicate history';$('empty').querySelector('p').textContent='Comparing unresolved quarantine copies against survivors with the original duplicate matcher. No set grouping or file moves.'}
   else if(!state.id||state.error||state.interrupted||(!state.inventory&&!state.complete)){
    historyData=null;members=[];$('review').classList.add('hidden');$('empty').classList.remove('hidden');$('progress').classList.add('hidden');
    $('status').textContent=state.error||state.phase;$('empty').querySelector('h2').textContent='Refresh duplicate history to begin';$('empty').querySelector('p').textContent='Use your full collection folder, including quarantine. No need to build proposed sets.';
@@ -116,13 +117,16 @@ async function switchReviewQueue(){
  const ids=['autoToolbar','autoInfo','selectionCount','moveSelected','clearSelection','sort','quarantineGroup','viewVerified','cancel'];
  const nodes=[...ids.map($),document.querySelector('label[for="sort"]')];
  if(active){
+  regularMatching={mode:$('mode').value,workers:$('workers').value};
   for(const el of nodes){historyHidden.set(el,el.classList.contains('hidden'));el.classList.add('hidden')}
   historyState=await api('/api/bulk/state');historyConfig=historyState.config||{};
+  $('mode').value=historyConfig.duplicate_mode||regularMatching.mode;$('workers').value=String(historyConfig.workers||regularMatching.workers);
   if(!$('historyRoots').value)$('historyRoots').value=(historyConfig.roots||[...paths('incoming'),...paths('reference')]).join('\n');
   historyLoadedJob=null;historyTarget=null;historyPage=0;
   await refreshHistory(true);
  }else{
   historyHidden.forEach((hidden,el)=>el.classList.toggle('hidden',hidden));historyHidden.clear();
+  if(regularMatching){$('mode').value=regularMatching.mode;$('workers').value=regularMatching.workers;}
   $('undo').textContent='Undo last action';$('keepGroup').textContent='Keep all / dismiss group';$('groupCount').nextElementSibling.textContent='groups to review';
   document.querySelectorAll('#compareDialog .row button').forEach(b=>b.classList.remove('hidden'));
   $('reviewQueue').disabled=false;seenRevision=-1;await refresh(true);
@@ -131,7 +135,7 @@ async function switchReviewQueue(){
 $('reviewQueue').onchange=()=>task(switchReviewQueue);
 $('historyPick').onclick=()=>task(async()=>{const r=await api('/api/pick',{});if(r.path)$('historyRoots').value=[...new Set([...paths('historyRoots'),r.path])].join('\n')});
 $('historyRefresh').onclick=()=>task(async()=>{
- const config={...historyConfig,roots:paths('historyRoots'),limit:0};
+ const config={...historyConfig,roots:paths('historyRoots'),limit:0,duplicate_mode:$('mode').value,workers:Number($('workers').value)};
  // Retain the saved collection's companion choice; newly connected choices are explicit.
  if($('libraryCharacter').value)config.character_id=$('libraryCharacter').value;
  historyState=await api('/api/history/inventory',config);historyData=null;historyLoadedJob=null;historyTarget=null;historyPage=0;await refreshHistory(true);

@@ -25,7 +25,7 @@ import crop_match
 import same_photo
 from search_index import SearchIndexes
 
-VERSION = '1.9.4'
+VERSION = '1.9.5'
 ALGORITHM = 1
 QUARANTINE = '_Duplicate_Review_Quarantine'
 EXTENSIONS = {'.jpg', '.jpeg', '.jpe', '.jfif', '.png', '.webp', '.bmp', '.tif', '.tiff', '.avif', '.gif'}
@@ -554,7 +554,7 @@ class Engine:
         finally:
             self.set_status(running=False)
 
-    def match(self, records, mode):
+    def match(self, records, mode, target_shas=None):
         self.set_status(phase='Comparing images', done=0, total=len(records))
         trees = [BKTree(), BKTree()]
         by_sha, by_pixel = {}, {}
@@ -579,6 +579,8 @@ class Engine:
                         if self.cancel.is_set():
                             raise InterruptedError()
                         other = by_id[k]
+                        if target_shas is not None and (r['sha'] in target_shas)==(other['sha'] in target_shas):
+                            continue
                         result = similarity(r, other, mode)
                         if result:
                             self.add_pair(db, other, r, result[1], result[0], ignored)
@@ -628,13 +630,14 @@ class Engine:
             blocks.setdefault(member['position']//256, []).append((member['position'], record))
         return [[r for _, r in sorted(block)] for _, block in sorted(blocks.items())]
 
-    def match_aligned(self, records, mode, workers=8):
+    def match_aligned(self, records, mode, workers=8, target_shas=None):
         """Same retrieval and match thresholds, bounded concurrent verification."""
         import cv2
         workers = max(1,min(int(workers),32,os.cpu_count() or 1))
         with self.db() as db:
             blocks = self.aligned_layout(db, [r for r in records if r.get('features')])
         unique = [r for block in blocks for r in block]
+        targets = [r['sha'] in target_shas for r in unique] if target_shas is not None else None
         @lru_cache(maxsize=2048)
         def feature(i):
             return crop_match.unpack(unique[i]['features'])
@@ -642,7 +645,11 @@ class Engine:
         for block in blocks:
             starts.append((offset, offset+len(block)))
             offset += len(block)
-        total = sum(max(0,len(unique)-start-1) for start, _ in starts)
+        def queries(start,stop):
+            if targets is None:return range(start+1,len(unique))
+            first={value:next((i for i in range(start,stop) if targets[i]==value),len(unique)) for value in (False,True)}
+            return [j for j in range(start+1,len(unique)) if j>first[not targets[j]]]
+        total = sum(len(queries(start,stop)) for start,stop in starts)
         completed, reused = 0, 0
         started = time.monotonic()
         self.set_status(phase='Checking saved comparisons',done=0,total=total,
@@ -662,14 +669,17 @@ class Engine:
                 if self.cancel.is_set(): raise InterruptedError()
                 block_ids = list(range(start,stop))
                 signature = hashlib.sha256(json.dumps([unique[i]['sha'] for i in block_ids]).encode()).hexdigest()
+                target_signature = hashlib.sha256(bytes(targets[start:stop])).hexdigest() if targets is not None else None
                 # Cache raw matching results, not review decisions or path-based IDs.
                 # Stable slots retain old keys when folders are added/reordered.
                 # A changed block, content, mode or feature version still invalidates it.
                 jobs = []
-                for j in range(start+1,len(unique)):
+                query_ids = queries(start,stop)
+                for j in query_ids:
                     if self.cancel.is_set(): raise InterruptedError()
-                    key = hashlib.sha256(json.dumps(['aligned-v2',crop_match.FEATURE_VERSION,mode,
-                                                    signature,unique[j]['sha'],min(j-start,stop-start)]).encode()).hexdigest()
+                    parts = ['aligned-v2',crop_match.FEATURE_VERSION,mode,signature,unique[j]['sha'],min(j-start,stop-start)]
+                    if targets is not None:parts.extend(['targeted-v1',target_signature,targets[j]])
+                    key = hashlib.sha256(json.dumps(parts).encode()).hexdigest()
                     cached = db.execute('SELECT results FROM aligned_tasks WHERE key=?',(key,)).fetchone()
                     if cached:
                         for i,score,label in json.loads(cached[0]):
@@ -677,7 +687,7 @@ class Engine:
                         completed += 1; reused += 1
                     else:
                         jobs.append((j,key))
-                checked += len(unique)-start-1
+                checked += len(query_ids)
                 self.set_status(done=checked, cached_tasks=reused)
                 if jobs: plans.append((start, stop, jobs))
                 db.commit()
@@ -713,6 +723,7 @@ class Engine:
                         for i in candidates:
                             if self.cancel.is_set(): raise InterruptedError()
                             if i>=j or i in found: continue
+                            if targets is not None and targets[i]==targets[j]:continue
                             result = crop_match.verify(query,feature(i),mode,mirrored)
                             if result:
                                 found.add(i);results.append([i-start,result[0],result[1]])
