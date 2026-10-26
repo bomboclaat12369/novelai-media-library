@@ -37,8 +37,24 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  await page.locator('#programUpdate').click();await page.getByRole('heading',{name:'Program updates'}).waitFor();
  assert.equal(await page.getByRole('button',{name:'Check for updates',exact:true}).isVisible(),true);
  await page.getByRole('button',{name:'Close',exact:true}).last().click();
+ await page.locator('#sourceFilter').selectOption('instagram');
+ await page.waitForFunction(()=>!busy&&currentId==='instagram:test_account:P2');
+ assert.equal(await page.locator('#filter').inputValue(),'all');
+ assert.equal(await page.locator('#order').inputValue(),'original');
+ assert.equal(await page.locator('#postList button').count(),2);
+ assert.deepEqual(await page.evaluate(()=>view.ids),[info.ids[2],info.ids[1],info.ids[0]]);
+ assert.deepEqual(await page.locator('#grid .caption').allTextContents(),['P2_1.jpg','P2_2.jpg','P2_10.jpg']);
+ const originalPaths=await page.evaluate(()=>view.images.map(i=>i.path));
+ assert(originalPaths.every(p=>p.includes('images')&&!p.includes('quarantine')));
+ await page.locator('#order').selectOption('filename');await page.waitForFunction(()=>!busy&&view.ids[0]===data.posts.find(p=>p.id==='post:recovered').cover);
+ assert.deepEqual(await page.evaluate(()=>view.ids),info.ids.slice(0,3));
+ await page.locator('#order').selectOption('original');await page.waitForFunction(()=>!busy&&view.images[0].display_name==='P2_1.jpg');
+ await page.reload();await page.waitForFunction(()=>view?.images[0]?.display_name==='P2_1.jpg');
+ assert.equal(await page.locator('#sourceFilter').inputValue(),'instagram');
+ assert.deepEqual(await page.evaluate(()=>view.images.map(i=>i.path)),originalPaths);
+ await page.screenshot({path:'/tmp/organizer-instagram.png',fullPage:true});
  assert(!posts.some(p=>/\/api\/(scan|history\/inventory|bulk\/start|selection\/move)/.test(p)),posts.join(','));
  assert.deepEqual(errors,[]);
- console.log('Organizer UI passed: saved inventory, selection/suggestions, keyboard viewer, drafts/reload/undo, columns, uncropped images, update dialog; no scan or move requests.');
+ console.log('Organizer UI passed: saved inventory, selection/suggestions, keyboard viewer, drafts/reload/undo, Instagram filtering/original order/keeper paths across reload, columns, uncropped images, update dialog; no scan or move requests.');
  }finally{await browser?.close();server.kill()}
 })().catch(e=>{console.error(e);process.exitCode=1});

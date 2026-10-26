@@ -33,7 +33,47 @@ def fixture(root):
     org.load_vectors()
     return engine,bulk,org,ids
 
+def add_instagram(bulk,ids):
+    for n,number in enumerate([10,2,1]):
+        for folder in ['IG','IG done']:
+            path=rf'C:\collection\{folder}\test_account\P2\P2_{number}.jpg'
+            origin={'key':'instagram:test_account:P2','kind':'instagram','label':'test_account / P2','path':path,'original_path':path,'quarantine_path':rf'C:\quarantine\{folder}\P2_{number}.jpg','quarantine':True}
+            item=bulk.current['source_catalog'][ids[n]]
+            item['origins'].append(origin);item['sources'][origin['key']]=origin
+    # The same keepers can have a different filename order in a second post.
+    for n,number in enumerate([1,2]):
+        origin={'key':'instagram:test_account:P10','kind':'instagram','label':'test_account / P10','path':rf'C:\IG\test_account\P10\P10_{number}.jpg','quarantine':True}
+        item=bulk.current['source_catalog'][ids[n]]
+        item['origins'].append(origin);item['sources'][origin['key']]=origin
+    bulk.persist()
+
+
 class OrganizerTests(unittest.TestCase):
+    def test_original_post_order_uses_keepers_without_inventory_or_image_reads(self):
+        with tempfile.TemporaryDirectory() as temp:
+            engine,bulk,org,ids=fixture(temp);add_instagram(bulk,ids);org.bound=None
+            before=copy.deepcopy(bulk.current)
+            with patch.object(Engine,'start',side_effect=AssertionError('No rescan')),patch.object(Workbench,'start',side_effect=AssertionError('No inventory')),patch('organizer.load_image',side_effect=AssertionError('No image decode')):
+                ig=[p for p in org.summary()['posts'] if p['kind']=='instagram']
+                self.assertEqual(len(ig),2)
+                self.assertEqual(next(p for p in ig if p['id'].endswith(':P2'))['count'],3)
+                page=org.page('post','instagram:test_account:P2',order='original')
+                self.assertEqual(page['ids'],[ids[2],ids[1],ids[0]])
+                self.assertEqual([i['display_name'] for i in page['images']],['P2_1.jpg','P2_2.jpg','P2_10.jpg'])
+                for image in page['images']:
+                    self.assertEqual(image['path'],before['source_catalog'][image['id']]['path'])
+                    self.assertFalse(image['quarantined'])
+                second=org.page('post','instagram:test_account:P10',order='original')
+                self.assertEqual(second['ids'],ids[:2])
+                by_keeper=org.page('post','instagram:test_account:P2',order='filename')
+                self.assertEqual(by_keeper['ids'],ids[:3])
+                org.mutate('save',{'job':'fixture-job','revision':0,'name':'IG shoot','ids':page['ids']})
+                saved=next(g for g in org.sets().values() if g['name']=='IG shoot')
+                self.assertEqual(set(saved['members']),set(ids[:3]))
+                reopened=Organizer(engine,Workbench(engine))
+                self.assertEqual(reopened.page('post','instagram:test_account:P2',order='original')['ids'],page['ids'])
+            self.assertEqual(bulk.current,before)
+
     def test_saved_inventory_drafts_and_undo_survive_reopen_without_scan(self):
         with tempfile.TemporaryDirectory() as temp:
             engine,bulk,org,ids=fixture(temp);before=copy.deepcopy(bulk.current)

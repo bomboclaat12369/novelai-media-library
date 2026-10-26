@@ -1,4 +1,18 @@
-LOCAL DUPLICATE REVIEW 2.0.0
+LOCAL DUPLICATE REVIEW 2.0.1
+
+NEW IN 2.0.1: INSTAGRAM POST ORDER WITH YOUR SELECTED KEEPERS
+- In Folder organizer, choose Instagram posts from the new source filter.
+  This shows all saved Instagram posts in natural post-folder name order and
+  selects Original post order for images. Status filters remain available.
+- Images follow their original Instagram filenames, including carousel numbers,
+  while previews, selection, and set membership use the surviving copies you
+  chose during duplicate review. Original filenames appear on the cards; the
+  large viewer still exposes the actual keeper path and original locations.
+- Folders with the same Instagram account/post ID are already merged by the
+  saved inventory. No import of restored copies, fresh inventory, or rescan is
+  needed. Multiple originals linked to one keeper appear once within a post.
+- This restores filename order, not posting dates or chronology absent from the
+  saved folder names. Existing scans, review decisions, and drafts are retained.
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 

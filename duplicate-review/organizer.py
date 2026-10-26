@@ -124,9 +124,19 @@ class Organizer:
         values=(self.matrix@chosen.T).max(axis=1)
         return dict(zip(self.vector_ids,values.tolist()))
 
-    def ordered(self,ids,mode):
-        ids=list(ids);cache=(tuple(ids),mode)
+    def original_name(self,ident,source):
+        item=self.catalog[ident]
+        paths=[o.get('original_path') or o.get('path','') for o in item.get('origins',[]) if o.get('key')==source]
+        names=[re.split(r'[\\/]',p)[-1] for p in paths if p]
+        return min(names,key=natural) if names else re.split(r'[\\/]',item['path'])[-1]
+
+    def ordered(self,ids,mode,source=None):
+        ids=list(ids);cache=(tuple(ids),mode,source)
         if cache in self.order_cache:return self.order_cache[cache]
+        if mode=='original':
+            # Origin filenames supply display order only. IDs and image paths keep
+            # pointing to the survivor selected during duplicate review.
+            return sorted(ids,key=lambda i:(natural(self.original_name(i,source)),i))
         base=sorted(ids,key=lambda i:(self.catalog[i].get('quarantine_only',False),natural(self.catalog[i]['path'])))
         if mode=='filename' or len(base)<3:return base
         # Preserve coarse source neighborhoods in very large mixed posts; each block
@@ -157,14 +167,15 @@ class Organizer:
             group=self.posts.get(ident) if kind=='post' else self.sets().get(ident)
             if not group:raise ValueError('Choose an available post or set.')
             ids=group.get('ids',group.get('members',[]));ids=[i for i in ids if i in self.catalog]
-            ids=self.ordered(ids,order);offset=max(0,min(int(offset),max(0,len(ids)-1)))//60*60
+            source=ident if kind=='post' else None
+            ids=self.ordered(ids,order,source);offset=max(0,min(int(offset),max(0,len(ids)-1)))//60*60
             state=self.state();state.update(view={'kind':kind,'id':ident,'offset':offset,'order':order})
             with self.db() as db:self.put_state(db,state)
             sets=self.sets();labels={}
             for g in sets.values():
                 for i in g['members']:labels.setdefault(i,[]).append(g['name'])
             return {'label':group.get('label',group.get('name')),'total':len(ids),'offset':offset,'ids':ids,
-                    'images':[self.image(i)|{'sets':labels.get(i,[])} for i in ids[offset:offset+60]],'job':self.bound[0]}
+                    'images':[self.image(i)|{'display_name':self.original_name(i,source),'sets':labels.get(i,[])} for i in ids[offset:offset+60]],'job':self.bound[0]}
 
     def related(self,body):
         with self.lock,self.bulk.lock:
