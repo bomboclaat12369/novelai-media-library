@@ -1,4 +1,15 @@
-LOCAL DUPLICATE REVIEW 2.0.3
+LOCAL DUPLICATE REVIEW 2.0.4
+
+NEW IN 2.0.4: WARN BEFORE ADDING AN IMAGE TO A SECOND SET
+- A quiet indicator beside the selection count shows how many selected images
+  already belong to another set, based on saved library and organizer memberships.
+- Before saving, a warning shows affected images and the names of their existing
+  sets. Cancel preserves the draft, Skip these images saves only the others,
+  and Add anyway explicitly permits intentional membership in multiple sets.
+- If every image would be skipped, no empty set is created. Images already in
+  the destination set are not new memberships and do not trigger the warning.
+- Membership is checked again when saving; an earlier confirmation cannot bypass
+  changed membership or a different selection. No scan or image moves required.
 
 NEW IN 2.0.3: OPTIONAL SET COLOR DESCRIPTORS
 - The small ... button beside the new-set name opens Color(s), the same optional

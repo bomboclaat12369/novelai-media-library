@@ -281,6 +281,19 @@ class Organizer:
                     if target and not previous:raise ValueError('Set no longer available.')
                     name=str(body.get('name') or (previous or {}).get('name','')).strip()
                     if not name or len(name)>250:raise ValueError('Give the set a name (up to 250 characters).')
+                    # Adding the same keeper from another source post must not
+                    # silently place it in a second set. Re-check on every save.
+                    already=set((previous or {}).get('members',[]))
+                    adding=set(ids)-already;memberships={i:[] for i in adding}
+                    for sid,g in allsets.items():
+                        if sid==target:continue
+                        for i in adding.intersection(g.get('members',[])):
+                            memberships[i].append({'id':sid,'name':g['name']})
+                    conflicts=[{'id':i,'name':self.image(i)['name'],'sets':sorted(memberships[i],key=lambda g:g['id'])} for i in ids if memberships.get(i)]
+                    if conflicts:
+                        signature=hashlib.sha256(json.dumps({'target':target,'ids':sorted(ids),'conflicts':conflicts},sort_keys=True).encode()).hexdigest()
+                        if body.get('membership_confirmation')!=signature:
+                            return {'confirmation_required':True,'conflicts':conflicts,'membership_confirmation':signature,'destination':name}
                     ident=target or uuid.uuid4().hex
                     old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,ident)).fetchone()
                     state['undo']={'action':'set','id':ident,'previous':old[0] if old else None,'selection':ids}

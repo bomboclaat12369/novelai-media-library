@@ -108,6 +108,27 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  await page.reload();await page.waitForFunction(()=>view&&data?.sets.find(g=>g.id===currentId)?.colors?.[0]==='Pink');
  await page.locator('#editSetColors').click();assert.equal(await page.locator('#setColors').inputValue(),'Pink, white');await page.locator('#cancelSetColors').click();
  await page.locator('#undo').click();await page.waitForFunction(()=>!busy&&data.sets.find(g=>g.id===currentId).colors.length===0);
+ // Saving into a second set is explicit; cancel retains the entire draft.
+ await page.locator('#clear').click();await page.locator(`#grid .card[data-id="${info.ids[0]}"] [data-pick]`).click();
+ assert.match(await page.locator('#membershipHint').textContent(),/1 already/);
+ await page.locator('#setName').fill('Accidental overlap');await page.locator('#save').click();
+ await page.locator('#membershipWarning').waitFor({state:'visible'});
+ assert.match(await page.locator('#membershipList').textContent(),/Existing shoot/);
+ await page.keyboard.press('Escape');await page.waitForFunction(()=>!busy);
+ assert.equal(await page.locator('#setName').inputValue(),'Accidental overlap');assert.equal(await page.evaluate(()=>selection.size),1);
+ assert(!await page.evaluate(()=>data.sets.some(g=>g.name==='Accidental overlap')));
+ await page.locator('#save').click();await page.locator('#membershipSkip').click();await page.waitForFunction(()=>!busy);
+ assert(!await page.evaluate(()=>data.sets.some(g=>g.name==='Accidental overlap')));
+ await page.locator('#postsTab').click();await page.locator('#postList button').filter({hasText:'test_account / P2'}).click();await page.waitForFunction(()=>!busy&&currentKind==='post');
+ await page.locator(`#grid .card[data-id="${info.ids[2]}"] [data-pick]`).click();await page.locator('#save').click();
+ await page.locator('#membershipSkip').click();await page.waitForFunction(()=>!busy&&data.sets.some(g=>g.name==='Accidental overlap'));
+ assert.deepEqual(await page.evaluate(()=>data.sets.find(g=>g.name==='Accidental overlap').members),[info.ids[2]]);
+ await page.locator(`#grid .card[data-id="${info.ids[0]}"] [data-pick]`).click();await page.locator('#setName').fill('Intentional overlap');await page.locator('#save').click();
+ await page.locator('#membershipContinue').click();await page.waitForFunction(()=>!busy&&data.sets.some(g=>g.name==='Intentional overlap'));
+ assert.deepEqual(await page.evaluate(()=>data.sets.find(g=>g.name==='Intentional overlap').members),[info.ids[0]]);
+ await page.locator(`#grid .card[data-id="${info.ids[0]}"] [data-pick]`).click();await page.locator('#target').selectOption('library:existing');
+ await page.locator('#save').click();await page.waitForFunction(()=>!busy&&selection.size===0);
+ assert.equal(await page.locator('#membershipWarning').evaluate(e=>e.open),false);
  assert(!posts.some(p=>/\/api\/(scan|history\/inventory|bulk\/start|selection\/move)/.test(p)),posts.join(','));
  assert.deepEqual(errors,[]);
  console.log('Organizer UI passed: viewer surround close, sidebar preview, Back, sorting, 8 columns, discard/reload/restore, Unsorted remaining/restore; existing keeper/order/draft workflows; no scan or move requests.');

@@ -49,6 +49,28 @@ def add_instagram(bulk,ids):
 
 
 class OrganizerTests(unittest.TestCase):
+    def test_second_set_membership_requires_specific_confirmation_and_noops_do_not_warn(self):
+        with tempfile.TemporaryDirectory() as temp:
+            engine,bulk,org,ids=fixture(temp);before=org.state();sets=copy.deepcopy(org.sets())
+            body={'job':'fixture-job','revision':0,'name':'Second shoot','ids':[ids[0],ids[2]]}
+            warning=org.mutate('save',body)
+            self.assertTrue(warning['confirmation_required'])
+            self.assertEqual([r['id'] for r in warning['conflicts']],[ids[0]])
+            self.assertEqual(warning['conflicts'][0]['sets'],[{'id':'library:existing','name':'Existing shoot'}])
+            self.assertEqual(org.state(),before);self.assertEqual(org.sets(),sets)
+            # A confirmation for a different selection must not bypass the check.
+            stale=org.mutate('save',dict(body,ids=[ids[0]],membership_confirmation=warning['membership_confirmation']))
+            self.assertTrue(stale['confirmation_required']);self.assertEqual(org.state(),before)
+            result=org.mutate('save',dict(body,membership_confirmation=warning['membership_confirmation']))
+            self.assertEqual(len(result['sets']),2)
+            # Re-selecting an image already in the destination adds no membership.
+            result=org.mutate('save',{'job':'fixture-job','revision':1,'target':'library:existing','ids':[ids[0]]})
+            self.assertNotIn('confirmation_required',result)
+            self.assertEqual(org.sets()['library:existing']['members'].count(ids[0]),1)
+            local=next(g for g in org.sets().values() if g['name']=='Second shoot')
+            warning=org.mutate('save',{'job':'fixture-job','revision':2,'target':'library:existing','ids':[ids[2]]})
+            self.assertEqual(warning['conflicts'][0]['sets'][0]['id'],local['id'])
+
     def test_set_color_descriptors_save_edit_preserve_export_and_undo(self):
         with tempfile.TemporaryDirectory() as temp:
             engine,bulk,org,ids=fixture(temp)
@@ -162,7 +184,9 @@ class OrganizerTests(unittest.TestCase):
                 self.assertEqual(second['ids'],ids[:2])
                 by_keeper=org.page('post','instagram:test_account:P2',order='filename')
                 self.assertEqual(by_keeper['ids'],ids[:3])
-                org.mutate('save',{'job':'fixture-job','revision':0,'name':'IG shoot','ids':page['ids']})
+                body={'job':'fixture-job','revision':0,'name':'IG shoot','ids':page['ids']}
+                warning=org.mutate('save',body)
+                org.mutate('save',dict(body,membership_confirmation=warning['membership_confirmation']))
                 saved=next(g for g in org.sets().values() if g['name']=='IG shoot')
                 self.assertEqual(set(saved['members']),set(ids[:3]))
                 reopened=Organizer(engine,Workbench(engine))
