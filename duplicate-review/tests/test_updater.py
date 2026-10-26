@@ -1,4 +1,4 @@
-import base64,hashlib,io,json,sys,tempfile,unittest,zipfile
+import base64,hashlib,io,json,re,sys,tempfile,unittest,zipfile
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from updater import Updater,MANIFEST,REPOSITORY,active_program
@@ -10,7 +10,7 @@ def payload(extra=None):
         for p in ROOT.rglob('*'):
             if p.is_file() and p.suffix in ('.py','.html','.js','.txt') and 'tests' not in p.parts and '__pycache__' not in p.parts:
                 data=p.read_bytes()
-                if p.name=='engine.py':data=data.replace(b"VERSION = '2.0.0'",b"VERSION = '2.0.1'")
+                if p.name=='engine.py':data=re.sub(rb"^VERSION = .*",b"VERSION = '2.0.1'",data,flags=re.M)
                 z.writestr('duplicate-review/'+p.relative_to(ROOT).as_posix(),data)
         z.writestr('runtime-src/companion-runtime.pyw',(ROOT.parent/'runtime-src/companion-runtime.pyw').read_bytes())
         if extra:z.writestr(*extra)

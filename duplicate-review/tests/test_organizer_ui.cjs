@@ -52,9 +52,52 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  await page.reload();await page.waitForFunction(()=>view?.images[0]?.display_name==='P2_1.jpg');
  assert.equal(await page.locator('#sourceFilter').inputValue(),'instagram');
  assert.deepEqual(await page.evaluate(()=>view.images.map(i=>i.path)),originalPaths);
+ // Clicking the image still zooms; clicking its empty surround closes.
+ await page.locator('#grid img').first().click();await page.waitForFunction(()=>document.querySelector('#largeImage').naturalWidth>0);
+ await page.locator('#largeImage').click();assert.equal(await page.locator('#viewer').evaluate(e=>e.open),true);
+ await page.locator('#largeImage').click();await page.locator('#imageArea').click({position:{x:5,y:100}});
+ assert.equal(await page.locator('#viewer').evaluate(e=>e.open),false);
+ // Sidebar set preview leaves both the main post and destination untouched.
+ const destination=await page.locator('#target').inputValue();
+ await page.locator('#suggestions').getByRole('button',{name:'View',exact:true}).first().click();
+ await page.waitForFunction(()=>!busy&&document.querySelector('#additionArea')?.textContent.includes('preview only'));
+ assert.equal(await page.locator('#additionArea .card').count(),2);
+ assert.equal(await page.evaluate(()=>currentId),'instagram:test_account:P2');
+ assert.equal(await page.locator('#target').inputValue(),destination);
+ assert.equal(await page.evaluate(async()=>(await api('state')).state.view.id),'instagram:test_account:P2');
+ await page.locator('#additionArea').getByRole('button',{name:'← Suggestions'}).click();
+ await page.waitForFunction(()=>sidebarSet===null&&document.querySelector('#additionArea')?.textContent.includes('Suggested additions'));
+ await page.locator('#postList button').last().click();await page.waitForFunction(()=>!busy&&currentId.endsWith(':P10'));
+ await page.locator('#back').click();await page.waitForFunction(()=>!busy&&currentId.endsWith(':P2'));
+ await page.locator('#postSort').selectOption('nameDesc');assert.match(await page.locator('#postList strong').first().textContent(),/P10/);
+ await page.locator('#postSort').selectOption('nameAsc');assert.match(await page.locator('#postList strong').first().textContent(),/P2/);
+ await page.locator('#postSort').selectOption('fewest');assert.match(await page.locator('#postList strong').first().textContent(),/P10/);
+ await page.locator('#postSort').selectOption('most');assert.match(await page.locator('#postList strong').first().textContent(),/P2/);
+ const oldWidth=await page.locator('#grid .card').first().evaluate(e=>e.getBoundingClientRect().width);
+ await page.locator('#columns').fill('8');await page.locator('#columns').dispatchEvent('input');
+ assert.equal(await page.locator('#grid').evaluate(e=>getComputedStyle(e).gridTemplateColumns.split(' ').length),8);
+ assert((await page.locator('#grid .card').first().evaluate(e=>e.getBoundingClientRect().width))<oldWidth);
+ // Discard is global and recoverable after reload; Unsorted is post-scoped.
+ await page.locator('#clear').click();await page.locator(`#grid .card[data-id="${info.ids[2]}"] [data-pick]`).click();
+ page.once('dialog',d=>d.accept());await page.locator('#discardSelected').click();
+ await page.waitForFunction(()=>!busy&&data.discarded_count===1);
+ assert(!await page.evaluate(id=>view.ids.includes(id),info.ids[2]));
+ await page.reload();await page.waitForFunction(()=>data?.discarded_count===1&&view);
+ await page.locator('#discarded').click();await page.waitForFunction(()=>!busy&&currentKind==='discarded');
+ assert.equal(await page.locator('#grid .card').count(),1);
+ await page.locator('#grid').getByRole('button',{name:'Restore',exact:true}).click();await page.waitForFunction(()=>!busy&&data.discarded_count===0);
+ await page.locator('#postList button').filter({hasText:'test_account / P2'}).click();await page.waitForFunction(()=>!busy&&currentId.endsWith(':P2'));
+ await page.locator('#unsortRemaining').click();await page.waitForFunction(()=>!busy&&data.unsorted_count===1);
+ assert.equal(await page.locator('#grid .card').count(),2);
+ await page.locator('#unsorted').click();await page.waitForFunction(()=>!busy&&currentKind==='unsorted');
+ assert.deepEqual(await page.evaluate(()=>view.ids),[info.ids[2]]);
+ await page.locator('#selectAll').click();await page.locator('#restoreUnsorted').click();await page.waitForFunction(()=>!busy&&data.unsorted_count===0);
+ await page.locator('#back').click();await page.waitForFunction(()=>!busy&&currentId.endsWith(':P2'));
+ assert.equal(await page.locator('#grid .card').count(),3);
+ await page.waitForFunction(()=>Array.from(document.querySelectorAll('#grid img')).every(i=>i.complete&&i.naturalWidth>0));
  await page.screenshot({path:'/tmp/organizer-instagram.png',fullPage:true});
  assert(!posts.some(p=>/\/api\/(scan|history\/inventory|bulk\/start|selection\/move)/.test(p)),posts.join(','));
  assert.deepEqual(errors,[]);
- console.log('Organizer UI passed: saved inventory, selection/suggestions, keyboard viewer, drafts/reload/undo, Instagram filtering/original order/keeper paths across reload, columns, uncropped images, update dialog; no scan or move requests.');
+ console.log('Organizer UI passed: viewer surround close, sidebar preview, Back, sorting, 8 columns, discard/reload/restore, Unsorted remaining/restore; existing keeper/order/draft workflows; no scan or move requests.');
  }finally{await browser?.close();server.kill()}
 })().catch(e=>{console.error(e);process.exitCode=1});

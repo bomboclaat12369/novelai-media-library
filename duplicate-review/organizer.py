@@ -18,12 +18,14 @@ class Organizer:
         self.lock=threading.RLock();self.cancel=threading.Event();self.thread=None
         self.job={'running':False,'phase':'Saved inventory ready','done':0,'total':0,'eta_seconds':None}
         self.bound=None;self.catalog={};self.posts={};self.order_cache={};self.vector_by_id={};self.quick={}
-        self.encoder_type=None;self.recipe=None;self.scope='';self.revision=0
+        self.encoder_type=None;self.recipe=None;self.scope='';self.revision=0;self.discarded=set();self.parked={}
         with self.db() as db:
             db.executescript('''CREATE TABLE IF NOT EXISTS state(scope TEXT PRIMARY KEY,data TEXT);
                 CREATE TABLE IF NOT EXISTS sets(scope TEXT,id TEXT,data TEXT,PRIMARY KEY(scope,id));
                 CREATE TABLE IF NOT EXISTS posts(scope TEXT,id TEXT,status TEXT,PRIMARY KEY(scope,id));
-                CREATE TABLE IF NOT EXISTS rejected(scope TEXT,context TEXT,id TEXT,PRIMARY KEY(scope,context,id));''')
+                CREATE TABLE IF NOT EXISTS rejected(scope TEXT,context TEXT,id TEXT,PRIMARY KEY(scope,context,id));
+                CREATE TABLE IF NOT EXISTS discarded(hash TEXT PRIMARY KEY,batch TEXT,data TEXT);
+                CREATE TABLE IF NOT EXISTS parked(scope TEXT,post TEXT,hash TEXT,PRIMARY KEY(scope,post,hash));''')
 
     @contextmanager
     def db(self):
@@ -46,6 +48,7 @@ class Organizer:
                 post['ids'].append(ident)
         # Load only saved analysis. No source-image reads, comparisons or model downloads.
         self.load_vectors()
+        self.load_dispositions()
         with self.engine.db() as db:
             sketches={r['sha']:r['sketch'] for r in db.execute('SELECT sha,sketch FROM cache WHERE sketch IS NOT NULL')}
         self.quick={}
@@ -56,6 +59,31 @@ class Organizer:
                 # Broad color/layout ordering only, never a duplicate or membership decision.
                 v=np.concatenate([a.mean((0,1)),a.reshape(4,8,4,8,3).mean((1,3)).ravel()])
                 self.quick[ident]=v/(np.linalg.norm(v)+1e-8)
+
+    def hashes(self,ident):
+        item=self.catalog[ident]
+        return {v for v in [item.get('sha')]+[c.get('sha') for c in item.get('copies',[])] if v}
+
+    def load_dispositions(self):
+        with self.db() as db:
+            discarded={r[0] for r in db.execute('SELECT hash FROM discarded')}
+            parked=list(db.execute('SELECT post,hash FROM parked WHERE scope=?',(self.scope,)))
+        self.discarded={i for i in self.catalog if self.hashes(i)&discarded}
+        self.parked={}
+        for post,digest in parked:self.parked.setdefault(post,set()).add(digest)
+
+    def post_ids(self,post):
+        parked=self.parked.get(post,set())
+        return [i for i in self.posts[post]['ids'] if i not in self.discarded and not self.hashes(i)&parked]
+
+    def unsorted_ids(self):
+        parked=set().union(*self.parked.values()) if self.parked else set()
+        assigned={i for g in self.sets().values() for i in g['members']}
+        return [i for i in self.catalog if i not in assigned and i not in self.discarded and not self.catalog[i].get('quarantine_only') and self.hashes(i)&parked]
+
+    def is_mixed(self,post):
+        # This known forum post is an entire account dump, not one shoot.
+        return post=='forum:smg:603571'
 
     def model(self):
         if self.encoder_type is None:
@@ -86,7 +114,7 @@ class Organizer:
     def put_state(self,db,state):
         db.execute('INSERT OR REPLACE INTO state VALUES (?,?)',(self.scope,json.dumps(state)))
 
-    def sets(self):
+    def sets(self,include_discarded=False):
         current=self.bulk.current or {};result={}
         for sid,g in current.get('library_sets',{}).items():
             result['library:'+sid]={'id':'library:'+sid,'name':g['name'],'members':[], 'library_id':sid,'saved':False}
@@ -100,27 +128,30 @@ class Organizer:
                 # Existing library members remain visible alongside locally reviewed additions.
                 g['members']=list(dict.fromkeys(result.get(sid,{}).get('members',[])+g['members']))
                 g['saved']=True;result[sid]=g
+        if not include_discarded:
+            for g in result.values():g['members']=[i for i in g['members'] if i in self.catalog and i not in self.discarded]
         return result
 
     def summary(self):
         with self.lock,self.bulk.lock:
-            self.bind();state=self.state();sets=self.sets();assigned={i for g in sets.values() for i in g['members']}
+            self.bind();state=self.state();state['selection']=[i for i in state.get('selection',[]) if i in self.catalog and i not in self.discarded];sets=self.sets();assigned={i for g in sets.values() for i in g['members']}
             with self.db() as db:statuses=dict(db.execute('SELECT id,status FROM posts WHERE scope=?',(self.scope,)))
             posts=[]
             for p in self.posts.values():
-                live=[i for i in p['ids'] if not self.catalog[i].get('quarantine_only')]
-                posts.append({k:v for k,v in p.items() if k!='ids'}|{'count':len(p['ids']),'remaining':sum(i not in assigned for i in live),'unresolved':len(p['ids'])-len(live),'status':statuses.get(p['id'],'pending'),'cover':live[0] if live else p['ids'][0]})
+                visible=self.post_ids(p['id']);live=[i for i in visible if not self.catalog[i].get('quarantine_only')]
+                posts.append({k:v for k,v in p.items() if k!='ids'}|{'count':len(visible),'remaining':sum(i not in assigned for i in live),'unresolved':len(visible)-len(live),'status':statuses.get(p['id'],'pending'),'mixed':self.is_mixed(p['id']),'cover':next(iter(live or visible),None)})
             posts.sort(key=lambda p:(p['status']!='pending',p['remaining']==0,natural(p['label'])))
-            total=sum(not r.get('quarantine_only') for r in self.catalog.values())
+            total=sum(not r.get('quarantine_only') and i not in self.discarded for i,r in self.catalog.items())
             return {'job':(self.bulk.current or {}).get('id'),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
-                'state':state,'images':total,'unresolved':len(self.catalog)-total,'indexed':sum(i in self.vector_by_id for i,r in self.catalog.items() if not r.get('quarantine_only')),
+                'state':state,'images':total,'unresolved':sum(bool(r.get('quarantine_only')) for i,r in self.catalog.items() if i not in self.discarded),'indexed':sum(i in self.vector_by_id for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded),
+                'unsorted_count':len(self.unsorted_ids()),'discarded_count':sum(not self.catalog[i].get('quarantine_only') for i in self.discarded),
                 'progress':dict(self.job),'inventory_complete':bool((self.bulk.current or {}).get('inventory_complete') or (self.bulk.current or {}).get('complete'))}
 
     def scores(self,seeds):
         vectors=[self.vector_by_id[i] for i in seeds if i in self.vector_by_id]
         if not vectors or not len(self.matrix):return {}
-        # A small representative sample bounds interaction cost for large selections.
-        chosen=np.stack(vectors[::max(1,len(vectors)//12)][:12])
+        # Evenly cover the reference pool, including its newest selected image.
+        chosen=np.stack([vectors[n] for n in np.linspace(0,len(vectors)-1,min(12,len(vectors)),dtype=int)])
         values=(self.matrix@chosen.T).max(axis=1)
         return dict(zip(self.vector_ids,values.tolist()))
 
@@ -159,18 +190,26 @@ class Organizer:
     def image(self,ident):
         r=self.catalog[ident]
         return {'id':ident,'name':re.split(r'[\\/]',r['path'])[-1],'path':r['path'],'quarantined':bool(r.get('quarantine_only')),
-                'sources':list(r.get('sources',{})),'origins':r.get('origins',[]),'reference':bool(r.get('reference'))}
+                'sources':list(r.get('sources',{})),'origins':r.get('origins',[]),'reference':bool(r.get('reference')),'discarded':ident in self.discarded}
 
-    def page(self,kind,ident,offset=0,order='similar'):
+    def page(self,kind,ident,offset=0,order='similar',remember=True):
         with self.lock,self.bulk.lock:
             self.bind()
-            group=self.posts.get(ident) if kind=='post' else self.sets().get(ident)
+            if kind=='post':
+                group=self.posts.get(ident)
+                ids=self.post_ids(ident) if group else []
+            elif kind=='set':
+                group=self.sets().get(ident);ids=group.get('members',[]) if group else []
+            elif kind=='unsorted':group={'label':'Unsorted'};ids=self.unsorted_ids()
+            elif kind=='discarded':group={'label':'Discarded · recoverable'};ids=[i for i in self.discarded if not self.catalog[i].get('quarantine_only')]
+            else:raise ValueError('Invalid collection.')
             if not group:raise ValueError('Choose an available post or set.')
-            ids=group.get('ids',group.get('members',[]));ids=[i for i in ids if i in self.catalog]
+            ids=[i for i in ids if i in self.catalog]
             source=ident if kind=='post' else None
             ids=self.ordered(ids,order,source);offset=max(0,min(int(offset),max(0,len(ids)-1)))//60*60
-            state=self.state();state.update(view={'kind':kind,'id':ident,'offset':offset,'order':order})
-            with self.db() as db:self.put_state(db,state)
+            if remember:
+                state=self.state();state.update(view={'kind':kind,'id':ident,'offset':offset,'order':order})
+                with self.db() as db:self.put_state(db,state)
             sets=self.sets();labels={}
             for g in sets.values():
                 for i in g['members']:labels.setdefault(i,[]).append(g['name'])
@@ -179,20 +218,23 @@ class Organizer:
 
     def related(self,body):
         with self.lock,self.bulk.lock:
-            self.bind();seeds=self.valid_ids(body.get('ids',[]));context=self.context_key(body,seeds)
+            self.bind();selection=self.valid_ids(body.get('ids',[]));allsets=self.sets()
+            members=allsets.get(str(body.get('target','')),{}).get('members',[])
+            seeds=list(dict.fromkeys([i for i in members if i not in selection]+selection))
+            context=self.context_key(body,seeds)
             if not seeds:return {'images':[],'posts':[],'sets':[],'total':0}
-            visual=self.scores(seeds);selected=set(seeds);sources={s for i in seeds for s in self.catalog[i]['sources'] if s in self.posts}
+            visual=self.scores(seeds);selected=set(seeds);sources={s for i in seeds for s in self.catalog[i]['sources'] if s in self.posts and not self.is_mixed(s)}
             with self.db() as db:rejected={r[0] for r in db.execute('SELECT id FROM rejected WHERE scope=? AND context=?',(self.scope,context))}
             ranked=[]
             for ident,item in self.catalog.items():
-                if ident in selected or ident in rejected or item.get('quarantine_only'):continue
+                if ident in selected or ident in rejected or ident in self.discarded or item.get('quarantine_only'):continue
                 shared=sources & item['sources'].keys();v=visual.get(ident,0)
                 if not shared and v<.60:continue
                 source_score=sum(1/(max(1,len(self.posts[s]['ids']))**.5) for s in shared)
                 score=min(.35,.3*source_score)+v
                 ranked.append((score,ident,'Shared source post'+(' · visually similar' if v>=.60 else '') if shared else 'Visually similar'))
             ranked.sort(key=lambda r:(-r[0],r[1]));offset=max(0,int(body.get('offset',0)));sets=[]
-            for g in self.sets().values():
+            for g in allsets.values():
                 members=set(g['members']);overlap=len(selected & members)
                 shared=len(sources & {s for i in members if i in self.catalog for s in self.catalog[i]['sources']})
                 v=max((visual.get(i,0) for i in members),default=0)
@@ -205,7 +247,7 @@ class Organizer:
     def valid_ids(self,ids):
         if not isinstance(ids,list) or len(ids)>15000:raise ValueError('Invalid selection.')
         ids=list(dict.fromkeys(ids))
-        if any(i not in self.catalog or self.catalog[i].get('quarantine_only') for i in ids):raise ValueError('Select surviving images only. Quarantine remains evidence only.')
+        if any(i not in self.catalog or self.catalog[i].get('quarantine_only') or i in self.discarded for i in ids):raise ValueError('Select surviving images only. Quarantine remains evidence only.')
         return ids
 
     def context_key(self,body,ids):
@@ -226,7 +268,7 @@ class Organizer:
                 if action=='save':
                     ids=self.valid_ids(body.get('ids',[]))
                     if not ids:raise ValueError('Select at least one image.')
-                    target=str(body.get('target',''));allsets=self.sets();previous=allsets.get(target)
+                    target=str(body.get('target',''));allsets=self.sets(include_discarded=True);previous=allsets.get(target)
                     if target and not previous:raise ValueError('Set no longer available.')
                     name=str(body.get('name') or (previous or {}).get('name','')).strip()
                     if not name or len(name)>250:raise ValueError('Give the set a name (up to 250 characters).')
@@ -245,6 +287,39 @@ class Organizer:
                     ids=self.valid_ids(body.get('ids',[]));state['undo']={'action':'set','id':target,'previous':old[0],'selection':ids}
                     group['members']=[i for i in group['members'] if i not in ids];group['updated']=time.time()
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)));state['selection']=[]
+                elif action in ('discard','restore_discard','unsort','restore_unsorted'):
+                    ids=body.get('ids',[])
+                    if action=='unsort' and body.get('remaining'):
+                        post=body.get('post')
+                        if post not in self.posts:raise ValueError('Choose a post.')
+                        assigned={i for g in self.sets().values() for i in g['members']}
+                        ids=[i for i in self.post_ids(post) if i not in assigned and not self.catalog[i].get('quarantine_only')]
+                    if action=='restore_discard':
+                        if not isinstance(ids,list) or len(ids)>15000 or any(i not in self.discarded for i in ids):raise ValueError('Choose discarded images to restore.')
+                    else:ids=self.valid_ids(ids)
+                    if not ids:raise ValueError('No eligible images selected.')
+                    hashes=set().union(*(self.hashes(i) for i in ids))
+                    if action in ('discard','restore_discard'):
+                        old=[list(row) for row in db.execute('SELECT hash,batch,data FROM discarded') if row[0] in hashes]
+                        if action=='discard':
+                            batch=uuid.uuid4().hex;metadata=json.dumps({'created':time.time(),'ids':ids})
+                            for digest in hashes:db.execute('INSERT OR REPLACE INTO discarded VALUES (?,?,?)',(digest,batch,metadata))
+                        else:
+                            # Restore hashes belonging to the chosen image and its known copies.
+                            for digest in hashes:db.execute('DELETE FROM discarded WHERE hash=?',(digest,))
+                        state['undo']={'action':'disposition','table':'discarded','hashes':sorted(hashes),'previous':old}
+                    else:
+                        assigned={i for g in self.sets().values() for i in g['members']}
+                        if action=='unsort' and any(i in assigned for i in ids):raise ValueError('Move only images not assigned to any set.')
+                        post=str(body.get('post',''))
+                        if action=='unsort' and (post not in self.posts or any(i not in self.posts[post]['ids'] for i in ids)):raise ValueError('Choose images from the current post.')
+                        old=[list(row) for row in db.execute('SELECT scope,post,hash FROM parked WHERE scope=?',(self.scope,)) if row[2] in hashes and (action=='restore_unsorted' or row[1]==post)]
+                        if action=='unsort':
+                            for digest in hashes:db.execute('INSERT OR IGNORE INTO parked VALUES (?,?,?)',(self.scope,post,digest))
+                        else:
+                            for digest in hashes:db.execute('DELETE FROM parked WHERE scope=? AND hash=?',(self.scope,digest))
+                        state['undo']={'action':'disposition','table':'parked','post':post if action=='unsort' else None,'hashes':sorted(hashes),'previous':old}
+                    state['selection']=[]
                 elif action=='post':
                     ident=body.get('id');status=body.get('status')
                     if ident not in self.posts or status not in ('pending','reviewed','deferred'):raise ValueError('Invalid post status.')
@@ -263,6 +338,16 @@ class Organizer:
                         db.execute('DELETE FROM sets WHERE scope=? AND id=?',(self.scope,undo['id']))
                         if undo['previous']:db.execute('INSERT INTO sets VALUES (?,?,?)',(self.scope,undo['id'],undo['previous']))
                         state['selection']=undo.get('selection',[])
+                    elif undo['action']=='disposition':
+                        table=undo['table']
+                        if table=='discarded':
+                            for digest in undo['hashes']:db.execute('DELETE FROM discarded WHERE hash=?',(digest,))
+                            db.executemany('INSERT OR REPLACE INTO discarded VALUES (?,?,?)',undo['previous'])
+                        else:
+                            for digest in undo['hashes']:
+                                if undo.get('post'):db.execute('DELETE FROM parked WHERE scope=? AND post=? AND hash=?',(self.scope,undo['post'],digest))
+                                else:db.execute('DELETE FROM parked WHERE scope=? AND hash=?',(self.scope,digest))
+                            db.executemany('INSERT OR REPLACE INTO parked VALUES (?,?,?)',undo['previous'])
                     elif undo['action']=='post':
                         db.execute('DELETE FROM posts WHERE scope=? AND id=?',(self.scope,undo['id']))
                         if undo['previous']:db.execute('INSERT INTO posts VALUES (?,?,?)',(self.scope,undo['id'],undo['previous']))
@@ -270,13 +355,14 @@ class Organizer:
                         for ident in undo['ids']:db.execute('DELETE FROM rejected WHERE scope=? AND context=? AND id=?',(self.scope,undo['context'],ident))
                 else:raise ValueError('Unknown organizer action.')
                 state['revision']=state.get('revision',0)+1;self.put_state(db,state)
+            self.load_dispositions()
             return self.summary()
 
     def index(self):
         with self.lock,self.bulk.lock:
             self.bind()
             if self.job['running'] or self.engine.status['running'] or (self.bulk.current or {}).get('running'):raise ValueError('Wait for the current operation.')
-            todo=[copy.copy(r) for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.vector_by_id]
+            todo=[copy.copy(r) for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.vector_by_id and i not in self.discarded]
             if not todo:return dict(self.job)|{'phase':'All saved images already indexed','remaining':0}
             self.cancel.clear();self.job={'running':True,'phase':'Preparing visual matching','done':0,'total':len(todo),'eta_seconds':None,'elapsed_seconds':0,'reused':len(self.vector_by_id),'issues':[]}
             self.thread=threading.Thread(target=self.run_index,args=(todo,),daemon=True);self.thread.start();return dict(self.job)
@@ -338,6 +424,8 @@ class Organizer:
     def export(self):
         with self.lock,self.bulk.lock:
             self.bind();summary=self.summary()
-            return {'format':'folder-organizer-1','source_job':self.bound[0],'config':(self.bulk.current or {}).get('config',{}),'sets':summary['sets'],'state':summary['state'],
+            with self.db() as db:
+                dispositions={'discarded':[list(r) for r in db.execute('SELECT hash,batch,data FROM discarded')],'parked':[list(r) for r in db.execute('SELECT scope,post,hash FROM parked WHERE scope=?',(self.scope,))]}
+            return {'format':'folder-organizer-2','dispositions':dispositions,'source_job':self.bound[0],'config':(self.bulk.current or {}).get('config',{}),'sets':summary['sets'],'state':summary['state'],
                     'post_review':[{k:p[k] for k in ('id','status')} for p in summary['posts']],'source_catalog':self.catalog,
                     'notice':'Locally saved set drafts; no images moved, restored or imported.'}

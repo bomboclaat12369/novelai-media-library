@@ -49,6 +49,75 @@ def add_instagram(bulk,ids):
 
 
 class OrganizerTests(unittest.TestCase):
+    def test_discard_filters_every_view_and_known_copies_survives_inventory_and_restores(self):
+        with tempfile.TemporaryDirectory() as temp:
+            engine,bulk,org,ids=fixture(temp);alias='a'*64
+            bulk.current['source_catalog'][ids[0]]['copies']=[{'sha':alias,'path':'old-copy.jpg'}]
+            before=copy.deepcopy(bulk.current);original=Path(org.catalog[ids[0]]['path']).read_bytes()
+            org.mutate('discard',{'job':'fixture-job','revision':0,'ids':[ids[0]]})
+            self.assertNotIn(ids[0],org.page('post','post:1')['ids'])
+            self.assertNotIn(ids[0],org.sets()['library:existing']['members'])
+            self.assertNotIn(ids[0],[i['id'] for i in org.related({'ids':[ids[1]]})['images']])
+            self.assertEqual(org.page('discarded','discarded')['ids'],[ids[0]])
+            with self.assertRaises(ValueError):org.valid_ids([ids[0]])
+            self.assertEqual(Path(org.catalog[ids[0]]['path']).read_bytes(),original)
+            self.assertEqual(bulk.current,before)
+            org.mutate('undo',{'job':'fixture-job','revision':1})
+            self.assertIn(ids[0],org.page('post','post:1')['ids'])
+            org.mutate('discard',{'job':'fixture-job','revision':2,'ids':[ids[0]]})
+            bulk.current['id']='replacement-job'
+            other=copy.deepcopy(bulk.current['source_catalog'][ids[0]])
+            other.update(id=alias,sha=alias,copies=[])
+            bulk.current['source_catalog'][alias]=other;bulk.persist()
+            reopened=Organizer(engine,Workbench(engine));reopened.summary()
+            self.assertTrue({ids[0],alias}<=reopened.discarded)
+            reopened.mutate('restore_discard',{'job':'replacement-job','revision':3,'ids':[ids[0]]})
+            self.assertFalse(reopened.discarded)
+            self.assertIn(ids[0],reopened.sets()['library:existing']['members'])
+
+    def test_unsorted_remaining_is_post_scoped_excludes_assigned_and_undo_survives_restart(self):
+        with tempfile.TemporaryDirectory() as temp:
+            engine,bulk,org,ids=fixture(temp);add_instagram(bulk,ids);org.bound=None;before=copy.deepcopy(bulk.current)
+            result=org.mutate('unsort',{'job':'fixture-job','revision':0,'post':'post:1','remaining':True})
+            self.assertEqual(result['unsorted_count'],4)
+            self.assertEqual(set(org.page('unsorted','unsorted')['ids']),set(ids[2:6]))
+            self.assertIn(ids[2],org.page('post','instagram:test_account:P2')['ids'])
+            self.assertNotIn(ids[2],org.page('post','post:1')['ids'])
+            self.assertIn(ids[0],org.page('post','post:1')['ids'])
+            org2=Organizer(engine,Workbench(engine));self.assertEqual(org2.summary()['unsorted_count'],4)
+            org2.mutate('undo',{'job':'fixture-job','revision':1});self.assertIn(ids[2],org2.page('post','post:1')['ids'])
+            with self.assertRaisesRegex(ValueError,'not assigned'):org2.mutate('unsort',{'job':'fixture-job','revision':2,'post':'post:1','ids':[ids[0]]})
+            org2.mutate('unsort',{'job':'fixture-job','revision':2,'post':'post:1','ids':[ids[2]]})
+            org2.mutate('restore_unsorted',{'job':'fixture-job','revision':3,'ids':[ids[2]]})
+            self.assertEqual(org2.summary()['unsorted_count'],0)
+            self.assertEqual(bulk.current,before)
+
+    def test_reference_cap_includes_newest_and_destination_members_and_mixed_dump_not_evidence(self):
+        with tempfile.TemporaryDirectory() as temp:
+            engine,bulk,org,ids=fixture(temp)
+            org.vector_ids=ids;org.matrix=np.eye(len(ids),dtype=np.float32)
+            org.vector_by_id=dict(zip(ids,org.matrix))
+            scores=org.scores(ids[:17]);self.assertAlmostEqual(scores[ids[16]],1)
+            self.assertEqual(sum(v>.5 for v in scores.values()),12)
+            with patch.object(org,'scores',wraps=org.scores) as scored:
+                r=org.related({'ids':[ids[16]],'target':'library:existing'})
+                self.assertEqual(scored.call_args.args[0],[ids[0],ids[1],ids[16]])
+                self.assertFalse({ids[0],ids[1],ids[16]} & {i['id'] for i in r['images']})
+            org.posts['forum:smg:603571']={'ids':[ids[0],ids[8]],'label':'Mixed dump','id':'forum:smg:603571'}
+            for ident in (ids[0],ids[8]):org.catalog[ident]['sources']['forum:smg:603571']={}
+            r=org.related({'ids':[ids[0]]})
+            self.assertNotIn(ids[8],[i['id'] for i in r['images']])
+            self.assertNotIn('forum:smg:603571',[p['id'] for p in r['posts']])
+            org.matrix[8]=org.matrix[0]
+            self.assertIn(ids[8],[i['id'] for i in org.related({'ids':[ids[0]]})['images']])
+
+    def test_sidebar_preview_does_not_replace_saved_main_view(self):
+        with tempfile.TemporaryDirectory() as temp:
+            engine,bulk,org,ids=fixture(temp)
+            org.page('post','post:1',order='filename');before=org.state()
+            preview=org.page('set','library:existing',remember=False)
+            self.assertEqual(set(preview['ids']),set(ids[:2]));self.assertEqual(org.state(),before)
+
     def test_original_post_order_uses_keepers_without_inventory_or_image_reads(self):
         with tempfile.TemporaryDirectory() as temp:
             engine,bulk,org,ids=fixture(temp);add_instagram(bulk,ids);org.bound=None

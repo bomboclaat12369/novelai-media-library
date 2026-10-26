@@ -1,4 +1,36 @@
-LOCAL DUPLICATE REVIEW 2.0.1
+LOCAL DUPLICATE REVIEW 2.0.2
+
+NEW IN 2.0.2: QUICKER ORGANIZING AND RECOVERABLE REMOVAL
+- Click empty space beside an enlarged image to close it. Clicking the image
+  still zooms. Back returns to the prior main post/set and restores its page,
+  image order, filters and scroll position. Navigation history survives reload
+  within the same browser tab.
+- Sort posts by name ascending/descending, most/fewest images, or most unassigned
+  images. The thumbnail slider now supports 2-8 columns with smaller previews.
+- View beside a likely existing set previews its images in the right sidebar.
+  Your main view, current selection and destination set stay in place. Use is
+  still the separate action that chooses the destination set.
+- Discard selected images, or use Discard in the large viewer, to hide them from
+  every organizer post, set and suggestion. Discarded provides Restore; Undo
+  also works. Discard decisions cover recorded hashes of known duplicate copies
+  and survive fresh inventories and updates. Newly altered, unrecognized copies
+  cannot be identified as discarded without a matching recorded hash.
+- Discard is a recoverable organizer exclusion: original files are retained in
+  place. It does not erase files, change the media library, or change duplicate
+  checker decisions. Discarded files are accessible only through that explicit
+  organizer section, not normal browsing or suggestions.
+- Move selected unassigned images, or Remaining -> Unsorted, out of the current
+  post's working view. Remaining covers the whole post, not just the visible
+  page. Images already in any set are protected. Unsorted keeps the images
+  available for later grouping; Return selected to posts and Undo restore their
+  working views. Other original post connections are retained.
+- Suggestions retain the 12-reference visual cap. References are evenly sampled
+  from destination-set members plus the selection, always including the newest
+  selected image with saved analysis. Unanalyzed images contribute only source
+  connections. No new scan runs when selecting images or updating the program.
+- The known account dump in forum post 603571 no longer supplies same-post
+  evidence to suggestions. Its images remain browseable and visually matchable.
+- Existing scan, review and draft data remain saved. No rescan or reimport.
 
 NEW IN 2.0.1: INSTAGRAM POST ORDER WITH YOUR SELECTED KEEPERS
 - In Folder organizer, choose Instagram posts from the new source filter.
