@@ -1,4 +1,15 @@
-LOCAL DUPLICATE REVIEW 2.0.2
+LOCAL DUPLICATE REVIEW 2.0.3
+
+NEW IN 2.0.3: OPTIONAL SET COLOR DESCRIPTORS
+- The small ... button beside the new-set name opens Color(s), the same optional
+  comma-separated descriptor field as the media library (for example Blue, white).
+  Apply remembers the descriptors until you save the new set, including reloads.
+- When viewing a saved set, ... beside its title edits its descriptors without
+  selecting or adding images. The bottom ... edits the chosen destination set
+  when a destination is selected. Leave Color(s) blank to clear descriptors.
+- Existing colors are preserved when adding images. Edits support Undo and are
+  saved in organizer drafts and exports; they do not directly update the media
+  library. Set search also matches color descriptors. No scan is needed.
 
 NEW IN 2.0.2: QUICKER ORGANIZING AND RECOVERABLE REMOVAL
 - Click empty space beside an enlarged image to close it. Clicking the image

@@ -49,6 +49,32 @@ def add_instagram(bulk,ids):
 
 
 class OrganizerTests(unittest.TestCase):
+    def test_set_color_descriptors_save_edit_preserve_export_and_undo(self):
+        with tempfile.TemporaryDirectory() as temp:
+            engine,bulk,org,ids=fixture(temp)
+            bulk.current['library_sets']['existing']['colors']=['Blue','white'];bulk.persist()
+            org.mutate('draft',{'job':'fixture-job','ids':[ids[2]],'new_colors':[' Red ','white','Red','']})
+            org.mutate('save',{'job':'fixture-job','revision':0,'name':'Colored shoot','ids':[ids[2]]})
+            group=next(g for g in org.sets().values() if g['name']=='Colored shoot');target=group['id']
+            self.assertEqual(group['colors'],['Red','white'])
+            org.mutate('save',{'job':'fixture-job','revision':1,'target':target,'ids':[ids[3]]})
+            self.assertEqual(org.sets()[target]['colors'],['Red','white'])
+            org.mutate('set_colors',{'job':'fixture-job','revision':2,'target':target,'colors':[]})
+            self.assertEqual(org.sets()[target]['colors'],[])
+            org.mutate('undo',{'job':'fixture-job','revision':3})
+            reopened=Organizer(engine,Workbench(engine));reopened.summary()
+            self.assertEqual(reopened.sets()[target]['colors'],['Red','white'])
+            self.assertEqual(set(reopened.sets()[target]['members']),set(ids[2:4]))
+            exported=next(g for g in reopened.export()['sets'] if g['id']==target)
+            self.assertEqual(exported['colors'],['Red','white'])
+            reopened.mutate('save',{'job':'fixture-job','revision':4,'target':'library:existing','ids':[ids[4]]})
+            self.assertEqual(reopened.sets()['library:existing']['colors'],['Blue','white'])
+            reopened.mutate('set_colors',{'job':'fixture-job','revision':5,'target':'library:existing','colors':['Green']})
+            self.assertEqual(bulk.current['library_sets']['existing']['colors'],['Blue','white'])
+            reopened.mutate('undo',{'job':'fixture-job','revision':6})
+            self.assertEqual(reopened.sets()['library:existing']['colors'],['Blue','white'])
+            with self.assertRaises(ValueError):reopened.mutate('set_colors',{'job':'fixture-job','revision':7,'target':target,'colors':'invalid'})
+
     def test_discard_filters_every_view_and_known_copies_survives_inventory_and_restores(self):
         with tempfile.TemporaryDirectory() as temp:
             engine,bulk,org,ids=fixture(temp);alias='a'*64

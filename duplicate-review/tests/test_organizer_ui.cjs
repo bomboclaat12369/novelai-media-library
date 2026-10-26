@@ -18,13 +18,18 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  await page.keyboard.press('ArrowRight');await page.keyboard.press(' ');assert.equal(await page.evaluate(()=>selection.size),2);
  await page.locator('#viewerDetails').click();assert.equal(await page.locator('#locations').isVisible(),true);
  await page.locator('#viewerClose').click();
- await page.locator('#setName').fill('Saved shoot');await page.locator('#save').click();await page.waitForFunction(()=>!busy&&data.sets.some(g=>g.name==='Saved shoot'));
+ await page.locator('#setName').fill('Saved shoot');
+ await page.locator('#draftSetColors').click();await page.locator('#setColors').fill(' Blue, white, Blue ');
+ await page.locator('#saveSetColors').click();await page.waitForFunction(()=>!busy&&!document.querySelector('#colorDetails').open);
+ await page.locator('#save').click();await page.waitForFunction(()=>!busy&&data.sets.some(g=>g.name==='Saved shoot'));
+ assert.deepEqual(await page.evaluate(()=>data.sets.find(g=>g.name==='Saved shoot').colors),['Blue','white']);
  assert.equal(await page.evaluate(()=>selection.size),0);
  const saved=await page.evaluate(()=>data.sets.find(g=>g.name==='Saved shoot').id);
  await page.locator('#setsTab').click();await page.locator('#postList button').filter({hasText:'Saved shoot'}).click();await page.waitForFunction(()=>currentKind==='set'&&!busy);
  assert.equal(await page.locator('#grid .card').count(),2);
  await page.reload();await page.waitForFunction(()=>data?.sets.some(g=>g.name==='Saved shoot')&&view);
  assert.equal(await page.evaluate(()=>currentId),saved);
+ assert.deepEqual(await page.evaluate(()=>data.sets.find(g=>g.id===currentId).colors),['Blue','white']);
  await page.locator('#undo').click();await page.waitForFunction(()=>!busy&&!data.sets.some(g=>g.name==='Saved shoot'));
  assert.equal(await page.evaluate(()=>selection.size),2);
  // Reopen a surviving post after undo removed the viewed draft.
@@ -96,6 +101,13 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  assert.equal(await page.locator('#grid .card').count(),3);
  await page.waitForFunction(()=>Array.from(document.querySelectorAll('#grid img')).every(i=>i.complete&&i.naturalWidth>0));
  await page.screenshot({path:'/tmp/organizer-instagram.png',fullPage:true});
+ await page.locator('#setsTab').click();await page.locator('#postList button').filter({hasText:'Existing shoot'}).click();await page.waitForFunction(()=>!busy&&currentKind==='set');
+ await page.locator('#editSetColors').click();assert.equal(await page.locator('#setColors').inputValue(),'');
+ await page.locator('#setColors').fill('Pink, white');await page.locator('#saveSetColors').click();await page.waitForFunction(()=>!busy&&!document.querySelector('#colorDetails').open);
+ assert.equal(await page.evaluate(()=>data.sets.find(g=>g.id===currentId).count),2);
+ await page.reload();await page.waitForFunction(()=>view&&data?.sets.find(g=>g.id===currentId)?.colors?.[0]==='Pink');
+ await page.locator('#editSetColors').click();assert.equal(await page.locator('#setColors').inputValue(),'Pink, white');await page.locator('#cancelSetColors').click();
+ await page.locator('#undo').click();await page.waitForFunction(()=>!busy&&data.sets.find(g=>g.id===currentId).colors.length===0);
  assert(!posts.some(p=>/\/api\/(scan|history\/inventory|bulk\/start|selection\/move)/.test(p)),posts.join(','));
  assert.deepEqual(errors,[]);
  console.log('Organizer UI passed: viewer surround close, sidebar preview, Back, sorting, 8 columns, discard/reload/restore, Unsorted remaining/restore; existing keeper/order/draft workflows; no scan or move requests.');

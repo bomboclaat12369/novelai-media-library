@@ -117,7 +117,7 @@ class Organizer:
     def sets(self,include_discarded=False):
         current=self.bulk.current or {};result={}
         for sid,g in current.get('library_sets',{}).items():
-            result['library:'+sid]={'id':'library:'+sid,'name':g['name'],'members':[], 'library_id':sid,'saved':False}
+            result['library:'+sid]={'id':'library:'+sid,'name':g['name'],'colors':g.get('colors') or [],'members':[], 'library_id':sid,'saved':False}
         for ident,item in self.catalog.items():
             if item.get('quarantine_only'):continue
             for sid in item.get('existing_sets',[]):
@@ -125,6 +125,7 @@ class Organizer:
         with self.db() as db:
             for sid,raw in db.execute('SELECT id,data FROM sets WHERE scope=?',(self.scope,)):
                 g=json.loads(raw)
+                g.setdefault('colors',result.get(sid,{}).get('colors',[]))
                 # Existing library members remain visible alongside locally reviewed additions.
                 g['members']=list(dict.fromkeys(result.get(sid,{}).get('members',[])+g['members']))
                 g['saved']=True;result[sid]=g
@@ -254,6 +255,13 @@ class Organizer:
         target=body.get('target')
         return str(target) if target else hashlib.sha256('\n'.join(sorted(ids)).encode()).hexdigest()
 
+    @staticmethod
+    def colors(value):
+        # Same descriptor format and limits as the media library's Set details.
+        if not isinstance(value,list) or len(value)>50 or any(not isinstance(v,str) or len(v)>150 for v in value):
+            raise ValueError('Invalid Set colors (up to 50 descriptors, 150 characters each).')
+        return list(dict.fromkeys(v.strip() for v in value if v.strip()))
+
     def mutate(self,action,body):
         with self.lock,self.bulk.lock:
             self.bind()
@@ -261,6 +269,7 @@ class Organizer:
             state=self.state()
             if action=='draft':
                 state['selection']=self.valid_ids(body.get('ids',[]));state['target']=str(body.get('target',''))
+                if 'new_colors' in body:state['new_colors']=self.colors(body['new_colors'])
                 with self.db() as db:self.put_state(db,state)
                 return {'saved':True}
             if int(body.get('revision',-1))!=state.get('revision',0):raise ValueError('Review changed in another window. Reload before saving.')
@@ -276,9 +285,18 @@ class Organizer:
                     old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,ident)).fetchone()
                     state['undo']={'action':'set','id':ident,'previous':old[0] if old else None,'selection':ids}
                     members=list(dict.fromkeys((previous or {}).get('members',[])+ids))
-                    group={'id':ident,'name':name,'members':members,'updated':time.time(),'library_id':(previous or {}).get('library_id')}
+                    colors=self.colors(body.get('colors',(previous or {}).get('colors',state.get('new_colors',[]))))
+                    group={'id':ident,'name':name,'colors':colors,'members':members,'updated':time.time(),'library_id':(previous or {}).get('library_id')}
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,ident,json.dumps(group)))
-                    state.update(selection=[],target='')
+                    state.update(selection=[],target='',new_colors=[])
+                elif action=='set_colors':
+                    target=str(body.get('target',''));group=self.sets(include_discarded=True).get(target)
+                    if not group:raise ValueError('Choose an available set.')
+                    colors=self.colors(body.get('colors'))
+                    old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
+                    state['undo']={'action':'set','id':target,'previous':old[0] if old else None,'selection':state.get('selection',[])}
+                    group.update(colors=colors,updated=time.time())
+                    db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)))
                 elif action=='remove':
                     target=str(body.get('target',''));old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
                     if not old:raise ValueError('Only locally saved drafts can be edited here.')
