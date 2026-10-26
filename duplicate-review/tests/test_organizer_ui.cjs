@@ -12,6 +12,8 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  assert.equal(await page.locator('#grid .card').filter({hasText:'Unresolved'}).getByRole('button',{name:'Select',exact:true}).isEnabled(),false);
  const id=info.ids[2];await page.locator(`#grid .card[data-id="${id}"] [data-pick]`).click();
  await page.waitForFunction(()=>document.querySelectorAll('#suggestions .card').length>0);
+ assert.equal(await page.locator(`#suggestions .card[data-id="${info.ids[0]}"] .membership`).textContent(),'In: Existing shoot');
+ assert.equal(await page.locator(`#suggestions .card[data-id="${info.ids[3]}"] .membership`).textContent(),'Not in a set');
  assert.match(await page.locator('#selectionCount').textContent(),/1 selected/);
  await page.locator(`#grid .card[data-id="${id}"] img`).click();await page.waitForFunction(()=>document.querySelector('#largeImage').naturalWidth>0);
  assert.equal(await page.locator('#viewer').evaluate(e=>e.open),true);
@@ -129,6 +131,20 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  await page.locator(`#grid .card[data-id="${info.ids[0]}"] [data-pick]`).click();await page.locator('#target').selectOption('library:existing');
  await page.locator('#save').click();await page.waitForFunction(()=>!busy&&selection.size===0);
  assert.equal(await page.locator('#membershipWarning').evaluate(e=>e.open),false);
+ await page.locator('#target').selectOption('');
+ await page.locator(`#grid .card[data-id="${info.ids[2]}"] [data-pick]`).click();
+ await page.waitForFunction(()=>document.querySelector('#suggestions .membership')?.textContent.includes('In:'));
+ await page.waitForFunction(id=>document.querySelector(`#suggestions .card[data-id="${id}"] .membership`)?.textContent==='In: Existing shoot, Intentional overlap',info.ids[0]);
+ // Reference and membership badges share styling without overlapping or hiding names.
+ const badgeCheck=await page.evaluate(()=>{
+   const c=card({id:'badge-fixture',name:'Preview',reference:true,sets:['A long saved set name','Another saved set name']},true);
+   document.querySelector('#suggestions .suggest-grid').append(c);
+   const badges=[...c.querySelectorAll('.badge')],a=badges[0].getBoundingClientRect(),b=badges[1].getBoundingClientRect();
+   const result={text:badges.map(e=>e.textContent),separate:a.bottom<=b.top,within:b.right<=c.getBoundingClientRect().right,
+     style:badges.map(e=>{const s=getComputedStyle(e);return [s.backgroundColor,s.border,s.fontSize,s.padding]})};c.remove();return result;
+ });
+ assert.deepEqual(badgeCheck.text,['In library','In: A long saved set name, Another saved set name']);
+ assert(badgeCheck.separate&&badgeCheck.within);assert.deepEqual(badgeCheck.style[0],badgeCheck.style[1]);
  assert(!posts.some(p=>/\/api\/(scan|history\/inventory|bulk\/start|selection\/move)/.test(p)),posts.join(','));
  assert.deepEqual(errors,[]);
  console.log('Organizer UI passed: viewer surround close, sidebar preview, Back, sorting, 8 columns, discard/reload/restore, Unsorted remaining/restore; existing keeper/order/draft workflows; no scan or move requests.');

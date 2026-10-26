@@ -49,6 +49,26 @@ def add_instagram(bulk,ids):
 
 
 class OrganizerTests(unittest.TestCase):
+    def test_suggested_additions_include_saved_set_names_and_refresh_after_undo(self):
+        with tempfile.TemporaryDirectory() as temp:
+            engine,bulk,org,ids=fixture(temp)
+            def suggestions(organizer):
+                return {i['id']:i for i in organizer.related({'ids':[ids[2]]})['images']}
+            initial=suggestions(org)
+            self.assertEqual(initial[ids[0]]['sets'],['Existing shoot'])
+            self.assertEqual(initial[ids[3]]['sets'],[])
+            body={'job':'fixture-job','revision':0,'name':'Second shoot','ids':[ids[0],ids[3]]}
+            warning=org.mutate('save',body)
+            org.mutate('save',dict(body,membership_confirmation=warning['membership_confirmation']))
+            reopened=Organizer(engine,bulk)
+            saved=suggestions(reopened)
+            self.assertEqual(saved[ids[0]]['sets'],['Existing shoot','Second shoot'])
+            self.assertEqual(saved[ids[3]]['sets'],['Second shoot'])
+            self.assertEqual(saved[ids[4]]['sets'],[])
+            self.assertEqual(list(saved),list(initial))
+            reopened.mutate('undo',{'job':'fixture-job','revision':1})
+            self.assertEqual(suggestions(reopened),initial)
+
     def test_second_set_membership_requires_specific_confirmation_and_noops_do_not_warn(self):
         with tempfile.TemporaryDirectory() as temp:
             engine,bulk,org,ids=fixture(temp);before=org.state();sets=copy.deepcopy(org.sets())

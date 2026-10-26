@@ -234,16 +234,17 @@ class Organizer:
                 source_score=sum(1/(max(1,len(self.posts[s]['ids']))**.5) for s in shared)
                 score=min(.35,.3*source_score)+v
                 ranked.append((score,ident,'Shared source post'+(' · visually similar' if v>=.60 else '') if shared else 'Visually similar'))
-            ranked.sort(key=lambda r:(-r[0],r[1]));offset=max(0,int(body.get('offset',0)));sets=[]
+            ranked.sort(key=lambda r:(-r[0],r[1]));offset=max(0,int(body.get('offset',0)));sets=[];labels={}
             for g in allsets.values():
                 members=set(g['members']);overlap=len(selected & members)
+                for i in members:labels.setdefault(i,[]).append(g['name'])
                 shared=len(sources & {s for i in members if i in self.catalog for s in self.catalog[i]['sources']})
                 v=max((visual.get(i,0) for i in members),default=0)
                 if overlap or shared or v>=.60:sets.append({'id':g['id'],'name':g['name'],'count':len(members),'overlap':overlap,'score':overlap*10+bool(shared)+v,'library':bool(g.get('library_id'))})
             sets.sort(key=lambda g:(-g['score'],g['name']))
             posts=[{'id':s,'label':self.posts[s]['label'],'count':len(self.posts[s]['ids']),'shared':sum(s in self.catalog[i]['sources'] for i in seeds)} for s in sources]
             posts.sort(key=lambda p:(-p['shared'],p['count'],p['label']))
-            return {'context':context,'images':[self.image(i)|{'reason':reason} for _,i,reason in ranked[offset:offset+30]],'total':len(ranked),'offset':offset,'sets':sets[:12],'posts':posts}
+            return {'context':context,'images':[self.image(i)|{'reason':reason,'sets':labels.get(i,[])} for _,i,reason in ranked[offset:offset+30]],'total':len(ranked),'offset':offset,'sets':sets[:12],'posts':posts}
 
     def valid_ids(self,ids):
         if not isinstance(ids,list) or len(ids)>15000:raise ValueError('Invalid selection.')

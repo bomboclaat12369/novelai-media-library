@@ -1,4 +1,11 @@
-LOCAL DUPLICATE REVIEW 2.0.4
+LOCAL DUPLICATE REVIEW 2.0.5
+
+NEW IN 2.0.5: SET MEMBERSHIP ON SUGGESTED ADDITIONS
+- Suggested images show In: followed by their saved set names, or Not in a set.
+  These use the same small overlay badge style as In library; both remain visible
+  when applicable. Membership includes library sets and local organizer drafts.
+- Uses saved metadata. Scans, analysis, duplicate decisions and drafts are retained;
+  no rescan or repeat review is needed.
 
 NEW IN 2.0.4: WARN BEFORE ADDING AN IMAGE TO A SECOND SET
 - A quiet indicator beside the selection count shows how many selected images
