@@ -2,6 +2,16 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Folder organizer and in-app updates (Duplicate Review 2.0.0)
+
+Open **Folder organizer** to use the completed source inventory immediately, including recovered original-post connections. Browse posts, select a shoot, inspect related posts and likely existing sets, and save a named set draft. Selected images stay selected across posts. Quarantined images remain labeled evidence and cannot become set members or imports. Existing library-set additions are saved locally for later import; this release does not mutate the media library.
+
+**No rescan on update.** The organizer reads saved inventory and analysis; updates do not start scans, clear decisions, or change cache recipes. Optional **Analyze missing images** adds outfit/scene features only where compatible analysis is missing, with stage progress, elapsed time, ETA and resumable per-image caching. Existing matching-model downloads may be needed on first use. Duplicate-history refresh also displays stage ETA.
+
+The UI provides large uncropped image grids, adjustable columns, similarity/filename ordering, paged rendering, cached previews, a large keyboard-controlled viewer and fullscreen. Similarity ordering uses saved outfit/scene features where available and saved color/layout fingerprints otherwise; suggestions still require visual review. Post statuses, selection, set drafts, rejected suggestions and undo persist in `organizer.sqlite3` beside the existing databases.
+
+**Install 2.0.0 once to add the updater.** Thereafter use **Updates → Download update → Restart & apply update**. Keep using the same launcher. Complete releases are staged in separate versioned folders, checked with SHA-256 and activated atomically; active scans block restart. Only one automatic check occurs on launch. Offline failures keep the installed app usable. Program updates do not overwrite image folders, databases, thumbnails, model caches or the Python environment.
+
 ## One-click history review (Duplicate Review 1.9.6)
 
 **Keep & next** on a surviving candidate now saves the keeper connection and advances immediately, in both the grid and large comparison. **Undo last connection** reverses the choice and returns to that exact comparison, including after restarting. All original paths remain preserved and no files move. Regular duplicate review retains its existing controls.

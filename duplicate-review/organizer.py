@@ -1,0 +1,332 @@
+"""Folder-first review over a saved inventory. No automatic scans or file moves."""
+from __future__ import annotations
+import copy, hashlib, io, json, re, runpy, sqlite3, threading, time, uuid
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
+import numpy as np
+from engine import load_image, sha256, stat_key, linked
+
+
+def natural(value):
+    return tuple((1,int(x)) if x.isdigit() else (0,x.casefold()) for x in re.split(r'(\d+)',str(value)))
+
+
+class Organizer:
+    def __init__(self, engine, bulk):
+        self.engine=engine;self.bulk=bulk;self.path=engine.state_dir/'organizer.sqlite3'
+        self.lock=threading.RLock();self.cancel=threading.Event();self.thread=None
+        self.job={'running':False,'phase':'Saved inventory ready','done':0,'total':0,'eta_seconds':None}
+        self.bound=None;self.catalog={};self.posts={};self.order_cache={};self.vector_by_id={};self.quick={}
+        self.encoder_type=None;self.recipe=None;self.scope='';self.revision=0
+        with self.db() as db:
+            db.executescript('''CREATE TABLE IF NOT EXISTS state(scope TEXT PRIMARY KEY,data TEXT);
+                CREATE TABLE IF NOT EXISTS sets(scope TEXT,id TEXT,data TEXT,PRIMARY KEY(scope,id));
+                CREATE TABLE IF NOT EXISTS posts(scope TEXT,id TEXT,status TEXT,PRIMARY KEY(scope,id));
+                CREATE TABLE IF NOT EXISTS rejected(scope TEXT,context TEXT,id TEXT,PRIMARY KEY(scope,context,id));''')
+
+    @contextmanager
+    def db(self):
+        db=sqlite3.connect(self.path,timeout=30)
+        try:
+            with db:yield db
+        finally:db.close()
+
+    def bind(self):
+        current=self.bulk.current or {};cat=current.get('source_catalog',{})
+        key=(current.get('id'),len(cat))
+        if self.bound==key:return
+        if self.job['running']:return
+        self.bound=key;self.catalog=cat;self.posts={};self.order_cache={}
+        self.scope=hashlib.sha256(json.dumps(current.get('config',{}).get('roots',[]),sort_keys=True).encode()).hexdigest()
+        for ident,item in cat.items():
+            for sid,source in item.get('sources',{}).items():
+                if source.get('kind')=='library':continue
+                post=self.posts.setdefault(sid,{'id':sid,'label':source.get('label',sid),'kind':source.get('kind','folder'),'ids':[]})
+                post['ids'].append(ident)
+        # Load only saved analysis. No source-image reads, comparisons or model downloads.
+        self.load_vectors()
+        with self.engine.db() as db:
+            sketches={r['sha']:r['sketch'] for r in db.execute('SELECT sha,sketch FROM cache WHERE sketch IS NOT NULL')}
+        self.quick={}
+        for ident,r in cat.items():
+            raw=sketches.get(r['sha'])
+            if raw and len(raw)==3072:
+                a=np.frombuffer(raw,dtype=np.uint8).reshape(32,32,3).astype(np.float32)/255
+                # Broad color/layout ordering only, never a duplicate or membership decision.
+                v=np.concatenate([a.mean((0,1)),a.reshape(4,8,4,8,3).mean((1,3)).ravel()])
+                self.quick[ident]=v/(np.linalg.norm(v)+1e-8)
+
+    def model(self):
+        if self.encoder_type is None:
+            source=Path(__file__).resolve().parents[1]/'runtime-src'/'companion-runtime.pyw'
+            self.encoder_type=runpy.run_path(str(source))['OutfitMatcher']
+            self.recipe=self.encoder_type.MODEL_SHA+':'+self.encoder_type.SCENE_RECIPE
+        return self.encoder_type
+
+    def load_vectors(self):
+        self.model();self.vector_by_id={}
+        with self.bulk.db() as db:
+            rows={sha:raw for sha,raw in db.execute('SELECT sha,data FROM vectors WHERE recipe=?',(self.recipe,))}
+        for ident,item in self.catalog.items():
+            raw=rows.get(item['sha'])
+            if not raw:continue
+            v=np.frombuffer(raw,dtype=np.float32)
+            if v.size!=2304 or not np.isfinite(v).all():continue
+            v=v.reshape(3,768).copy();v/=np.maximum(np.linalg.norm(v,axis=1,keepdims=True),1e-8)
+            self.vector_by_id[ident]=(v*np.sqrt(np.array([.45,.35,.20],np.float32))[:,None]).ravel()
+        self.vector_ids=sorted(self.vector_by_id)
+        self.matrix=np.stack([self.vector_by_id[i] for i in self.vector_ids]) if self.vector_ids else np.zeros((0,2304),np.float32)
+        self.order_cache={}
+
+    def state(self):
+        with self.db() as db:row=db.execute('SELECT data FROM state WHERE scope=?',(self.scope,)).fetchone()
+        return json.loads(row[0]) if row else {'revision':0,'selection':[]}
+
+    def put_state(self,db,state):
+        db.execute('INSERT OR REPLACE INTO state VALUES (?,?)',(self.scope,json.dumps(state)))
+
+    def sets(self):
+        current=self.bulk.current or {};result={}
+        for sid,g in current.get('library_sets',{}).items():
+            result['library:'+sid]={'id':'library:'+sid,'name':g['name'],'members':[], 'library_id':sid,'saved':False}
+        for ident,item in self.catalog.items():
+            if item.get('quarantine_only'):continue
+            for sid in item.get('existing_sets',[]):
+                if 'library:'+sid in result:result['library:'+sid]['members'].append(ident)
+        with self.db() as db:
+            for sid,raw in db.execute('SELECT id,data FROM sets WHERE scope=?',(self.scope,)):
+                g=json.loads(raw)
+                # Existing library members remain visible alongside locally reviewed additions.
+                g['members']=list(dict.fromkeys(result.get(sid,{}).get('members',[])+g['members']))
+                g['saved']=True;result[sid]=g
+        return result
+
+    def summary(self):
+        with self.lock,self.bulk.lock:
+            self.bind();state=self.state();sets=self.sets();assigned={i for g in sets.values() for i in g['members']}
+            with self.db() as db:statuses=dict(db.execute('SELECT id,status FROM posts WHERE scope=?',(self.scope,)))
+            posts=[]
+            for p in self.posts.values():
+                live=[i for i in p['ids'] if not self.catalog[i].get('quarantine_only')]
+                posts.append({k:v for k,v in p.items() if k!='ids'}|{'count':len(p['ids']),'remaining':sum(i not in assigned for i in live),'unresolved':len(p['ids'])-len(live),'status':statuses.get(p['id'],'pending'),'cover':live[0] if live else p['ids'][0]})
+            posts.sort(key=lambda p:(p['status']!='pending',p['remaining']==0,natural(p['label'])))
+            total=sum(not r.get('quarantine_only') for r in self.catalog.values())
+            return {'job':(self.bulk.current or {}).get('id'),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
+                'state':state,'images':total,'unresolved':len(self.catalog)-total,'indexed':sum(i in self.vector_by_id for i,r in self.catalog.items() if not r.get('quarantine_only')),
+                'progress':dict(self.job),'inventory_complete':bool((self.bulk.current or {}).get('inventory_complete') or (self.bulk.current or {}).get('complete'))}
+
+    def scores(self,seeds):
+        vectors=[self.vector_by_id[i] for i in seeds if i in self.vector_by_id]
+        if not vectors or not len(self.matrix):return {}
+        # A small representative sample bounds interaction cost for large selections.
+        chosen=np.stack(vectors[::max(1,len(vectors)//12)][:12])
+        values=(self.matrix@chosen.T).max(axis=1)
+        return dict(zip(self.vector_ids,values.tolist()))
+
+    def ordered(self,ids,mode):
+        ids=list(ids);cache=(tuple(ids),mode)
+        if cache in self.order_cache:return self.order_cache[cache]
+        base=sorted(ids,key=lambda i:(self.catalog[i].get('quarantine_only',False),natural(self.catalog[i]['path'])))
+        if mode=='filename' or len(base)<3:return base
+        # Preserve coarse source neighborhoods in very large mixed posts; each block
+        # is bounded so a 5,000-image folder never stalls the UI with an N² sort.
+        result=[]
+        for start in range(0,len(base),240):
+            left=base[start:start+240];ordered=[left.pop(0)]
+            while left:
+                prior=ordered[-1]
+                def distance(i):
+                    if prior in self.vector_by_id and i in self.vector_by_id:return 2+float(self.vector_by_id[prior]@self.vector_by_id[i])
+                    if prior in self.quick and i in self.quick:return float(self.quick[prior]@self.quick[i])
+                    return -1
+                best=max(range(len(left)),key=lambda j:distance(left[j]));ordered.append(left.pop(best))
+            result.extend(ordered)
+        self.order_cache[cache]=result
+        if len(self.order_cache)>100:self.order_cache.pop(next(iter(self.order_cache)))
+        return result
+
+    def image(self,ident):
+        r=self.catalog[ident]
+        return {'id':ident,'name':re.split(r'[\\/]',r['path'])[-1],'path':r['path'],'quarantined':bool(r.get('quarantine_only')),
+                'sources':list(r.get('sources',{})),'origins':r.get('origins',[]),'reference':bool(r.get('reference'))}
+
+    def page(self,kind,ident,offset=0,order='similar'):
+        with self.lock,self.bulk.lock:
+            self.bind()
+            group=self.posts.get(ident) if kind=='post' else self.sets().get(ident)
+            if not group:raise ValueError('Choose an available post or set.')
+            ids=group.get('ids',group.get('members',[]));ids=[i for i in ids if i in self.catalog]
+            ids=self.ordered(ids,order);offset=max(0,min(int(offset),max(0,len(ids)-1)))//60*60
+            state=self.state();state.update(view={'kind':kind,'id':ident,'offset':offset,'order':order})
+            with self.db() as db:self.put_state(db,state)
+            sets=self.sets();labels={}
+            for g in sets.values():
+                for i in g['members']:labels.setdefault(i,[]).append(g['name'])
+            return {'label':group.get('label',group.get('name')),'total':len(ids),'offset':offset,'ids':ids,
+                    'images':[self.image(i)|{'sets':labels.get(i,[])} for i in ids[offset:offset+60]],'job':self.bound[0]}
+
+    def related(self,body):
+        with self.lock,self.bulk.lock:
+            self.bind();seeds=self.valid_ids(body.get('ids',[]));context=self.context_key(body,seeds)
+            if not seeds:return {'images':[],'posts':[],'sets':[],'total':0}
+            visual=self.scores(seeds);selected=set(seeds);sources={s for i in seeds for s in self.catalog[i]['sources'] if s in self.posts}
+            with self.db() as db:rejected={r[0] for r in db.execute('SELECT id FROM rejected WHERE scope=? AND context=?',(self.scope,context))}
+            ranked=[]
+            for ident,item in self.catalog.items():
+                if ident in selected or ident in rejected or item.get('quarantine_only'):continue
+                shared=sources & item['sources'].keys();v=visual.get(ident,0)
+                if not shared and v<.60:continue
+                source_score=sum(1/(max(1,len(self.posts[s]['ids']))**.5) for s in shared)
+                score=min(.35,.3*source_score)+v
+                ranked.append((score,ident,'Shared source post'+(' · visually similar' if v>=.60 else '') if shared else 'Visually similar'))
+            ranked.sort(key=lambda r:(-r[0],r[1]));offset=max(0,int(body.get('offset',0)));sets=[]
+            for g in self.sets().values():
+                members=set(g['members']);overlap=len(selected & members)
+                shared=len(sources & {s for i in members if i in self.catalog for s in self.catalog[i]['sources']})
+                v=max((visual.get(i,0) for i in members),default=0)
+                if overlap or shared or v>=.60:sets.append({'id':g['id'],'name':g['name'],'count':len(members),'overlap':overlap,'score':overlap*10+bool(shared)+v,'library':bool(g.get('library_id'))})
+            sets.sort(key=lambda g:(-g['score'],g['name']))
+            posts=[{'id':s,'label':self.posts[s]['label'],'count':len(self.posts[s]['ids']),'shared':sum(s in self.catalog[i]['sources'] for i in seeds)} for s in sources]
+            posts.sort(key=lambda p:(-p['shared'],p['count'],p['label']))
+            return {'context':context,'images':[self.image(i)|{'reason':reason} for _,i,reason in ranked[offset:offset+30]],'total':len(ranked),'offset':offset,'sets':sets[:12],'posts':posts}
+
+    def valid_ids(self,ids):
+        if not isinstance(ids,list) or len(ids)>15000:raise ValueError('Invalid selection.')
+        ids=list(dict.fromkeys(ids))
+        if any(i not in self.catalog or self.catalog[i].get('quarantine_only') for i in ids):raise ValueError('Select surviving images only. Quarantine remains evidence only.')
+        return ids
+
+    def context_key(self,body,ids):
+        target=body.get('target')
+        return str(target) if target else hashlib.sha256('\n'.join(sorted(ids)).encode()).hexdigest()
+
+    def mutate(self,action,body):
+        with self.lock,self.bulk.lock:
+            self.bind()
+            if body.get('job')!=self.bound[0]:raise ValueError('Inventory changed. Reopen the organizer.')
+            state=self.state()
+            if action=='draft':
+                state['selection']=self.valid_ids(body.get('ids',[]));state['target']=str(body.get('target',''))
+                with self.db() as db:self.put_state(db,state)
+                return {'saved':True}
+            if int(body.get('revision',-1))!=state.get('revision',0):raise ValueError('Review changed in another window. Reload before saving.')
+            with self.db() as db:
+                if action=='save':
+                    ids=self.valid_ids(body.get('ids',[]))
+                    if not ids:raise ValueError('Select at least one image.')
+                    target=str(body.get('target',''));allsets=self.sets();previous=allsets.get(target)
+                    if target and not previous:raise ValueError('Set no longer available.')
+                    name=str(body.get('name') or (previous or {}).get('name','')).strip()
+                    if not name or len(name)>250:raise ValueError('Give the set a name (up to 250 characters).')
+                    ident=target or uuid.uuid4().hex
+                    old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,ident)).fetchone()
+                    state['undo']={'action':'set','id':ident,'previous':old[0] if old else None,'selection':ids}
+                    members=list(dict.fromkeys((previous or {}).get('members',[])+ids))
+                    group={'id':ident,'name':name,'members':members,'updated':time.time(),'library_id':(previous or {}).get('library_id')}
+                    db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,ident,json.dumps(group)))
+                    state.update(selection=[],target='')
+                elif action=='remove':
+                    target=str(body.get('target',''));old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
+                    if not old:raise ValueError('Only locally saved drafts can be edited here.')
+                    group=json.loads(old[0])
+                    if group.get('library_id'):raise ValueError('Existing library membership is preserved; edit removals in the media library.')
+                    ids=self.valid_ids(body.get('ids',[]));state['undo']={'action':'set','id':target,'previous':old[0],'selection':ids}
+                    group['members']=[i for i in group['members'] if i not in ids];group['updated']=time.time()
+                    db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)));state['selection']=[]
+                elif action=='post':
+                    ident=body.get('id');status=body.get('status')
+                    if ident not in self.posts or status not in ('pending','reviewed','deferred'):raise ValueError('Invalid post status.')
+                    old=db.execute('SELECT status FROM posts WHERE scope=? AND id=?',(self.scope,ident)).fetchone()
+                    state['undo']={'action':'post','id':ident,'previous':old[0] if old else None}
+                    db.execute('INSERT OR REPLACE INTO posts VALUES (?,?,?)',(self.scope,ident,status))
+                elif action=='reject':
+                    ids=self.valid_ids(body.get('ids',[]));context=str(body.get('context',''))
+                    if not context or len(context)>200:raise ValueError('Invalid suggestion context.')
+                    for ident in ids:db.execute('INSERT OR IGNORE INTO rejected VALUES (?,?,?)',(self.scope,context,ident))
+                    state['undo']={'action':'reject','context':context,'ids':ids}
+                elif action=='undo':
+                    undo=state.pop('undo',None)
+                    if not undo:raise ValueError('No organizer action to undo.')
+                    if undo['action']=='set':
+                        db.execute('DELETE FROM sets WHERE scope=? AND id=?',(self.scope,undo['id']))
+                        if undo['previous']:db.execute('INSERT INTO sets VALUES (?,?,?)',(self.scope,undo['id'],undo['previous']))
+                        state['selection']=undo.get('selection',[])
+                    elif undo['action']=='post':
+                        db.execute('DELETE FROM posts WHERE scope=? AND id=?',(self.scope,undo['id']))
+                        if undo['previous']:db.execute('INSERT INTO posts VALUES (?,?,?)',(self.scope,undo['id'],undo['previous']))
+                    elif undo['action']=='reject':
+                        for ident in undo['ids']:db.execute('DELETE FROM rejected WHERE scope=? AND context=? AND id=?',(self.scope,undo['context'],ident))
+                else:raise ValueError('Unknown organizer action.')
+                state['revision']=state.get('revision',0)+1;self.put_state(db,state)
+            return self.summary()
+
+    def index(self):
+        with self.lock,self.bulk.lock:
+            self.bind()
+            if self.job['running'] or self.engine.status['running'] or (self.bulk.current or {}).get('running'):raise ValueError('Wait for the current operation.')
+            todo=[copy.copy(r) for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.vector_by_id]
+            if not todo:return dict(self.job)|{'phase':'All saved images already indexed','remaining':0}
+            self.cancel.clear();self.job={'running':True,'phase':'Preparing visual matching','done':0,'total':len(todo),'eta_seconds':None,'elapsed_seconds':0,'reused':len(self.vector_by_id),'issues':[]}
+            self.thread=threading.Thread(target=self.run_index,args=(todo,),daemon=True);self.thread.start();return dict(self.job)
+
+    def run_index(self,todo):
+        owner=self;base=self.model();started=time.monotonic()
+        class Encoder(base):
+            stage_started=time.monotonic()
+            stage_done=0
+            def update(self,ident,**fields):
+                with owner.lock:
+                    if 'phase' in fields and fields['phase']!=owner.job['phase']:
+                        self.stage_started=time.monotonic();self.stage_done=0
+                        owner.job.update(done=0,total=fields.get('total',0),eta_seconds=None)
+                    owner.job.update({k:v for k,v in fields.items() if k in ('phase','done','total')})
+                    elapsed=time.monotonic()-self.stage_started;done=owner.job['done'];total=owner.job['total']
+                    owner.job.update(elapsed_seconds=round(elapsed),eta_seconds=round(elapsed/done*max(0,total-done)) if done and total else None)
+            def _check_cancel(self,ident):
+                if owner.cancel.is_set():raise InterruptedError('Paused. Completed visual analysis is saved.')
+        encoder=Encoder(SimpleNamespace(root=Path((self.bulk.current or {}).get('model_root') or self.engine.state_dir/'bulk-models'),_hash_file=sha256))
+        try:
+            encoder._prepare('organizer');encoder._prepare_scene('organizer');started=time.monotonic()
+            with self.lock:self.job.update(phase='Analyzing missing images',done=0,total=len(todo),elapsed_seconds=0,eta_seconds=None)
+            for at,item in enumerate(todo):
+                encoder._check_cancel('organizer')
+                try:
+                    path=Path(item['path'])
+                    if linked(path) or stat_key(path)!=item['stamp']:raise ValueError('File changed since the saved inventory.')
+                    value=np.concatenate((encoder._encode(path),encoder._encode_scene(path).reshape(-1))).astype(np.float32)
+                    if value.size!=2304 or not np.isfinite(value).all():raise ValueError('Invalid visual analysis')
+                    if stat_key(path)!=item['stamp']:raise ValueError('File changed during analysis.')
+                    with self.bulk.db() as db:db.execute('INSERT OR REPLACE INTO vectors VALUES (?,?,?)',(item['sha'],self.recipe,value.tobytes()))
+                except InterruptedError:raise
+                except Exception as e:
+                    with self.lock:self.job['issues'].append({'path':item['path'],'message':str(e)})
+                elapsed=time.monotonic()-started
+                with self.lock:self.job.update(phase='Analyzing missing images',done=at+1,elapsed_seconds=round(elapsed),eta_seconds=round(elapsed/(at+1)*(len(todo)-at-1)))
+            with self.lock:self.job.update(phase='Visual analysis saved',eta_seconds=0)
+        except Exception as e:
+            with self.lock:self.job.update(phase=str(e),eta_seconds=None)
+        finally:
+            with self.lock:self.load_vectors();self.job['running']=False
+
+    def preview(self,ident,size):
+        with self.lock,self.bulk.lock:
+            self.bind();item=self.catalog.get(ident)
+            if not item:raise ValueError('Image is not in the saved inventory.')
+            path=Path(item['path']);stamp=stat_key(path)
+            if linked(path) or stamp!=item['stamp']:raise ValueError('Image changed or moved since inventory.')
+            size=min(2400,max(240,int(size)))
+            key=hashlib.sha256((item['sha']+':'+stamp+':'+str(size)+':preview-v1').encode()).hexdigest()
+        target=self.engine.state_dir/'organizer-thumbnails'/key[:2]/(key+'.jpg')
+        if target.is_file():return target.read_bytes()
+        im,_,_=load_image(path,size);out=io.BytesIO();im.save(out,format='JPEG',quality=94)
+        data=out.getvalue();target.parent.mkdir(parents=True,exist_ok=True)
+        temp=target.with_name(key+'.'+uuid.uuid4().hex+'.tmp');temp.write_bytes(data);temp.replace(target)
+        return data
+
+    def export(self):
+        with self.lock,self.bulk.lock:
+            self.bind();summary=self.summary()
+            return {'format':'folder-organizer-1','source_job':self.bound[0],'config':(self.bulk.current or {}).get('config',{}),'sets':summary['sets'],'state':summary['state'],
+                    'post_review':[{k:p[k] for k in ('id','status')} for p in summary['posts']],'source_catalog':self.catalog,
+                    'notice':'Locally saved set drafts; no images moved, restored or imported.'}

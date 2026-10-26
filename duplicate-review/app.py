@@ -13,6 +13,10 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
+if __name__ == '__main__' and '--pick-folder' not in sys.argv:
+    from updater import launch_active
+    launch_active()
+
 # Avoid loading NumPy for the native folder dialog subprocess.
 if '--pick-folder' in sys.argv:
     import tkinter as tk
@@ -34,7 +38,18 @@ def make_server(engine, port=0, token=None):
     html = html.replace('__HISTORY_REVIEW__', (Path(__file__).parent / 'history-review.js').read_text(encoding='utf-8'))
     from bulk.workbench import Workbench
     bulk = Workbench(engine)
+    from organizer import Organizer
+    from updater import Updater
+    organizer = Organizer(engine, bulk)
+    updater = Updater(engine.state_dir, VERSION)
+    operation_lock = threading.RLock()
     bulk_html = (Path(__file__).parent / 'bulk' / 'ui.html').read_text(encoding='utf-8')
+    organizer_html = (Path(__file__).parent / 'organizer.html').read_text(encoding='utf-8')
+    update_js = (Path(__file__).parent / 'update-ui.js').read_text(encoding='utf-8')
+    update_tag = '<script nonce="__TOKEN__">'+update_js+'</script>'
+    html = html.replace('</body>',update_tag+'</body>')
+    bulk_html = bulk_html.replace('</body>',update_tag+'</body>')
+    organizer_html = organizer_html.replace('__UPDATER__',update_js)
 
     image_slots = threading.Semaphore(2)
 
@@ -72,11 +87,28 @@ def make_server(engine, port=0, token=None):
             params = parse_qs(url.query)
             if url.path == '/bulk':
                 return self.send(200, bulk_html.replace('__TOKEN__', token).encode(), 'text/html; charset=utf-8')
+            if url.path == '/organizer':
+                return self.send(200, organizer_html.replace('__TOKEN__', token).encode(), 'text/html; charset=utf-8')
             if url.path == '/':
                 return self.send(200, html.replace('__TOKEN__', token).replace('__VERSION__', VERSION).encode(), 'text/html; charset=utf-8')
             if self.headers.get('X-Review-Token') != token and params.get('token', [''])[0] != token:
                 return self.send(403, {'error': 'Reopen the app using its launcher.'})
             try:
+                if url.path == '/api/update/status':
+                    return self.send(200, updater.status())
+                if url.path == '/api/organizer/state':
+                    return self.send(200, organizer.summary())
+                if url.path == '/api/organizer/page':
+                    return self.send(200, organizer.page(params.get('kind',['post'])[0],params['id'][0],int(params.get('offset',[0])[0]),params.get('order',['similar'])[0]))
+                if url.path == '/api/organizer/progress':
+                    with organizer.lock:progress=dict(organizer.job)
+                    return self.send(200, progress)
+                if url.path == '/api/organizer/export':
+                    return self.send(200, organizer.export())
+                if url.path == '/api/organizer/image':
+                    with image_slots:
+                        payload=organizer.preview(params['id'][0],int(params.get('size',[1000])[0]))
+                    return self.send(200,payload,'image/jpeg')
                 if url.path == '/api/bulk/state':
                     return self.send(200, bulk.status())
                 if url.path == '/api/bulk/context':
@@ -120,6 +152,10 @@ def make_server(engine, port=0, token=None):
                 return self.send(400, {'error': str(e)})
 
         def do_POST(self):
+            with operation_lock:
+                self.handle_post()
+
+        def handle_post(self):
             if not self.allowed() or self.headers.get('X-Review-Token') != token:
                 return self.send(403, {'error': 'Local access only'})
             try:
@@ -128,9 +164,30 @@ def make_server(engine, port=0, token=None):
                     raise ValueError('Invalid request size')
                 body = json.loads(self.rfile.read(length))
                 path = urlparse(self.path).path
+                if updater.restart:
+                    raise ValueError('The app is restarting to apply an update.')
+                if organizer.job['running'] and not (path.startswith('/api/organizer/') or path in ('/api/quit','/api/history/open','/api/history/reveal','/api/update/check','/api/update/install')):
+                    raise ValueError('Pause visual analysis before changing the source inventory or restarting.')
                 if bulk.current and bulk.current['running'] and path not in ('/api/bulk/cancel','/api/pick','/api/quit'):
                     raise ValueError('Stop the bulk evaluation before changing files or starting another operation.')
-                if path == '/api/bulk/start':
+                if path == '/api/update/check':
+                    result=updater.start()
+                elif path == '/api/update/install':
+                    result=updater.start(install=True)
+                elif path == '/api/update/apply':
+                    if engine.status['running'] or organizer.job['running'] or (bulk.current or {}).get('running'):
+                        raise ValueError('Finish or stop the active scan before restarting. Your progress is saved.')
+                    result=updater.activate()
+                    threading.Thread(target=self.server.shutdown,daemon=True).start()
+                elif path == '/api/organizer/related':
+                    result=organizer.related(body)
+                elif path == '/api/organizer/index':
+                    result=organizer.index()
+                elif path == '/api/organizer/pause':
+                    organizer.cancel.set();result={'paused':True}
+                elif path.startswith('/api/organizer/'):
+                    result=organizer.mutate(path.rsplit('/',1)[-1],body)
+                elif path == '/api/bulk/start':
                     result = bulk.start(body)
                 elif path == '/api/history/inventory':
                     result = bulk.start(body,inventory_only=True)
@@ -222,6 +279,7 @@ def make_server(engine, port=0, token=None):
                         subprocess.Popen(['xdg-open', str(file)])
                     result = {'message': 'Opened the original in your image viewer.'}
                 elif path == '/api/quit':
+                    organizer.cancel.set()
                     bulk.cancel.set()
                     engine.cancel.set()
                     result = {'message': 'App closed. You can close this tab.'}
@@ -234,6 +292,8 @@ def make_server(engine, port=0, token=None):
 
     server = ThreadingHTTPServer(('127.0.0.1', port), Handler)
     server.bulk = bulk
+    server.organizer = organizer
+    server.updater = updater
     server.daemon_threads = True
     return server
 
@@ -269,6 +329,8 @@ def main():
         return
     engine = Engine(state)
     server = make_server(engine, args.port)
+    # One background check on launch; no periodic network traffic while idle.
+    server.updater.start()
     url = f'http://127.0.0.1:{server.server_port}/'
     (state/'running-url.txt').write_text(url)
     print(f'Local Duplicate Review {VERSION}\n{url}\nKeep this window open. Use Quit in the app when finished.', flush=True)
@@ -279,6 +341,9 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        server.organizer.cancel.set()
+        if server.organizer.thread:
+            server.organizer.thread.join(timeout=10)
         server.bulk.cancel.set()
         if server.bulk.thread:
             server.bulk.thread.join(timeout=10)
@@ -287,6 +352,10 @@ def main():
             engine.thread.join(timeout=10)
         server.server_close()
         lock.close()
+    if server.updater.restart:
+        from updater import active_program
+        program=active_program(state)
+        if program:os.execv(sys.executable,[sys.executable,str(program),*sys.argv[1:]])
 
 
 if __name__ == '__main__':

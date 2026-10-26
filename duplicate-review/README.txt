@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.9.6
+LOCAL DUPLICATE REVIEW 2.0.0
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -15,7 +15,39 @@ Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private
 Duplicate scans and image processing stay local; no cloud account or GPU is required.
 The optional set-preparation pilot downloads matching models on first use.
 
-NEW IN 1.9.6: ONE-CLICK HISTORY REVIEW, NO RESCAN
+NEW IN 2.0.0: FOLDER ORGANIZER AND IN-APP UPDATES
+- Open Folder organizer from Duplicate Review. It uses your completed inventory
+  immediately. Do NOT refresh duplicate history or rerun a scan just to update.
+- Browse reconstructed original posts, select one shoot, inspect related posts,
+  visual suggestions and existing-set matches, then save a named set draft or add
+  to an existing one. Selections persist while browsing posts. Mixed posts are
+  never assigned to a set automatically. Quarantine is labeled evidence only.
+- Large uncropped previews, adjustable columns, paged grids and a large viewer
+  with arrow keys, Space to select, click-to-zoom and fullscreen. Disk-cached
+  previews survive restarts and updates; unchanged images need not be decoded
+  for every visit. File names and full original locations remain accessible.
+- Similar-image ordering uses compatible saved outfit/scene features when present,
+  then saved color/layout fingerprints, with filename ordering also available.
+  These are ordering/suggestion aids, not guarantees of set membership.
+- Analyze missing images is OPTIONAL: it prepares outfit/scene features only for
+  survivors without compatible saved analysis. First use may download the existing
+  local models. It reports progress, elapsed time and estimated time remaining
+  for the current stage. Pause/resume reuses every completed feature. Ordinary
+  updates do not start analysis or invalidate caches. Initial estimates need a
+  few completed items. The duplicate-history scanner now displays stage ETA too.
+- Saved set drafts, post statuses, rejected suggestions, selections and last undo
+  live separately in organizer.sqlite3. The existing scan/history databases and
+  all original files remain in place. Saving here does not import to or change the
+  media library; existing library set additions are local drafts for later import.
+- Install this version once using the download. Future releases: Updates >
+  Download update > Restart & apply update. The original launcher opens the active
+  verified version. Updates are downloaded into versioned directories, verified
+  against SHA-256, then activated atomically. Restart is blocked during scans.
+  Startup checks once for an update; there is no periodic background network check.
+  Offline/update failures leave the installed version usable. Python dependencies
+  remain in the existing environment; incompatible dependency changes are refused.
+
+PREVIOUS 1.9.6: ONE-CLICK HISTORY REVIEW, NO RESCAN
 - Click Keep & next on the matching survivor to save the connection and advance
   immediately. The same button works in Compare large. No Finish group step.
 - Undo last connection restores the last connection's comparison, including after

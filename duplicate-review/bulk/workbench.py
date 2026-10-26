@@ -39,6 +39,7 @@ class Workbench:
         self.path=engine.state_dir/'bulk-preparation.sqlite3'
         self.lock=threading.RLock();self.cancel=threading.Event();self.thread=None
         self.encoder_factory=encoder_factory
+        self.phase_clock=time.monotonic();self.phase_done=0
         self.current=None
         with self.db() as db:
             db.executescript('''CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, updated REAL, data TEXT);
@@ -70,7 +71,15 @@ class Workbench:
 
     def update(self,**fields):
         with self.lock:
+            if fields.get('phase',self.current.get('phase'))!=self.current.get('phase') or fields.get('done',self.phase_done)<self.phase_done:
+                self.phase_clock=time.monotonic();self.phase_done=fields.get('done',0)
+                self.current['phase_eta_seconds']=None
             self.current.update(fields)
+            done=self.current.get('done',0);total=self.current.get('total',0)
+            elapsed=time.monotonic()-self.phase_clock
+            self.current['phase_elapsed_seconds']=round(elapsed)
+            if 'done' in fields and done>self.phase_done and total>=done:
+                self.current['phase_eta_seconds']=round(elapsed/(done-self.phase_done)*(total-done))
 
     def check(self):
         if self.cancel.is_set():raise InterruptedError('Stopped. Restart with the same settings to reuse cached work.')
