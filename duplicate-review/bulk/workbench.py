@@ -110,7 +110,7 @@ class Workbench:
         result['config']=self.current.get('config',{}) if self.current else {}
         return result
 
-    def start(self,body):
+    def start(self,body,inventory_only=False):
         with self.engine.lock,self.lock:
             if self.engine.status['running'] or (self.current and self.current['running']):raise ValueError('Wait for the current scan or file operation to finish.')
             roots=[]
@@ -127,6 +127,7 @@ class Workbench:
                     'person':str(body.get('person','Collection'))[:120], 'character_id':str(body.get('character_id',''))}
             self.current={'id':uuid.uuid4().hex,'config':config,'recipe':RECIPE,'running':True,'phase':'Inventorying original and quarantined files',
                           'done':0,'total':0,'issues':[],'items':{},'proposals':[],'unassigned':[], 'created':time.time()}
+            self.current['inventory_only']=inventory_only
             self.cancel.clear();self.persist()
             self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
             return self.status()
@@ -436,6 +437,9 @@ class Workbench:
                 previous=json.loads(row[0]);chosen=copy.deepcopy(list(previous['items'].values()))
             else:
                 found=self.inventory(config);items=self.identities(found)
+                if self.current.get('inventory_only'):
+                    self.update(phase='Duplicate history ready',inventory_complete=True,done=len(found),total=len(found))
+                    return
                 chosen=self.sample(items,config['limit'])
                 self.current['sampled']=sum(not i['reference'] for i in chosen)
                 self.current['outside_evaluation']=sum(not i['reference'] for i in items)-self.current['sampled']
@@ -586,12 +590,15 @@ class Workbench:
                 statuses=dict(db.execute('SELECT sha,status FROM origin_review'))
                 cursor=db.execute('SELECT sha FROM origin_cursor WHERE scope=?',(scope,)).fetchone()
             counts={key:sum(len(rows) for sha,rows in families.items() if statuses.get(sha,'pending')==key)
-                    for key in ('pending','deferred','no_counterpart')}
+                    for key in ('pending','deferred','no_counterpart','discarded')}
             pending=[rows for sha,rows in sorted(families.items()) if review_filter=='all' or statuses.get(sha,'pending')==review_filter]
             regular=self.engine.groups()
             summary={'total_files':sum(map(len,families.values())),'counts':counts,
+                'job':self.current['id'],'can_undo':bool(self.current.get('origin_undo')),
+                'entries':[{'digest':rows[0]['sha'],'name':Path(rows[0]['path']).name,'count':len(rows),
+                    'status':statuses.get(rows[0]['sha'],'pending')} for rows in pending],
                 'regular_groups':len(regular['groups']),'regular_images':sum(g['count'] for g in regular['groups']),
-                'complete_inventory':bool(catalog),'inventory':self.current.get('inventory',{}),
+                'complete_inventory':bool(self.current.get('inventory_complete') or (catalog and not self.current.get('error') and not self.current.get('interrupted'))),'inventory':self.current.get('inventory',{}),
                 'issues':self.current.get('issues',[])}
             if not pending:return {**summary,'total':0,'candidates':[]}
             wanted=target or (cursor[0] if cursor else None)
@@ -619,18 +626,26 @@ class Workbench:
                 elif mode!='all' and score[1] and score[2]>20:continue
                 candidates.append((score,other))
             candidates.sort(key=lambda pair:pair[0]);page=max(0,int(page));start=page*24
+            def review_image(ident):
+                from PIL import Image
+                result=self.image_info(ident)
+                try:
+                    path=self.preview_path(ident)
+                    with Image.open(path) as im:result.update(w=im.width,h=im.height,size=path.stat().st_size)
+                except Exception as e:result.update(w=0,h=0,size=0,unavailable=str(e))
+                return result
             return {**summary,'total':len(pending),'offset':at,'digest':digest,
                 'review_status':statuses.get(digest,'pending'),'copy_count':len(rows),
-                'image':self.image_info(item['id']),'origins':[o for row in rows for o in row['origins']],
+                'image':review_image(item['id']),'origins':[o for row in rows for o in row['origins']],
                 'candidate_count':len(candidates),'page':page,
-                'candidates':[self.image_info(i['id']) for _,i in candidates[start:start+24]]}
+                'candidates':[review_image(i['id']) for _,i in candidates[start:start+24]]}
 
     def mark_origin(self,body):
         with self.lock:
             if not self.current or self.current['running'] or body.get('job')!=self.current['id']:raise ValueError('Evaluation changed.')
             item=self.current.get('source_catalog',{}).get(body.get('target'))
             status=body.get('status')
-            if not item or not item.get('quarantine_only') or status not in ('pending','deferred','no_counterpart'):raise ValueError('Invalid recovery review.')
+            if not item or not item.get('quarantine_only') or status not in ('pending','deferred','no_counterpart','discarded'):raise ValueError('Invalid recovery review.')
             with self.db() as db:db.execute('INSERT OR REPLACE INTO origin_review VALUES (?,?,?)',(item['sha'],status,time.time()))
             # A review label never removes an image or fabricates a keeper link.
             return self.status()

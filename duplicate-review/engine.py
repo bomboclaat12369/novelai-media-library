@@ -25,7 +25,7 @@ import crop_match
 import same_photo
 from search_index import SearchIndexes
 
-VERSION = '1.9.3'
+VERSION = '1.9.4'
 ALGORITHM = 1
 QUARANTINE = '_Duplicate_Review_Quarantine'
 EXTENSIONS = {'.jpg', '.jpeg', '.jpe', '.jfif', '.png', '.webp', '.bmp', '.tif', '.tiff', '.avif', '.gif'}

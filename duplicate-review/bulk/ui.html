@@ -65,7 +65,7 @@ $('auditDefer').onclick=()=>auditAction(()=>markAudit('deferred'));
 $('auditNoSurvivor').onclick=()=>auditAction(()=>markAudit('no_counterpart'));
 $('auditPending').onclick=()=>auditAction(()=>markAudit('pending'));
 $('undoOrigin').onclick=()=>auditAction(async()=>{if(busy)return;state=await api('bulk/undo-origin',{job:state.id});render();await loadAudit()});
-$('originAudit').onclick=()=>auditAction(async()=>{auditOffset=null;auditPage=0;await loadAudit();$('audit').showModal()});
+$('originAudit').onclick=()=>{location.href='/#history'};
 $('auditPrevious').onclick=()=>auditAction(async()=>{auditOffset=Math.max(0,auditOffset-1);auditPage=0;await loadAudit()});
 $('auditNext').onclick=()=>auditAction(async()=>{auditOffset++;auditPage=0;await loadAudit()});
 $('auditFilter').onchange=()=>auditAction(async()=>{auditOffset=null;auditPage=0;await loadAudit()});

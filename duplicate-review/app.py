@@ -31,6 +31,7 @@ from engine import Engine, VERSION, load_image
 def make_server(engine, port=0, token=None):
     token = token or secrets.token_urlsafe(32)
     html = (Path(__file__).parent / 'ui.html').read_text(encoding='utf-8')
+    html = html.replace('__HISTORY_REVIEW__', (Path(__file__).parent / 'history-review.js').read_text(encoding='utf-8'))
     from bulk.workbench import Workbench
     bulk = Workbench(engine)
     bulk_html = (Path(__file__).parent / 'bulk' / 'ui.html').read_text(encoding='utf-8')
@@ -131,6 +132,8 @@ def make_server(engine, port=0, token=None):
                     raise ValueError('Stop the bulk evaluation before changing files or starting another operation.')
                 if path == '/api/bulk/start':
                     result = bulk.start(body)
+                elif path == '/api/history/inventory':
+                    result = bulk.start(body,inventory_only=True)
                 elif path == '/api/bulk/reevaluate':
                     result = bulk.reevaluate(body)
                 elif path == '/api/bulk/cancel':
@@ -199,14 +202,17 @@ def make_server(engine, port=0, token=None):
                     if child.returncode:
                         raise ValueError('Folder picker unavailable. Paste the folder path into the box instead.')
                     result = {'path': child.stdout.strip()}
-                elif path in ('/api/open','/api/reveal'):
-                    record = engine.record(int(body['id']))
-                    file = engine.validate(record, verify_hash=False)
-                    if path == '/api/reveal' and os.name == 'nt':
+                elif path in ('/api/open','/api/reveal','/api/history/open','/api/history/reveal'):
+                    if path.startswith('/api/history/'):
+                        file = bulk.preview_path(str(body['id']))
+                    else:
+                        record = engine.record(int(body['id']))
+                        file = engine.validate(record, verify_hash=False)
+                    if path.endswith('/reveal') and os.name == 'nt':
                         subprocess.Popen(['explorer.exe','/select,',str(file)])
-                    elif path == '/api/reveal' and sys.platform == 'darwin':
+                    elif path.endswith('/reveal') and sys.platform == 'darwin':
                         subprocess.Popen(['open','-R',str(file)])
-                    elif path == '/api/reveal':
+                    elif path.endswith('/reveal'):
                         subprocess.Popen(['xdg-open',str(file.parent)])
                     elif os.name == 'nt':
                         os.startfile(str(file))

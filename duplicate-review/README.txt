@@ -1,4 +1,4 @@
-LOCAL DUPLICATE REVIEW 1.9.3
+LOCAL DUPLICATE REVIEW 1.9.4
 ============================
 Local image comparison, reversible cleanup, and media-library replacement.
 
@@ -15,31 +15,24 @@ Python launcher. The first launch installs Pillow, NumPy and OpenCV in a private
 Duplicate scans and image processing stay local; no cloud account or GPU is required.
 The optional set-preparation pilot downloads matching models on first use.
 
-NEW IN 1.9.3: TARGETED DUPLICATE-HISTORY REPAIR
-1. Finish pending groups in regular Duplicate Review after updating. Single-keeper
-   choices record the keeper relationship; keeping several images does not guess
-   which kept photo a removed copy belongs to.
-2. Build proposed sets once to refresh the full inventory after those decisions.
-   Keep quarantine and both databases. No restoration or re-download is needed.
-3. Open Repair duplicate history. Only unresolved quarantine is queued; exact,
-   verified visual and recorded-keeper links are excluded automatically.
-- Byte-identical unresolved copies share one review entry, with ALL their original
-  locations displayed and retained. Counts distinguish photos from physical files.
-- Progress and review labels survive restarts. Defer never resolves a connection.
-  No surviving copy is an explicit, reversible label, not a deletion or proof.
-  All unresolved includes both labels; exports retain them for auditing.
-- Suggested counterparts use saved comparisons (including a two-edge search) and
-  fingerprints. Weak/unsupported fillers are omitted. Search filename/path/post
-  across ALL survivors or choose Browse all survivors, with paginated results.
-  Empty suggestions do not prove that no surviving copy exists.
-- Confirming validates every matching physical quarantine file and the survivor,
-  preserves all origins, moves no files, and supports Undo connection.
-- The screen reports remaining regular groups/images and file-processing issues.
-  Missing/changed files stop confirmation rather than silently losing an origin.
-- Original paths from the move journal are preferred when available, while the
-  quarantine location is retained separately. Old path-wrapper recovery still works.
-- Finish repair, then Build proposed sets to use the added origins in grouping.
-  This release does not change set-grouping thresholds or restore quarantine.
+NEW IN 1.9.4: FAMILIAR DUPLICATE REVIEW FOR QUARANTINE HISTORY
+1. Finish your remaining Regular duplicate groups as usual.
+2. In the SAME screen, change Review queue to Unresolved quarantine copies.
+3. Check Collection folders includes the parent containing quarantine, then click
+   Refresh duplicate history. This inventories the FULL collection, with no set
+   grouping, pilot limit, model download, restoration, or file moves.
+4. First card is the quarantined photo. Other cards are possible surviving copies,
+   not an assertion that all candidates match. Mark the matching survivor Keep,
+   then Finish group, or use Keep only this. Compare large uses the usual viewer.
+5. Defer if uncertain. Intentionally discarded is only for a photo you recognize
+   as deliberately discarded; it preserves the file and origin without inventing
+   a keeper. All unresolved includes these entries and previous no-counterpart
+   labels. Search and Browse all survivors remain available.
+All physical copies' origins are preserved; confirmations validate their contents
+and support Undo last connection. Trusted exact, verified visual and recorded
+keeper links stay excluded. Regular duplicate review keeps its existing actions.
+The old Repair duplicate history button now opens this same normal review screen.
+Keep quarantine and both databases. Existing set evaluations remain saved.
 
 NEW IN 1.9.2: ORIGINAL FOLDER CONNECTIONS AND RELATED-DRAFT REVIEW
 - Single-keeper quarantine decisions now journal the kept image's hash and path

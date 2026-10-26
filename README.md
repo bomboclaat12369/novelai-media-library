@@ -2,6 +2,12 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Familiar duplicate-history review (Duplicate Review 1.9.4)
+
+The normal duplicate-review screen now includes **Review queue → Unresolved quarantine copies**. Historical comparisons reuse the image cards, Keep choices, and large comparison viewer. **Finish group** saves the chosen survivor's connection to every represented quarantine origin; it does not move or restore files. The other candidates are suggestions, not copies to remove.
+
+Finish regular duplicate groups, switch queues, check the collection folders include quarantine, and click **Refresh duplicate history**. This refreshes the full inventory without set grouping or a 400-image pilot. Existing evaluations and review progress remain saved. Exact, verified visual, and recorded keeper links are excluded. Defer uncertain items; explicitly mark intentionally discarded photos only when recognized. All unresolved retains deferred/discarded entries and old no-counterpart labels. Search, all-survivor pagination, original-path inspection, validation, and undo remain available. The former repair button redirects to this screen.
+
 ## Targeted duplicate-history repair (Duplicate Review 1.9.3)
 
 **Repair duplicate history** now queues only unresolved quarantine, groups byte-identical copies while retaining every original location, and remembers your place across restarts. Deferred and explicitly marked no-survivor entries remain counted as unresolved and can be revisited. Unsupported filler candidates are gone; filename/path/post search and paginated browsing cover all inventoried survivors. Every physical copy is checked before its origins are attached, and the last connection can be undone.

@@ -9,6 +9,29 @@ import tempfile,unittest
 from unittest.mock import patch
 
 class OriginWorkflow(unittest.TestCase):
+    def test_history_inventory_skips_grouping_and_keeps_unresolved_origins(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);incoming=root/'incoming';engine=Engine(root/'state')
+            live=incoming/'Post 1'/'kept.png';create(live,(20,30,40))
+            q=incoming/'_Duplicate_Review_Quarantine'/'batch'/'Post 2'/'old.png';create(q,(50,60,70))
+            w=Workbench(engine)
+            with patch.object(w,'recover_visual_aliases',return_value=0),patch.object(w,'encode',side_effect=AssertionError('No set analysis')):
+                w.start({'roots':[str(incoming)],'limit':0},inventory_only=True);w.thread.join(20)
+            self.assertNotIn('error',w.current);self.assertTrue(w.current['inventory_complete'])
+            self.assertEqual(w.current['items'],{});self.assertEqual(w.current['proposals'],[])
+            d=w.origin_audit(mode='all');self.assertEqual(d['total_files'],1)
+            self.assertEqual(d['origins'][0]['original_path'],str(incoming/'Post 2'/'old.png'))
+            self.assertEqual(d['origins'][0]['quarantine_path'],str(q))
+            self.assertEqual(d['image']['w'],160)
+            w.mark_origin({'job':w.current['id'],'target':d['image']['id'],'status':'discarded'})
+            self.assertEqual(w.origin_audit()['total_files'],1)
+            self.assertEqual(w.origin_audit()['counts']['discarded'],1)
+            before=q.read_bytes();keeper=d['candidates'][0]['id']
+            w.confirm_origin({'job':w.current['id'],'target':d['image']['id'],'keeper':keeper})
+            self.assertEqual(q.read_bytes(),before);self.assertTrue(live.exists())
+            self.assertEqual(len(w.current['source_catalog'][keeper]['origins']),2)
+            w.undo_origin({'job':w.current['id']});self.assertEqual(w.origin_audit()['total_files'],1)
+
     def test_recorded_keeper_chain_undo_and_full_folder_inventory(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);incoming=root/'incoming';engine=Engine(root/'state')

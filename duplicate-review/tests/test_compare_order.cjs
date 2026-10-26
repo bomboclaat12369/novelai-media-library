@@ -1,11 +1,11 @@
 // Focused regression check of the actual UI functions without a browser/server.
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const html=fs.readFileSync(path.join(__dirname,'../ui.html'),'utf8');
-const script=html.match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
+const script=html.replace('__HISTORY_REVIEW__',fs.readFileSync(path.join(__dirname,'../history-review.js'),'utf8')).match(/<script[^>]*>([\s\S]*?)<\/script>/)[1];
 new vm.Script(script); // Check the complete shipped script's syntax.
 const elements=new Map();
 function element(){return {value:'',children:[],attrs:{},style:{},classList:{toggle(){}},replaceChildren(){this.children=[]},append(child){this.children.push(child)},getAttribute(k){return this.attrs[k]??null},set src(v){this.attrs.src=v},showModal(){this.open=true}}}
-const context=vm.createContext({Number,Math,$:id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id)},document:{createElement:element},folder:()=>'/fixture',name:p=>p,token:'test',busy:false,snapshot:null,members:[],zoom(){},refreshComparisonResolution(){}});
+const context=vm.createContext({Number,Math,$:id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id)},document:{createElement:element},folder:()=>'/fixture',name:p=>p,token:'test',busy:false,snapshot:null,historyModeActive:()=>false,reviewPreview:(r,size)=>`/api/preview?id=${r.id}&size=${size}&token=test`,members:[],zoom(){},refreshComparisonResolution(){}});
 vm.runInContext(script.slice(script.indexOf('function openCompare('),script.indexOf('function refreshComparisonResolution(')),context);
 const run=s=>vm.runInContext(s,context);
 function expectPair(ids){
