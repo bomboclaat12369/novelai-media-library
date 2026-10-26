@@ -21,7 +21,7 @@ for at,start in enumerate(range(0,len(encoded),60000),1):
     parts.append({'path':path.relative_to(root).as_posix(),'sha256':hashlib.sha256(content).hexdigest()})
 if args.commit:
     if not re.fullmatch('[0-9a-f]{40}',args.commit):raise ValueError('Use the full payload commit SHA.')
-    manifest={'schema':1,'version':version,'sha256':hashlib.sha256(payload).hexdigest(),'notes':'Suggested Additions now shows saved set names or Not in a set, using the existing image badge style. Saved scans, analysis, duplicate decisions and drafts remain intact; no rescan.',
+    manifest={'schema':1,'version':version,'sha256':hashlib.sha256(payload).hexdigest(),'notes':'Removed the Not in a set badge from Suggested Additions. Existing set-name and library badges remain. Saved scans, analysis, decisions and drafts are preserved; no rescan.',
               'parts':[{'url':'https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/'+args.commit+'/'+r['path'],'sha256':r['sha256']} for r in parts]}
     (root/'release-duplicate-review.json').write_text(json.dumps(manifest,indent=2)+'\n')
 print(json.dumps({'version':version,'archive':str(archive),'bytes':len(payload),'parts':len(parts)}))

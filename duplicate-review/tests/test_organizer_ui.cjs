@@ -13,7 +13,7 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  const id=info.ids[2];await page.locator(`#grid .card[data-id="${id}"] [data-pick]`).click();
  await page.waitForFunction(()=>document.querySelectorAll('#suggestions .card').length>0);
  assert.equal(await page.locator(`#suggestions .card[data-id="${info.ids[0]}"] .membership`).textContent(),'In: Existing shoot');
- assert.equal(await page.locator(`#suggestions .card[data-id="${info.ids[3]}"] .membership`).textContent(),'Not in a set');
+ assert.equal(await page.locator(`#suggestions .card[data-id="${info.ids[3]}"] .membership`).count(),0);
  assert.match(await page.locator('#selectionCount').textContent(),/1 selected/);
  await page.locator(`#grid .card[data-id="${id}"] img`).click();await page.waitForFunction(()=>document.querySelector('#largeImage').naturalWidth>0);
  assert.equal(await page.locator('#viewer').evaluate(e=>e.open),true);

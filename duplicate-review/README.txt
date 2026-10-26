@@ -1,4 +1,8 @@
-LOCAL DUPLICATE REVIEW 2.0.5
+LOCAL DUPLICATE REVIEW 2.0.6
+
+NEW IN 2.0.6: QUIETER SUGGESTED ADDITIONS
+- Removed the Not in a set badge. Assigned images still show their set names,
+  and the In library badge remains available. No rescan is needed.
 
 NEW IN 2.0.5: SET MEMBERSHIP ON SUGGESTED ADDITIONS
 - Suggested images show In: followed by their saved set names, or Not in a set.
