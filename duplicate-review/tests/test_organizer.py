@@ -49,6 +49,54 @@ def add_instagram(bulk,ids):
 
 
 class OrganizerTests(unittest.TestCase):
+    def test_categories_create_cache_assign_export_and_undo_without_library_writes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            engine,bulk,org,ids=fixture(temp)
+            library={'characters':[{'id':'owner','name':'Mikayla','set_categories':[{'id':'blue','name':'Blue outfits'}]}]}
+            bulk.current['library_sets']['existing']['categories']=['blue']
+            with patch.object(engine.library,'request',return_value=library) as request:
+                org.category_action('load_categories',{'job':'fixture-job'})
+                request.assert_called_once_with('/api/library')
+            local=org.category_action('create_category',{'job':'fixture-job','name':' Swimwear '})['category']
+            self.assertEqual(org.category_action('create_category',{'job':'fixture-job','name':'swimwear'})['category']['id'],local['id'])
+            org.mutate('draft',{'job':'fixture-job','ids':[ids[2]],'new_categories':['blue',local['id']]})
+            org.mutate('save',{'job':'fixture-job','revision':0,'name':'New shoot','ids':[ids[2]]})
+            group=next(g for g in org.sets().values() if g['name']=='New shoot');target=group['id'];created=group['created']
+            org.mutate('save',{'job':'fixture-job','revision':1,'target':target,'ids':[ids[3]]})
+            self.assertEqual(org.sets()[target]['categories'],['blue',local['id']])
+            self.assertEqual(org.sets()[target]['created'],created)
+            org.mutate('set_details',{'job':'fixture-job','revision':2,'target':target,'colors':['White'],'categories':[]})
+            self.assertEqual(org.sets()[target]['categories'],[])
+            self.assertEqual(org.sets()[target]['created'],created)
+            org.mutate('undo',{'job':'fixture-job','revision':3})
+            reopened=Organizer(engine,bulk);exported=reopened.export()
+            self.assertEqual(next(g for g in exported['sets'] if g['id']==target)['categories'],['blue',local['id']])
+            self.assertEqual(exported['category_catalog']['character_id'],'owner')
+            self.assertTrue(any(c['id']==local['id'] for c in exported['category_catalog']['categories']))
+            reopened.mutate('set_details',{'job':'fixture-job','revision':4,'target':'library:existing','categories':[local['id']]})
+            self.assertEqual(bulk.current['library_sets']['existing']['categories'],['blue'])
+            self.assertNotIn('created',reopened.sets()['library:existing'])
+            with self.assertRaises(ValueError):reopened.mutate('set_details',{'job':'fixture-job','revision':5,'target':target,'categories':['unrelated']})
+
+    def test_creation_dates_are_immutable_and_legacy_dates_stay_unknown(self):
+        with tempfile.TemporaryDirectory() as temp:
+            engine,bulk,org,ids=fixture(temp)
+            with org.db() as db:
+                db.execute('INSERT INTO sets VALUES (?,?,?)',(org.scope,'old',json.dumps({'id':'old','name':'Old shoot','members':[ids[2]],'updated':100})))
+            org.mutate('set_details',{'job':'fixture-job','revision':0,'target':'old','colors':['White'],'categories':[]})
+            self.assertNotIn('created',org.sets()['old'])
+            org.mutate('save',{'job':'fixture-job','revision':1,'target':'old','ids':[ids[3]]})
+            self.assertNotIn('created',org.sets()['old'])
+            with patch('organizer.time.time',return_value=200):org.mutate('save',{'job':'fixture-job','revision':2,'name':'New','ids':[ids[4]]})
+            target=next(g['id'] for g in org.sets().values() if g['name']=='New')
+            with patch('organizer.time.time',return_value=300):org.mutate('set_colors',{'job':'fixture-job','revision':3,'target':target,'colors':['Blue']})
+            self.assertEqual(org.sets()[target]['created'],200)
+            self.assertEqual(org.sets()[target]['updated'],300)
+            org.mutate('remove',{'job':'fixture-job','revision':4,'target':target,'ids':[ids[4]]})
+            self.assertEqual(org.sets()[target]['created'],200)
+            org.mutate('undo',{'job':'fixture-job','revision':5})
+            self.assertEqual(org.sets()[target]['created'],200)
+
     def test_suggested_additions_include_saved_set_names_and_refresh_after_undo(self):
         with tempfile.TemporaryDirectory() as temp:
             engine,bulk,org,ids=fixture(temp)

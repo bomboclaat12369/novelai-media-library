@@ -185,6 +185,8 @@ def make_server(engine, port=0, token=None):
                     result=organizer.index()
                 elif path == '/api/organizer/pause':
                     organizer.cancel.set();result={'paused':True}
+                elif path in ('/api/organizer/load_categories','/api/organizer/create_category'):
+                    result=organizer.category_action(path.rsplit('/',1)[-1],body)
                 elif path.startswith('/api/organizer/'):
                     result=organizer.mutate(path.rsplit('/',1)[-1],body)
                 elif path == '/api/bulk/start':

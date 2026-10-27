@@ -145,6 +145,34 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  });
  assert.deepEqual(badgeCheck.text,['In library','In: A long saved set name, Another saved set name']);
  assert(badgeCheck.separate&&badgeCheck.within);assert.deepEqual(badgeCheck.style[0],badgeCheck.style[1]);
+ // Create categories in the existing details dialog, then find uncategorized sets.
+ await page.locator('#clear').click();await page.locator('#setsTab').click();
+ await page.locator('#postList button').filter({hasText:'Intentional overlap'}).click();await page.waitForFunction(()=>!busy&&currentKind==='set');
+ const categoryTarget=await page.evaluate(()=>currentId),createdBefore=await page.evaluate(()=>data.sets.find(g=>g.id===currentId).created);
+ assert(createdBefore>0);
+ await page.locator('#editSetColors').click();await page.locator('#newSetCategory').fill('Swimwear');await page.locator('#createSetCategory').click();
+ await page.waitForFunction(()=>!busy&&document.querySelector('#setCategoryChoices input:checked'));
+ assert.equal(await page.getByLabel('Swimwear',{exact:true}).isChecked(),true);
+ await page.locator('#saveSetColors').click();await page.waitForFunction(()=>!busy&&!document.querySelector('#colorDetails').open);
+ await page.locator('#setFilter').selectOption('uncategorized');
+ assert.equal(await page.locator('#postList button').filter({hasText:'Intentional overlap'}).count(),0);
+ await page.locator('#setFilter').selectOption('categorized');
+ assert.equal(await page.locator('#postList button').filter({hasText:'Intentional overlap'}).count(),1);
+ await page.reload();await page.waitForFunction(()=>data&&view&&!busy);
+ assert.equal(await page.locator('#setFilter').inputValue(),'categorized');
+ await page.locator('#editSetColors').click();assert.equal(await page.getByLabel('Swimwear',{exact:true}).isChecked(),true);
+ await page.locator('#setColors').fill('Blue');await page.locator('#saveSetColors').click();await page.waitForFunction(()=>!busy&&!document.querySelector('#colorDetails').open);
+ assert.equal(await page.evaluate(()=>data.sets.find(g=>g.id===currentId).created),createdBefore);
+ await page.locator('#setFilter').selectOption('all');await page.locator('#setSort').selectOption('createdDesc');
+ assert.equal(await page.locator('#postList strong').last().textContent(),'Existing shoot');
+ await page.locator('#postList button').filter({hasText:'Existing shoot'}).click();await page.waitForFunction(()=>!busy&&currentId==='library:existing');
+ await page.locator('#editSetColors').click();assert.match(await page.locator('#setDates').textContent(),/Created: Not recorded/);await page.locator('#cancelSetColors').click();
+ // New-set category selections survive reload before saving.
+ await page.locator('#target').selectOption('');await page.locator('#draftSetColors').click();await page.getByLabel('Swimwear',{exact:true}).check();
+ await page.locator('#saveSetColors').click();await page.waitForFunction(()=>!busy&&!document.querySelector('#colorDetails').open);
+ await page.reload();await page.waitForFunction(()=>data&&view);await page.locator('#draftSetColors').click();
+ assert.equal(await page.getByLabel('Swimwear',{exact:true}).isChecked(),true);await page.locator('#cancelSetColors').click();
+ await page.locator('#draftSetColors').click();await page.screenshot({path:'/tmp/organizer-categories.png',fullPage:true});await page.locator('#cancelSetColors').click();
  assert(!posts.some(p=>/\/api\/(scan|history\/inventory|bulk\/start|selection\/move)/.test(p)),posts.join(','));
  assert.deepEqual(errors,[]);
  console.log('Organizer UI passed: viewer surround close, sidebar preview, Back, sorting, 8 columns, discard/reload/restore, Unsorted remaining/restore; existing keeper/order/draft workflows; no scan or move requests.');

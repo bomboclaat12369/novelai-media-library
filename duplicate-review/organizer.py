@@ -21,6 +21,7 @@ class Organizer:
         self.encoder_type=None;self.recipe=None;self.scope='';self.revision=0;self.discarded=set();self.parked={}
         with self.db() as db:
             db.executescript('''CREATE TABLE IF NOT EXISTS state(scope TEXT PRIMARY KEY,data TEXT);
+                CREATE TABLE IF NOT EXISTS category_catalog(scope TEXT PRIMARY KEY,data TEXT);
                 CREATE TABLE IF NOT EXISTS sets(scope TEXT,id TEXT,data TEXT,PRIMARY KEY(scope,id));
                 CREATE TABLE IF NOT EXISTS posts(scope TEXT,id TEXT,status TEXT,PRIMARY KEY(scope,id));
                 CREATE TABLE IF NOT EXISTS rejected(scope TEXT,context TEXT,id TEXT,PRIMARY KEY(scope,context,id));
@@ -117,7 +118,7 @@ class Organizer:
     def sets(self,include_discarded=False):
         current=self.bulk.current or {};result={}
         for sid,g in current.get('library_sets',{}).items():
-            result['library:'+sid]={'id':'library:'+sid,'name':g['name'],'colors':g.get('colors') or [],'members':[], 'library_id':sid,'saved':False}
+            result['library:'+sid]={'id':'library:'+sid,'name':g['name'],'colors':g.get('colors') or [],'categories':g.get('categories') or [],'members':[], 'library_id':sid,'saved':False}
         for ident,item in self.catalog.items():
             if item.get('quarantine_only'):continue
             for sid in item.get('existing_sets',[]):
@@ -126,6 +127,7 @@ class Organizer:
             for sid,raw in db.execute('SELECT id,data FROM sets WHERE scope=?',(self.scope,)):
                 g=json.loads(raw)
                 g.setdefault('colors',result.get(sid,{}).get('colors',[]))
+                g.setdefault('categories',result.get(sid,{}).get('categories',[]))
                 # Existing library members remain visible alongside locally reviewed additions.
                 g['members']=list(dict.fromkeys(result.get(sid,{}).get('members',[])+g['members']))
                 g['saved']=True;result[sid]=g
@@ -144,7 +146,7 @@ class Organizer:
             posts.sort(key=lambda p:(p['status']!='pending',p['remaining']==0,natural(p['label'])))
             total=sum(not r.get('quarantine_only') and i not in self.discarded for i,r in self.catalog.items())
             return {'job':(self.bulk.current or {}).get('id'),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
-                'state':state,'images':total,'unresolved':sum(bool(r.get('quarantine_only')) for i,r in self.catalog.items() if i not in self.discarded),'indexed':sum(i in self.vector_by_id for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded),
+                'category_catalog':self.category_catalog(),'state':state,'images':total,'unresolved':sum(bool(r.get('quarantine_only')) for i,r in self.catalog.items() if i not in self.discarded),'indexed':sum(i in self.vector_by_id for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded),
                 'unsorted_count':len(self.unsorted_ids()),'discarded_count':sum(not self.catalog[i].get('quarantine_only') for i in self.discarded),
                 'progress':dict(self.job),'inventory_complete':bool((self.bulk.current or {}).get('inventory_complete') or (self.bulk.current or {}).get('complete'))}
 
@@ -263,6 +265,45 @@ class Organizer:
             raise ValueError('Invalid Set colors (up to 50 descriptors, 150 characters each).')
         return list(dict.fromkeys(v.strip() for v in value if v.strip()))
 
+    def category_catalog(self):
+        with self.db() as db:row=db.execute('SELECT data FROM category_catalog WHERE scope=?',(self.scope,)).fetchone()
+        return json.loads(row[0]) if row else {'character_id':(self.bulk.current or {}).get('config',{}).get('character_id',''),'categories':[]}
+
+    def category_action(self,action,body):
+        # Explicit metadata-only actions. No media scan or library writes.
+        with self.lock,self.bulk.lock:
+            self.bind()
+            if body.get('job')!=self.bound[0]:raise ValueError('Inventory changed. Reopen the organizer.')
+            catalog=self.category_catalog()
+            if action=='load_categories':
+                library=self.engine.library.request('/api/library')
+                characters=library.get('characters',[])
+                owner=catalog['character_id'] or str(body.get('character_id',''))
+                if not owner and len(characters)==1:owner=characters[0]['id']
+                if not owner:return {'choose_character':[{'id':c['id'],'name':c['name']} for c in characters]}
+                character=next((c for c in characters if c['id']==owner),None)
+                if not character:raise ValueError('The saved character is not available in this media library.')
+                catalog['character_id']=owner
+                by_id={c['id']:c for c in catalog['categories']}
+                for c in character.get('set_categories',[]):by_id[c['id']]={'id':c['id'],'name':c['name'],'local':False}
+                catalog['categories']=list(by_id.values())
+            elif action=='create_category':
+                name=str(body.get('name','')).strip()
+                if not name or len(name)>150:raise ValueError('Enter a category name (up to 150 characters).')
+                category=next((c for c in catalog['categories'] if c['name'].casefold()==name.casefold()),None)
+                if not category:
+                    category={'id':uuid.uuid4().hex,'name':name,'local':True}
+                    catalog['categories'].append(category)
+            else:raise ValueError('Invalid category action.')
+            with self.db() as db:db.execute('INSERT OR REPLACE INTO category_catalog VALUES (?,?)',(self.scope,json.dumps(catalog)))
+            return {'category_catalog':catalog,**({'category':category} if action=='create_category' else {})}
+
+    def categories(self,value,previous=()):
+        valid={c['id'] for c in self.category_catalog()['categories']}|set(previous)
+        if not isinstance(value,list) or any(not isinstance(c,str) or c not in valid for c in value):
+            raise ValueError('Choose available Set categories.')
+        return list(dict.fromkeys(value))
+
     def mutate(self,action,body):
         with self.lock,self.bulk.lock:
             self.bind()
@@ -271,6 +312,7 @@ class Organizer:
             if action=='draft':
                 state['selection']=self.valid_ids(body.get('ids',[]));state['target']=str(body.get('target',''))
                 if 'new_colors' in body:state['new_colors']=self.colors(body['new_colors'])
+                if 'new_categories' in body:state['new_categories']=self.categories(body['new_categories'],state.get('new_categories',[]))
                 with self.db() as db:self.put_state(db,state)
                 return {'saved':True}
             if int(body.get('revision',-1))!=state.get('revision',0):raise ValueError('Review changed in another window. Reload before saving.')
@@ -300,16 +342,20 @@ class Organizer:
                     state['undo']={'action':'set','id':ident,'previous':old[0] if old else None,'selection':ids}
                     members=list(dict.fromkeys((previous or {}).get('members',[])+ids))
                     colors=self.colors(body.get('colors',(previous or {}).get('colors',state.get('new_colors',[]))))
-                    group={'id':ident,'name':name,'colors':colors,'members':members,'updated':time.time(),'library_id':(previous or {}).get('library_id')}
+                    categories=self.categories(body.get('categories',(previous or {}).get('categories',state.get('new_categories',[]))),(previous or {}).get('categories',[]))
+                    stamp=time.time()
+                    group=dict(previous or {},id=ident,name=name,colors=colors,categories=categories,members=members,updated=stamp,library_id=(previous or {}).get('library_id'))
+                    if previous is None:group['created']=stamp
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,ident,json.dumps(group)))
-                    state.update(selection=[],target='',new_colors=[])
-                elif action=='set_colors':
+                    state.update(selection=[],target='',new_colors=[],new_categories=[])
+                elif action in ('set_colors','set_details'):
                     target=str(body.get('target',''));group=self.sets(include_discarded=True).get(target)
                     if not group:raise ValueError('Choose an available set.')
-                    colors=self.colors(body.get('colors'))
+                    colors=self.colors(body.get('colors',group.get('colors',[])))
+                    categories=self.categories(body.get('categories',group.get('categories',[])),group.get('categories',[]))
                     old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
                     state['undo']={'action':'set','id':target,'previous':old[0] if old else None,'selection':state.get('selection',[])}
-                    group.update(colors=colors,updated=time.time())
+                    group.update(colors=colors,categories=categories,updated=time.time())
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)))
                 elif action=='remove':
                     target=str(body.get('target',''));old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
@@ -458,6 +504,6 @@ class Organizer:
             self.bind();summary=self.summary()
             with self.db() as db:
                 dispositions={'discarded':[list(r) for r in db.execute('SELECT hash,batch,data FROM discarded')],'parked':[list(r) for r in db.execute('SELECT scope,post,hash FROM parked WHERE scope=?',(self.scope,))]}
-            return {'format':'folder-organizer-2','dispositions':dispositions,'source_job':self.bound[0],'config':(self.bulk.current or {}).get('config',{}),'sets':summary['sets'],'state':summary['state'],
+            return {'format':'folder-organizer-2','dispositions':dispositions,'source_job':self.bound[0],'config':(self.bulk.current or {}).get('config',{}),'sets':summary['sets'],'state':summary['state'],'category_catalog':summary['category_catalog'],
                     'post_review':[{k:p[k] for k in ('id','status')} for p in summary['posts']],'source_catalog':self.catalog,
                     'notice':'Locally saved set drafts; no images moved, restored or imported.'}

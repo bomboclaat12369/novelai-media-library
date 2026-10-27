@@ -1,4 +1,23 @@
-LOCAL DUPLICATE REVIEW 2.0.6
+LOCAL DUPLICATE REVIEW 2.0.7
+
+NEW IN 2.0.7: SET CATEGORIES AND CREATION DATES
+- The ... dialog now has Color(s) and Categories. Select multiple categories or
+  enter a name and click Create; the new category is selected immediately.
+  Apply remembers the choices for a new set; Save details edits a saved draft.
+- Load library categories reads the companion's Set categories for this collection's
+  character (choose a character if none was saved). Start the companion for this
+  optional step. Names and IDs are cached locally for later offline use.
+- Newly created categories and category assignments stay in organizer drafts and
+  exports; the media library is not edited. Existing saved library category IDs
+  are retained. Category creation reuses an existing cached name case-insensitively.
+- Sets has Without a category / With a category filters and creation-date or
+  last-modified sorting. The selected tab, filter and sort are remembered.
+- New sets preserve their creation timestamp across assignments and detail edits.
+  Old sets without a recorded creation date display Not recorded and sort last
+  in either creation-date direction. Last-modified timestamps remain separate.
+- Draft selections, colors, categories, creation dates and category definitions
+  survive reopening and export. Undo restores set details. No rescan, matching
+  changes, duplicate review, image moves or cache reset is required.
 
 NEW IN 2.0.6: QUIETER SUGGESTED ADDITIONS
 - Removed the Not in a set badge. Assigned images still show their set names,
