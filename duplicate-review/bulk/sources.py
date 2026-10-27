@@ -5,6 +5,8 @@ from pathlib import PureWindowsPath, PurePosixPath
 POST = re.compile(r'(?:^|\s)Post\s+(\d+)(?:\s|$)', re.I)
 SHORTCODE = re.compile(r'^[A-Za-z0-9_-]{8,32}$')
 QUARANTINE = '_Duplicate_Review_Quarantine'
+DATED_IG_POST = re.compile(r'^(\d{4}-\d{2}-\d{2}) - Post ([A-Za-z0-9_-]{8,32})$', re.I)
+IG_ACCOUNT_FOLDER = re.compile(r'^Instagram[-_ ]+([A-Za-z0-9_.-]+)$', re.I)
 
 
 def source_of(path, forum='smg', owner=''):
@@ -16,6 +18,17 @@ def source_of(path, forum='smg', owner=''):
     original = str((PureWindowsPath if '\\' in str(path) else PurePosixPath)(*parts))
     locations = {'original_path': original, 'quarantine_path': str(path)} if quarantine is not None else {}
     parent = parts[:-1]
+    # Dated gallery-dl posts directly under an explicitly named Instagram folder.
+    # Numeric forum post IDs are deliberately left to the existing forum parser.
+    for i in range(len(parent)-1, 0, -1):
+        post = DATED_IG_POST.fullmatch(parent[i])
+        account = IG_ACCOUNT_FOLDER.fullmatch(parent[i-1])
+        if post and account and not post[2].isdigit():
+            user, shortcode = account[1], post[2]
+            return {'key': 'instagram:' + user.casefold() + ':' + shortcode,
+                    'kind': 'instagram', 'label': post[1] + ' · ' + user + ' / ' + shortcode,
+                    'post_id': shortcode, 'post_date': post[1],
+                    'path': str(path), 'quarantine': quarantine is not None, **locations}
     for part in reversed(parent):
         match = POST.search(part)
         if match:

@@ -35,6 +35,31 @@ def create(path,color):
 
 
 class Sources(unittest.TestCase):
+    def test_dated_instagram_direct_and_quarantine_origins(self):
+        relative = r'Instagram-alice-delish\2025-01-31 - Post DFf8wpaySM6\3557829444985644244_1.jpg'
+        direct = source_of('C:\\SMG\\Alice\\' + relative)
+        recovered = source_of('C:\\SMG\\Alice\\_Duplicate_Review_Quarantine\\batch123\\' + relative)
+        self.assertEqual(direct['key'], 'instagram:alice-delish:DFf8wpaySM6')
+        self.assertEqual(direct['kind'], 'instagram')
+        self.assertEqual(direct['post_date'], '2025-01-31')
+        self.assertFalse(direct['quarantine'])
+        self.assertTrue(recovered['quarantine'])
+        self.assertEqual(recovered['key'], direct['key'])
+        self.assertEqual(recovered['original_path'], direct['path'])
+        self.assertEqual(recovered['quarantine_path'], recovered['path'])
+        other = source_of('/Alice/Instagram-ALICE-DELISH/2026-02-01 - Post DFf8wpaySM6/other_2.jpg')
+        self.assertEqual(other['key'], direct['key'])
+        self.assertNotEqual(source_of(other['path'].replace('DFf8wpaySM6', 'dff8wpaysm6'))['key'], direct['key'])
+
+    def test_dated_instagram_requires_explicit_parent_and_shortcode(self):
+        for path in ('/Alice/Other/2025-01-31 - Post DFf8wpaySM6/1.jpg',
+                     '/Alice/Instagram-alice-delish/2025-01-31 - Post short/1.jpg'):
+            self.assertEqual(source_of(path)['kind'], 'folder')
+        for parent in ('Alice-Images-By-Post', 'Instagram-alice-delish'):
+            source = source_of('/Alice/' + parent + '/2021-01-16 - Post 603571/1.jpg')
+            self.assertEqual(source['key'], 'forum:smg:603571')
+            self.assertEqual(source['kind'], 'forum')
+
     def test_batch_and_date_independent_forum_identity(self):
         a=source_of(r'C:\Mikayla\_Duplicate_Review_Quarantine\abc\Mikayla-Images-By-Post\2024-10-01 - Post 3672997\A.jpg','smg')
         b=source_of(r'C:\Mikayla\_Duplicate_Review_Quarantine\def\Mikayla-Videos-And-ImagePond\2026-02-16 - Post 3672997\B.jpg','smg')

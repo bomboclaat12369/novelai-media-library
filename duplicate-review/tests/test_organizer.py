@@ -6,6 +6,7 @@ from PIL import Image,ImageDraw
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from engine import Engine,sha256,stat_key,fingerprint
 from bulk.workbench import Workbench
+from bulk.sources import source_of
 from organizer import Organizer
 
 
@@ -49,6 +50,37 @@ def add_instagram(bulk,ids):
 
 
 class OrganizerTests(unittest.TestCase):
+    def test_dated_instagram_carousel_order_from_recovered_origins(self):
+        with tempfile.TemporaryDirectory() as temp:
+            engine,bulk,org,ids=fixture(temp)
+            names=['3557829444977182002_4.jpg','3557829444985579989_6.jpg',
+                   '3557829444985644244_1.jpg','3557829444993921426_2.jpg',
+                   '3557829444993961675_3.jpg','3557829445363133351_5.jpg','100_10.jpg']
+            for n,name in enumerate(names):
+                origin=source_of(r'C:\SMG\Alice\_Duplicate_Review_Quarantine\batch\Instagram-alice-delish\2025-01-31 - Post DFf8wpaySM6'+'\\'+name)
+                item=bulk.current['source_catalog'][ids[n]]
+                item['origins'].append(origin);item['sources'][origin['key']]=origin
+            key=origin['key']
+            # The same surviving image at two carousel positions appears once, at its earliest position.
+            later=source_of(r'C:\SMG\Alice\Instagram-alice-delish\2025-01-31 - Post DFf8wpaySM6\1_12.jpg')
+            bulk.current['source_catalog'][ids[2]]['origins'].append(later)
+            bulk.persist();org.bound=None;before=copy.deepcopy(bulk.current)
+            expected=[ids[n] for n in (2,3,4,0,5,1,6)]
+            with patch.object(Engine,'start',side_effect=AssertionError('No rescan')),patch.object(Workbench,'start',side_effect=AssertionError('No inventory')),patch('organizer.load_image',side_effect=AssertionError('No image decode')):
+                page=org.page('post',key,order='original')
+                self.assertEqual(page['ids'],expected)
+                self.assertEqual([i['display_name'] for i in page['images']],[names[n] for n in (2,3,4,0,5,1,6)])
+                for image in page['images']:
+                    self.assertEqual(image['path'],before['source_catalog'][image['id']]['path'])
+                    self.assertFalse(image['quarantined'])
+                self.assertEqual(org.page('post',key,order='filename')['ids'],ids[:7])
+                forum_ids=org.page('post','post:1',order='original')['ids']
+                self.assertEqual([i for i in forum_ids if not i.startswith('q:')],ids[:6])
+                reopened=Organizer(engine,Workbench(engine))
+                self.assertEqual(reopened.page('post',key,order='original')['ids'],expected)
+                self.assertEqual(reopened.summary()['indexed'],18)
+            self.assertEqual(bulk.current,before)
+
     def test_categories_create_cache_assign_export_and_undo_without_library_writes(self):
         with tempfile.TemporaryDirectory() as temp:
             engine,bulk,org,ids=fixture(temp)

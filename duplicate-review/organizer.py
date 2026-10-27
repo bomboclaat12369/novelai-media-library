@@ -158,11 +158,20 @@ class Organizer:
         values=(self.matrix@chosen.T).max(axis=1)
         return dict(zip(self.vector_ids,values.tolist()))
 
+    @staticmethod
+    def original_order_key(name,source):
+        if str(source).startswith('instagram:'):
+            # Carousel position follows the final underscore, not the media ID.
+            # Bare numbered filenames are used by some older IG downloads.
+            match=re.search(r'(?:^|_)(\d+)\.[^.]+$',name)
+            if match:return (0,int(match[1]),natural(name))
+        return (1,0,natural(name))
+
     def original_name(self,ident,source):
         item=self.catalog[ident]
         paths=[o.get('original_path') or o.get('path','') for o in item.get('origins',[]) if o.get('key')==source]
         names=[re.split(r'[\\/]',p)[-1] for p in paths if p]
-        return min(names,key=natural) if names else re.split(r'[\\/]',item['path'])[-1]
+        return min(names,key=lambda name:self.original_order_key(name,source)) if names else re.split(r'[\\/]',item['path'])[-1]
 
     def ordered(self,ids,mode,source=None):
         ids=list(ids);cache=(tuple(ids),mode,source)
@@ -170,7 +179,7 @@ class Organizer:
         if mode=='original':
             # Origin filenames supply display order only. IDs and image paths keep
             # pointing to the survivor selected during duplicate review.
-            return sorted(ids,key=lambda i:(natural(self.original_name(i,source)),i))
+            return sorted(ids,key=lambda i:(self.original_order_key(self.original_name(i,source),source),i))
         base=sorted(ids,key=lambda i:(self.catalog[i].get('quarantine_only',False),natural(self.catalog[i]['path'])))
         if mode=='filename' or len(base)<3:return base
         # Preserve coarse source neighborhoods in very large mixed posts; each block

@@ -1,4 +1,17 @@
-LOCAL DUPLICATE REVIEW 2.0.7
+LOCAL DUPLICATE REVIEW 2.0.8
+
+NEW IN 2.0.8: DATED INSTAGRAM POSTS AND CAROUSEL ORDER
+- Recognizes Instagram-alice-delish / YYYY-MM-DD - Post SHORTCODE folders,
+  including copies under the duplicate quarantine wrapper. Dates, source paths
+  and case-sensitive post IDs are preserved. No renaming or redownload needed.
+- Original post order for Instagram uses the trailing _1, _2, ... filename
+  position, even when the preceding media IDs differ. Recovered origins supply
+  this order while previews and selections still use the chosen surviving copy.
+- Existing IG/account/shortcode layouts and numeric forum post IDs remain
+  supported. Shared posts are suggestion evidence, not automatic set assignments.
+- Existing inventories, drafts, categories, decisions and caches are retained.
+  No rescan is required for Mikayla. Alice's initial history inventory is a
+  separate preparation step; this update does not start it or move any files.
 
 NEW IN 2.0.7: SET CATEGORIES AND CREATION DATES
 - The ... dialog now has Color(s) and Categories. Select multiple categories or
