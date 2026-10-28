@@ -53,7 +53,7 @@ class Workbench:
         if row:
             self.current=json.loads(row[0])
             if self.current.get('history_verifying'):
-                self.current.update(running=False,history_verifying=False,interrupted=False,phase='Saved-match verification paused. Verify saved matches to resume.')
+                self.current.update(running=False,history_verifying=False,interrupted=False,phase='Recovery paused. Use the same verification button to resume.')
                 self.persist()
             elif self.current['running']:
                 self.current.update(running=False,phase='Interrupted. Start again to reuse cached work.',interrupted=True)
@@ -620,6 +620,7 @@ class Workbench:
             summary={'total_files':sum(map(len,families.values())),'counts':counts,
                 'job':self.current['id'],'can_undo':bool(self.current.get('origin_undo')),
                 'auto_undo':self.current.get('origin_undo',{}).get('kind')=='auto',
+                'auto_policy':self.current.get('origin_undo',{}).get('policy','strict'),
                 'verification':self.current.get('history_verification',{}),
                 'matching_ready':self.current.get('history_match_recipe')==HISTORY_RECIPE,
                 'matching_mode':self.current['config'].get('duplicate_mode','balanced'),

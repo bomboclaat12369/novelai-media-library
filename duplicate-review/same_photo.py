@@ -64,7 +64,7 @@ def _pixels_agree(a, b):
     return True
 
 
-def _check_transform(target, keeper, matrix):
+def _check_transform(target, keeper, matrix, pixel_check=None):
     a, b = target['rgb'], keeper['rgb']
     h, w = a.shape[:2]; kh, kw = b.shape[:2]
     scale = float(np.linalg.norm(matrix[:, 0]))
@@ -93,10 +93,10 @@ def _check_transform(target, keeper, matrix):
         mapping = adjust @ np.vstack([mapping, [0, 0, 1]])
     warped = cv2.warpAffine(b, mapping, (ow, oh), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
     reduced = np.array(Image.fromarray(a).resize((ow, oh), Image.Resampling.LANCZOS))
-    return _pixels_agree(reduced, warped)
+    return (pixel_check or _pixels_agree)(reduced, warped)
 
 
-def verify(target, keeper):
+def verify(target, keeper, *, pixel_check=None):
     """True only when target is explained by keeper. No quality/MP ranking here."""
     if target is None or keeper is None or target['profile'] != keeper['profile']:
         return False
@@ -105,7 +105,7 @@ def verify(target, keeper):
         # Exact resize mapping avoids feature-fit noise for ordinary copies.
         sx, sy = kw/w, kh/h
         matrix = np.array([[sx, 0, (sx-1)/2], [0, sy, (sy-1)/2]])
-        if _check_transform(target, keeper, matrix):
+        if _check_transform(target, keeper, matrix, pixel_check):
             return True
     da, db = target['desc'], keeper['desc']
     if da is None or db is None or min(len(da), len(db)) < 16:
@@ -130,4 +130,4 @@ def verify(target, keeper):
     errors = np.linalg.norm(p[mask] @ matrix[:, :2].T + matrix[:, 2] - q[mask], axis=1)
     if np.median(errors) > .35:
         return False
-    return _check_transform(target, keeper, matrix)
+    return _check_transform(target, keeper, matrix, pixel_check)

@@ -1,4 +1,24 @@
-LOCAL DUPLICATE REVIEW 2.0.9
+LOCAL DUPLICATE REVIEW 2.0.10
+
+NEW IN 2.0.10: OPTIONAL HIGH-CONFIDENCE HISTORY CONNECTIONS
+- Accept high-confidence connections is a separate button in Unresolved quarantine
+  copies. It never runs automatically and does not change Verify saved matches.
+- Uses saved duplicate candidates: a score of at least 99 and a lead greater
+  than 1 point over another surviving image's score are required. Multiple
+  identical-content candidates count as one image. Scores are not probabilities.
+- The candidate must also pass image checks. Embedded color profiles are converted
+  to sRGB (ordinary untagged images assume sRGB), with more tolerance for global
+  JPEG/resizing differences. Local detail and rigid alignment/coverage checks
+  remain in place. Similar scores alone cannot save a connection.
+- Uses a separate cache, so earlier strict rejections do not block this option.
+  Strict verification and normal file-quarantine rules are unchanged.
+- Saves provenance only: no moving files, changing keep choices, rebuilding the
+  inventory, or analyzing outfits. Deferred/discarded entries stay untouched.
+- Stop and resume with the same button. Undo high-confidence connections restores
+  that batch and preserves earlier strict connections. A later manual confirmation
+  replaces the one-step Undo, as before. Saved drafts and other collections remain.
+- After completion, Needs review after verification shows the remaining checked
+  entries. Ambiguous, weaker, unavailable and unmatched images remain unresolved.
 
 NEW IN 2.0.9: VERIFY SAVED RECOVERY MATCHES
 - In Unresolved quarantine copies, click Verify saved matches. It checks the
