@@ -82,9 +82,10 @@ class Organizer:
         assigned={i for g in self.sets().values() for i in g['members']}
         return [i for i in self.catalog if i not in assigned and i not in self.discarded and not self.catalog[i].get('quarantine_only') and self.hashes(i)&parked]
 
-    def is_mixed(self,post):
-        # This known forum post is an entire account dump, not one shoot.
-        return post=='forum:smg:603571'
+    def is_mixed(self,post,evidence=None):
+        # Keep the known dump excluded by default. Size alone does not prove a dump.
+        if evidence is None:evidence=self.state().get('post_evidence',{})
+        return evidence.get(post,post=='forum:smg:603571')
 
     def model(self):
         if self.encoder_type is None:
@@ -142,7 +143,7 @@ class Organizer:
             posts=[]
             for p in self.posts.values():
                 visible=self.post_ids(p['id']);live=[i for i in visible if not self.catalog[i].get('quarantine_only')]
-                posts.append({k:v for k,v in p.items() if k!='ids'}|{'count':len(visible),'remaining':sum(i not in assigned for i in live),'unresolved':len(visible)-len(live),'status':statuses.get(p['id'],'pending'),'mixed':self.is_mixed(p['id']),'cover':next(iter(live or visible),None)})
+                posts.append({k:v for k,v in p.items() if k!='ids'}|{'count':len(visible),'remaining':sum(i not in assigned for i in live),'unresolved':len(visible)-len(live),'status':statuses.get(p['id'],'pending'),'mixed':self.is_mixed(p['id'],state.get('post_evidence',{})),'large':len(p['ids'])>=1000,'source_count':len(p['ids']),'cover':next(iter(live or visible),None)})
             posts.sort(key=lambda p:(p['status']!='pending',p['remaining']==0,natural(p['label'])))
             total=sum(not r.get('quarantine_only') and i not in self.discarded for i,r in self.catalog.items())
             return {'job':(self.bulk.current or {}).get('id'),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
@@ -235,7 +236,8 @@ class Organizer:
             seeds=list(dict.fromkeys([i for i in members if i not in selection]+selection))
             context=self.context_key(body,seeds)
             if not seeds:return {'images':[],'posts':[],'sets':[],'total':0}
-            visual=self.scores(seeds);selected=set(seeds);sources={s for i in seeds for s in self.catalog[i]['sources'] if s in self.posts and not self.is_mixed(s)}
+            evidence=self.state().get('post_evidence',{})
+            visual=self.scores(seeds);selected=set(seeds);sources={s for i in seeds for s in self.catalog[i]['sources'] if s in self.posts and not self.is_mixed(s,evidence)}
             with self.db() as db:rejected={r[0] for r in db.execute('SELECT id FROM rejected WHERE scope=? AND context=?',(self.scope,context))}
             ranked=[]
             for ident,item in self.catalog.items():
@@ -407,6 +409,12 @@ class Organizer:
                             for digest in hashes:db.execute('DELETE FROM parked WHERE scope=? AND hash=?',(self.scope,digest))
                         state['undo']={'action':'disposition','table':'parked','post':post if action=='unsort' else None,'hashes':sorted(hashes),'previous':old}
                     state['selection']=[]
+                elif action=='post_evidence':
+                    ident=body.get('id');ignored=body.get('ignored')
+                    if ident not in self.posts or not isinstance(ignored,bool):raise ValueError('Choose a post and a valid grouping setting.')
+                    evidence=state.setdefault('post_evidence',{})
+                    state['undo']={'action':'post_evidence','id':ident,'previous':evidence.get(ident)}
+                    evidence[ident]=ignored
                 elif action=='post':
                     ident=body.get('id');status=body.get('status')
                     if ident not in self.posts or status not in ('pending','reviewed','deferred'):raise ValueError('Invalid post status.')
@@ -435,6 +443,10 @@ class Organizer:
                                 if undo.get('post'):db.execute('DELETE FROM parked WHERE scope=? AND post=? AND hash=?',(self.scope,undo['post'],digest))
                                 else:db.execute('DELETE FROM parked WHERE scope=? AND hash=?',(self.scope,digest))
                             db.executemany('INSERT OR REPLACE INTO parked VALUES (?,?,?)',undo['previous'])
+                    elif undo['action']=='post_evidence':
+                        evidence=state.setdefault('post_evidence',{})
+                        if undo['previous'] is None:evidence.pop(undo['id'],None)
+                        else:evidence[undo['id']]=undo['previous']
                     elif undo['action']=='post':
                         db.execute('DELETE FROM posts WHERE scope=? AND id=?',(self.scope,undo['id']))
                         if undo['previous']:db.execute('INSERT INTO posts VALUES (?,?,?)',(self.scope,undo['id'],undo['previous']))

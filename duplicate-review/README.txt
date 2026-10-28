@@ -1,4 +1,15 @@
-LOCAL DUPLICATE REVIEW 2.0.11
+LOCAL DUPLICATE REVIEW 2.0.12
+
+NEW IN 2.0.12: DUMP POST GROUPING CONTROLS
+- Open a post and select Ignore as grouping evidence to exclude its shared-post
+  links from Suggested additions, Likely existing sets and Connected original
+  posts. Its images remain browsable and eligible for visual suggestions.
+- This setting is saved per collection, included in exports, and supports Undo.
+  No scans, file moves, analysis resets or changes to original provenance.
+- Use the Large posts (1,000+) filter to find potential dumps; size only flags a
+  post for review and does not automatically ignore it. The known Mikayla dump
+  remains ignored by default. Ignored for grouping lists your excluded posts.
+- Previous page / Next page and a page counter clarify the 60-image pages.
 
 NEW IN 2.0.11: ACCEPT ALL SUGGESTED HISTORY CONNECTIONS
 - Optional Accept all suggested connections button in Unresolved quarantine copies.
