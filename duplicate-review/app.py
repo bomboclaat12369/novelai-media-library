@@ -191,6 +191,8 @@ def make_server(engine, port=0, token=None):
                     result=organizer.mutate(path.rsplit('/',1)[-1],body)
                 elif path == '/api/bulk/start':
                     result = bulk.start(body)
+                elif path == '/api/history/verify':
+                    result = bulk.verify_history(body)
                 elif path == '/api/history/inventory':
                     result = bulk.start(body,inventory_only=True)
                 elif path == '/api/bulk/reevaluate':

@@ -52,7 +52,10 @@ class Workbench:
             row=db.execute('SELECT data FROM jobs ORDER BY updated DESC LIMIT 1').fetchone()
         if row:
             self.current=json.loads(row[0])
-            if self.current['running']:
+            if self.current.get('history_verifying'):
+                self.current.update(running=False,history_verifying=False,interrupted=False,phase='Saved-match verification paused. Verify saved matches to resume.')
+                self.persist()
+            elif self.current['running']:
                 self.current.update(running=False,phase='Interrupted. Start again to reuse cached work.',interrupted=True)
                 self.persist()
 
@@ -87,7 +90,7 @@ class Workbench:
     def status(self):
         with self.lock:
             if not self.current:return {'running':False,'phase':'Ready for a local evaluation','groups':[], 'jobs':self.jobs()}
-            out={k:copy.deepcopy(v) for k,v in self.current.items() if k not in ('items','proposals','unassigned','duplicate_families','source_profiles','match_diagnostics','source_shoots','review_exclusions','source_catalog','review_undo','origin_undo','history_matches')}
+            out={k:copy.deepcopy(v) for k,v in self.current.items() if k not in ('items','proposals','unassigned','duplicate_families','source_profiles','match_diagnostics','source_shoots','review_exclusions','source_catalog','review_undo','origin_undo','history_matches','history_verified')}
             out['groups']=[{k:v for k,v in g.items() if k not in ('members','original_members','sources','evidence')}|{'count':len(g['members'])} for g in self.current.get('proposals',[])]
             reviews=[g for g in self.current.get('proposals',[]) if g.get('review')=='accepted']
             out['evaluation']={'accepted':len(reviews),'unchanged':sum(set(g['members'])==set(g['original_members']) for g in reviews),
@@ -606,10 +609,18 @@ class Workbench:
                 cursor=db.execute('SELECT sha FROM origin_cursor WHERE scope=?',(scope,)).fetchone()
             counts={key:sum(len(rows) for sha,rows in families.items() if statuses.get(sha,'pending')==key)
                     for key in ('pending','deferred','no_counterpart','discarded')}
-            pending=[rows for sha,rows in sorted(families.items()) if review_filter=='all' or statuses.get(sha,'pending')==review_filter]
+            checked=self.current.get('history_verified',{})
+            def included(sha):
+                status=statuses.get(sha,'pending')
+                if review_filter=='uncertain':return status=='pending' and sha in checked
+                if review_filter=='no_matches':return status=='pending' and not self.current.get('history_matches',{}).get(sha)
+                return review_filter=='all' or status==review_filter
+            pending=[rows for sha,rows in sorted(families.items()) if included(sha)]
             regular=self.engine.groups()
             summary={'total_files':sum(map(len,families.values())),'counts':counts,
                 'job':self.current['id'],'can_undo':bool(self.current.get('origin_undo')),
+                'auto_undo':self.current.get('origin_undo',{}).get('kind')=='auto',
+                'verification':self.current.get('history_verification',{}),
                 'matching_ready':self.current.get('history_match_recipe')==HISTORY_RECIPE,
                 'matching_mode':self.current['config'].get('duplicate_mode','balanced'),
                 'entries':[{'digest':rows[0]['sha'],'name':Path(rows[0]['path']).name,'count':len(rows),
@@ -652,6 +663,10 @@ class Workbench:
                 'candidate_count':len(candidates),'page':page,
                 'candidates':[review_image(i['id']) for _,i in candidates[start:start+24]]}
 
+    def verify_history(self,body):
+        from .history_verify import start
+        return start(self,body)
+
     def mark_origin(self,body):
         with self.lock:
             if not self.current or self.current['running'] or body.get('job')!=self.current['id']:raise ValueError('Evaluation changed.')
@@ -691,6 +706,9 @@ class Workbench:
             if not self.current or self.current['running'] or body.get('job')!=self.current['id']:raise ValueError('Evaluation changed.')
             undo=self.current.get('origin_undo')
             if not undo:raise ValueError('No recovered connection to undo in this evaluation.')
+            if undo.get('kind')=='auto':
+                from .history_verify import undo_batch
+                return undo_batch(self,undo)
             with self.db() as db:
                 db.execute('DELETE FROM confirmed_origins WHERE target=?',(undo['target'],))
                 if undo['prior']:db.execute('INSERT INTO confirmed_origins VALUES (?,?,?)',(undo['target'],*undo['prior']))

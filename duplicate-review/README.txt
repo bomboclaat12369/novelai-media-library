@@ -1,4 +1,25 @@
-LOCAL DUPLICATE REVIEW 2.0.8
+LOCAL DUPLICATE REVIEW 2.0.9
+
+NEW IN 2.0.9: VERIFY SAVED RECOVERY MATCHES
+- In Unresolved quarantine copies, click Verify saved matches. It checks the
+  already saved candidate pairs using the strict same-photo verifier and saves
+  passing original-to-survivor connections. Scores alone never approve links.
+- No new inventory, duplicate scan, outfit analysis, or file moves. Existing
+  keep/quarantine decisions, organizer drafts, categories and caches stay intact.
+- Stop pauses the operation. Verify saved matches resumes using cached pair
+  checks, including after a restart. Connections are saved as they are made.
+- Deferred, intentionally discarded and previously marked no-counterpart entries
+  are left alone, as are explicit Different image decisions. Mark an entry
+  unresolved again if you want it included in a later verification pass.
+- Needs review after verification shows checked entries still awaiting a link.
+  No suggested survivor isolates pending entries without saved candidates.
+  All unresolved always shows the complete remaining queue; filtering does not
+  confirm, discard or delete anything. Some or all entries may still need review.
+- Undo automatic connections reverses the saved automatic batch, including a
+  resumed batch, before a later manual confirmation replaces the one-step Undo.
+- Ordinary duplicate scans for other folders do not replace the saved history
+  inventory. Verify saved matches operates on that saved inventory, not on a new
+  folder typed into the regular scan controls.
 
 NEW IN 2.0.8: DATED INSTAGRAM POSTS AND CAROUSEL ORDER
 - Recognizes Instagram-alice-delish / YYYY-MM-DD - Post SHORTCODE folders,
