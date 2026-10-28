@@ -1,4 +1,23 @@
-LOCAL DUPLICATE REVIEW 2.0.10
+LOCAL DUPLICATE REVIEW 2.0.11
+
+NEW IN 2.0.11: ACCEPT ALL SUGGESTED HISTORY CONNECTIONS
+- Optional Accept all suggested connections button in Unresolved quarantine copies.
+  It uses the highest-scoring saved candidate for each pending entry, without
+  strict/high-confidence verification, score thresholds or ambiguity margins.
+  Ties use the existing candidate order. This is user acceptance, not proof.
+- Applies to all pending entries in the saved collection, regardless of the
+  current display filter. No candidate means no connection is invented.
+  Deferred/discarded/no-counterpart entries and Different image decisions remain
+  respected. Missing or changed files stay unresolved; see Issues.
+- Files are checked against their saved identity, but not visually reanalyzed.
+  No new scan, inventory rebuild, image moves, or changes to keeper choices.
+  Original paths and source-post membership are attached to the chosen keeper.
+- Stop and resume using the same button. Undo accepted suggestions reverses the
+  batch after reopening and preserves earlier recovery connections. As before,
+  a subsequent manual confirmation replaces the one-step Undo.
+- Accepted suggestions are labeled separately from verified matches and never
+  enter strict/high-confidence verification caches. Neither stricter action is
+  changed or automatically replaced. Nothing runs just because you update.
 
 NEW IN 2.0.10: OPTIONAL HIGH-CONFIDENCE HISTORY CONNECTIONS
 - Accept high-confidence connections is a separate button in Unresolved quarantine

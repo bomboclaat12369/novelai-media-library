@@ -10,11 +10,12 @@ function historyLabel(s){return ({pending:'Unresolved',deferred:'Deferred',disca
 function historyControls(){
  const running=!!historyState?.running||!!snapshot?.status.running,locked=busy||running;
  for(const id of ['scan','scanKind','incoming','reference','addIncoming','addReference','reset','resumeCleanup','resumeReplacement'])$(id).disabled=true;
- for(const id of ['mode','workers','historyRefresh','historyVerify','historyHighConfidence','historyPick','historyRoots','historyMode','historyFilter','historySearch','historySearchButton','connectLibrary','libraryCharacter','reviewQueue'])$(id).disabled=locked;
+ for(const id of ['mode','workers','historyRefresh','historyVerify','historyHighConfidence','historyAcceptAll','historyPick','historyRoots','historyMode','historyFilter','historySearch','historySearchButton','connectLibrary','libraryCharacter','reviewQueue'])$(id).disabled=locked;
  $('historyVerify').disabled=locked||!historyData?.matching_ready;
  $('historyHighConfidence').disabled=locked||!historyData?.matching_ready;
+ $('historyAcceptAll').disabled=locked||!historyData?.matching_ready;
  $('historyStop').classList.toggle('hidden',!historyState?.running);$('historyStop').disabled=busy;
- $('undo').textContent=historyData?.auto_undo?(historyData.auto_policy==='high_confidence'?'Undo high-confidence connections':'Undo automatic connections'):'Undo last connection';$('undo').disabled=locked||!historyData?.can_undo;
+ $('undo').textContent=historyData?.auto_undo?(historyData.auto_policy==='accept_suggestions'?'Undo accepted suggestions':historyData.auto_policy==='high_confidence'?'Undo high-confidence connections':'Undo automatic connections'):'Undo last connection';$('undo').disabled=locked||!historyData?.can_undo;
  $('finishGroup').disabled=true;
  $('keepGroup').textContent='Defer / next';$('keepGroup').disabled=locked||!historyData?.image;
  for(const id of ['historyDiscard','historyPending'])$(id).disabled=locked||!historyData?.image;
@@ -81,7 +82,7 @@ async function loadHistory(offset=null){
  if(!historyModeActive())return;
  historyData=data;historyLoadedJob=data.job;
  const verification=data.verification||{};
- $('historyVerification').textContent=verification.started?`${verification.policy==='high_confidence'?'High-confidence recovery':'Saved-match verification'}: ${verification.linked_files||0} files connected · ${verification.checked||0} entries checked. Remaining entries still need review; deferred/discarded entries are untouched.`:'Verify saved matches can reduce this queue without rebuilding the inventory. It checks saved candidates; scores alone never approve a connection. Accept high-confidence connections is a separate, optional recovery action.';
+ $('historyVerification').textContent=verification.started?`${verification.policy==='accept_suggestions'?'Accepted suggestions (no confidence check)':verification.policy==='high_confidence'?'High-confidence recovery':'Saved-match verification'}: ${verification.linked_files||0} files connected · ${verification.checked||0} entries checked. Remaining entries stay unlinked; deferred/discarded entries are untouched.`:'Verify saved matches can reduce this queue without rebuilding the inventory. It checks saved candidates; scores alone never approve a connection. Accept high-confidence connections is a separate, optional recovery action.';
  historyTarget=data.digest||null;
  historyListOffset=Math.floor((data.offset||0)/50)*50;
  members=data.image?[data.image,...data.candidates].map((r,i)=>({...r,origin_id:r.id,id:i+1,quarantined:i===0,keep:false})):[];
@@ -106,7 +107,7 @@ async function refreshHistory(force=false){
  try{
   const state=await api('/api/bulk/state');if(!historyModeActive())return;
   historyState=state;
-  if(state.running){const eta=state.phase_eta_seconds;$('status').textContent=state.phase+' · '+(state.done||0).toLocaleString()+' / '+(state.total||0).toLocaleString()+' · '+Math.floor((state.phase_elapsed_seconds||0)/60)+'m elapsed'+(eta==null?' · estimating remaining time…':' · ~'+Math.ceil(eta/60)+'m remaining in this stage');$('progress').classList.remove('hidden');$('progress').max=state.total||1;$('progress').value=state.done;$('review').classList.add('hidden');$('empty').classList.remove('hidden');$('empty').querySelector('h2').textContent=state.history_verifying?(state.history_verification?.policy==='high_confidence'?'Checking high-confidence connections':'Verifying saved matches'):'Refreshing full duplicate history';$('empty').querySelector('p').textContent=state.history_verifying?'Checking saved candidates only. Connections and completed checks are saved as it runs. Stop and resume with the same verification button. No files move.':'Comparing unresolved quarantine copies against survivors with the original duplicate matcher. No set grouping or file moves.'}
+  if(state.running){const eta=state.phase_eta_seconds;$('status').textContent=state.phase+' · '+(state.done||0).toLocaleString()+' / '+(state.total||0).toLocaleString()+' · '+Math.floor((state.phase_elapsed_seconds||0)/60)+'m elapsed'+(eta==null?' · estimating remaining time…':' · ~'+Math.ceil(eta/60)+'m remaining in this stage');$('progress').classList.remove('hidden');$('progress').max=state.total||1;$('progress').value=state.done;$('review').classList.add('hidden');$('empty').classList.remove('hidden');$('empty').querySelector('h2').textContent=state.history_verifying?(state.history_verification?.policy==='accept_suggestions'?'Accepting saved suggestions':state.history_verification?.policy==='high_confidence'?'Checking high-confidence connections':'Verifying saved matches'):'Refreshing full duplicate history';$('empty').querySelector('p').textContent=state.history_verifying?'Using saved candidates only. Connections are saved as it runs. Stop and resume with the same action button. No files move.':'Comparing unresolved quarantine copies against survivors with the original duplicate matcher. No set grouping or file moves.'}
   else if(!state.id||state.error||state.interrupted||(!state.inventory&&!state.complete)){
    historyData=null;members=[];$('review').classList.add('hidden');$('empty').classList.remove('hidden');$('progress').classList.add('hidden');
    $('status').textContent=state.error||state.phase;$('empty').querySelector('h2').textContent='Refresh duplicate history to begin';$('empty').querySelector('p').textContent='Use your full collection folder, including quarantine. No need to build proposed sets.';
@@ -146,6 +147,7 @@ $('historyRefresh').onclick=()=>task(async()=>{
 });
 $('historyVerify').onclick=()=>task(async()=>{historyState=await api('/api/history/verify',{job:historyState.id});historyLoadedJob=null;historyTarget=null;historyPage=0;await refreshHistory(true)});
 $('historyHighConfidence').onclick=()=>task(async()=>{historyState=await api('/api/history/verify',{job:historyState.id,policy:'high_confidence'});historyLoadedJob=null;historyTarget=null;historyPage=0;await refreshHistory(true)});
+$('historyAcceptAll').onclick=()=>task(async()=>{historyState=await api('/api/history/verify',{job:historyState.id,policy:'accept_suggestions'});historyLoadedJob=null;historyTarget=null;historyPage=0;await refreshHistory(true)});
 $('historyStop').onclick=()=>task(()=>api('/api/bulk/cancel',{}));
 for(const id of ['historyMode','historyFilter'])$(id).onchange=()=>task(async()=>{historyPage=0;historyTarget=null;await loadHistory()});
 $('historySearchButton').onclick=()=>task(async()=>{historyPage=0;await loadHistory()});

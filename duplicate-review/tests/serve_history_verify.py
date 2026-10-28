@@ -13,6 +13,10 @@ with tempfile.TemporaryDirectory() as temp:
         with work.db() as db:
             db.execute('INSERT INTO aliases VALUES (?,?,?,?)', (digest,cat[keeper]['sha'],same_photo.VERSION,0))
         work.persist()
+    if os.environ.get('ACCEPT_ALL_FIXTURE'):
+        cat = work.current['source_catalog']
+        work.current['history_matches'][cat[bad]['sha']][0]['score'] = 98
+        work.persist()
     server = make_server(engine)
     engine.library.request = lambda *_: (_ for _ in ()).throw(ValueError('Fixture: no companion'))
     # This UI exercise must use the existing saved job, never rebuild it.

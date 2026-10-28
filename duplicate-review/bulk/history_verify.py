@@ -1,6 +1,7 @@
 """Strict verification of an existing history queue; no inventory or matching pass."""
 import copy
 import json
+import math
 from functools import lru_cache
 from pathlib import Path
 import threading
@@ -10,6 +11,25 @@ import same_photo
 from . import history_confidence
 from engine import sha256, stat_key
 from .history_matching import RECIPE
+
+
+def top_suggestion(saved, catalog, digest, separated):
+    """Choose the displayed top valid suggestion without a confidence threshold."""
+    ranked = []
+    for match in saved:
+        keeper = catalog.get(match.get('id'))
+        if not keeper or keeper.get('quarantine_only'):
+            continue
+        if tuple(sorted((digest, keeper['sha']))) in separated:
+            continue
+        try:
+            score = float(match['score'])
+        except (KeyError, ValueError, TypeError):
+            continue
+        if math.isfinite(score) and 0 <= score <= 100:
+            ranked.append((score, keeper['id'], match))
+    ranked.sort(key=lambda row: (-row[0], row[1]))
+    return [ranked[0][2]] if ranked else []
 
 
 def save_job(work, db):
@@ -25,14 +45,14 @@ def start(work, body):
         if current.get('history_match_recipe') != RECIPE:
             raise ValueError('Prepare duplicate history first. Saved matching results are required.')
         policy = body.get('policy', 'strict')
-        if policy not in ('strict', 'high_confidence'):
-            raise ValueError('Choose strict verification or high-confidence recovery.')
+        if policy not in ('strict', 'high_confidence', 'accept_suggestions'):
+            raise ValueError('Choose a supported recovery action.')
         current.pop('error', None)
         current.update(running=True, history_verifying=True, interrupted=False)
         current.setdefault('history_verified', {})
-        current['history_verification'] = {'started': True, 'checked': 0, 'linked_files': 0, 'policy': policy}
+        current['history_verification'] = {'started': True, 'checked': 0, 'linked_files': 0, 'policy': policy, 'without_candidate': 0}
         work.cancel.clear()
-        work.update(phase='Checking high-confidence connections' if policy == 'high_confidence' else 'Verifying saved duplicate candidates', done=0, total=0)
+        work.update(phase='Accepting saved suggestions' if policy == 'accept_suggestions' else 'Checking high-confidence connections' if policy == 'high_confidence' else 'Verifying saved duplicate candidates', done=0, total=0)
         work.persist()
         work.thread = threading.Thread(target=run, args=(work,), daemon=True)
         work.thread.start()
@@ -42,8 +62,9 @@ def start(work, body):
 def run(work):
     report = work.current['history_verification']
     policy = report.get('policy', 'strict')
-    verifier = history_confidence if policy == 'high_confidence' else same_photo
-    resume_button = 'Accept high-confidence connections' if policy == 'high_confidence' else 'Verify saved matches'
+    verifier = None if policy == 'accept_suggestions' else history_confidence if policy == 'high_confidence' else same_photo
+    cache_recipe = verifier.VERSION if verifier else None
+    resume_button = 'Accept all suggested connections' if policy == 'accept_suggestions' else 'Accept high-confidence connections' if policy == 'high_confidence' else 'Verify saved matches'
     checked = work.current['history_verified']
     catalog = work.current['source_catalog']
     # Decode only the saved candidate pairs, keeping a small bounded image cache.
@@ -81,6 +102,10 @@ def run(work):
             candidates = work.current.get('history_matches', {}).get(digest, [])
             if policy == 'high_confidence':
                 candidates = history_confidence.candidates(candidates, catalog, digest, separated)
+            elif policy == 'accept_suggestions':
+                candidates = top_suggestion(candidates, catalog, digest, separated)
+                if not candidates:
+                    report['without_candidate'] += 1
             for candidate in candidates:
                 work.check()
                 keeper = catalog.get(candidate['id'])
@@ -89,19 +114,22 @@ def run(work):
                 try:
                     paths = [validate(row) for row in rows]
                     keeper_path = validate(keeper)
-                    with work.db() as db:
-                        cached = db.execute('SELECT accepted FROM aliases WHERE target=? AND keeper=? AND recipe=?',
-                                            (digest, keeper['sha'], verifier.VERSION)).fetchone()
-                    if cached is None:
-                        accepted = bool(verifier.verify(prepared(str(paths[0])), prepared(str(keeper_path))))
-                        # Validation must still hold after the expensive verification.
-                        for item in rows + [keeper]:
-                            validate(item)
-                        with work.db() as db:
-                            db.execute('INSERT OR REPLACE INTO aliases VALUES (?,?,?,?)',
-                                       (digest, keeper['sha'], verifier.VERSION, int(accepted)))
+                    if policy == 'accept_suggestions':
+                        accepted = True  # Explicit user acceptance, not algorithmic verification.
                     else:
-                        accepted = bool(cached[0])
+                        with work.db() as db:
+                            cached = db.execute('SELECT accepted FROM aliases WHERE target=? AND keeper=? AND recipe=?',
+                                                (digest, keeper['sha'], verifier.VERSION)).fetchone()
+                        if cached is None:
+                            accepted = bool(verifier.verify(prepared(str(paths[0])), prepared(str(keeper_path))))
+                            # Validation must still hold after the expensive verification.
+                            for item in rows + [keeper]:
+                                validate(item)
+                            with work.db() as db:
+                                db.execute('INSERT OR REPLACE INTO aliases VALUES (?,?,?,?)',
+                                           (digest, keeper['sha'], verifier.VERSION, int(accepted)))
+                        else:
+                            accepted = bool(cached[0])
                     work.check()
                     if not accepted:
                         continue
@@ -109,7 +137,7 @@ def run(work):
                         # Journal and saved catalog are committed together, one connection at a time.
                         undo = work.current.get('origin_undo')
                         if not undo or undo.get('kind') != 'auto' or undo.get('policy', 'strict') != policy:
-                            undo = {'kind': 'auto', 'policy': policy, 'cache_recipe': verifier.VERSION, 'keepers': {}, 'rows': [], 'priors': {},
+                            undo = {'kind': 'auto', 'policy': policy, 'cache_recipe': cache_recipe, 'keepers': {}, 'rows': [], 'priors': {},
                                     'previous': copy.deepcopy(undo), 'checked_previous': {}}
                             work.current['origin_undo'] = undo
                         undo['keepers'].setdefault(keeper['id'], copy.deepcopy(keeper))
@@ -122,7 +150,7 @@ def run(work):
                             keeper['sources'].update(row['sources'])
                             keeper['origins'].extend(row['origins'])
                             keeper.setdefault('copies', []).append({'path': row['path'], 'sha': digest,
-                                'quarantine': True, 'reference': False, 'proof': 'high-confidence history connection' if policy == 'high_confidence' else 'verified saved history candidate'})
+                                'quarantine': True, 'reference': False, 'proof': 'user-accepted top saved suggestion' if policy == 'accept_suggestions' else 'high-confidence history connection' if policy == 'high_confidence' else 'verified saved history candidate'})
                             del catalog[row['id']]
                         if keeper['id'] in work.current.get('items', {}):
                             work.current['items'][keeper['id']] = copy.deepcopy(keeper)
@@ -143,7 +171,7 @@ def run(work):
             report['checked'] = at + 1
             work.update(done=at + 1)
             work.persist()
-        work.update(phase='High-confidence recovery complete' if policy == 'high_confidence' else 'Saved-match verification complete')
+        work.update(phase='Saved suggestions accepted' if policy == 'accept_suggestions' else 'High-confidence recovery complete' if policy == 'high_confidence' else 'Saved-match verification complete')
     except InterruptedError:
         work.update(phase='Recovery paused. ' + resume_button + ' to resume.')
     except Exception as exc:
@@ -162,7 +190,9 @@ def undo_batch(work, undo):
             if prior:
                 db.execute('INSERT INTO confirmed_origins VALUES (?,?,?)', (digest, *prior))
             # Do not leave an accepted cache entry that silently reapplies an undone batch on refresh.
-            db.execute('DELETE FROM aliases WHERE target=? AND recipe=?', (digest, undo.get('cache_recipe', same_photo.VERSION)))
+            recipe = undo.get('cache_recipe', same_photo.VERSION)
+            if recipe:
+                db.execute('DELETE FROM aliases WHERE target=? AND recipe=?', (digest, recipe))
             previous = undo['checked_previous'].get(digest)
             if previous is None:
                 work.current.get('history_verified', {}).pop(digest, None)
