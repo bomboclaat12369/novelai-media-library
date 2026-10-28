@@ -99,7 +99,7 @@ def make_server(engine, port=0, token=None):
                 if url.path == '/api/organizer/state':
                     return self.send(200, organizer.summary())
                 if url.path == '/api/organizer/page':
-                    return self.send(200, organizer.page(params.get('kind',['post'])[0],params['id'][0],int(params.get('offset',[0])[0]),params.get('order',['similar'])[0],params.get('peek',['0'])[0]!='1'))
+                    return self.send(200, organizer.page(params.get('kind',['post'])[0],params['id'][0],int(params.get('offset',[0])[0]),params.get('order',['similar'])[0],params.get('peek',['0'])[0]!='1',params.get('focus',[''])[0]))
                 if url.path == '/api/organizer/progress':
                     with organizer.lock:progress=dict(organizer.job)
                     return self.send(200, progress)

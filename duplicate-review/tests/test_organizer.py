@@ -92,8 +92,8 @@ class OrganizerTests(unittest.TestCase):
             local=org.category_action('create_category',{'job':'fixture-job','name':' Swimwear '})['category']
             self.assertEqual(org.category_action('create_category',{'job':'fixture-job','name':'swimwear'})['category']['id'],local['id'])
             org.mutate('draft',{'job':'fixture-job','ids':[ids[2]],'new_categories':['blue',local['id']]})
-            org.mutate('save',{'job':'fixture-job','revision':0,'name':'New shoot','ids':[ids[2]]})
-            group=next(g for g in org.sets().values() if g['name']=='New shoot');target=group['id'];created=group['created']
+            org.mutate('save',{'job':'fixture-job','revision':0,'name':'New Shoot','ids':[ids[2]]})
+            group=next(g for g in org.sets().values() if g['name']=='New Shoot');target=group['id'];created=group['created']
             org.mutate('save',{'job':'fixture-job','revision':1,'target':target,'ids':[ids[3]]})
             self.assertEqual(org.sets()[target]['categories'],['blue',local['id']])
             self.assertEqual(org.sets()[target]['created'],created)
@@ -137,13 +137,13 @@ class OrganizerTests(unittest.TestCase):
             initial=suggestions(org)
             self.assertEqual(initial[ids[0]]['sets'],['Existing shoot'])
             self.assertEqual(initial[ids[3]]['sets'],[])
-            body={'job':'fixture-job','revision':0,'name':'Second shoot','ids':[ids[0],ids[3]]}
+            body={'job':'fixture-job','revision':0,'name':'Second Shoot','ids':[ids[0],ids[3]]}
             warning=org.mutate('save',body)
             org.mutate('save',dict(body,membership_confirmation=warning['membership_confirmation']))
             reopened=Organizer(engine,bulk)
             saved=suggestions(reopened)
-            self.assertEqual(saved[ids[0]]['sets'],['Existing shoot','Second shoot'])
-            self.assertEqual(saved[ids[3]]['sets'],['Second shoot'])
+            self.assertEqual(saved[ids[0]]['sets'],['Existing shoot','Second Shoot'])
+            self.assertEqual(saved[ids[3]]['sets'],['Second Shoot'])
             self.assertEqual(saved[ids[4]]['sets'],[])
             self.assertEqual(list(saved),list(initial))
             reopened.mutate('undo',{'job':'fixture-job','revision':1})
@@ -152,7 +152,7 @@ class OrganizerTests(unittest.TestCase):
     def test_second_set_membership_requires_specific_confirmation_and_noops_do_not_warn(self):
         with tempfile.TemporaryDirectory() as temp:
             engine,bulk,org,ids=fixture(temp);before=org.state();sets=copy.deepcopy(org.sets())
-            body={'job':'fixture-job','revision':0,'name':'Second shoot','ids':[ids[0],ids[2]]}
+            body={'job':'fixture-job','revision':0,'name':'Second Shoot','ids':[ids[0],ids[2]]}
             warning=org.mutate('save',body)
             self.assertTrue(warning['confirmation_required'])
             self.assertEqual([r['id'] for r in warning['conflicts']],[ids[0]])
@@ -167,7 +167,7 @@ class OrganizerTests(unittest.TestCase):
             result=org.mutate('save',{'job':'fixture-job','revision':1,'target':'library:existing','ids':[ids[0]]})
             self.assertNotIn('confirmation_required',result)
             self.assertEqual(org.sets()['library:existing']['members'].count(ids[0]),1)
-            local=next(g for g in org.sets().values() if g['name']=='Second shoot')
+            local=next(g for g in org.sets().values() if g['name']=='Second Shoot')
             warning=org.mutate('save',{'job':'fixture-job','revision':2,'target':'library:existing','ids':[ids[2]]})
             self.assertEqual(warning['conflicts'][0]['sets'][0]['id'],local['id'])
 
@@ -176,25 +176,25 @@ class OrganizerTests(unittest.TestCase):
             engine,bulk,org,ids=fixture(temp)
             bulk.current['library_sets']['existing']['colors']=['Blue','white'];bulk.persist()
             org.mutate('draft',{'job':'fixture-job','ids':[ids[2]],'new_colors':[' Red ','white','Red','']})
-            org.mutate('save',{'job':'fixture-job','revision':0,'name':'Colored shoot','ids':[ids[2]]})
-            group=next(g for g in org.sets().values() if g['name']=='Colored shoot');target=group['id']
-            self.assertEqual(group['colors'],['Red','white'])
+            org.mutate('save',{'job':'fixture-job','revision':0,'name':'Colored Shoot','ids':[ids[2]]})
+            group=next(g for g in org.sets().values() if g['name']=='Colored Shoot');target=group['id']
+            self.assertEqual(group['colors'],['Red','White'])
             org.mutate('save',{'job':'fixture-job','revision':1,'target':target,'ids':[ids[3]]})
-            self.assertEqual(org.sets()[target]['colors'],['Red','white'])
+            self.assertEqual(org.sets()[target]['colors'],['Red','White'])
             org.mutate('set_colors',{'job':'fixture-job','revision':2,'target':target,'colors':[]})
             self.assertEqual(org.sets()[target]['colors'],[])
             org.mutate('undo',{'job':'fixture-job','revision':3})
             reopened=Organizer(engine,Workbench(engine));reopened.summary()
-            self.assertEqual(reopened.sets()[target]['colors'],['Red','white'])
+            self.assertEqual(reopened.sets()[target]['colors'],['Red','White'])
             self.assertEqual(set(reopened.sets()[target]['members']),set(ids[2:4]))
             exported=next(g for g in reopened.export()['sets'] if g['id']==target)
-            self.assertEqual(exported['colors'],['Red','white'])
+            self.assertEqual(exported['colors'],['Red','White'])
             reopened.mutate('save',{'job':'fixture-job','revision':4,'target':'library:existing','ids':[ids[4]]})
-            self.assertEqual(reopened.sets()['library:existing']['colors'],['Blue','white'])
+            self.assertEqual(reopened.sets()['library:existing']['colors'],['Blue','White'])
             reopened.mutate('set_colors',{'job':'fixture-job','revision':5,'target':'library:existing','colors':['Green']})
             self.assertEqual(bulk.current['library_sets']['existing']['colors'],['Blue','white'])
             reopened.mutate('undo',{'job':'fixture-job','revision':6})
-            self.assertEqual(reopened.sets()['library:existing']['colors'],['Blue','white'])
+            self.assertEqual(reopened.sets()['library:existing']['colors'],['Blue','White'])
             with self.assertRaises(ValueError):reopened.mutate('set_colors',{'job':'fixture-job','revision':7,'target':target,'colors':'invalid'})
 
     def test_discard_filters_every_view_and_known_copies_survives_inventory_and_restores(self):
@@ -284,10 +284,10 @@ class OrganizerTests(unittest.TestCase):
                 self.assertEqual(second['ids'],ids[:2])
                 by_keeper=org.page('post','instagram:test_account:P2',order='filename')
                 self.assertEqual(by_keeper['ids'],ids[:3])
-                body={'job':'fixture-job','revision':0,'name':'IG shoot','ids':page['ids']}
+                body={'job':'fixture-job','revision':0,'name':'IG Shoot','ids':page['ids']}
                 warning=org.mutate('save',body)
                 org.mutate('save',dict(body,membership_confirmation=warning['membership_confirmation']))
-                saved=next(g for g in org.sets().values() if g['name']=='IG shoot')
+                saved=next(g for g in org.sets().values() if g['name']=='IG Shoot')
                 self.assertEqual(set(saved['members']),set(ids[:3]))
                 reopened=Organizer(engine,Workbench(engine))
                 self.assertEqual(reopened.page('post','instagram:test_account:P2',order='original')['ids'],page['ids'])

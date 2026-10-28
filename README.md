@@ -2,6 +2,12 @@
 
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
+## Connected-image navigation and saved title case (Duplicate Review 2.0.13 / runtime 2.7.63)
+
+In Folder Organizer, **Open** under Connected original posts now finds the page containing the most recently selected image connected to that post, scrolls to it, and highlights it. Image sorting, selection and Back navigation are preserved. Existing ignored posts stay ignored; uncheck **Ignore as grouping evidence** to use them again. No rescan, cache reset or change to the 12-reference visual cap.
+
+Set names and Color(s) use the same title-case rule when created or saved in the organizer and regular Media Library: **blue and white outfit → Blue and White Outfit**, **black with gold → Black with Gold**. Connecting words stay lowercase inside labels; first/last words are capitalized. Acronyms and deliberate mixed-case spelling are preserved. Existing records are not bulk renamed on startup. Aliases, notes and categories are unaffected. The library change is in the shared companion runtime; its UI versions are unchanged. Restart the companion to load runtime 2.7.63.
+
 ## Folder organizer and in-app updates (Duplicate Review 2.0.0)
 
 Open **Folder organizer** to use the completed source inventory immediately, including recovered original-post connections. Browse posts, select a shoot, inspect related posts and likely existing sets, and save a named set draft. Selected images stay selected across posts. Quarantined images remain labeled evidence and cannot become set members or imports. Existing library-set additions are saved locally for later import; this release does not mutate the media library.

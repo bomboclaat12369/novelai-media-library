@@ -1,4 +1,19 @@
-LOCAL DUPLICATE REVIEW 2.0.12
+LOCAL DUPLICATE REVIEW 2.0.13
+
+NEW IN 2.0.13: JUMP TO CONNECTED IMAGES AND AUTOMATIC TITLE CASE
+- Open on a Connected original post jumps to the page containing the most
+  recently selected image from that post, scrolls to it, and outlines it in blue.
+  Your current image order and selection are preserved; Back returns to the
+  previous view. The 12-image visual-reference cap is unchanged.
+- To use an ignored dump again, uncheck Ignore as grouping evidence on that post.
+  Existing ignore choices are not reset by the update.
+- Set names and Color(s) use title case when created or saved: for example,
+  blue and white outfit becomes Blue and White Outfit. Small connecting words
+  stay lowercase inside names; first/last words are capitalized. Acronyms and
+  deliberate mixed-case spelling are preserved. Existing saved data is not
+  rewritten just by installing or opening the app.
+- Media Library runtime 2.7.63 uses the same rule. Restart its companion to get
+  that runtime update. This organizer update requires no rescan or reanalysis.
 
 NEW IN 2.0.12: DUMP POST GROUPING CONTROLS
 - Open a post and select Ignore as grouping evidence to exclude its shared-post

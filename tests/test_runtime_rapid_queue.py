@@ -57,7 +57,7 @@ class RapidQueueTests(unittest.TestCase):
         a,b,c=[self.pending(i) for i in range(3)]
         self.resolve('review',[a]);self.assertTrue(self.store.media_item(a['id'])['in_review'])
         result=self.resolve('new_set',[b],name='Blue',colors=['blue','white'])
-        group=result['set'];self.assertEqual(group['colors'],['blue','white']);self.assertEqual(group['media_ids'],[b['id']])
+        group=result['set'];self.assertEqual(group['colors'],['Blue','White']);self.assertEqual(group['media_ids'],[b['id']])
         self.assertFalse(self.store.media_item(b['id'])['in_all']);self.assertIn('set_added_at',self.store.media_item(b['id']))
         self.assertEqual([m['id'] for m in self.store.rapid_queue(self.character['id'])['items']],[c['id']])
         self.resolve('discard',[c]);self.assertFalse((self.store.root/c['stored_rel']).exists())

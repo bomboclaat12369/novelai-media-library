@@ -2,10 +2,21 @@
 from __future__ import annotations
 import copy, hashlib, io, json, re, runpy, sqlite3, threading, time, uuid
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
 from engine import load_image, sha256, stat_key, linked
+
+
+@lru_cache(maxsize=1)
+def runtime_helpers():
+    # The same runtime ships with both apps; share the actual saved-label rules.
+    return runpy.run_path(str(Path(__file__).resolve().parents[1]/'runtime-src'/'companion-runtime.pyw'))
+
+
+def title_case_label(value):
+    return runtime_helpers()['title_case_label'](value)
 
 
 def natural(value):
@@ -89,8 +100,7 @@ class Organizer:
 
     def model(self):
         if self.encoder_type is None:
-            source=Path(__file__).resolve().parents[1]/'runtime-src'/'companion-runtime.pyw'
-            self.encoder_type=runpy.run_path(str(source))['OutfitMatcher']
+            self.encoder_type=runtime_helpers()['OutfitMatcher']
             self.recipe=self.encoder_type.MODEL_SHA+':'+self.encoder_type.SCENE_RECIPE
         return self.encoder_type
 
@@ -205,7 +215,7 @@ class Organizer:
         return {'id':ident,'name':re.split(r'[\\/]',r['path'])[-1],'path':r['path'],'quarantined':bool(r.get('quarantine_only')),
                 'sources':list(r.get('sources',{})),'origins':r.get('origins',[]),'reference':bool(r.get('reference')),'discarded':ident in self.discarded}
 
-    def page(self,kind,ident,offset=0,order='similar',remember=True):
+    def page(self,kind,ident,offset=0,order='similar',remember=True,focus_id=None):
         with self.lock,self.bulk.lock:
             self.bind()
             if kind=='post':
@@ -219,14 +229,17 @@ class Organizer:
             if not group:raise ValueError('Choose an available post or set.')
             ids=[i for i in ids if i in self.catalog]
             source=ident if kind=='post' else None
-            ids=self.ordered(ids,order,source);offset=max(0,min(int(offset),max(0,len(ids)-1)))//60*60
+            ids=self.ordered(ids,order,source)
+            focus_id=focus_id if focus_id in ids else None
+            if focus_id is not None:offset=ids.index(focus_id)
+            offset=max(0,min(int(offset),max(0,len(ids)-1)))//60*60
             if remember:
                 state=self.state();state.update(view={'kind':kind,'id':ident,'offset':offset,'order':order})
                 with self.db() as db:self.put_state(db,state)
             sets=self.sets();labels={}
             for g in sets.values():
                 for i in g['members']:labels.setdefault(i,[]).append(g['name'])
-            return {'label':group.get('label',group.get('name')),'total':len(ids),'offset':offset,'ids':ids,
+            return {'label':group.get('label',group.get('name')),'total':len(ids),'offset':offset,'ids':ids,'focus_id':focus_id,
                     'images':[self.image(i)|{'display_name':self.original_name(i,source),'sets':labels.get(i,[])} for i in ids[offset:offset+60]],'job':self.bound[0]}
 
     def related(self,body):
@@ -255,7 +268,7 @@ class Organizer:
                 v=max((visual.get(i,0) for i in members),default=0)
                 if overlap or shared or v>=.60:sets.append({'id':g['id'],'name':g['name'],'count':len(members),'overlap':overlap,'score':overlap*10+bool(shared)+v,'library':bool(g.get('library_id'))})
             sets.sort(key=lambda g:(-g['score'],g['name']))
-            posts=[{'id':s,'label':self.posts[s]['label'],'count':len(self.posts[s]['ids']),'shared':sum(s in self.catalog[i]['sources'] for i in seeds)} for s in sources]
+            posts=[{'id':s,'label':self.posts[s]['label'],'count':len(self.posts[s]['ids']),'shared':sum(s in self.catalog[i]['sources'] for i in seeds),'anchor_id':next(i for i in reversed(seeds) if s in self.catalog[i]['sources'])} for s in sources]
             posts.sort(key=lambda p:(-p['shared'],p['count'],p['label']))
             return {'context':context,'images':[self.image(i)|{'reason':reason,'sets':labels.get(i,[])} for _,i,reason in ranked[offset:offset+30]],'total':len(ranked),'offset':offset,'sets':sets[:12],'posts':posts}
 
@@ -274,7 +287,7 @@ class Organizer:
         # Same descriptor format and limits as the media library's Set details.
         if not isinstance(value,list) or len(value)>50 or any(not isinstance(v,str) or len(v)>150 for v in value):
             raise ValueError('Invalid Set colors (up to 50 descriptors, 150 characters each).')
-        return list(dict.fromkeys(v.strip() for v in value if v.strip()))
+        return list(dict.fromkeys(title_case_label(v) for v in value if v.strip()))
 
     def category_catalog(self):
         with self.db() as db:row=db.execute('SELECT data FROM category_catalog WHERE scope=?',(self.scope,)).fetchone()
@@ -333,7 +346,7 @@ class Organizer:
                     if not ids:raise ValueError('Select at least one image.')
                     target=str(body.get('target',''));allsets=self.sets(include_discarded=True);previous=allsets.get(target)
                     if target and not previous:raise ValueError('Set no longer available.')
-                    name=str(body.get('name') or (previous or {}).get('name','')).strip()
+                    name=title_case_label(body.get('name') or (previous or {}).get('name',''))
                     if not name or len(name)>250:raise ValueError('Give the set a name (up to 250 characters).')
                     # Adding the same keeper from another source post must not
                     # silently place it in a second set. Re-check on every save.

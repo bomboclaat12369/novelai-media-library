@@ -17,7 +17,7 @@ class SetPreferencesTests(unittest.TestCase):
         self.assertEqual({g['name'] for g in groups},{f'White Bikini {i}' for i in range(1,5)})
         same=self.store.update_set(groups[0]['id'],name=groups[0]['name'])
         self.assertEqual(same['name'],groups[0]['name'])
-        self.assertEqual(self.store.update_set(groups[0]['id'],name=' white bikini ')['name'],'white bikini 5')
+        self.assertEqual(self.store.update_set(groups[0]['id'],name=' white bikini ')['name'],'White Bikini 5')
         other=self.store.add_character('Another')
         self.assertEqual(self.store.create_set(other['id'],'White Bikini',[])['name'],'White Bikini')
 

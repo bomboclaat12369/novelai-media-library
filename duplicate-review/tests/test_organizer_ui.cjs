@@ -20,19 +20,19 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  await page.keyboard.press('ArrowRight');await page.keyboard.press(' ');assert.equal(await page.evaluate(()=>selection.size),2);
  await page.locator('#viewerDetails').click();assert.equal(await page.locator('#locations').isVisible(),true);
  await page.locator('#viewerClose').click();
- await page.locator('#setName').fill('Saved shoot');
+ await page.locator('#setName').fill('Saved Shoot');
  await page.locator('#draftSetColors').click();await page.locator('#setColors').fill(' Blue, white, Blue ');
  await page.locator('#saveSetColors').click();await page.waitForFunction(()=>!busy&&!document.querySelector('#colorDetails').open);
- await page.locator('#save').click();await page.waitForFunction(()=>!busy&&data.sets.some(g=>g.name==='Saved shoot'));
- assert.deepEqual(await page.evaluate(()=>data.sets.find(g=>g.name==='Saved shoot').colors),['Blue','white']);
+ await page.locator('#save').click();await page.waitForFunction(()=>!busy&&data.sets.some(g=>g.name==='Saved Shoot'));
+ assert.deepEqual(await page.evaluate(()=>data.sets.find(g=>g.name==='Saved Shoot').colors),['Blue','White']);
  assert.equal(await page.evaluate(()=>selection.size),0);
- const saved=await page.evaluate(()=>data.sets.find(g=>g.name==='Saved shoot').id);
- await page.locator('#setsTab').click();await page.locator('#postList button').filter({hasText:'Saved shoot'}).click();await page.waitForFunction(()=>currentKind==='set'&&!busy);
+ const saved=await page.evaluate(()=>data.sets.find(g=>g.name==='Saved Shoot').id);
+ await page.locator('#setsTab').click();await page.locator('#postList button').filter({hasText:'Saved Shoot'}).click();await page.waitForFunction(()=>currentKind==='set'&&!busy);
  assert.equal(await page.locator('#grid .card').count(),2);
- await page.reload();await page.waitForFunction(()=>data?.sets.some(g=>g.name==='Saved shoot')&&view);
+ await page.reload();await page.waitForFunction(()=>data?.sets.some(g=>g.name==='Saved Shoot')&&view);
  assert.equal(await page.evaluate(()=>currentId),saved);
- assert.deepEqual(await page.evaluate(()=>data.sets.find(g=>g.id===currentId).colors),['Blue','white']);
- await page.locator('#undo').click();await page.waitForFunction(()=>!busy&&!data.sets.some(g=>g.name==='Saved shoot'));
+ assert.deepEqual(await page.evaluate(()=>data.sets.find(g=>g.id===currentId).colors),['Blue','White']);
+ await page.locator('#undo').click();await page.waitForFunction(()=>!busy&&!data.sets.some(g=>g.name==='Saved Shoot'));
  assert.equal(await page.evaluate(()=>selection.size),2);
  // Reopen a surviving post after undo removed the viewed draft.
  await page.locator('#postsTab').click();await page.locator('#postList button').first().click();await page.waitForFunction(()=>currentKind==='post'&&!busy);
@@ -108,33 +108,33 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  await page.locator('#setColors').fill('Pink, white');await page.locator('#saveSetColors').click();await page.waitForFunction(()=>!busy&&!document.querySelector('#colorDetails').open);
  assert.equal(await page.evaluate(()=>data.sets.find(g=>g.id===currentId).count),2);
  await page.reload();await page.waitForFunction(()=>view&&data?.sets.find(g=>g.id===currentId)?.colors?.[0]==='Pink');
- await page.locator('#editSetColors').click();assert.equal(await page.locator('#setColors').inputValue(),'Pink, white');await page.locator('#cancelSetColors').click();
+ await page.locator('#editSetColors').click();assert.equal(await page.locator('#setColors').inputValue(),'Pink, White');await page.locator('#cancelSetColors').click();
  await page.locator('#undo').click();await page.waitForFunction(()=>!busy&&data.sets.find(g=>g.id===currentId).colors.length===0);
  // Saving into a second set is explicit; cancel retains the entire draft.
  await page.locator('#clear').click();await page.locator(`#grid .card[data-id="${info.ids[0]}"] [data-pick]`).click();
  assert.match(await page.locator('#membershipHint').textContent(),/1 already/);
- await page.locator('#setName').fill('Accidental overlap');await page.locator('#save').click();
+ await page.locator('#setName').fill('Accidental Overlap');await page.locator('#save').click();
  await page.locator('#membershipWarning').waitFor({state:'visible'});
  assert.match(await page.locator('#membershipList').textContent(),/Existing shoot/);
  await page.keyboard.press('Escape');await page.waitForFunction(()=>!busy);
- assert.equal(await page.locator('#setName').inputValue(),'Accidental overlap');assert.equal(await page.evaluate(()=>selection.size),1);
- assert(!await page.evaluate(()=>data.sets.some(g=>g.name==='Accidental overlap')));
+ assert.equal(await page.locator('#setName').inputValue(),'Accidental Overlap');assert.equal(await page.evaluate(()=>selection.size),1);
+ assert(!await page.evaluate(()=>data.sets.some(g=>g.name==='Accidental Overlap')));
  await page.locator('#save').click();await page.locator('#membershipSkip').click();await page.waitForFunction(()=>!busy);
- assert(!await page.evaluate(()=>data.sets.some(g=>g.name==='Accidental overlap')));
+ assert(!await page.evaluate(()=>data.sets.some(g=>g.name==='Accidental Overlap')));
  await page.locator('#postsTab').click();await page.locator('#postList button').filter({hasText:'test_account / P2'}).click();await page.waitForFunction(()=>!busy&&currentKind==='post');
  await page.locator(`#grid .card[data-id="${info.ids[2]}"] [data-pick]`).click();await page.locator('#save').click();
- await page.locator('#membershipSkip').click();await page.waitForFunction(()=>!busy&&data.sets.some(g=>g.name==='Accidental overlap'));
- assert.deepEqual(await page.evaluate(()=>data.sets.find(g=>g.name==='Accidental overlap').members),[info.ids[2]]);
- await page.locator(`#grid .card[data-id="${info.ids[0]}"] [data-pick]`).click();await page.locator('#setName').fill('Intentional overlap');await page.locator('#save').click();
- await page.locator('#membershipContinue').click();await page.waitForFunction(()=>!busy&&data.sets.some(g=>g.name==='Intentional overlap'));
- assert.deepEqual(await page.evaluate(()=>data.sets.find(g=>g.name==='Intentional overlap').members),[info.ids[0]]);
+ await page.locator('#membershipSkip').click();await page.waitForFunction(()=>!busy&&data.sets.some(g=>g.name==='Accidental Overlap'));
+ assert.deepEqual(await page.evaluate(()=>data.sets.find(g=>g.name==='Accidental Overlap').members),[info.ids[2]]);
+ await page.locator(`#grid .card[data-id="${info.ids[0]}"] [data-pick]`).click();await page.locator('#setName').fill('Intentional Overlap');await page.locator('#save').click();
+ await page.locator('#membershipContinue').click();await page.waitForFunction(()=>!busy&&data.sets.some(g=>g.name==='Intentional Overlap'));
+ assert.deepEqual(await page.evaluate(()=>data.sets.find(g=>g.name==='Intentional Overlap').members),[info.ids[0]]);
  await page.locator(`#grid .card[data-id="${info.ids[0]}"] [data-pick]`).click();await page.locator('#target').selectOption('library:existing');
  await page.locator('#save').click();await page.waitForFunction(()=>!busy&&selection.size===0);
  assert.equal(await page.locator('#membershipWarning').evaluate(e=>e.open),false);
  await page.locator('#target').selectOption('');
  await page.locator(`#grid .card[data-id="${info.ids[2]}"] [data-pick]`).click();
  await page.waitForFunction(()=>document.querySelector('#suggestions .membership')?.textContent.includes('In:'));
- await page.waitForFunction(id=>document.querySelector(`#suggestions .card[data-id="${id}"] .membership`)?.textContent==='In: Existing shoot, Intentional overlap',info.ids[0]);
+ await page.waitForFunction(id=>document.querySelector(`#suggestions .card[data-id="${id}"] .membership`)?.textContent==='In: Existing Shoot, Intentional Overlap',info.ids[0]);
  // Reference and membership badges share styling without overlapping or hiding names.
  const badgeCheck=await page.evaluate(()=>{
    const c=card({id:'badge-fixture',name:'Preview',reference:true,sets:['A long saved set name','Another saved set name']},true);
@@ -147,7 +147,7 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  assert(badgeCheck.separate&&badgeCheck.within);assert.deepEqual(badgeCheck.style[0],badgeCheck.style[1]);
  // Create categories in the existing details dialog, then find uncategorized sets.
  await page.locator('#clear').click();await page.locator('#setsTab').click();
- await page.locator('#postList button').filter({hasText:'Intentional overlap'}).click();await page.waitForFunction(()=>!busy&&currentKind==='set');
+ await page.locator('#postList button').filter({hasText:'Intentional Overlap'}).click();await page.waitForFunction(()=>!busy&&currentKind==='set');
  const categoryTarget=await page.evaluate(()=>currentId),createdBefore=await page.evaluate(()=>data.sets.find(g=>g.id===currentId).created);
  assert(createdBefore>0);
  await page.locator('#editSetColors').click();await page.locator('#newSetCategory').fill('Swimwear');await page.locator('#createSetCategory').click();
@@ -155,17 +155,17 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  assert.equal(await page.getByLabel('Swimwear',{exact:true}).isChecked(),true);
  await page.locator('#saveSetColors').click();await page.waitForFunction(()=>!busy&&!document.querySelector('#colorDetails').open);
  await page.locator('#setFilter').selectOption('uncategorized');
- assert.equal(await page.locator('#postList button').filter({hasText:'Intentional overlap'}).count(),0);
+ assert.equal(await page.locator('#postList button').filter({hasText:'Intentional Overlap'}).count(),0);
  await page.locator('#setFilter').selectOption('categorized');
- assert.equal(await page.locator('#postList button').filter({hasText:'Intentional overlap'}).count(),1);
+ assert.equal(await page.locator('#postList button').filter({hasText:'Intentional Overlap'}).count(),1);
  await page.reload();await page.waitForFunction(()=>data&&view&&!busy);
  assert.equal(await page.locator('#setFilter').inputValue(),'categorized');
  await page.locator('#editSetColors').click();assert.equal(await page.getByLabel('Swimwear',{exact:true}).isChecked(),true);
  await page.locator('#setColors').fill('Blue');await page.locator('#saveSetColors').click();await page.waitForFunction(()=>!busy&&!document.querySelector('#colorDetails').open);
  assert.equal(await page.evaluate(()=>data.sets.find(g=>g.id===currentId).created),createdBefore);
  await page.locator('#setFilter').selectOption('all');await page.locator('#setSort').selectOption('createdDesc');
- assert.equal(await page.locator('#postList strong').last().textContent(),'Existing shoot');
- await page.locator('#postList button').filter({hasText:'Existing shoot'}).click();await page.waitForFunction(()=>!busy&&currentId==='library:existing');
+ assert.equal(await page.locator('#postList strong').last().textContent(),'Existing Shoot');
+ await page.locator('#postList button').filter({hasText:'Existing Shoot'}).click();await page.waitForFunction(()=>!busy&&currentId==='library:existing');
  await page.locator('#editSetColors').click();assert.match(await page.locator('#setDates').textContent(),/Created: Not recorded/);await page.locator('#cancelSetColors').click();
  // New-set category selections survive reload before saving.
  await page.locator('#target').selectOption('');await page.locator('#draftSetColors').click();await page.getByLabel('Swimwear',{exact:true}).check();

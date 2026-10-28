@@ -21,7 +21,7 @@ for at,start in enumerate(range(0,len(encoded),60000),1):
     parts.append({'path':path.relative_to(root).as_posix(),'sha256':hashlib.sha256(content).hexdigest()})
 if args.commit:
     if not re.fullmatch('[0-9a-f]{40}',args.commit):raise ValueError('Use the full payload commit SHA.')
-    manifest={'schema':1,'version':version,'sha256':hashlib.sha256(payload).hexdigest(),'notes':'Per-post Ignore as grouping evidence with saved preferences and Undo. Large-post filter flags potential dumps without automatically excluding them. Ignored posts retain images, original paths and visual suggestions. Clearer page controls. No rescan or analysis reset.',
+    manifest={'schema':1,'version':version,'sha256':hashlib.sha256(payload).hexdigest(),'notes':'Connected original posts open at the most recently selected matching image, with automatic paging, scrolling and highlight. Set names and Color(s) use title case on save, shared with Media Library runtime 2.7.63. Saved ignore choices, progress and the 12-reference cap are preserved; no rescan.',
               'parts':[{'url':'https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/'+args.commit+'/'+r['path'],'sha256':r['sha256']} for r in parts]}
     (root/'release-duplicate-review.json').write_text(json.dumps(manifest,indent=2)+'\n')
 print(json.dumps({'version':version,'archive':str(archive),'bytes':len(payload),'parts':len(parts)}))

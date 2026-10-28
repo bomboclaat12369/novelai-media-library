@@ -1,5 +1,22 @@
 # Stability regression checks
 
+## Saved title case and connected-image navigation (runtime 2.7.63 / Duplicate Review 2.0.13)
+
+Focused checks cover shared title-case rules, API create/edit/collisions and color
+normalization, legacy metadata isolation, persistence and organizer Undo. The
+organizer suite covers most-recent-selected source anchors, all three image sort
+orders, later-page resolution, ignored posts and missing/parked anchors.
+
+Browser checks use temporary fixture libraries: `test-title-case-ui.cjs` creates
+and edits lowercase Set names/colors in the regular library;
+`duplicate-review/tests/test_organizer_navigation_ui.cjs` selects a suggestion,
+opens its source at page 17, checks the visible highlighted image, returns with
+Back, preserves selection, and saves/reopens title-cased names and colors.
+The existing organizer workflow and updater checks also pass. Runtime payload
+hashes and organizer ZIP parts/source consistency were verified; library UI
+versions and payload hashes are unchanged.
+
+
 ## Standalone 2.8.94 / runtime 2.7.57 validation
 
 `test_runtime_holding_assignments.py` passed four focused tests covering new

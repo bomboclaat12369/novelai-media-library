@@ -40,6 +40,31 @@ APP_NAME = "NovelAI Media Library"
 API_VERSION = 9
 
 
+def title_case_label(value: str) -> str:
+    """Title case a saved Set label, preserving punctuation and deliberate acronyms."""
+    value = str(value or '').strip()
+    minor = {'a', 'an', 'the', 'and', 'as', 'at', 'but', 'by', 'for', 'from',
+             'in', 'into', 'nor', 'of', 'on', 'onto', 'or', 'over', 'per', 'than',
+             'through', 'to', 'upon', 'via', 'vs', 'with', 'without', 'yet'}
+    words = list(re.finditer(r"[^\W_]+(?:['’][^\W_]+)*", value, re.UNICODE))
+    if not words:
+        return value
+    pieces = []; end = 0
+    for index, match in enumerate(words):
+        gap = value[end:match.start()]; word = match.group(); lower = word.lower()
+        boundary = index == 0 or index == len(words)-1 or bool(re.search(r'[:.!?—–]\s*$', gap))
+        if lower in minor:
+            word = lower[:1].upper() + lower[1:] if boundary else lower
+        elif word.isupper() and len(word) > 1:
+            pass  # Explicit AI, PVC, USA, etc. remain intact.
+        elif any(c.isupper() for c in word[1:]) and not word.isupper():
+            pass  # Preserve deliberate spelling such as iPhone or McQueen.
+        else:
+            word = lower[:1].upper() + lower[1:]
+        pieces.extend((gap, word)); end = match.end()
+    return ''.join(pieces) + value[end:]
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -1902,7 +1927,7 @@ class LibraryStore:
             if value is not None:
                 if not isinstance(value, list) or len(value) > 50 or any(not isinstance(v, str) or len(v) > 150 for v in value):
                     raise ValueError('Invalid Set ' + key)
-                result[key] = list(dict.fromkeys(v.strip() for v in value if v.strip()))
+                result[key] = list(dict.fromkeys(title_case_label(v) if key == 'colors' else v.strip() for v in value if v.strip()))
         if notes is not None:
             if not isinstance(notes, str) or len(notes) > 5000:
                 raise ValueError('Set notes must be at most 5000 characters.')
@@ -3241,7 +3266,7 @@ class LibraryStore:
     def create_set(self, character_id: str, name: str, media_ids: list[Any], cover_media_id: Any = None, kind: str = "set", preserve_placement: bool = False, cover_source: Any = None, categories: Any = None, aliases: Any = None, colors: Any = None, notes: Any = None) -> dict[str, Any]:
         if kind != "set":
             raise ValueError("Only Sets are supported")
-        name = str(name or "").strip()
+        name = title_case_label(name)
         if not name:
             raise ValueError("Set name cannot be empty")
         details = self._set_details(aliases, colors, notes)
@@ -3296,7 +3321,7 @@ class LibraryStore:
                 raise KeyError("Set not found")
             character_id = str(item.get("character_id", ""))
             kind = item.get("kind", "set")
-            next_name = str(item.get("name", "")) if name is None else str(name or "").strip()
+            next_name = str(item.get("name", "")) if name is None else title_case_label(name)
             if not next_name:
                 raise ValueError("Set name cannot be empty")
             next_name = self._unique_set_name(character_id, next_name, set_id)
