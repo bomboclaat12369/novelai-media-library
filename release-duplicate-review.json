@@ -1,32 +1,32 @@
 {
   "schema": 1,
-  "version": "2.0.11",
-  "sha256": "de7203b561b30364f75b9ad8d762be5674ad185fce46d3703c40317a438cbd6c",
-  "notes": "Optional Accept all suggested connections: accept each pending entry's top saved candidate without confidence checks, with stop/resume and batch undo. Entries without a candidate stay unlinked. No full rescan, inventory rebuild or file moves.",
+  "version": "2.0.12",
+  "sha256": "c40755b707aab7b933689722d41ec9e5d26713b6a3ee91da02875e9733645e21",
+  "notes": "Per-post Ignore as grouping evidence with saved preferences and Undo. Large-post filter flags potential dumps without automatically excluding them. Ignored posts retain images, original paths and visual suggestions. Clearer page controls. No rescan or analysis reset.",
   "parts": [
     {
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/c0f714cb8a6340163903e48d2b9b851a93ee1e09/payload/duplicate-review-2.0.11.part01.txt",
-      "sha256": "6c96d43c58567eac0f6f78ef78410abcd5678d4aab5df326ae0ebff971397f7b"
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/941e1714094f854c5c6ac53d194a1497035f3fc5/payload/duplicate-review-2.0.12.part01.txt",
+      "sha256": "e8c4aa773bbdbadeb2cae68a3d342cffc25af7b3d39d39efe25ce099c695ff27"
     },
     {
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/c0f714cb8a6340163903e48d2b9b851a93ee1e09/payload/duplicate-review-2.0.11.part02.txt",
-      "sha256": "f2670182b154a67f894f74cb281fcfc978f7a0308a759d04a7aa01e2346397a7"
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/941e1714094f854c5c6ac53d194a1497035f3fc5/payload/duplicate-review-2.0.12.part02.txt",
+      "sha256": "440ac40e110ade59b77a8dc3feaab7837e2d3336f8ef04bac517b66ceee829c5"
     },
     {
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/c0f714cb8a6340163903e48d2b9b851a93ee1e09/payload/duplicate-review-2.0.11.part03.txt",
-      "sha256": "6e34e80daf2c27eb8862a735bae250bcc3564e07890fa60c929b0cf6a12f4995"
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/941e1714094f854c5c6ac53d194a1497035f3fc5/payload/duplicate-review-2.0.12.part03.txt",
+      "sha256": "8c46199306df6dfdeefd7f3ef48920beb6d1bc911a1a1012c432a334fb29ad96"
     },
     {
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/c0f714cb8a6340163903e48d2b9b851a93ee1e09/payload/duplicate-review-2.0.11.part04.txt",
-      "sha256": "791318cb22d67512be914d966c470c61e00f6b35c9244cc8c44f5fc5dcdee095"
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/941e1714094f854c5c6ac53d194a1497035f3fc5/payload/duplicate-review-2.0.12.part04.txt",
+      "sha256": "eb941bef4efad390047bfdd5d91ae993f948f595b0a878f94ea27313ff85d3ce"
     },
     {
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/c0f714cb8a6340163903e48d2b9b851a93ee1e09/payload/duplicate-review-2.0.11.part05.txt",
-      "sha256": "d408c6d106037306bf673808d3bf67e0fa9aa5b4365c57ac09791a8bde680cbd"
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/941e1714094f854c5c6ac53d194a1497035f3fc5/payload/duplicate-review-2.0.12.part05.txt",
+      "sha256": "ce9373878b64e53ded791b5843412f084c98fc6d9ee764087deaf883d0aebf49"
     },
     {
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/c0f714cb8a6340163903e48d2b9b851a93ee1e09/payload/duplicate-review-2.0.11.part06.txt",
-      "sha256": "f6874eb4c0c7175a2f5802313e2e0379428efcb87a04190620546bdabeabf6a0"
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/941e1714094f854c5c6ac53d194a1497035f3fc5/payload/duplicate-review-2.0.12.part06.txt",
+      "sha256": "73eb4d3a2979584ad70dfe7d71d6d168f6de034ab90eb99553dfe54c552fbeec"
     }
   ]
 }
