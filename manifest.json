@@ -3,7 +3,7 @@
   "launcher_version": "1.0.0",
   "launcher_url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/companion.pyw",
   "launcher_sha256": "39538ee93f2469bf761291cbdaabf678d8e0234e7de19a285954a85c622ee998",
-  "userscript_payload_version": "2.8.93",
+  "userscript_payload_version": "2.8.98",
   "userscript_parts": [
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.68.transport-start.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.5.reset-state.txt",
@@ -36,6 +36,7 @@
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.93.ranking-library.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.93.profiles.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.93.viewer-layout.txt",
+    "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.9.7.no-autofill.txt",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/userscript-2.8.3.transport-end.txt"
   ],
   "runtime_version": "2.7.63",
@@ -80,8 +81,8 @@
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.63.part36.b64",
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.63.part37.b64"
   ],
-  "userscript_sha256": "d57c4b092b214f48e67e0b89387a9ba266d9fc9e99327a9a0ad7bfc483ab5fb1",
-  "standalone_url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/standalone-2.9.6.html",
-  "standalone_sha256": "b7e83178101945a8777c9851c41873e3af0e819e7f43044e3cd1fb1cd71e7f1d",
-  "standalone_version": "2.9.6"
+  "userscript_sha256": "91b22ac9e71dd192d54415907a9660dbac94010ad0a90c4bfe337669da15472f",
+  "standalone_url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/standalone-2.9.7.html",
+  "standalone_sha256": "89c0ba4f4531a07441a209be76fe03b4bae3e7d68138d1b159f58237315f64fc",
+  "standalone_version": "2.9.7"
 }
