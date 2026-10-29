@@ -51,6 +51,11 @@ def make_server(engine, port=0, token=None):
     bulk_html = bulk_html.replace('</body>',update_tag+'</body>')
     organizer_html = organizer_html.replace('__UPDATER__',update_js)
 
+    autofill_js=(Path(__file__).parent/'no-autofill.js').read_text(encoding='utf-8')
+    def no_autofill(page):
+        return page.replace('<html ', '<html data-local-duplicate-review="1" ',1).replace('</body>', '<script nonce="__TOKEN__">'+autofill_js+'</script></body>')
+    html=no_autofill(html);bulk_html=no_autofill(bulk_html);organizer_html=no_autofill(organizer_html)
+
     image_slots = threading.Semaphore(2)
 
     class Handler(BaseHTTPRequestHandler):
@@ -133,6 +138,8 @@ def make_server(engine, port=0, token=None):
                     return self.send(200, engine.groups(int(params['group'][0]) if 'group' in params else None, params.get('sort',['most'])[0]))
                 if url.path == '/api/verified/preview':
                     return self.send(200, engine.verified_preview())
+                if url.path == '/api/ui-preferences':
+                    return self.send(200, engine.ui_preferences())
                 if url.path == '/api/config':
                     return self.send(200, engine.config())
                 if url.path == '/api/library':
@@ -166,11 +173,13 @@ def make_server(engine, port=0, token=None):
                 path = urlparse(self.path).path
                 if updater.restart:
                     raise ValueError('The app is restarting to apply an update.')
-                if organizer.job['running'] and not (path.startswith('/api/organizer/') or path in ('/api/quit','/api/history/open','/api/history/reveal','/api/update/check','/api/update/install')):
+                if organizer.job['running'] and not (path.startswith('/api/organizer/') or path in ('/api/ui-preferences','/api/quit','/api/history/open','/api/history/reveal','/api/update/check','/api/update/install')):
                     raise ValueError('Pause visual analysis before changing the source inventory or restarting.')
-                if bulk.current and bulk.current['running'] and path not in ('/api/bulk/cancel','/api/pick','/api/quit'):
+                if bulk.current and bulk.current['running'] and path not in ('/api/ui-preferences','/api/bulk/cancel','/api/pick','/api/quit'):
                     raise ValueError('Stop the bulk evaluation before changing files or starting another operation.')
-                if path == '/api/update/check':
+                if path == '/api/ui-preferences':
+                    result=engine.ui_preferences(body)
+                elif path == '/api/update/check':
                     result=updater.start()
                 elif path == '/api/update/install':
                     result=updater.start(install=True)

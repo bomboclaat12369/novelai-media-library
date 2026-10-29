@@ -149,6 +149,8 @@ class Organizer:
     def summary(self):
         with self.lock,self.bulk.lock:
             self.bind();state=self.state();state['selection']=[i for i in state.get('selection',[]) if i in self.catalog and i not in self.discarded];sets=self.sets();assigned={i for g in sets.values() for i in g['members']}
+            reference=state.get('suggestion_reference')
+            if reference not in self.catalog or reference in self.discarded or self.catalog[reference].get('quarantine_only'):state['suggestion_reference']='';reference=None
             with self.db() as db:statuses=dict(db.execute('SELECT id,status FROM posts WHERE scope=?',(self.scope,)))
             posts=[]
             for p in self.posts.values():
@@ -157,7 +159,7 @@ class Organizer:
             posts.sort(key=lambda p:(p['status']!='pending',p['remaining']==0,natural(p['label'])))
             total=sum(not r.get('quarantine_only') and i not in self.discarded for i,r in self.catalog.items())
             return {'job':(self.bulk.current or {}).get('id'),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
-                'category_catalog':self.category_catalog(),'state':state,'images':total,'unresolved':sum(bool(r.get('quarantine_only')) for i,r in self.catalog.items() if i not in self.discarded),'indexed':sum(i in self.vector_by_id for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded),
+                'reference_image':self.image(reference)|{'analyzed':reference in self.vector_by_id} if reference else None,'category_catalog':self.category_catalog(),'state':state,'images':total,'unresolved':sum(bool(r.get('quarantine_only')) for i,r in self.catalog.items() if i not in self.discarded),'indexed':sum(i in self.vector_by_id for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded),
                 'unsorted_count':len(self.unsorted_ids()),'discarded_count':sum(not self.catalog[i].get('quarantine_only') for i in self.discarded),
                 'progress':dict(self.job),'inventory_complete':bool((self.bulk.current or {}).get('inventory_complete') or (self.bulk.current or {}).get('complete'))}
 
@@ -247,10 +249,13 @@ class Organizer:
             self.bind();selection=self.valid_ids(body.get('ids',[]));allsets=self.sets()
             members=allsets.get(str(body.get('target','')),{}).get('members',[])
             seeds=list(dict.fromkeys([i for i in members if i not in selection]+selection))
-            context=self.context_key(body,seeds)
-            if not seeds:return {'images':[],'posts':[],'sets':[],'total':0}
+            reference=body.get('suggestion_reference') or ''
+            if reference:self.valid_ids([reference])
+            evidence_ids=[reference] if reference else seeds
+            context=self.context_key(body,evidence_ids)
+            if not evidence_ids:return {'images':[],'posts':[],'sets':[],'total':0}
             evidence=self.state().get('post_evidence',{})
-            visual=self.scores(seeds);selected=set(seeds);sources={s for i in seeds for s in self.catalog[i]['sources'] if s in self.posts and not self.is_mixed(s,evidence)}
+            visual=self.scores(evidence_ids);selected=set(seeds)|set(evidence_ids);sources={s for i in evidence_ids for s in self.catalog[i]['sources'] if s in self.posts and not self.is_mixed(s,evidence)}
             with self.db() as db:rejected={r[0] for r in db.execute('SELECT id FROM rejected WHERE scope=? AND context=?',(self.scope,context))}
             ranked=[]
             for ident,item in self.catalog.items():
@@ -268,9 +273,9 @@ class Organizer:
                 v=max((visual.get(i,0) for i in members),default=0)
                 if overlap or shared or v>=.60:sets.append({'id':g['id'],'name':g['name'],'count':len(members),'overlap':overlap,'score':overlap*10+bool(shared)+v,'library':bool(g.get('library_id'))})
             sets.sort(key=lambda g:(-g['score'],g['name']))
-            posts=[{'id':s,'label':self.posts[s]['label'],'count':len(self.posts[s]['ids']),'shared':sum(s in self.catalog[i]['sources'] for i in seeds),'anchor_id':next(i for i in reversed(seeds) if s in self.catalog[i]['sources'])} for s in sources]
+            posts=[{'id':s,'label':self.posts[s]['label'],'count':len(self.posts[s]['ids']),'shared':sum(s in self.catalog[i]['sources'] for i in evidence_ids),'anchor_id':next(i for i in reversed(evidence_ids) if s in self.catalog[i]['sources'])} for s in sources]
             posts.sort(key=lambda p:(-p['shared'],p['count'],p['label']))
-            return {'context':context,'images':[self.image(i)|{'reason':reason,'sets':labels.get(i,[])} for _,i,reason in ranked[offset:offset+30]],'total':len(ranked),'offset':offset,'sets':sets[:12],'posts':posts}
+            return {'reference':self.image(reference)|{'analyzed':reference in self.vector_by_id} if reference else None,'context':context,'images':[self.image(i)|{'reason':reason,'sets':labels.get(i,[])} for _,i,reason in ranked[offset:offset+30]],'total':len(ranked),'offset':offset,'sets':sets[:12],'posts':posts}
 
     def valid_ids(self,ids):
         if not isinstance(ids,list) or len(ids)>15000:raise ValueError('Invalid selection.')
@@ -280,6 +285,7 @@ class Organizer:
 
     def context_key(self,body,ids):
         target=body.get('target')
+        if body.get('suggestion_reference'):return 'reference:'+hashlib.sha256(json.dumps([target,body['suggestion_reference']]).encode()).hexdigest()
         return str(target) if target else hashlib.sha256('\n'.join(sorted(ids)).encode()).hexdigest()
 
     @staticmethod
@@ -334,6 +340,10 @@ class Organizer:
             if body.get('job')!=self.bound[0]:raise ValueError('Inventory changed. Reopen the organizer.')
             state=self.state()
             if action=='draft':
+                if 'suggestion_reference' in body:
+                    reference=body['suggestion_reference']
+                    if reference:self.valid_ids([reference])
+                    state['suggestion_reference']=reference or ''
                 state['selection']=self.valid_ids(body.get('ids',[]));state['target']=str(body.get('target',''))
                 if 'new_colors' in body:state['new_colors']=self.colors(body['new_colors'])
                 if 'new_categories' in body:state['new_categories']=self.categories(body['new_categories'],state.get('new_categories',[]))

@@ -25,7 +25,7 @@ import crop_match
 import same_photo
 from search_index import SearchIndexes
 
-VERSION = '2.0.13'
+VERSION = '2.0.14'
 ALGORITHM = 1
 QUARANTINE = '_Duplicate_Review_Quarantine'
 EXTENSIONS = {'.jpg', '.jpeg', '.jpe', '.jfif', '.png', '.webp', '.bmp', '.tif', '.tiff', '.avif', '.gif'}
@@ -273,6 +273,24 @@ class Engine:
         with self.db() as db:
             row = db.execute("SELECT value FROM settings WHERE key='config'").fetchone()
         return json.loads(row[0]) if row else {'incoming': [], 'reference': [], 'mode': 'balanced'}
+
+    def ui_preferences(self, value=None):
+        # Editing the form must never change the active scan's configuration.
+        with self.lock, self.db() as db:
+            row=db.execute("SELECT value FROM settings WHERE key='ui_preferences'").fetchone()
+            previous=json.loads(row[0]) if row else {}
+            if value is None:return previous
+            if not isinstance(value,dict):raise ValueError('Invalid form preferences.')
+            fields={'incoming_text':16000,'reference_text':16000,'history_roots':16000,
+                    'library_character':256,'library_id':512,'library_label':300}
+            stamp=value.get('edited_at')
+            if type(stamp) is not int or not 0 < stamp < 10**15:raise ValueError('Invalid preference timestamp.')
+            if any(not isinstance(value.get(k),str) or len(value[k])>limit for k,limit in fields.items()):
+                raise ValueError('Invalid form preferences.')
+            if stamp <= previous.get('edited_at',0):return previous
+            saved={k:value[k] for k in fields};saved['edited_at']=stamp
+            db.execute("INSERT OR REPLACE INTO settings VALUES ('ui_preferences',?)",(json.dumps(saved),))
+            return saved
 
     def set_status(self, **kwargs):
         with self.lock:

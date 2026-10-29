@@ -31,8 +31,9 @@
     "payload/userscript-2.8.93.ranking-library.txt",
     "payload/userscript-2.8.93.profiles.txt",
     "payload/userscript-2.8.93.viewer-layout.txt",
+    "payload/userscript-2.9.7.no-autofill.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 148,
-  "version": "2.8.93"
+  "release_build": 149,
+  "version": "2.8.98"
 }

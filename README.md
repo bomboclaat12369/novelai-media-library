@@ -1,5 +1,13 @@
 # NovelAI Media Library
 
+## Saved folder choices and single-image suggestions (Duplicate Review 2.0.14)
+
+Incoming folders, reference folders and the selected media-library character are saved as you edit, including empty choices. Refreshing, leaving the page or restarting the program restores the latest choices independently of the last scan. A disconnected library retains the chosen character until it reconnects.
+
+Use **◎** on an image card or **Use for suggestions** in the viewer to pin one image as the organizer reference. Its thumbnail stays visible above suggestions. Only that image guides visual matches and post connections; your full selection and destination set remain available for saving. **Clear reference** restores normal suggestions. The pin is saved across reloads. Unanalyzed references show a notice and use post connections until you explicitly analyze missing images.
+
+Browser autofill is disabled on app fields, including dynamically opened dialogs, in Duplicate Review and Media Library (standalone 2.9.7 / NovelAI overlay 2.8.98). NovelAI's own fields are unaffected. Browsers retain final control of their saved-info popups. No scan or runtime update is needed; existing title-case saving and connected-post image navigation are included.
+
 Local image/video library overlay for `novelai.net`, with a Tampermonkey front end and a local Python companion.
 
 ## Connected-image navigation and saved title case (Duplicate Review 2.0.13 / runtime 2.7.63)

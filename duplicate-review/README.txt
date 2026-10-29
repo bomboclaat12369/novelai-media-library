@@ -1,4 +1,14 @@
-LOCAL DUPLICATE REVIEW 2.0.13
+LOCAL DUPLICATE REVIEW 2.0.14
+
+NEW IN 2.0.14: SAVED FOLDER CHOICES AND SINGLE-IMAGE SUGGESTIONS
+- Incoming/reference folders and media-library choice save as you edit, even
+  when cleared. Refresh, navigation and restart keep the latest choices without
+  changing the settings of the last scan.
+- Use the circle target button on a card, or Use for suggestions in the viewer,
+  to pin one image. Its thumbnail appears above suggestions. Clear reference
+  restores normal matching. Your full save selection remains selected.
+- App text fields request no browser autofill, including dynamic dialogs.
+- No rescan. Existing progress, title case and connected-image navigation remain.
 
 NEW IN 2.0.13: JUMP TO CONNECTED IMAGES AND AUTOMATIC TITLE CASE
 - Open on a Connected original post jumps to the page containing the most

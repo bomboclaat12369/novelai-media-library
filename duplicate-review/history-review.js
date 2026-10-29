@@ -138,7 +138,7 @@ async function switchReviewQueue(){
  }
 }
 $('reviewQueue').onchange=()=>task(switchReviewQueue);
-$('historyPick').onclick=()=>task(async()=>{const r=await api('/api/pick',{});if(r.path)$('historyRoots').value=[...new Set([...paths('historyRoots'),r.path])].join('\n')});
+$('historyPick').onclick=()=>task(async()=>{const r=await api('/api/pick',{});if(r.path){$('historyRoots').value=[...new Set([...paths('historyRoots'),r.path])].join('\n');saveFormPreferences()}});
 $('historyRefresh').onclick=()=>task(async()=>{
  const config={...historyConfig,roots:paths('historyRoots'),limit:0,duplicate_mode:$('mode').value,workers:Number($('workers').value)};
  // Retain the saved collection's companion choice; newly connected choices are explicit.
