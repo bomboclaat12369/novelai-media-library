@@ -129,7 +129,7 @@ class Organizer:
     def sets(self,include_discarded=False):
         current=self.bulk.current or {};result={}
         for sid,g in current.get('library_sets',{}).items():
-            result['library:'+sid]={'id':'library:'+sid,'name':g['name'],'colors':g.get('colors') or [],'categories':g.get('categories') or [],'members':[], 'library_id':sid,'saved':False}
+            result['library:'+sid]={'id':'library:'+sid,'name':g['name'],'colors':g.get('colors') or [],'categories':g.get('categories') or [],'favorite':bool(g.get('favorite')),'members':[], 'library_id':sid,'saved':False}
         for ident,item in self.catalog.items():
             if item.get('quarantine_only'):continue
             for sid in item.get('existing_sets',[]):
@@ -139,6 +139,7 @@ class Organizer:
                 g=json.loads(raw)
                 g.setdefault('colors',result.get(sid,{}).get('colors',[]))
                 g.setdefault('categories',result.get(sid,{}).get('categories',[]))
+                g.setdefault('favorite',bool(result.get(sid,{}).get('favorite')))
                 # Existing library members remain visible alongside locally reviewed additions.
                 g['members']=list(dict.fromkeys(result.get(sid,{}).get('members',[])+g['members']))
                 g['saved']=True;result[sid]=g
@@ -160,7 +161,7 @@ class Organizer:
             total=sum(not r.get('quarantine_only') and i not in self.discarded for i,r in self.catalog.items())
             return {'job':(self.bulk.current or {}).get('id'),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
                 'reference_image':self.image(reference)|{'analyzed':reference in self.vector_by_id} if reference else None,'category_catalog':self.category_catalog(),'state':state,'images':total,'unresolved':sum(bool(r.get('quarantine_only')) for i,r in self.catalog.items() if i not in self.discarded),'indexed':sum(i in self.vector_by_id for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded),
-                'unsorted_count':len(self.unsorted_ids()),'discarded_count':sum(not self.catalog[i].get('quarantine_only') for i in self.discarded),
+                'unassigned_count':sum(not r.get('quarantine_only') and i not in self.discarded and i not in assigned for i,r in self.catalog.items()),'unsorted_count':len(self.unsorted_ids()),'discarded_count':sum(not self.catalog[i].get('quarantine_only') for i in self.discarded),
                 'progress':dict(self.job),'inventory_complete':bool((self.bulk.current or {}).get('inventory_complete') or (self.bulk.current or {}).get('complete'))}
 
     def scores(self,seeds):
@@ -295,6 +296,11 @@ class Organizer:
             raise ValueError('Invalid Set colors (up to 50 descriptors, 150 characters each).')
         return list(dict.fromkeys(title_case_label(v) for v in value if v.strip()))
 
+    @staticmethod
+    def favorite(value):
+        if not isinstance(value,bool):raise ValueError('Choose a valid Set favorite setting.')
+        return value
+
     def category_catalog(self):
         with self.db() as db:row=db.execute('SELECT data FROM category_catalog WHERE scope=?',(self.scope,)).fetchone()
         return json.loads(row[0]) if row else {'character_id':(self.bulk.current or {}).get('config',{}).get('character_id',''),'categories':[]}
@@ -345,6 +351,7 @@ class Organizer:
                     if reference:self.valid_ids([reference])
                     state['suggestion_reference']=reference or ''
                 state['selection']=self.valid_ids(body.get('ids',[]));state['target']=str(body.get('target',''))
+                if 'new_favorite' in body:state['new_favorite']=self.favorite(body['new_favorite'])
                 if 'new_colors' in body:state['new_colors']=self.colors(body['new_colors'])
                 if 'new_categories' in body:state['new_categories']=self.categories(body['new_categories'],state.get('new_categories',[]))
                 with self.db() as db:self.put_state(db,state)
@@ -378,10 +385,11 @@ class Organizer:
                     colors=self.colors(body.get('colors',(previous or {}).get('colors',state.get('new_colors',[]))))
                     categories=self.categories(body.get('categories',(previous or {}).get('categories',state.get('new_categories',[]))),(previous or {}).get('categories',[]))
                     stamp=time.time()
-                    group=dict(previous or {},id=ident,name=name,colors=colors,categories=categories,members=members,updated=stamp,library_id=(previous or {}).get('library_id'))
+                    favorite=self.favorite(body.get('favorite',(previous or {}).get('favorite',state.get('new_favorite',False))))
+                    group=dict(previous or {},id=ident,name=name,colors=colors,categories=categories,favorite=favorite,members=members,updated=stamp,library_id=(previous or {}).get('library_id'))
                     if previous is None:group['created']=stamp
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,ident,json.dumps(group)))
-                    state.update(selection=[],target='',new_colors=[],new_categories=[])
+                    state.update(selection=[],target='',new_colors=[],new_categories=[],new_favorite=False)
                 elif action in ('set_colors','set_details'):
                     target=str(body.get('target',''));group=self.sets(include_discarded=True).get(target)
                     if not group:raise ValueError('Choose an available set.')
@@ -389,7 +397,8 @@ class Organizer:
                     categories=self.categories(body.get('categories',group.get('categories',[])),group.get('categories',[]))
                     old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
                     state['undo']={'action':'set','id':target,'previous':old[0] if old else None,'selection':state.get('selection',[])}
-                    group.update(colors=colors,categories=categories,updated=time.time())
+                    favorite=self.favorite(body.get('favorite',group.get('favorite',False)))
+                    group.update(colors=colors,categories=categories,favorite=favorite,updated=time.time())
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)))
                 elif action=='remove':
                     target=str(body.get('target',''));old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()

@@ -200,7 +200,7 @@ class Workbench:
             memberships={}
             for group in library.get('sets',[]):
                 if group.get('character_id')!=config['character_id'] or group.get('kind','set')!='set':continue
-                self.current['library_sets'][group['id']]={k:group.get(k) for k in ('id','name','categories','colors')}
+                self.current['library_sets'][group['id']]={k:group.get(k) for k in ('id','name','categories','colors','favorite')}
                 for mid in group.get('media_ids',[]):memberships.setdefault(mid,[]).append(group['id'])
             for row in catalog['files']:
                 key=str(Path(row['path']).resolve())

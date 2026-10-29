@@ -21,7 +21,7 @@ for at,start in enumerate(range(0,len(encoded),60000),1):
     parts.append({'path':path.relative_to(root).as_posix(),'sha256':hashlib.sha256(content).hexdigest()})
 if args.commit:
     if not re.fullmatch('[0-9a-f]{40}',args.commit):raise ValueError('Use the full payload commit SHA.')
-    manifest={'schema':1,'version':version,'sha256':hashlib.sha256(payload).hexdigest(),'notes':'Pin one image to guide organizer suggestions while keeping your full save selection. Current incoming folders, reference folders and media-library character survive refresh and restart independently of the last scan. Autofill suppression covers app text fields. Existing progress, title case, connected-image navigation and the normal 12-reference cap are preserved; no rescan.',
+    manifest={'schema':1,'version':version,'sha256':hashlib.sha256(payload).hexdigest(),'notes':'Organizer: toggle red highlighting for images without a set; drag the right sidebar edge to resize suggestions; favorite sets from the details menu and filter Favorites; click the active reference again to clear it. Header shows unassigned / total images, including Unsorted and excluding discarded or unresolved quarantine copies. Preferences, favorites and existing review progress are preserved; no rescan.',
               'parts':[{'url':'https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/'+args.commit+'/'+r['path'],'sha256':r['sha256']} for r in parts]}
     (root/'release-duplicate-review.json').write_text(json.dumps(manifest,indent=2)+'\n')
 print(json.dumps({'version':version,'archive':str(archive),'bytes':len(payload),'parts':len(parts)}))

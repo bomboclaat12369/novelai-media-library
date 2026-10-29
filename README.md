@@ -1,5 +1,13 @@
 # NovelAI Media Library
 
+## Organizer visibility and favorites (Duplicate Review 2.0.15)
+
+**Highlight unassigned** toggles a red border and lower banner on images without a set, in both the main grid and suggestions. Selected images retain their gold border. The header shows **unassigned / total images** across the collection, including Unsorted and excluding discarded images and unresolved quarantine copies. Counts and highlights update after saving, removing, discarding and undoing.
+
+Drag the left edge of **Find the rest** to resize the right sidebar and its thumbnails. Focus the divider and use Left/Right arrows to adjust it, or double-click / press Home to reset. The width and highlight toggle are remembered across page reloads.
+
+The **⋯ → Set details** dialog now includes **Favorite set**, for existing sets and new drafts. Save/Apply keeps the choice with the draft; a star appears in set lists and the destination picker. Choose **Favorites** in the Sets filter to find them. Favorites survive restarting and are included in exported drafts; organizer changes remain local until library import. The active image reference is also a toggle now: click its card control or viewer button again to clear it without clearing the save selection.
+
 ## Saved folder choices and single-image suggestions (Duplicate Review 2.0.14)
 
 Incoming folders, reference folders and the selected media-library character are saved as you edit, including empty choices. Refreshing, leaving the page or restarting the program restores the latest choices independently of the last scan. A disconnected library retains the chosen character until it reconnects.

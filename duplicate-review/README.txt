@@ -1,4 +1,19 @@
-LOCAL DUPLICATE REVIEW 2.0.14
+LOCAL DUPLICATE REVIEW 2.0.15
+
+NEW IN 2.0.15: ORGANIZER VISIBILITY AND FAVORITES
+- Highlight unassigned toggles a red border/banner for images without a set.
+  Selected images keep their gold border. Works in the grid and suggestions.
+- The header shows unassigned / total images across the collection, including
+  Unsorted and excluding discarded images and unresolved quarantine copies.
+- Drag the left edge of Find the rest to resize the sidebar and thumbnails.
+  Arrow keys adjust the focused divider; double-click or Home resets it.
+  The sidebar width and highlight toggle are remembered across reloads.
+- Set details (...) includes Favorite set. Save/Apply preserves the choice for
+  existing sets or new drafts. Stars appear in the list and destination picker;
+  the Favorites filter shows only starred sets. Favorites are included in draft
+  exports and stay local, like colors/categories, until library import.
+- Click the active suggestion-reference control again to clear it. The images
+  selected for saving remain selected. No rescan or companion update needed.
 
 NEW IN 2.0.14: SAVED FOLDER CHOICES AND SINGLE-IMAGE SUGGESTIONS
 - Incoming/reference folders and media-library choice save as you edit, even
