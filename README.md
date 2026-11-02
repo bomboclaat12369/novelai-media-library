@@ -1053,3 +1053,18 @@ ratings and starts a fresh round/undo history.
 
 Update/restart the companion for 2.7.49, then refresh and apply the library UI update
 for 2.8.86. The standalone and NovelAI interfaces share the same saved rankings.
+
+### Standalone 2.9.8 / Runtime 2.7.64 — approved card editions
+
+Twelve finished card designs are available in the standalone Media Library.
+Open a card, flip it over, expand **Card customization**, choose **Card edition**,
+and select **Save card appearance**. #1 and Former #1 use the existing qualified
+leader history automatically; the other ten designs are manual choices. Captain
+is a separate corner crest with visibility and left/right controls. **Base card**
+opts out of edition artwork. Unfinished designs are not included.
+
+The original artwork, fonts and per-card coordinates are embedded for offline
+use. Card photos fill their opening by default; **Position card** also offers
+**Fit whole photo**. Appearance changes preserve the original images and rankings.
+Update the companion runtime to 2.7.64 for saved edition settings, then load
+standalone 2.9.8. The NovelAI overlay remains 2.8.98.

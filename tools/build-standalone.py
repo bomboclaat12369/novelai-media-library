@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import json
+import mimetypes
 import sys
 from pathlib import Path
 
@@ -11,6 +12,15 @@ payload = ''.join(Path(p).read_text() for p in config['parts'])
 bootstrap = Path('standalone-src/bootstrap.js').read_text()
 artwork={key:'data:image/webp;base64,'+base64.b64encode(Path(path).read_bytes()).decode('ascii') for key,path in config.get('title_artwork',{}).items()}
 asset_code='const naiCardTitleAssets=Object.freeze('+json.dumps(artwork,separators=(',',':'))+');\n'
+if config.get('edition_catalog'):
+    catalog=json.loads(Path(config['edition_catalog']).read_text())
+    def embedded(path):
+        mime=mimetypes.guess_type(path)[0] or 'application/octet-stream'
+        return 'data:'+mime+';base64,'+base64.b64encode(Path(path).read_bytes()).decode('ascii')
+    for edition in catalog['editions'].values():edition['art']=embedded(edition['art'])
+    for kind in ('ranks','fonts'):
+        catalog[kind]={key:embedded(path) for key,path in catalog[kind].items()}
+    asset_code+='const naiCardEditionAssets=Object.freeze('+json.dumps(catalog,separators=(',',':'))+');\n'
 script = (asset_code + bootstrap + '\n' + payload).replace('</script', '<\\/script')
 html = f'''<!doctype html>
 <html lang="en" data-nai-standalone="1" data-nai-media-payload-version="{version}">

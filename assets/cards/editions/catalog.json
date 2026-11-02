@@ -1,0 +1,737 @@
+{
+  "version": 1,
+  "approved_editions": [
+    "number-one",
+    "former-one",
+    "cosplay",
+    "pregnant-orchid",
+    "hall-of-fame",
+    "valentines",
+    "signature",
+    "birthday",
+    "halloween",
+    "hidden-gem",
+    "whore-stage",
+    "christmas"
+  ],
+  "editions": {
+    "number-one": {
+      "name": "#1",
+      "automatic": true,
+      "art": "assets/cards/editions/number-one.webp",
+      "layout": {
+        "rating": [
+          20.5,
+          15.8,
+          21,
+          4.4
+        ],
+        "name": [
+          50,
+          83.6,
+          68,
+          6
+        ],
+        "placing": [
+          50,
+          90.8,
+          25,
+          3.4
+        ],
+        "nameSize": 64,
+        "placingSize": 44
+      },
+      "rankFits": {
+        "Bronze": {
+          "left": 84.6,
+          "top": 17.301296928327645,
+          "width": 11.341638225255972,
+          "height": 7.93914675767918
+        },
+        "Diamond": {
+          "left": 84.6,
+          "top": 17.301296928327645,
+          "width": 11.341638225255972,
+          "height": 7.93914675767918
+        },
+        "Grandmaster": {
+          "left": 84.6,
+          "top": 17.298131399317406,
+          "width": 11.341638225255972,
+          "height": 7.93914675767918
+        }
+      },
+      "style": {
+        "--window-left": "11.7%",
+        "--window-right": "88.3%",
+        "--window-top": "16.4%",
+        "--window-bottom": "78.8%",
+        "--metal-light": "#fff5d9",
+        "--metal-mid": "#e3bd70",
+        "--metal-low": "#82531d",
+        "--mat": "#0b1424"
+      }
+    },
+    "former-one": {
+      "name": "Former #1",
+      "automatic": true,
+      "art": "assets/cards/editions/former-one.webp",
+      "layout": {
+        "rating": [
+          18.8,
+          13.3,
+          18.8,
+          4.4
+        ],
+        "name": [
+          50,
+          82.6,
+          68,
+          6
+        ],
+        "placing": [
+          50,
+          89.2,
+          24,
+          3.3
+        ],
+        "nameSize": 64,
+        "placingSize": 44
+      },
+      "rankFits": {
+        "Bronze": {
+          "left": 82.8,
+          "top": 13.608941979522184,
+          "width": 12.197610921501706,
+          "height": 8.538327645051194
+        },
+        "Diamond": {
+          "left": 82.8,
+          "top": 13.608941979522184,
+          "width": 12.197610921501706,
+          "height": 8.538327645051194
+        },
+        "Grandmaster": {
+          "left": 82.8,
+          "top": 13.605537542662116,
+          "width": 12.197610921501706,
+          "height": 8.538327645051194
+        }
+      },
+      "style": {
+        "--window-left": "11.7%",
+        "--window-right": "88.3%",
+        "--window-top": "13.5%",
+        "--window-bottom": "78.5%",
+        "--metal-light": "#fff8e9",
+        "--metal-mid": "#c8bca9",
+        "--metal-low": "#706754",
+        "--mat": "#0d192b"
+      }
+    },
+    "cosplay": {
+      "name": "Cosplay",
+      "automatic": false,
+      "art": "assets/cards/editions/cosplay.webp",
+      "layout": {
+        "rating": [
+          21.5,
+          10.23,
+          16,
+          4.2
+        ],
+        "name": [
+          49.905,
+          83.633,
+          70,
+          6
+        ],
+        "placing": [
+          49.952,
+          90.833,
+          23,
+          3.5
+        ],
+        "nameSize": 64,
+        "placingSize": 44
+      },
+      "rankFits": {
+        "Bronze": {
+          "left": 79.647,
+          "top": 10.55587372013652,
+          "width": 9.950682593856657,
+          "height": 6.96547781569966
+        },
+        "Diamond": {
+          "left": 79.647,
+          "top": 10.55587372013652,
+          "width": 9.950682593856657,
+          "height": 6.96547781569966
+        },
+        "Grandmaster": {
+          "left": 79.647,
+          "top": 10.553096416382253,
+          "width": 9.950682593856657,
+          "height": 6.96547781569966
+        }
+      },
+      "style": {
+        "--window-left": "11.4%",
+        "--window-right": "88.6%",
+        "--window-top": "12.7%",
+        "--window-bottom": "79.2%",
+        "--metal-light": "#faf7ff",
+        "--metal-mid": "#c5c8e8",
+        "--metal-low": "#746a8f",
+        "--mat": "#141324"
+      }
+    },
+    "pregnant-orchid": {
+      "name": "Pregnant",
+      "automatic": false,
+      "art": "assets/cards/editions/pregnant-orchid.webp",
+      "layout": {
+        "rating": [
+          20.162,
+          12.167,
+          19,
+          7.5
+        ],
+        "name": [
+          49.952,
+          87.9,
+          68,
+          5.7
+        ],
+        "placing": [
+          49.952,
+          95.067,
+          19,
+          3
+        ],
+        "nameSize": 64,
+        "placingSize": 44,
+        "ratingDark": true
+      },
+      "rankFits": {
+        "Bronze": {
+          "left": 79.695,
+          "top": 12.414675767918089,
+          "width": 12.839590443686006,
+          "height": 8.987713310580205
+        },
+        "Diamond": {
+          "left": 79.695,
+          "top": 12.414675767918089,
+          "width": 12.839590443686006,
+          "height": 8.987713310580205
+        },
+        "Grandmaster": {
+          "left": 79.695,
+          "top": 12.41109215017065,
+          "width": 12.839590443686006,
+          "height": 8.987713310580205
+        }
+      },
+      "style": {
+        "--window-left": "11.8%",
+        "--window-right": "88.3%",
+        "--window-top": "18%",
+        "--window-bottom": "83.2%",
+        "--metal-light": "#fff3f6",
+        "--metal-mid": "#ddb8cc",
+        "--metal-low": "#8c5b79",
+        "--mat": "#352133"
+      }
+    },
+    "hall-of-fame": {
+      "name": "Hall of Fame",
+      "automatic": false,
+      "art": "assets/cards/editions/hall-of-fame.webp",
+      "layout": {
+        "rating": [
+          18.494,
+          11.567,
+          11,
+          4.4
+        ],
+        "name": [
+          50,
+          83.367,
+          68,
+          6
+        ],
+        "placing": [
+          50,
+          90.233,
+          25,
+          3.1
+        ],
+        "nameSize": 64,
+        "placingSize": 44
+      },
+      "rankFits": {
+        "Bronze": {
+          "left": 81.602,
+          "top": 11.75874061433447,
+          "width": 10.271672354948805,
+          "height": 7.190170648464163
+        },
+        "Diamond": {
+          "left": 81.602,
+          "top": 11.75874061433447,
+          "width": 10.271672354948805,
+          "height": 7.190170648464163
+        },
+        "Grandmaster": {
+          "left": 81.602,
+          "top": 11.755873720136519,
+          "width": 10.271672354948805,
+          "height": 7.190170648464163
+        }
+      },
+      "style": {
+        "--window-left": "11.5%",
+        "--window-right": "88.5%",
+        "--window-top": "13.3%",
+        "--window-bottom": "78.6%",
+        "--metal-light": "#fff4d3",
+        "--metal-mid": "#d5b16c",
+        "--metal-low": "#806033",
+        "--mat": "#10100f"
+      }
+    },
+    "valentines": {
+      "name": "Valentine\u2019s",
+      "automatic": false,
+      "art": "assets/cards/editions/valentines.webp",
+      "layout": {
+        "rating": [
+          25.453,
+          10.907,
+          27,
+          4.5
+        ],
+        "name": [
+          49.952,
+          86.258,
+          64,
+          5.5
+        ],
+        "placing": [
+          50,
+          92.328,
+          23,
+          3
+        ],
+        "nameSize": 64,
+        "placingSize": 44
+      },
+      "rankFits": {
+        "Bronze": {
+          "left": 81.077,
+          "top": 10.170474402730376,
+          "width": 10.913651877133105,
+          "height": 7.6395563139931735
+        },
+        "Diamond": {
+          "left": 81.077,
+          "top": 10.170474402730376,
+          "width": 10.913651877133105,
+          "height": 7.6395563139931735
+        },
+        "Grandmaster": {
+          "left": 81.077,
+          "top": 10.167428327645052,
+          "width": 10.913651877133105,
+          "height": 7.6395563139931735
+        }
+      },
+      "style": {
+        "--window-left": "11.3%",
+        "--window-right": "89.1%",
+        "--window-top": "14.8%",
+        "--window-bottom": "82.1%",
+        "--metal-light": "#fff1df",
+        "--metal-mid": "#e6b8a0",
+        "--metal-low": "#934a38",
+        "--mat": "#260b13"
+      }
+    },
+    "signature": {
+      "name": "Signature",
+      "automatic": false,
+      "art": "assets/cards/editions/signature.webp",
+      "layout": {
+        "rating": [
+          25.333,
+          8.027,
+          25,
+          4.7
+        ],
+        "rank": [
+          81.274,
+          8.194,
+          8.5
+        ],
+        "name": [
+          50,
+          88.729,
+          70,
+          5.2
+        ],
+        "placing": [
+          50.048,
+          95.117,
+          14.5,
+          2.8
+        ],
+        "nameSize": 64,
+        "placingSize": 44
+      },
+      "rankFits": {
+        "Bronze": {
+          "left": 81.274,
+          "top": 8.294341296928328,
+          "width": 11.234641638225256,
+          "height": 7.864249146757679
+        },
+        "Diamond": {
+          "left": 81.274,
+          "top": 8.294341296928328,
+          "width": 11.234641638225256,
+          "height": 7.864249146757679
+        },
+        "Grandmaster": {
+          "left": 81.274,
+          "top": 8.291205631399318,
+          "width": 11.234641638225256,
+          "height": 7.864249146757679
+        }
+      },
+      "style": {
+        "--window-left": "10%",
+        "--window-right": "90%",
+        "--window-top": "12.5%",
+        "--window-bottom": "82%",
+        "--metal-light": "#fff9e7",
+        "--metal-mid": "#c7b18c",
+        "--metal-low": "#76624b",
+        "--mat": "#101215"
+      }
+    },
+    "birthday": {
+      "name": "Birthday",
+      "automatic": false,
+      "art": "assets/cards/editions/birthday.webp",
+      "layout": {
+        "rating": [
+          21.9,
+          16.05,
+          22,
+          4.5
+        ],
+        "name": [
+          50,
+          83.4,
+          68,
+          6
+        ],
+        "placing": [
+          50,
+          90.7,
+          24,
+          3.3
+        ],
+        "nameSize": 64,
+        "placingSize": 44
+      },
+      "rankFits": {
+        "Bronze": {
+          "left": 84.25,
+          "top": 17.802252559726963,
+          "width": 11.44863481228669,
+          "height": 8.014044368600683
+        },
+        "Diamond": {
+          "left": 84.25,
+          "top": 17.802252559726963,
+          "width": 11.44863481228669,
+          "height": 8.014044368600683
+        },
+        "Grandmaster": {
+          "left": 84.25,
+          "top": 17.799057167235492,
+          "width": 11.44863481228669,
+          "height": 8.014044368600683
+        }
+      },
+      "style": {
+        "--window-left": "11.2%",
+        "--window-right": "88.8%",
+        "--window-top": "17.5%",
+        "--window-bottom": "79%",
+        "--metal-light": "#fff7df",
+        "--metal-mid": "#e5be72",
+        "--metal-low": "#95631f",
+        "--mat": "#261123"
+      }
+    },
+    "halloween": {
+      "name": "Halloween",
+      "automatic": false,
+      "art": "assets/cards/editions/halloween.webp",
+      "layout": {
+        "rating": [
+          23.2,
+          11.2,
+          20,
+          4.5
+        ],
+        "name": [
+          50,
+          84,
+          68,
+          6
+        ],
+        "placing": [
+          50,
+          91,
+          24,
+          3.3
+        ],
+        "nameSize": 64,
+        "placingSize": 44
+      },
+      "rankFits": {
+        "Bronze": {
+          "left": 80.45,
+          "top": 11.700341296928327,
+          "width": 11.234641638225256,
+          "height": 7.864249146757678
+        },
+        "Diamond": {
+          "left": 80.45,
+          "top": 11.700341296928327,
+          "width": 11.234641638225256,
+          "height": 7.864249146757678
+        },
+        "Grandmaster": {
+          "left": 80.45,
+          "top": 11.697205631399317,
+          "width": 11.234641638225256,
+          "height": 7.864249146757678
+        }
+      },
+      "style": {
+        "--window-left": "11.2%",
+        "--window-right": "88.8%",
+        "--window-top": "14.4%",
+        "--window-bottom": "79.4%",
+        "--metal-light": "#fff0d8",
+        "--metal-mid": "#c7a070",
+        "--metal-low": "#765033",
+        "--mat": "#151017"
+      }
+    },
+    "hidden-gem": {
+      "name": "Hidden Gem",
+      "automatic": false,
+      "art": "assets/cards/editions/hidden-gem.webp",
+      "layout": {
+        "rating": [
+          21.3,
+          15.8,
+          22,
+          4.5
+        ],
+        "name": [
+          50,
+          83.55,
+          68,
+          6
+        ],
+        "placing": [
+          50,
+          90.2,
+          25,
+          3.2
+        ],
+        "nameSize": 64,
+        "placingSize": 44
+      },
+      "rankFits": {
+        "Bronze": {
+          "left": 84.5,
+          "top": 17.653208191126282,
+          "width": 11.555631399317408,
+          "height": 8.088941979522184
+        },
+        "Diamond": {
+          "left": 84.5,
+          "top": 17.653208191126282,
+          "width": 11.555631399317408,
+          "height": 8.088941979522184
+        },
+        "Grandmaster": {
+          "left": 84.5,
+          "top": 17.649982935153584,
+          "width": 11.555631399317408,
+          "height": 8.088941979522184
+        }
+      },
+      "style": {
+        "--window-left": "11.7%",
+        "--window-right": "88.3%",
+        "--window-top": "18%",
+        "--window-bottom": "78.8%",
+        "--metal-light": "#fff5d9",
+        "--metal-mid": "#e3bd70",
+        "--metal-low": "#82531d",
+        "--mat": "#071e18"
+      }
+    },
+    "whore-stage": {
+      "name": "Whore \u00b7 Stage",
+      "automatic": false,
+      "art": "assets/cards/editions/whore-stage.webp",
+      "layout": {
+        "rating": [
+          22.5,
+          11.25,
+          22,
+          4.5
+        ],
+        "name": [
+          50,
+          83.6,
+          68,
+          6
+        ],
+        "placing": [
+          50,
+          91.0,
+          24,
+          3.1
+        ],
+        "nameSize": 64,
+        "placingSize": 44
+      },
+      "rankFits": {
+        "Bronze": {
+          "left": 83.4,
+          "top": 12.40320819112628,
+          "width": 11.555631399317408,
+          "height": 8.088941979522184
+        },
+        "Diamond": {
+          "left": 83.4,
+          "top": 12.40320819112628,
+          "width": 11.555631399317408,
+          "height": 8.088941979522184
+        },
+        "Grandmaster": {
+          "left": 83.4,
+          "top": 12.399982935153584,
+          "width": 11.555631399317408,
+          "height": 8.088941979522184
+        }
+      },
+      "style": {
+        "--window-left": "11.7%",
+        "--window-right": "88.3%",
+        "--window-top": "14.5%",
+        "--window-bottom": "76.1%",
+        "--metal-light": "#fff0e7",
+        "--metal-mid": "#c5b2a7",
+        "--metal-low": "#79645e",
+        "--mat": "#150d10"
+      }
+    },
+    "christmas": {
+      "name": "Christmas",
+      "automatic": false,
+      "art": "assets/cards/editions/christmas.webp",
+      "layout": {
+        "rating": [
+          23.241,
+          7.831,
+          26,
+          5.9
+        ],
+        "rank": [
+          82.272,
+          7.865,
+          11.8
+        ],
+        "name": [
+          49.952,
+          88.353,
+          70,
+          6.1
+        ],
+        "placing": [
+          50.143,
+          95.315,
+          17,
+          2.4
+        ],
+        "nameSize": 64,
+        "placingSize": 42
+      },
+      "rankFits": {
+        "Bronze": {
+          "left": 82.272,
+          "top": 7.986365187713311,
+          "width": 13.588566552901023,
+          "height": 9.511996587030715
+        },
+        "Diamond": {
+          "left": 82.272,
+          "top": 7.986365187713311,
+          "width": 13.588566552901023,
+          "height": 9.511996587030715
+        },
+        "Grandmaster": {
+          "left": 82.272,
+          "top": 7.98257252559727,
+          "width": 13.588566552901023,
+          "height": 9.511996587030715
+        }
+      },
+      "style": {
+        "--window-left": "8.5%",
+        "--window-right": "91.5%",
+        "--window-top": "12.5%",
+        "--window-bottom": "84%",
+        "--metal-light": "#fff6c9",
+        "--metal-mid": "#e6b55e",
+        "--metal-low": "#9b581b",
+        "--mat": "#230c0b"
+      }
+    }
+  },
+  "ranks": {
+    "Bronze": "assets/cards/editions/rank-bronze.webp",
+    "Diamond": "assets/cards/editions/rank-diamond.webp",
+    "Grandmaster": "assets/cards/editions/rank-grandmaster.webp"
+  },
+  "fonts": {
+    "EditionDisplayV2": "assets/cards/editions/EditionDisplayV2.woff",
+    "EditionNumeralsV2": "assets/cards/editions/EditionNumeralsV2.woff"
+  },
+  "sha256": {
+    "assets/cards/editions/number-one.webp": "c1b406f50e5423bf5ccb7e42b5b85bf3d32812637ca21446c82d0928401d9478",
+    "assets/cards/editions/former-one.webp": "d85fe419c19396642de7d7b4f03ddae41ef2ac64e493ba574d793fc5c1e0f2c5",
+    "assets/cards/editions/cosplay.webp": "2475f7e7deafa7dec3ba6fec1131c15eca063eb7a1f099d79dc50ed527e21bad",
+    "assets/cards/editions/pregnant-orchid.webp": "e18cee2fed559c93b8828fe38e742b19042000ef6fdbf2574e9611a54aa6fe9e",
+    "assets/cards/editions/hall-of-fame.webp": "264fb966faa4e12b15ae628f98c54718976491f0f6419b4edbc1b0789c1f0433",
+    "assets/cards/editions/valentines.webp": "650827e25fd88b211520e848cb820112c2f7fa75be7f52a327b129f95cd42e34",
+    "assets/cards/editions/signature.webp": "6898371f618f08c37c12d51b62cbe11afcaca2c11be109765d748f568b92feb8",
+    "assets/cards/editions/birthday.webp": "46bc9b881aa7c69e9845dc194deb8ab4fe8849fe52a3f0de783116216620726b",
+    "assets/cards/editions/halloween.webp": "575a5d90c8247279e301ac514f9c980e4c10afe903dce82bb991c309b1c08c8e",
+    "assets/cards/editions/hidden-gem.webp": "aa578ca3e3ddca4e11a100d8e480387983ad5102ab9049c6965aa186180468c6",
+    "assets/cards/editions/whore-stage.webp": "781e1cbfde7f732213f8cd81beb644ff4a7dc1d44fc318a71207c94b3ae97b30",
+    "assets/cards/editions/christmas.webp": "0f920d52d5944a54b51ccb3c8bcd51ad763dcd8ccafeb3c6a4bf4d1ee757d36f"
+  }
+}

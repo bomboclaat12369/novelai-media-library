@@ -39,6 +39,10 @@ PORT = 8765
 APP_NAME = "NovelAI Media Library"
 API_VERSION = 9
 
+# Finished studio designs only. Automatic editions use existing battle provenance.
+MANUAL_CARD_EDITIONS = ('cosplay', 'pregnant-orchid', 'hall-of-fame', 'valentines',
+                        'signature', 'birthday', 'halloween', 'hidden-gem', 'whore-stage', 'christmas')
+
 
 def title_case_label(value: str) -> str:
     """Title case a saved Set label, preserving punctuation and deliberate acronyms."""
@@ -920,6 +924,7 @@ class BattleRankings:
 
     def _card_metadata(self, board, rows, owner, kind):
         cards=board.get('cards') or {};collection=self.store.character(owner).get('collection') or {};prefs=collection.get('titles',{})
+        edition_pool_qualified=sum(not r['provisional'] for r in rows)>=10
         for row in rows:
             row['arrival']=copy.deepcopy(cards.get('arrivals',{}).get(row['id']))
             row['best_recorded']=copy.deepcopy(cards.get('best',{}).get(row['id']))
@@ -942,6 +947,21 @@ class BattleRankings:
                     row['titles'].append({'id':ident,'name':name,'detail':'Manually restored in title corrections.','manual':True})
             row['titles'].sort(key=lambda t:0 if t['id']=='former_number_one' else 1)
             row['title_choice']=prefs.get(key,'auto')
+            automatic=[]
+            if row.get('leader') and row.get('rating_status')=='Established' and edition_pool_qualified:
+                automatic.append('number-one')
+            if any(t['id']=='former_number_one' for t in row['titles']):
+                automatic.append('former-one')
+            settings=copy.deepcopy(collection.get('editions',{}).get(key,{}))
+            choice=settings.get('choice','auto')
+            # Honor an existing explicit title opt-out until an edition is selected.
+            if not settings and row['title_choice']=='none':choice='none'
+            available=list(MANUAL_CARD_EDITIONS)+automatic
+            row['edition_settings']={'choice':choice,'rating_style':settings.get('rating_style','side'),
+                                     'captain_corner':settings.get('captain_corner','left'),
+                                     'show_captain':settings.get('show_captain',row['title_choice']!='none')}
+            row['available_editions']=available
+            row['edition_id']=(automatic[0] if automatic else None) if choice=='auto' else (choice if choice in available else None)
 
     @staticmethod
     def _in_scope(entry, session, scheduling=False):
@@ -2238,6 +2258,7 @@ class LibraryStore:
             data.setdefault('captains', {})
             data.setdefault('titles', {})
             data.setdefault('title_overrides', {})
+            data.setdefault('editions', {})
             if data.get('captain_schema')!=2:
                 data['legacy_captains']=copy.deepcopy(data['captains'])
                 data['captains']={}
@@ -2247,7 +2268,7 @@ class LibraryStore:
             for ident,mid in list(data['captains'].items()):
                 if ident not in groups or mid not in groups[ident].get('media_ids',[]) or mid not in media:
                     data['captains'].pop(ident,None)
-            if action not in ('state', 'save', 'frame', 'review', 'captain', 'title', 'title-correction'):
+            if action not in ('state', 'save', 'frame', 'review', 'captain', 'title', 'title-correction', 'edition'):
                 raise ValueError('Unknown collection action.')
             if action != 'state' and body.get('revision', '') != data['revision']:
                 raise ValueError('Collection changed in another window. Reopen it before saving.')
@@ -2298,6 +2319,25 @@ class LibraryStore:
                 if not row or choice not in ['auto','none']+[t['id'] for t in row['titles']]:
                     raise ValueError('Choose an available title for an eligible card.')
                 data['titles'][('set:' if kind=='sets' else '')+mid]=choice
+            elif action == 'edition':
+                ident,kind=body.get('entry_id'),body.get('kind','images')
+                if kind not in ('images','sets'):
+                    raise ValueError('Choose images or sets.')
+                rows=self.battles.request('summary',{'character_id':owner,'kind':kind})['entries']
+                row=next((r for r in rows if r['id']==ident and not r.get('flagged_for_removal')),None)
+                key=('set:' if kind=='sets' else '')+str(ident)
+                settings=copy.deepcopy(data['editions'].get(key,{}))
+                choice=body.get('choice',settings.get('choice','auto'))
+                if not row or choice not in ['auto','none']+row['available_editions']:
+                    raise ValueError('Choose an available finished edition for this card.')
+                rating_style=body.get('rating_style',settings.get('rating_style','side'))
+                captain_corner=body.get('captain_corner',settings.get('captain_corner','left'))
+                show_captain=body.get('show_captain',settings.get('show_captain',row['title_choice']!='none'))
+                if type(show_captain) is not bool:
+                    raise ValueError('Choose whether to show the Captain crest.')
+                if rating_style not in ('side','number') or captain_corner not in ('left','right'):
+                    raise ValueError('Choose a valid rating display and Captain corner.')
+                data['editions'][key]={'choice':choice,'rating_style':rating_style,'captain_corner':captain_corner,'show_captain':show_captain}
             elif action == 'frame':
                 key, mid = body.get('key', ''), body.get('media_id', '')
                 if mid not in media or key not in ('image:'+mid, 'profile:'+mid):
@@ -2309,7 +2349,11 @@ class LibraryStore:
                     v = frame.get(name)
                     if type(v) not in (int,float) or not math.isfinite(v) or not low <= v <= high:
                         raise ValueError('Invalid card position or zoom.')
+                fit=frame.get('fit','fill')
+                if fit not in ('fill','contain'):
+                    raise ValueError('Choose fill opening or fit whole photo.')
                 data['frames'][key] = {name:frame[name] for name in ('x','y','zoom')}
+                data['frames'][key]['fit']=fit
             elif action == 'review':
                 mid = body.get('media_id')
                 if mid not in media:
@@ -4348,7 +4392,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                 body = self._read_json()
                 self._send_json(200, self.server.ui_updates.activate(str(body.get("version", ""))))
                 return
-            if path in {"/api/collection/state", "/api/collection/save", "/api/collection/frame", "/api/collection/review", "/api/collection/captain", "/api/collection/title", "/api/collection/title-correction"}:
+            if path in {"/api/collection/state", "/api/collection/save", "/api/collection/frame", "/api/collection/review", "/api/collection/captain", "/api/collection/title", "/api/collection/title-correction", "/api/collection/edition"}:
                 self._send_json(200, self.store.collection_request(path.rsplit("/", 1)[1], self._read_json()))
                 return
             if path in {"/api/profile/state", "/api/profile/save"}:
