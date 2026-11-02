@@ -39,7 +39,7 @@ PORT = 8765
 APP_NAME = "NovelAI Media Library"
 API_VERSION = 9
 
-# Finished studio designs only. Automatic editions use existing battle provenance.
+# Finished studio designs only. Automatic mode uses battle provenance; every finished frame is also selectable.
 MANUAL_CARD_EDITIONS = ('cosplay', 'pregnant-orchid', 'hall-of-fame', 'valentines',
                         'signature', 'birthday', 'halloween', 'hidden-gem', 'whore-stage', 'christmas')
 
@@ -956,7 +956,7 @@ class BattleRankings:
             choice=settings.get('choice','auto')
             # Honor an existing explicit title opt-out until an edition is selected.
             if not settings and row['title_choice']=='none':choice='none'
-            available=list(MANUAL_CARD_EDITIONS)+automatic
+            available=['number-one','former-one']+list(MANUAL_CARD_EDITIONS)
             row['edition_settings']={'choice':choice,'rating_style':settings.get('rating_style','side'),
                                      'captain_corner':settings.get('captain_corner','left'),
                                      'show_captain':settings.get('show_captain',row['title_choice']!='none')}
@@ -2320,24 +2320,32 @@ class LibraryStore:
                     raise ValueError('Choose an available title for an eligible card.')
                 data['titles'][('set:' if kind=='sets' else '')+mid]=choice
             elif action == 'edition':
-                ident,kind=body.get('entry_id'),body.get('kind','images')
+                kind=body.get('kind','images')
                 if kind not in ('images','sets'):
                     raise ValueError('Choose images or sets.')
-                rows=self.battles.request('summary',{'character_id':owner,'kind':kind})['entries']
-                row=next((r for r in rows if r['id']==ident and not r.get('flagged_for_removal')),None)
-                key=('set:' if kind=='sets' else '')+str(ident)
-                settings=copy.deepcopy(data['editions'].get(key,{}))
-                choice=body.get('choice',settings.get('choice','auto'))
-                if not row or choice not in ['auto','none']+row['available_editions']:
-                    raise ValueError('Choose an available finished edition for this card.')
-                rating_style=body.get('rating_style',settings.get('rating_style','side'))
-                captain_corner=body.get('captain_corner',settings.get('captain_corner','left'))
-                show_captain=body.get('show_captain',settings.get('show_captain',row['title_choice']!='none'))
-                if type(show_captain) is not bool:
-                    raise ValueError('Choose whether to show the Captain crest.')
-                if rating_style not in ('side','number') or captain_corner not in ('left','right'):
-                    raise ValueError('Choose a valid rating display and Captain corner.')
-                data['editions'][key]={'choice':choice,'rating_style':rating_style,'captain_corner':captain_corner,'show_captain':show_captain}
+                ids=body.get('entry_ids',[body.get('entry_id')])
+                if not isinstance(ids,list) or not ids or any(not isinstance(i,str) for i in ids):
+                    raise ValueError('Select at least one eligible card.')
+                ids=list(dict.fromkeys(ids))
+                rows={r['id']:r for r in self.battles.request('summary',{'character_id':owner,'kind':kind})['entries'] if not r.get('flagged_for_removal')}
+                changes={}
+                # Validate the whole selection before applying any appearance changes.
+                for ident in ids:
+                    row=rows.get(ident)
+                    key=('set:' if kind=='sets' else '')+ident
+                    settings=copy.deepcopy(data['editions'].get(key,{}))
+                    choice=body.get('choice',settings.get('choice','auto'))
+                    if not row or choice not in ['auto','none']+row['available_editions']:
+                        raise ValueError('Choose an available finished edition for eligible cards belonging to this person.')
+                    rating_style=body.get('rating_style',settings.get('rating_style','side'))
+                    captain_corner=body.get('captain_corner',settings.get('captain_corner','left'))
+                    show_captain=body.get('show_captain',settings.get('show_captain',row['title_choice']!='none'))
+                    if type(show_captain) is not bool:
+                        raise ValueError('Choose whether to show the Captain crest.')
+                    if rating_style not in ('side','number') or captain_corner not in ('left','right'):
+                        raise ValueError('Choose a valid rating display and Captain corner.')
+                    changes[key]={'choice':choice,'rating_style':rating_style,'captain_corner':captain_corner,'show_captain':show_captain}
+                data['editions'].update(changes)
             elif action == 'frame':
                 key, mid = body.get('key', ''), body.get('media_id', '')
                 if mid not in media or key not in ('image:'+mid, 'profile:'+mid):
@@ -2345,7 +2353,7 @@ class LibraryStore:
                 frame = body.get('frame', {})
                 if not isinstance(frame, dict):
                     raise ValueError('Invalid card framing.')
-                for name, low, high in [('x',-50,50),('y',-50,50),('zoom',1,3)]:
+                for name, low, high in [('x',-1000,1000),('y',-1000,1000),('zoom',1,3)]:
                     v = frame.get(name)
                     if type(v) not in (int,float) or not math.isfinite(v) or not low <= v <= high:
                         raise ValueError('Invalid card position or zoom.')

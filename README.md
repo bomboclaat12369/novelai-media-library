@@ -1087,3 +1087,23 @@ closes. Runtime remains 2.7.64; this is a standalone UI update.
 Validated with `tests/test-card-edition-layout-ui.cjs`: eight-column default,
 frame gallery, edition filters, and normalized photo geometry across the editor,
 fullscreen, 4/8/10-column grids and a narrow viewport, using both fill and contain.
+
+### Standalone 2.9.10 / Runtime 2.7.65 — full-source positioning and quick editions
+
+Card framing now sizes the complete original photo behind the opening. Moving a
+filled photo can reveal its formerly hidden top, bottom or sides. Positioning
+uses finer steps and expands its range for wide/tall photos and zoom. An editor-only
+red outline sits outside the photo; it disappears when the edge is covered by
+the frame opening. Saved positions retain their existing offset and zoom values.
+
+Use **Edit edition** beside **Position card** in the enlarged viewer, or the
+**✦** shortcut under a leaderboard card. **Select cards** enables checkboxes,
+**Select all matching**, and **Apply edition** for bulk changes. Bulk changes
+preserve each card's crop, Captain settings and rating display, and validate
+the entire selection before saving. All twelve frames, including **#1** and
+**Former #1**, can be applied manually. **Automatic** still follows ranking
+history; choosing artwork manually does not award a title or change ratings.
+
+Update runtime to 2.7.65 and standalone to 2.9.10. Validated with the full-source
+browser regression (portrait and landscape edge recovery, red guide, crop
+consistency, direct/bulk edition changes) and atomic runtime edition tests.

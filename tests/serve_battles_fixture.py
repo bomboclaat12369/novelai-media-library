@@ -45,6 +45,11 @@ with tempfile.TemporaryDirectory() as directory:
             elif i%4==1:size=(2400,1600+i)
             elif i%4==2:size=(1800+i,1800+i)
         image=Image.new('RGB',size,['#4182be','#f29463','#7a97bf','#61b18f'][i%4]);fmt='PNG';mime='image/png'
+        if os.environ.get('NAI_CARD_SOURCE_DEMO')=='1' and i<2:
+            from PIL import ImageDraw
+            image=Image.new('RGB',(1221,2136) if i==0 else (2136,1221),'#ec9951');draw=ImageDraw.Draw(image)
+            draw.rectangle((0,0,image.width,180),fill='#38e6d6');draw.rectangle((0,image.height-180,image.width,image.height),fill='#9155df')
+            draw.rectangle((0,0,100,image.height),fill='#e9dd43');draw.rectangle((image.width-100,0,image.width,image.height),fill='#5071db')
         if os.environ.get('NAI_LANDSCAPE_DEMO')=='1' and i==3:
             image=Image.new('RGB',(2403,1600),'#61b18f');exif=Image.Exif();exif[274]=6;image.save(data,'JPEG',exif=exif);fmt='JPEG';mime='image/jpeg'
         else:image.save(data,'PNG')

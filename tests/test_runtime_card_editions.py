@@ -15,7 +15,7 @@ class CardEditions(unittest.TestCase):
         a,b=[self.import_image(i) for i in range(2)]
         group=self.store.create_set(self.character['id'],'Shoot',[a['id'],b['id']],preserve_placement=True)
         data=self.collection();battle=copy.deepcopy(self.store.battles._load());media=copy.deepcopy(self.store.data['media'])
-        for edition in fixtures.RUNTIME['MANUAL_CARD_EDITIONS']:
+        for edition in ('number-one','former-one')+fixtures.RUNTIME['MANUAL_CARD_EDITIONS']:
             data=self.collection('edition',revision=data['collection']['revision'],entry_id=a['id'],choice=edition,rating_style='number',captain_corner='right')
             row=next(r for r in self.board()['entries'] if r['id']==a['id'])
             self.assertEqual(row['edition_id'],edition)
@@ -26,15 +26,39 @@ class CardEditions(unittest.TestCase):
         self.store.save();loaded=type(self.store)(self.store.root)
         rows=loaded.battles.request('summary',{'character_id':self.character['id']})['entries']
         self.assertEqual(next(r for r in rows if r['id']==a['id'])['edition_id'],'christmas')
-        for choice in ('naked','ass-chrome','video-premiere','number-one','former-one'):
+        for choice in ('naked','ass-chrome','video-premiere'):
             with self.assertRaises(ValueError):self.collection('edition',revision=data['collection']['revision'],entry_id=a['id'],choice=choice)
         with self.assertRaises(ValueError):self.collection('edition',revision='stale',entry_id=a['id'],choice='cosplay')
         other=self.store.add_character('Other');b['character_id']=other['id']
         with self.assertRaises(ValueError):self.collection('edition',revision=data['collection']['revision'],entry_id=b['id'],choice='cosplay')
+    def test_bulk_editions_are_atomic_and_preserve_individual_settings(self):
+        a,b,c=[self.import_image(i) for i in range(3)]
+        data=self.collection()
+        data=self.collection('edition',revision=data['collection']['revision'],entry_id=a['id'],choice='cosplay',rating_style='number',captain_corner='right',show_captain=False)
+        data=self.collection('frame',revision=data['collection']['revision'],key='image:'+a['id'],media_id=a['id'],frame={'x':9,'y':12,'zoom':1.3,'fit':'fill'})
+        frames=copy.deepcopy(data['collection']['frames']);battle=copy.deepcopy(self.store.battles._load())
+        data=self.collection('edition',revision=data['collection']['revision'],entry_ids=[a['id'],b['id']],choice='number-one')
+        rows={r['id']:r for r in self.board()['entries']}
+        for item in (a,b):self.assertEqual(rows[item['id']]['edition_id'],'number-one')
+        self.assertIsNone(rows[c['id']]['edition_id'])
+        self.assertEqual(rows[a['id']]['edition_settings']['rating_style'],'number')
+        self.assertEqual(rows[a['id']]['edition_settings']['captain_corner'],'right')
+        self.assertFalse(rows[a['id']]['edition_settings']['show_captain'])
+        self.assertEqual(data['collection']['frames'],frames)
+        self.assertEqual(self.store.battles._load(),battle)
+        before=copy.deepcopy(data['collection']['editions'])
+        for ids in ([a['id'],'missing'],[],[None]):
+            with self.assertRaises(ValueError):self.collection('edition',revision=data['collection']['revision'],entry_ids=ids,choice='former-one')
+            self.assertEqual(self.collection()['collection']['editions'],before)
+        with self.assertRaises(ValueError):self.collection('edition',revision='stale',entry_ids=[a['id'],b['id']],choice='none')
+        other=self.store.add_character('Other');c['character_id']=other['id']
+        with self.assertRaises(ValueError):self.collection('edition',revision=data['collection']['revision'],entry_ids=[a['id'],c['id']],choice='none')
+        self.assertEqual(self.collection()['collection']['editions'],before)
+
     def test_fill_and_contain_do_not_change_source(self):
         a=self.import_image(0);data=self.collection();original=copy.deepcopy(a)
         for fit in ('fill','contain'):
-            data=self.collection('frame',revision=data['collection']['revision'],key='image:'+a['id'],media_id=a['id'],frame={'x':8,'y':-3,'zoom':1.2,'fit':fit})
+            data=self.collection('frame',revision=data['collection']['revision'],key='image:'+a['id'],media_id=a['id'],frame={'x':85,'y':-63,'zoom':1.2,'fit':fit})
             self.assertEqual(data['collection']['frames']['image:'+a['id']]['fit'],fit)
         self.assertEqual(a,original)
         with self.assertRaises(ValueError):self.collection('frame',revision=data['collection']['revision'],key='image:'+a['id'],media_id=a['id'],frame={'x':0,'y':0,'zoom':1,'fit':'stretch'})

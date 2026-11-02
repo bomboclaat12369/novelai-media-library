@@ -17,7 +17,7 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
   await p.getByRole('button',{name:'Save card appearance',exact:true}).click();await p.locator('.naiExpandedCard[data-edition=christmas]').waitFor({state:'attached'});
   await p.locator('.naiCardBackBody h2').click();await p.waitForFunction(()=>document.getElementById('nai-media-host').shadowRoot.querySelector('.naiFlipCard').dataset.flipped==='false');
   await p.locator('.naiExpandedCard .naiEditionFrame').evaluate(im=>im.decode());
-  assert.equal(await p.locator('.naiExpandedCard .naiCardPhotoWindow img').evaluate(e=>getComputedStyle(e).objectFit),'cover');
+  assert.equal(await p.locator('.naiExpandedCard .naiCardPhotoWindow img').evaluate(e=>getComputedStyle(e).objectFit),'fill');
   await p.locator('.naiFlipCard').evaluate(e=>Promise.all(e.getAnimations({subtree:true}).map(a=>a.finished)));await p.screenshot({path:'/tmp/editions-live-card.png'});
   await p.getByRole('button',{name:'Position card',exact:true}).click();await p.getByLabel('Photo framing',{exact:true}).selectOption('contain');await p.getByRole('button',{name:'Save framing',exact:true}).click();
   await p.getByRole('button',{name:'Close image',exact:true}).click();
@@ -39,7 +39,7 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
    },{id,rows:summary.entries,index:Object.keys(catalog.editions).indexOf(id)});
    const card=p.locator('#edition-test .naiEdition');assert.equal(await card.count(),1);
    const check=await card.evaluate(e=>{const frame=e.querySelector('.naiEditionFrame'),box=e.querySelector('.naiCardPhotoWindow'),c=e.querySelector('canvas'),im=box.querySelector('img');return {native:frame.naturalWidth,box:[box.offsetWidth,box.offsetHeight],left:box.offsetLeft,top:box.offsetTop,clip:getComputedStyle(e).clipPath,canvas:[c.width,c.height],fit:getComputedStyle(im).objectFit,rank:e.querySelector('.naiEditionRank').getBoundingClientRect().width}});
-   assert(check.native>1000);assert(check.box.every(n=>n>300));assert(check.left>35&&check.top>50);assert.equal(check.clip,'none');assert(check.canvas[0]>=1000);assert.equal(check.fit,'cover');assert(check.rank>40);
+   assert(check.native>1000);assert(check.box.every(n=>n>300));assert(check.left>35&&check.top>50);assert.equal(check.clip,'none');assert(check.canvas[0]>=1000);assert.equal(check.fit,'fill');assert(check.rank>40);
    await card.screenshot({path:'/tmp/edition-'+id+'.png'});
   }
   await p.evaluate(()=>document.getElementById('nai-media-host').shadowRoot.querySelector('#edition-test').remove());
