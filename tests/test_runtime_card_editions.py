@@ -60,6 +60,8 @@ class CardEditions(unittest.TestCase):
         for fit in ('fill','contain'):
             data=self.collection('frame',revision=data['collection']['revision'],key='image:'+a['id'],media_id=a['id'],frame={'x':85,'y':-63,'zoom':1.2,'fit':fit})
             self.assertEqual(data['collection']['frames']['image:'+a['id']]['fit'],fit)
+        data=self.collection('frame',revision=data['collection']['revision'],key='image:'+a['id'],media_id=a['id'],frame={'x':0,'y':0,'zoom':1})
+        self.assertEqual(data['collection']['frames']['image:'+a['id']]['fit'],'contain')
         self.assertEqual(a,original)
         with self.assertRaises(ValueError):self.collection('frame',revision=data['collection']['revision'],key='image:'+a['id'],media_id=a['id'],frame={'x':0,'y':0,'zoom':1,'fit':'stretch'})
     def test_automatic_leader_former_and_opt_out(self):

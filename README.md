@@ -1107,3 +1107,18 @@ history; choosing artwork manually does not award a title or change ratings.
 Update runtime to 2.7.65 and standalone to 2.9.10. Validated with the full-source
 browser regression (portrait and landscape edge recovery, red guide, crop
 consistency, direct/bulk edition changes) and atomic runtime edition tests.
+
+### Standalone 2.9.11 / Runtime 2.7.66 — fit by default, original-quality zoom
+
+New and legacy cards without a saved fit choice now use **Fit whole photo**.
+**Reset framing** returns to fit, centered, at 1×. Explicit saved Fill/Fit choices,
+position offsets and zoom remain unchanged. The runtime also defaults omitted
+fit choices to fit.
+
+The editor, fullscreen and battle views already use original images. Zoomed
+leaderboard cards now load the stored original as well, instead of enlarging a
+512px preview. Zoom changes display geometry only; it does not resize or
+recompress the stored source. Unzoomed leaderboard cards retain lazy previews.
+
+Validated fit/reset defaults, saved choices, and original native dimensions for
+zoomed portrait and landscape leaderboard cards against editor/fullscreen.

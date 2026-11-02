@@ -2357,7 +2357,7 @@ class LibraryStore:
                     v = frame.get(name)
                     if type(v) not in (int,float) or not math.isfinite(v) or not low <= v <= high:
                         raise ValueError('Invalid card position or zoom.')
-                fit=frame.get('fit','fill')
+                fit=frame.get('fit','contain')
                 if fit not in ('fill','contain'):
                     raise ValueError('Choose fill opening or fit whole photo.')
                 data['frames'][key] = {name:frame[name] for name in ('x','y','zoom')}
