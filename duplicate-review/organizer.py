@@ -19,6 +19,10 @@ def title_case_label(value):
     return runtime_helpers()['title_case_label'](value)
 
 
+def set_name_colors(name, colors=None):
+    return runtime_helpers()['set_name_colors'](name,colors)
+
+
 def natural(value):
     return tuple((1,int(x)) if x.isdigit() else (0,x.casefold()) for x in re.split(r'(\d+)',str(value)))
 
@@ -38,6 +42,12 @@ class Organizer:
                 CREATE TABLE IF NOT EXISTS rejected(scope TEXT,context TEXT,id TEXT,PRIMARY KEY(scope,context,id));
                 CREATE TABLE IF NOT EXISTS discarded(hash TEXT PRIMARY KEY,batch TEXT,data TEXT);
                 CREATE TABLE IF NOT EXISTS parked(scope TEXT,post TEXT,hash TEXT,PRIMARY KEY(scope,post,hash));''')
+            # Upgrade every saved collection's tags without touching membership,
+            # timestamps, inventory, matching results, selections or progress.
+            for scope,ident,raw in db.execute('SELECT scope,id,data FROM sets').fetchall():
+                group=json.loads(raw);colors=set_name_colors(group.get('name',''),group.get('colors',[]))
+                if colors!=group.get('colors',[]):
+                    group['colors']=colors;db.execute('UPDATE sets SET data=? WHERE scope=? AND id=?',(json.dumps(group),scope,ident))
 
     @contextmanager
     def db(self):
@@ -143,6 +153,7 @@ class Organizer:
                 # Existing library members remain visible alongside locally reviewed additions.
                 g['members']=list(dict.fromkeys(result.get(sid,{}).get('members',[])+g['members']))
                 g['saved']=True;result[sid]=g
+        for g in result.values():g['colors']=set_name_colors(g['name'],g.get('colors',[]))
         if not include_discarded:
             for g in result.values():g['members']=[i for i in g['members'] if i in self.catalog and i not in self.discarded]
         return result
@@ -386,7 +397,7 @@ class Organizer:
                     categories=self.categories(body.get('categories',(previous or {}).get('categories',state.get('new_categories',[]))),(previous or {}).get('categories',[]))
                     stamp=time.time()
                     favorite=self.favorite(body.get('favorite',(previous or {}).get('favorite',state.get('new_favorite',False))))
-                    group=dict(previous or {},id=ident,name=name,colors=colors,categories=categories,favorite=favorite,members=members,updated=stamp,library_id=(previous or {}).get('library_id'))
+                    group=dict(previous or {},id=ident,name=name,colors=set_name_colors(name,colors),categories=categories,favorite=favorite,members=members,updated=stamp,library_id=(previous or {}).get('library_id'))
                     if previous is None:group['created']=stamp
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,ident,json.dumps(group)))
                     state.update(selection=[],target='',new_colors=[],new_categories=[],new_favorite=False)
@@ -398,7 +409,7 @@ class Organizer:
                     old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
                     state['undo']={'action':'set','id':target,'previous':old[0] if old else None,'selection':state.get('selection',[])}
                     favorite=self.favorite(body.get('favorite',group.get('favorite',False)))
-                    group.update(colors=colors,categories=categories,favorite=favorite,updated=time.time())
+                    group.update(colors=set_name_colors(group['name'],colors),categories=categories,favorite=favorite,updated=time.time())
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)))
                 elif action=='remove':
                     target=str(body.get('target',''));old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()

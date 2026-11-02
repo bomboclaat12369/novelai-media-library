@@ -16,11 +16,11 @@ class CardEditions(unittest.TestCase):
         group=self.store.create_set(self.character['id'],'Shoot',[a['id'],b['id']],preserve_placement=True)
         data=self.collection();battle=copy.deepcopy(self.store.battles._load());media=copy.deepcopy(self.store.data['media'])
         for edition in ('number-one','former-one')+fixtures.RUNTIME['MANUAL_CARD_EDITIONS']:
-            data=self.collection('edition',revision=data['collection']['revision'],entry_id=a['id'],choice=edition,rating_style='number',captain_corner='right')
+            data=self.collection('edition',revision=data['collection']['revision'],entry_id=a['id'],choice=edition,add_traits=[edition],rating_style='number',captain_corner='right')
             row=next(r for r in self.board()['entries'] if r['id']==a['id'])
             self.assertEqual(row['edition_id'],edition)
             self.assertEqual(row['edition_settings']['captain_corner'],'right')
-        data=self.collection('edition',revision=data['collection']['revision'],entry_id=group['id'],kind='sets',choice='christmas')
+        data=self.collection('edition',revision=data['collection']['revision'],entry_id=group['id'],kind='sets',choice='christmas',add_traits=['christmas'])
         self.assertEqual(self.board('sets')['entries'][0]['edition_id'],'christmas')
         self.assertEqual(self.store.battles._load(),battle);self.assertEqual(self.store.data['media'],media)
         self.store.save();loaded=type(self.store)(self.store.root)
@@ -34,10 +34,10 @@ class CardEditions(unittest.TestCase):
     def test_bulk_editions_are_atomic_and_preserve_individual_settings(self):
         a,b,c=[self.import_image(i) for i in range(3)]
         data=self.collection()
-        data=self.collection('edition',revision=data['collection']['revision'],entry_id=a['id'],choice='cosplay',rating_style='number',captain_corner='right',show_captain=False)
+        data=self.collection('edition',revision=data['collection']['revision'],entry_id=a['id'],choice='cosplay',add_traits=['cosplay'],rating_style='number',captain_corner='right',show_captain=False)
         data=self.collection('frame',revision=data['collection']['revision'],key='image:'+a['id'],media_id=a['id'],frame={'x':9,'y':12,'zoom':1.3,'fit':'fill'})
         frames=copy.deepcopy(data['collection']['frames']);battle=copy.deepcopy(self.store.battles._load())
-        data=self.collection('edition',revision=data['collection']['revision'],entry_ids=[a['id'],b['id']],choice='number-one')
+        data=self.collection('edition',revision=data['collection']['revision'],entry_ids=[a['id'],b['id']],choice='number-one',add_traits=['number-one'])
         rows={r['id']:r for r in self.board()['entries']}
         for item in (a,b):self.assertEqual(rows[item['id']]['edition_id'],'number-one')
         self.assertIsNone(rows[c['id']]['edition_id'])

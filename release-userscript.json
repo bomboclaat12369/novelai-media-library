@@ -2,7 +2,7 @@
   "parts": [
     "payload/userscript-2.8.68.transport-start.txt",
     "payload/userscript-2.8.5.reset-state.txt",
-    "payload/userscript-2.8.93.part01.txt",
+    "payload/userscript-2.8.99.part01.txt",
     "payload/userscript-2.8.77.virtual-grid.txt",
     "payload/userscript-2.3.0.patch01.txt",
     "payload/userscript-2.3.0.patch02.txt",
@@ -18,7 +18,7 @@
     "payload/userscript-2.4.7.patch01.txt",
     "payload/userscript-2.8.57.video-labels.txt",
     "payload/userscript-2.8.93.viewer-api.txt",
-    "payload/userscript-2.8.93.sets.txt",
+    "payload/userscript-2.9.12.sets.txt",
     "payload/userscript-2.8.51.thumbnail-picker.txt",
     "payload/userscript-2.8.73.update-status.txt",
     "payload/userscript-2.8.93.groups.txt",
@@ -29,11 +29,12 @@
     "payload/userscript-2.8.76.search-fields.txt",
     "payload/userscript-2.8.90.ranks.txt",
     "payload/userscript-2.8.93.ranking-library.txt",
-    "payload/userscript-2.8.93.profiles.txt",
+    "payload/userscript-2.9.12.profiles.txt",
     "payload/userscript-2.8.93.viewer-layout.txt",
     "payload/userscript-2.9.7.no-autofill.txt",
+    "payload/userscript-2.9.12.search-clear.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 149,
-  "version": "2.8.98"
+  "release_build": 150,
+  "version": "2.8.99"
 }

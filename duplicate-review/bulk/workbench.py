@@ -29,6 +29,18 @@ from .clothing import classify
 EXTENSIONS={'.jpg','.jpeg','.png','.webp','.bmp','.tif','.tiff','.avif','.gif'}
 
 
+@lru_cache(maxsize=1)
+def color_helper():
+    return runpy.run_path(str(Path(__file__).resolve().parents[2]/'runtime-src'/'companion-runtime.pyw'))['set_name_colors']
+
+def add_set_colors(job):
+    changed=False
+    for group in job.get('proposals',[]):
+        colors=color_helper()(group.get('name',''),group.get('colors',[]))
+        if colors!=group.get('colors',[]):group['colors']=colors;changed=True
+    return changed
+
+
 class PreparationError(RuntimeError):
     """One model preparation failure stops the job, not one retry per image."""
 
@@ -49,6 +61,9 @@ class Workbench:
                 CREATE TABLE IF NOT EXISTS origin_cursor(scope TEXT PRIMARY KEY, sha TEXT);
                 CREATE TABLE IF NOT EXISTS confirmed_origins(target TEXT PRIMARY KEY, keeper TEXT, created REAL);
                 CREATE TABLE IF NOT EXISTS aliases(target TEXT, keeper TEXT, recipe TEXT, accepted INTEGER, PRIMARY KEY(target,keeper,recipe));''')
+            for ident,raw in db.execute('SELECT id,data FROM jobs').fetchall():
+                job=json.loads(raw)
+                if add_set_colors(job):db.execute('UPDATE jobs SET data=? WHERE id=?',(json.dumps(job),ident))
             row=db.execute('SELECT data FROM jobs ORDER BY updated DESC LIMIT 1').fetchone()
         if row:
             self.current=json.loads(row[0])
@@ -70,6 +85,7 @@ class Workbench:
     def persist(self):
         with self.lock,self.db() as db:
             if self.current:
+                add_set_colors(self.current)
                 db.execute('INSERT OR REPLACE INTO jobs VALUES (?,?,?)',(self.current['id'],time.time(),json.dumps(self.current)))
 
     def update(self,**fields):

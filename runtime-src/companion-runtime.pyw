@@ -44,6 +44,19 @@ MANUAL_CARD_EDITIONS = ('cosplay', 'pregnant-orchid', 'hall-of-fame', 'valentine
                         'signature', 'birthday', 'halloween', 'hidden-gem', 'whore-stage', 'christmas')
 
 
+def set_name_colors(name, existing=None):
+    """Add literal color words; retain manual tags and all non-color metadata."""
+    result=list(existing or [])
+    known={str(c).casefold() for c in result}
+    aliases={'grey':'Gray','gray':'Gray','golden':'Gold','multicolour':'Multicolor','multicolor':'Multicolor'}
+    palette=set('white black blue red pink purple green yellow orange brown beige silver gold cream burgundy maroon navy teal turquoise aqua lavender lilac nude tan peach coral olive mint magenta violet bronze ivory rainbow'.split())
+    for word in re.findall(r"[a-z]+",str(name).lower()):
+        color=aliases.get(word) or (word.title() if word in palette else None)
+        if color and color.casefold() not in known:
+            result.append(color);known.add(color.casefold())
+    return result
+
+
 def title_case_label(value: str) -> str:
     """Title case a saved Set label, preserving punctuation and deliberate acronyms."""
     value = str(value or '').strip()
@@ -957,11 +970,15 @@ class BattleRankings:
             # Honor an existing explicit title opt-out until an edition is selected.
             if not settings and row['title_choice']=='none':choice='none'
             available=['number-one','former-one']+list(MANUAL_CARD_EDITIONS)
+            traits=[t for t in settings.get('traits',([choice] if choice in available else [])) if t in available]
+            owned=list(dict.fromkeys(traits+automatic))
+            row['owned_editions']=owned
+            row['automatic_editions']=automatic
             row['edition_settings']={'choice':choice,'rating_style':settings.get('rating_style','side'),
                                      'captain_corner':settings.get('captain_corner','left'),
-                                     'show_captain':settings.get('show_captain',row['title_choice']!='none')}
+                                     'show_captain':bool(row.get('captain_sets')),'traits':traits}
             row['available_editions']=available
-            row['edition_id']=(automatic[0] if automatic else None) if choice=='auto' else (choice if choice in available else None)
+            row['edition_id']=(automatic[0] if automatic else None) if choice=='auto' else (choice if choice in owned else None)
 
     @staticmethod
     def _in_scope(entry, session, scheduling=False):
@@ -1434,6 +1451,10 @@ class LibraryStore:
                 for media_id in (item.get("media_ids", []) if isinstance(item.get("media_ids", []), list) else [])
             }
             changed = False
+            for group in data['sets']:
+                if group.get('kind','set')=='set':
+                    colors=set_name_colors(group.get('name',''),group.get('colors',[]))
+                    if colors!=group.get('colors',[]):group['colors']=colors;changed=True
             retired = [item for item in data["sets"] if item.get("kind") == "connection"]
             if retired:
                 # Retire only the removed feature's metadata. Keep originals,
@@ -2334,8 +2355,16 @@ class LibraryStore:
                     row=rows.get(ident)
                     key=('set:' if kind=='sets' else '')+ident
                     settings=copy.deepcopy(data['editions'].get(key,{}))
+                    if not row:raise ValueError('Choose eligible cards belonging to this person.')
+                    traits=list(row['edition_settings']['traits'])
+                    additions,removals=body.get('add_traits',[]),body.get('remove_traits',[])
+                    if any(not isinstance(v,list) or any(t not in row['available_editions'] for t in v) for v in (additions,removals)):
+                        raise ValueError('Choose finished edition traits.')
+                    traits=list(dict.fromkeys([t for t in traits if t not in removals]+additions))
+                    owned=list(dict.fromkeys(traits+row['automatic_editions']))
                     choice=body.get('choice',settings.get('choice','auto'))
-                    if not row or choice not in ['auto','none']+row['available_editions']:
+                    if 'choice' not in body and choice not in ['auto','none']+owned:choice='auto'
+                    if choice not in ['auto','none']+owned:
                         raise ValueError('Choose an available finished edition for eligible cards belonging to this person.')
                     rating_style=body.get('rating_style',settings.get('rating_style','side'))
                     captain_corner=body.get('captain_corner',settings.get('captain_corner','left'))
@@ -2344,7 +2373,7 @@ class LibraryStore:
                         raise ValueError('Choose whether to show the Captain crest.')
                     if rating_style not in ('side','number') or captain_corner not in ('left','right'):
                         raise ValueError('Choose a valid rating display and Captain corner.')
-                    changes[key]={'choice':choice,'rating_style':rating_style,'captain_corner':captain_corner,'show_captain':show_captain}
+                    changes[key]={'choice':choice,'rating_style':rating_style,'captain_corner':captain_corner,'show_captain':bool(row.get('captain_sets')),'traits':traits}
                 data['editions'].update(changes)
             elif action == 'frame':
                 key, mid = body.get('key', ''), body.get('media_id', '')
@@ -2454,7 +2483,12 @@ class LibraryStore:
                 notes = proposed.get('notes', '')
                 if not isinstance(notes, str) or len(notes) > 10000:
                     raise ValueError('Notes must be 10,000 characters or less.')
-                profile = {'photos': photos, 'measurements': cleaned, 'notes': notes.strip(), 'revision': uuid.uuid4().hex}
+                appearance={}
+                for key in ('eye_color','hair_color'):
+                    value=proposed.get(key,profile.get(key,''))
+                    if not isinstance(value,str) or len(value)>80:raise ValueError('Hair and eye colors must be 80 characters or less.')
+                    appearance[key]=value.strip()
+                profile = {**appearance,'photos': photos, 'measurements': cleaned, 'notes': notes.strip(), 'revision': uuid.uuid4().hex}
                 previous = character.get('profile')
                 character['profile'] = profile
                 try:
@@ -2467,6 +2501,8 @@ class LibraryStore:
                     raise
             elif action != 'state':
                 raise ValueError('Unknown profile action.')
+            profile.setdefault('eye_color', '')
+            profile.setdefault('hair_color', '')
             profile.setdefault('measurements', {})
             profile.setdefault('notes', '')
             profile.setdefault('revision', '')
@@ -3361,6 +3397,7 @@ class LibraryStore:
                 "updated_at": stamp,
             }
             item.update(details)
+            item["colors"]=set_name_colors(name,item.get("colors",[]))
             self.data.setdefault("sets", []).append(item)
             self.save()
             return item
@@ -3429,6 +3466,7 @@ class LibraryStore:
             if favorite is not None:
                 item["favorite"] = favorite
             item["name"] = next_name
+            item["colors"]=set_name_colors(next_name,item.get("colors",[]))
             item["media_ids"] = members
             item["cover_media_id"] = cover
             item["updated_at"] = now_iso()

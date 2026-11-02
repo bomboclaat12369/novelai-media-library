@@ -1,5 +1,15 @@
 # NovelAI Media Library
 
+## Owned edition traits, media search and appearance (standalone 2.9.12 / runtime 2.7.67 / NovelAI 2.8.99 / Duplicate Review 2.0.16)
+
+**Edit special edition** shows owned edition traits separately from the displayed frame, with a live original-image card preview. Add or remove traits, then choose which owned frame to display. Existing manually equipped editions become owned traits. Automatic Current #1 / Former #1 awards remain available; those editions can also be added as manual traits. Bulk actions separately add a trait or display a frame shared by the selected cards. Captain crests follow actual set-captain assignments automatically and have no manual display controls.
+
+**Show special edition frames** hides edition artwork in the leaderboard without changing ownership, equipped choices or saved image positioning. The base presentation preserves the photo's position and scale relative to the full card. Edition filters match owned traits, and card backs list their sets and traits. Fit whole photo remains the default, and zoom uses the original image.
+
+Main media search matches associated set names as well as filenames: `white bikini` finds main images from White Bikini 1, 2, and other matching sets; `white` matches any associated set containing that text. It stays in media search. Search/filter fields have a right-hand clear button. Person profiles now save and display eye and hair color.
+
+Named colors are added to existing and future set color tags in the media library, local organizer and completed bulk-set drafts. Existing tags, timestamps, members, review decisions, inventory and analysis remain intact. Update both applications and restart to load the changes; no rescan is needed.
+
 ## Organizer visibility and favorites (Duplicate Review 2.0.15)
 
 **Highlight unassigned** toggles a red border and lower banner on images without a set, in both the main grid and suggestions. Selected images retain their gold border. The header shows **unassigned / total images** across the collection, including Unsorted and excluding discarded images and unresolved quarantine copies. Counts and highlights update after saving, removing, discarding and undoing.
