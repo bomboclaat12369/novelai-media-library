@@ -1068,3 +1068,22 @@ use. Card photos fill their opening by default; **Position card** also offers
 **Fit whole photo**. Appearance changes preserve the original images and rankings.
 Update the companion runtime to 2.7.64 for saved edition settings, then load
 standalone 2.9.8. The NovelAI overlay remains 2.8.98.
+
+### Standalone 2.9.9 — larger leaderboard cards and consistent framing
+
+Leaderboards now default to eight cards per row with 8px gaps and compact action
+strips. **Cards per row** offers 4–10 columns; narrow windows use fewer columns
+so cards remain readable. Base and special editions share the same outer size.
+
+Under the rank badges, **Special edition frames** opens all twelve approved
+frames, with full-size artwork previews. **Edition filter** shows special
+editions, base cards, or one specific edition.
+
+**Position card** now displays the equipped special edition. Leaderboard,
+fullscreen, and positioning views use the same saved fill/contain, position,
+and zoom settings. Saving framing refreshes the leaderboard when the viewer
+closes. Runtime remains 2.7.64; this is a standalone UI update.
+
+Validated with `tests/test-card-edition-layout-ui.cjs`: eight-column default,
+frame gallery, edition filters, and normalized photo geometry across the editor,
+fullscreen, 4/8/10-column grids and a narrow viewport, using both fill and contain.
