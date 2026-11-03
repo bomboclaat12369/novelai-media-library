@@ -1,5 +1,13 @@
 # NovelAI Media Library
 
+## Rank badge sizing correction (standalone 2.9.15)
+
+Rank artwork keeps an SVG icon container so existing thumbnail, viewer, set,
+profile, trophy and base-card sizing rules still apply. This fixes ranked
+thumbnail emblems inheriting ordinary photo styles and covering the image.
+The approved artwork and calibrated special-edition rank positions are unchanged.
+Companion remains 2.7.69; only the Media Library interface needs this update.
+
 ## Final card layouts and seven rank emblems (standalone 2.9.14 / runtime 2.7.69)
 
 All 13 approved special editions now use the larger exact 3:4 photo opening,

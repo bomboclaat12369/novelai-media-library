@@ -12,14 +12,14 @@ class E{
 function canvas(){const c=createCanvas(1,1),e=new E('canvas');for(const k of Object.keys(e))c[k]=e[k];c.setAttribute=e.setAttribute;c.log=[];const ctx=c.getContext('2d'),fill=ctx.fillText.bind(ctx);ctx.fillText=(s,...a)=>{c.log.push(s);return fill(s,...a)};return c;}
 const root=new E('root');root.naiGetLibrary=()=>({characters:[{id:'owner',name:'Alexandria Montgomery'}]});root.naiCards={ovr:e=>e.rating,fitBattle:()=>{},lightCard:e=>{const c=new E('div');c.dataset.cardKind=e.testKind||'image';return c},battle:()=>new E('div')};
 const context={document:{getElementById:()=>({shadowRoot:root}),createElement:t=>t==='canvas'?canvas():new E(t),createElementNS:(_,t)=>new E(t),fonts:{add(){}}},naiCardEditionAssets:pack,FontFace:class{load(){return Promise.resolve(this)}},ResizeObserver:class{observe(){}unobserve(){}},MutationObserver:class{observe(){}},queueMicrotask(){},localStorage:{getItem(){return null}},console};
-vm.runInNewContext(fs.readFileSync('payload/userscript-2.9.14.ranks.txt','utf8'),context);vm.runInNewContext(source,context);
+vm.runInNewContext(fs.readFileSync('payload/userscript-2.9.15.ranks.txt','utf8'),context);vm.runInNewContext(source,context);
 (async()=>{
  assert.equal(Object.keys(pack.editions).length,13);assert.equal(Object.keys(pack.ranks).length,7);assert.equal(root.naiCards.editionNames.length,13);
  const alphas={};for(const [tier,p]of Object.entries(pack.ranks)){
   const im=await loadImage(p),c=createCanvas(im.width,im.height),ctx=c.getContext('2d');ctx.drawImage(im,0,0);const a=ctx.getImageData(0,0,im.width,im.height).data;let l=im.width,t=im.height,r=0,b=0;
   for(let y=0;y<im.height;y++)for(let x=0;x<im.width;x++)if(a[(y*im.width+x)*4+3]>8){l=Math.min(l,x);t=Math.min(t,y);r=Math.max(r,x+1);b=Math.max(b,y+1)}
   alphas[tier]={bounds:[l,t,r,b],width:im.width,height:im.height};assert.deepEqual(pack.rankGeometry[tier].bounds,alphas[tier].bounds);
-  const badge=root.naiRanks.badge(tier);assert.equal(badge.children[0].tag,'img');assert.equal(badge.children[0].src,p);
+  const badge=root.naiRanks.badge(tier);assert.equal(badge.children[0].tag,'svg');assert.equal(badge.children[0].children[0].tag,'image');assert.equal(badge.children[0].children[0].attrs.href,p);
  }
  assert.equal(root.naiRanks.emblem('Placement').tag,'svg');
  let count=0;
