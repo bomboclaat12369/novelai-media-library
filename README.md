@@ -1,3 +1,10 @@
+## Temporary Yoga artwork preview (Media Library 2.9.22)
+
+Adds a Yoga preview button beside Collection HQ. It opens the current unaltered
+artwork for review, without adding a trait or changing any live cards or crops.
+Companion remains 2.7.71. The preview uses the existing temporary URL-preview
+route and requires an internet connection on first open; nothing is imported.
+
 ## Special-edition overall and rank sizing (Media Library 2.9.21)
 
 Enlarges the local rating and rank housings on the approved special editions,

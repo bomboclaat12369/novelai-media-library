@@ -1,0 +1,27 @@
+// Temporary artwork review only; no traits, saved cards or framing are changed.
+(()=>{
+ 'use strict';
+ const root=document.getElementById('nai-media-host')?.shadowRoot;
+ if(!root?.naiCards)return;
+ const source='https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/assets/cards/editions/yoga-preview.webp';
+ let cached;
+ const button=document.createElement('button');
+ button.type='button';button.id='naiYogaPreview';button.textContent='Yoga preview';
+ button.onclick=()=>{
+  const m=root.naiCards.modal('Yoga · temporary artwork preview');
+  const note=document.createElement('p');note.textContent='Loading current artwork…';m.body.append(note);
+  m.run(async()=>{
+   if(!cached){
+    const response=await fetch('/api/preview/url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:source})});
+    if(!response.ok)throw Error('Could not load the yoga preview. Check your internet connection and try again.');
+    cached=await response.blob();
+   }
+   if(!m.wrap.isConnected)return;
+   const image=document.createElement('img'),url=URL.createObjectURL(cached);image.src=url;image.alt='Current yoga special edition frame preview';
+   image.style.cssText='display:block;max-width:100%;height:76vh;width:auto;object-fit:contain;margin:auto;background:#202630';
+   try{await image.decode();}finally{URL.revokeObjectURL(url);}
+   note.textContent='Current design study — original artwork, before text and rank fitting.';m.body.append(image);
+  });
+ };
+ (root.getElementById('naiCollectionBtn')||root.getElementById('randomBtn'))?.after(button);
+})();
