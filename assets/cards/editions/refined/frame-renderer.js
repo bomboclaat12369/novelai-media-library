@@ -41,7 +41,7 @@ const RefinedRenderer = (() => {
     const x=b.x-(m.actualBoundingBoxRight-m.actualBoundingBoxLeft)/2,y=b.y+(asc-desc)/2;
     const g=ctx.createLinearGradient(0,b.y-b.height/2,0,b.y+b.height/2);
     g.addColorStop(0,palette[0]);g.addColorStop(.42,palette[1]);g.addColorStop(.53,palette[0]);g.addColorStop(1,palette[1]);
-    ctx.fillStyle=g;ctx.strokeStyle=palette[2];ctx.lineWidth=.9;ctx.shadowColor='#000b';ctx.shadowBlur=2;ctx.shadowOffsetY=1.8;
+    ctx.fillStyle=g;ctx.strokeStyle=palette[2];ctx.lineWidth=palette[3]||.9;ctx.shadowColor='#000b';ctx.shadowBlur=2;ctx.shadowOffsetY=1.8;
     ctx.strokeText(text,x,y);ctx.fillText(text,x,y);ctx.restore();
     return {x:x-m.actualBoundingBoxLeft,y:y-asc,width:m.actualBoundingBoxLeft+m.actualBoundingBoxRight,height:asc+desc,box:b};
   }

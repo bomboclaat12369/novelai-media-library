@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import mimetypes
+import subprocess
 import sys
 from pathlib import Path
 
@@ -29,6 +30,9 @@ if config.get('edition_catalog'):
         catalog[kind]={key:embedded(path) for key,path in catalog[kind].items()}
     asset_code+='const naiCardEditionAssets=Object.freeze('+json.dumps(catalog,separators=(',',':'))+');\n'
 script = (asset_code + bootstrap + '\n' + payload).replace('</script', '<\\/script')
+if config.get('minify_javascript'):
+    script = subprocess.run(['node', 'tools/minify-standalone.cjs'], input=script,
+                            text=True, capture_output=True, check=True).stdout
 html = f'''<!doctype html>
 <html lang="en" data-nai-standalone="1" data-nai-media-payload-version="{version}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">

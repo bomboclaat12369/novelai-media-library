@@ -1,4 +1,6 @@
 const GuideRenderer = (() => {
+  // Number colors follow the emblem; the small OVR label stays neutral.
+  const rankPalettes={Bronze:['#ffd0a5','#c8804b','#28150a',2.2],Silver:['#ffffff','#c5d0df','#121b29',2.2],Gold:['#ffe99e','#e4b12f','#302007',2.2],Platinum:['#a0ffe8','#14c6a4','#073b32',2.2],Diamond:['#b6e4ff','#299cf5','#082d52',2.2],Master:['#e5b9ff','#ad63ed','#28103f',2.2],Grandmaster:['#ffe89b','#d5a034','#030307',3]};
   function distance(p,a,b){const dx=b[0]-a[0],dy=b[1]-a[1],t=Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[1]-a[1])*dy)/(dx*dx+dy*dy||1)));return Math.hypot(p[0]-a[0]-t*dx,p[1]-a[1]-t*dy);}
   function inside(p,poly){let yes=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>p[1])!==(b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])yes=!yes;}return yes;}
   function fits(zone,w,h){
@@ -16,8 +18,8 @@ const GuideRenderer = (() => {
     return R.centered(ctx,text,{x:z.anchor[0],y:z.anchor[1],width:m.width+.001,height:m.height+.001},z.maxFontSize*scale,font,palette);
   }
   function lettering(ctx,layout,zones,state,R){
-    const p=layout.palette,rp=layout.ratingDark?['#684734','#3e251e','#21130e']:p,z=zones.rating,result={};
-    const number=String(state.rating||'0'),font='EditionNumeralsV2';
+    const p=layout.palette,tierPalette=rankPalettes[state.rankTier],rp=tierPalette||(layout.ratingDark?['#684734','#3e251e','#21130e']:p),lp=tierPalette?['#f2f1ed','#c0c7d0','#111826']:rp,z=zones.rating,result={};
+    const number=String(state.rating||'0'),font=tierPalette?'EditionRankNumeralsV1':'EditionNumeralsV2';
     function dims(s){const n=measure(ctx,number,z.maxFontSize*s,font),l=measure(ctx,'OVR',z.maxFontSize*32/88*s,font);return {n,l,width:n.width+l.width+10*s,height:Math.max(n.height,l.height),gap:10*s};}
     if(state.ratingStyle==='number'){
       result.rating=label(ctx,number,z,font,rp,R);
@@ -25,7 +27,7 @@ const GuideRenderer = (() => {
     const s=fittingScale(z,dims),d=dims(s),left=z.anchor[0]-d.width/2;
     if(s>.001){
       const n=R.centered(ctx,number,{x:left+d.n.width/2,y:z.anchor[1],width:d.n.width+.001,height:d.n.height+.001},z.maxFontSize*s,font,rp);
-      const l=R.centered(ctx,'OVR',{x:left+d.n.width+d.gap+d.l.width/2,y:z.anchor[1]+(d.n.height-d.l.height)/2,width:d.l.width+.001,height:d.l.height+.001},z.maxFontSize*32/88*s,font,rp);
+      const l=R.centered(ctx,'OVR',{x:left+d.n.width+d.gap+d.l.width/2,y:z.anchor[1]+(d.n.height-d.l.height)/2,width:d.l.width+.001,height:d.l.height+.001},z.maxFontSize*32/88*s,font,lp);
       result.rating={x:n.x,y:Math.min(n.y,l.y),width:l.x+l.width-n.x,height:Math.max(n.y+n.height,l.y+l.height)-Math.min(n.y,l.y),box:{x:z.anchor[0],y:z.anchor[1]}};
     }
     }
@@ -60,6 +62,8 @@ const GuideRenderer = (() => {
     }
     return true;
   }
-  return {inside,fits,distance,measure,fittingScale,label,lettering,rank,validate};
+  return {inside,fits,distance,measure,fittingScale,label,lettering,rank,validate,rankPalettes};
 })();
-if(typeof module!=='undefined')module.exports=GuideRenderer;
+
+
+if(typeof module !== 'undefined') module.exports=GuideRenderer;

@@ -1,0 +1,5 @@
+{
+  "name": "novelai-media-release-tools",
+  "private": true,
+  "devDependencies": { "terser": "5.44.0" }
+}

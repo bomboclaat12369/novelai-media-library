@@ -1,3 +1,28 @@
+## Special-edition overall and rank sizing (Media Library 2.9.21)
+
+Enlarges the local rating and rank housings on the approved special editions,
+using Ass as the emblem-size reference. Overall numbers follow their rank's
+color, with a smaller neutral OVR label. Pregnant is completely unchanged.
+Signature and Christmas retain their existing overall plaques; Ass retains its
+artwork and sizing. Each revised housing keeps its edition's materials and shape.
+
+The 840×1120 photo opening, saved photo framing, names and placement guides remain
+unchanged. All seven emblems use visible-alpha centering with controlled overlap.
+Typography fits the measured interior polygons and centers the complete label.
+Updated overall labels load the bundled numeral font directly from bytes so the
+local app’s data-URL font restriction cannot silently substitute another font.
+Pregnant, names and placements retain their existing typography path.
+The approved #1 and Hall of Fame previews are included exactly. Companion stays
+2.7.71 and the NovelAI overlay stays 2.8.100.
+
+Validation: production renderer, all 13 cards in Chromium, overall values 0–99,
+placements 7/92, long names, seven emblem sizes, preserved Pregnant asset and
+metadata, and the verified updater's full document route.
+
+Build setup: `npm ci --prefix tools`, then `python3 tools/build-release.py`.
+The shipped document uses pinned Terser minification and lossless artwork
+compression; readable source remains in the repository.
+
 ## Approved base card family (Media Library 2.9.20)
 
 Replaces the geometric base frames with the approved machined-metal artwork for

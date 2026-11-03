@@ -1,3 +1,33 @@
+# Current production checkpoint: 2.9.21
+
+`../catalog.json` and its referenced `.webp` assets are authoritative for current
+production frames and measured guides. The older `baseline.json`, PNG/source
+artwork, and `layout-guides.json` below are historical checkpoints and must not
+be re-imported over this release without reconciliation.
+
+Eleven frame assets have locally regenerated upper rating/rank housings. Their
+central motifs, rails and footers are preserved outside the local patches. The
+#1 and Hall of Fame patches are the exact approved viewer composites. The
+Pregnant artwork and full catalog entry are unchanged. Ass's artwork is also
+unchanged. All output frames remain 1050×1500 lossless WebP with transparency.
+
+The catalog `rankColoredOverall` flag enables emblem-colored overall numerals
+and neutral smaller OVR text. Updated overall labels use the same bundled
+numeral font under the EditionRankNumeralsV1 alias, loaded from bytes to avoid
+blocked data-URL font requests in the local app. Pregnant does not opt in.
+Names and placements retain their existing font path. Shared guide rendering
+continues centering the complete visible text and fitting it inside the plaque
+polygon. Rank geometry remains based on each emblem's visible alpha bounds.
+Photo opening and saved framing references, plus all name/placement guides,
+are preserved. Ass's corrected placement anchor remains [525.5,1426.5].
+
+Browser and native-renderer verification cover all cards, seven ranks, overall
+values 0–99, 7/92 placements, long names, and the packaged update document.
+
+---
+
+## Historical checkpoint notes
+
 # Approved larger-photo cards — all 13 editions
 
 The authoritative production checkpoint is now `baseline.json` and
