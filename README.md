@@ -1,3 +1,13 @@
+## Matched base-card photographs (Media Library 2.9.18)
+
+All seven base ranks now use the special-edition photo opening: x=105, y=195,
+width=840, height=1120 on a 1050×1500 card (exactly 3:4). The existing metallic
+outer rails, tier colors/engraving, shield designs and faceted footer remain.
+The inner photo trim follows the shared opening. Existing explicit crop references
+are respected; legacy custom crops retain their old base-card reference geometry.
+Profiles, card backs, special-edition artwork and set voting mosaics are unchanged.
+Only the Media Library interface needs updating; companion remains 2.7.71.
+
 ## Card maintenance mode (2.9.17 / companion 2.7.71)
 
 Leaderboard Debug mode shows the Position editor's red photo boundary, default

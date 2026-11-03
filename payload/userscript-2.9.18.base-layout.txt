@@ -1,0 +1,24 @@
+// Base cards retain their metal artwork; photographs share the edition geometry.
+(()=>{
+ 'use strict';
+ const root=document.getElementById('nai-media-host')?.shadowRoot,cards=root?.naiCards;if(!cards)return;
+ const legacy={left:.05,top:.038,width:.90,height:.84};
+ const style=document.createElement('style');style.textContent=`
+ .naiPortraitCard:not(.naiEdition)>.naiCardPhotoWindow,
+ .naiPortraitCard:not(.naiEdition)>.naiBattleGalleryVisual{
+  left:10%!important;top:13%!important;width:80%!important;height:74.66666666666667%!important;
+  padding:0!important;border:0!important;box-shadow:none!important;
+ }
+ `;root.append(style);
+ function prepare(card){
+  if(!card?.classList.contains('naiPortraitCard')||card.classList.contains('naiEdition'))return card;
+  const im=card.querySelector('.naiFramedSource,.naiBattleGalleryVisual img,.naiBattlePhoto');
+  if(im){
+   // Explicit references always win in layoutPhoto; these only cover old crops
+   // saved before references existed. Default crops use the actual shared opening.
+   if(!im.naiLegacyFramingReference)im.naiLegacyFramingReference=legacy;
+  }
+  return card;
+ }
+ for(const method of ['battle','lightCard']){const original=cards[method];cards[method]=function(...args){return prepare(original(...args));};}
+})();
