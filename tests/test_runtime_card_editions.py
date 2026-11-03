@@ -64,6 +64,22 @@ class CardEditions(unittest.TestCase):
         self.assertEqual(data['collection']['frames']['image:'+a['id']]['fit'],'contain')
         self.assertEqual(a,original)
         with self.assertRaises(ValueError):self.collection('frame',revision=data['collection']['revision'],key='image:'+a['id'],media_id=a['id'],frame={'x':0,'y':0,'zoom':1,'fit':'stretch'})
+    def test_framing_reference_round_trips_without_touching_media_or_traits(self):
+        a=self.import_image(0);data=self.collection();original=copy.deepcopy(a)
+        data=self.collection('edition',revision=data['collection']['revision'],entry_id=a['id'],choice='cosplay',add_traits=['cosplay','christmas'])
+        traits=copy.deepcopy(data['collection']['editions']);battle=copy.deepcopy(self.store.battles._load())
+        reference={'left':.114,'top':.127,'width':.772,'height':.665}
+        frame={'x':12,'y':-6,'zoom':1.4,'fit':'fill','reference':reference}
+        data=self.collection('frame',revision=data['collection']['revision'],key='image:'+a['id'],media_id=a['id'],frame=frame)
+        self.assertEqual(data['collection']['frames']['image:'+a['id']],frame)
+        self.store.save();loaded=type(self.store)(self.store.root)
+        saved=loaded.collection_request('state',{'character_id':self.character['id']})
+        self.assertEqual(saved['collection']['frames']['image:'+a['id']],frame)
+        self.assertEqual(data['collection']['editions'],traits);self.assertEqual(a,original);self.assertEqual(self.store.battles._load(),battle)
+        for invalid in ({'left':0},dict(reference,width=float('nan')),dict(reference,width=2),dict(reference,left=-.1)):
+            with self.assertRaises(ValueError):self.collection('frame',revision=data['collection']['revision'],key='image:'+a['id'],media_id=a['id'],frame=dict(frame,reference=invalid))
+        data=self.collection('frame',revision=data['collection']['revision'],key='image:'+a['id'],media_id=a['id'],frame={'x':0,'y':0,'zoom':1,'fit':'contain','reference':None})
+        self.assertNotIn('reference',data['collection']['frames']['image:'+a['id']])
     def test_automatic_leader_former_and_opt_out(self):
         ids=[self.import_image(i)['id'] for i in range(12)];battle=self.store.battles
         board={'revision':'seed','ratings':{mid:{'rating':1400-i,'rd':80.,'played':20,'opponents':{other:1 for other in ids if other!=mid},'wins':10,'losses':10,'ties':0} for i,mid in enumerate(ids)},'history':[],'recent':[],'undo':[],'votes':0,'session':None}

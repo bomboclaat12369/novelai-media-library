@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "approved_editions": [
     "number-one",
     "former-one",
@@ -75,115 +75,221 @@
     "former-one": {
       "name": "Former #1",
       "automatic": true,
-      "art": "assets/cards/editions/former-one.webp",
+      "art": "assets/cards/editions/refined/former-one.png",
       "layout": {
         "rating": [
-          18.8,
-          13.3,
-          18.8,
-          4.4
+          17.135330518204285,
+          12.093037986324738,
+          18.89752670805036,
+          3.4959351275790556
         ],
         "name": [
-          50,
-          82.6,
-          68,
-          6
+          50.26075619295958,
+          90.05516431924883,
+          70.92568448500651,
+          2.4319248826291187
         ],
         "placing": [
-          50,
-          89.2,
-          24,
-          3.3
+          50.156453715775754,
+          94.05046948356808,
+          7.614080834419822,
+          2.5187793427230036
         ],
         "nameSize": 64,
         "placingSize": 44
       },
       "rankFits": {
         "Bronze": {
-          "left": 82.8,
-          "top": 13.608941979522184,
-          "width": 12.197610921501706,
-          "height": 8.538327645051194
+          "left": 83.41494425945966,
+          "top": 12.468979200290054,
+          "width": 11.199742367079196,
+          "height": 7.839819656955437
         },
         "Diamond": {
-          "left": 82.8,
-          "top": 13.608941979522184,
-          "width": 12.197610921501706,
-          "height": 8.538327645051194
+          "left": 83.42894393741851,
+          "top": 12.579628506824067,
+          "width": 11.525660795750811,
+          "height": 8.067962557025568
         },
         "Grandmaster": {
-          "left": 82.8,
-          "top": 13.605537542662116,
-          "width": 12.197610921501706,
-          "height": 8.538327645051194
+          "left": 83.42894393741851,
+          "top": 12.569304069251093,
+          "width": 11.495250081250148,
+          "height": 8.046675056875104
         }
       },
       "style": {
-        "--window-left": "11.7%",
-        "--window-right": "88.3%",
-        "--window-top": "13.5%",
-        "--window-bottom": "78.5%",
-        "--metal-light": "#fff8e9",
-        "--metal-mid": "#c8bca9",
-        "--metal-low": "#706754",
+        "--window-left": "10%",
+        "--window-right": "90%",
+        "--window-top": "13%",
+        "--window-bottom": "87.66666666666667%",
+        "--metal-light": "#fff8e5",
+        "--metal-mid": "#e0c17d",
+        "--metal-low": "#6c4824",
         "--mat": "#0d192b"
+      },
+      "legacyWindow": {
+        "left": 0.11699999999999999,
+        "top": 0.135,
+        "width": 0.766,
+        "height": 0.65
+      },
+      "refined": {
+        "sourceWidth": 1036,
+        "sourceHeight": 1518,
+        "layout": {
+          "opening": [
+            134,
+            213,
+            901,
+            1234
+          ],
+          "rating": [
+            198,
+            197,
+            190,
+            55
+          ],
+          "name": [
+            520,
+            1289,
+            680,
+            56
+          ],
+          "placing": [
+            519,
+            1381,
+            73,
+            58
+          ],
+          "rank": [
+            838,
+            200,
+            124,
+            116
+          ],
+          "palette": [
+            "#fff8e5",
+            "#e0c17d",
+            "#6c4824"
+          ]
+        }
+      },
+      "rankDefaultFit": {
+        "left": 83.42894393741851,
+        "top": 12.478778974861248,
+        "width": 12.933507170795306,
+        "height": 7.624224616389161
       }
     },
     "cosplay": {
       "name": "Cosplay",
       "automatic": false,
-      "art": "assets/cards/editions/cosplay.webp",
+      "art": "assets/cards/editions/refined/cosplay.png",
       "layout": {
         "rating": [
-          21.5,
-          10.23,
-          16,
-          4.2
+          20.383189122373302,
+          10.10362694300518,
+          14.932014833127317,
+          3.233160621761657
         ],
         "name": [
-          49.905,
-          83.633,
-          70,
-          6
+          49.85166872682324,
+          90.4432809773124,
+          63.28800988875154,
+          2.3246073298429413
         ],
         "placing": [
-          49.952,
-          90.833,
-          23,
-          3.5
+          49.653893695920885,
+          93.86561954624783,
+          16.711990111248458,
+          1.9371727748691077
         ],
         "nameSize": 64,
         "placingSize": 44
       },
       "rankFits": {
         "Bronze": {
-          "left": 79.647,
-          "top": 10.55587372013652,
-          "width": 9.950682593856657,
-          "height": 6.96547781569966
+          "left": 79.70531121825192,
+          "top": 10.365198133503714,
+          "width": 8.309739860755554,
+          "height": 5.8168179025288875
         },
         "Diamond": {
-          "left": 79.647,
-          "top": 10.55587372013652,
-          "width": 9.950682593856657,
-          "height": 6.96547781569966
+          "left": 79.71569839307787,
+          "top": 10.44729528564655,
+          "width": 8.551557687391298,
+          "height": 5.986090381173909
         },
         "Grandmaster": {
-          "left": 79.647,
-          "top": 10.553096416382253,
-          "width": 9.950682593856657,
-          "height": 6.96547781569966
+          "left": 79.71569839307787,
+          "top": 10.439634985290693,
+          "width": 8.528994210643564,
+          "height": 5.970295947450495
         }
       },
       "style": {
-        "--window-left": "11.4%",
-        "--window-right": "88.6%",
-        "--window-top": "12.7%",
-        "--window-bottom": "79.2%",
-        "--metal-light": "#faf7ff",
-        "--metal-mid": "#c5c8e8",
-        "--metal-low": "#746a8f",
+        "--window-left": "10%",
+        "--window-right": "90%",
+        "--window-top": "13%",
+        "--window-bottom": "87.66666666666667%",
+        "--metal-light": "#fff9ff",
+        "--metal-mid": "#d4c5e3",
+        "--metal-low": "#655477",
         "--mat": "#141324"
+      },
+      "legacyWindow": {
+        "left": 0.114,
+        "top": 0.127,
+        "width": 0.7719999999999999,
+        "height": 0.665
+      },
+      "refined": {
+        "sourceWidth": 1049,
+        "sourceHeight": 1499,
+        "layout": {
+          "opening": [
+            119,
+            193,
+            928,
+            1308
+          ],
+          "rating": [
+            224,
+            150,
+            151,
+            48
+          ],
+          "name": [
+            522,
+            1351,
+            640,
+            36
+          ],
+          "placing": [
+            520,
+            1404,
+            169,
+            30
+          ],
+          "rank": [
+            824,
+            154,
+            92,
+            84
+          ],
+          "palette": [
+            "#fff9ff",
+            "#d4c5e3",
+            "#655477"
+          ]
+        }
+      },
+      "rankDefaultFit": {
+        "left": 79.71569839307787,
+        "top": 10.372469155881875,
+        "width": 9.097651421508036,
+        "height": 5.656855410209344
       }
     },
     "pregnant-orchid": {
@@ -302,60 +408,113 @@
       }
     },
     "valentines": {
-      "name": "Valentine\u2019s",
+      "name": "Valentine’s",
       "automatic": false,
-      "art": "assets/cards/editions/valentines.webp",
+      "art": "assets/cards/editions/refined/valentines.png",
       "layout": {
         "rating": [
-          25.453,
-          10.907,
-          27,
-          4.5
+          22.893401015228427,
+          10.193832599118942,
+          23.3502538071066,
+          3.1497797356828205
         ],
         "name": [
-          49.952,
-          86.258,
-          64,
-          5.5
+          49.796954314720814,
+          90.07971014492753,
+          35.53299492385787,
+          2.359420289855067
         ],
         "placing": [
-          50,
-          92.328,
-          23,
-          3
+          49.796954314720814,
+          94.5304347826087,
+          5.786802030456859,
+          2.573913043478266
         ],
         "nameSize": 64,
         "placingSize": 44
       },
       "rankFits": {
         "Bronze": {
-          "left": 81.077,
-          "top": 10.170474402730376,
-          "width": 10.913651877133105,
-          "height": 7.6395563139931735
+          "left": 81.15765351666067,
+          "top": 9.61424395286308,
+          "width": 7.887338955726974,
+          "height": 5.521137269008881
         },
         "Diamond": {
-          "left": 81.077,
-          "top": 10.170474402730376,
-          "width": 10.913651877133105,
-          "height": 7.6395563139931735
+          "left": 81.16751269035532,
+          "top": 9.690341206669483,
+          "width": 7.908095110873624,
+          "height": 5.535666577611537
         },
         "Grandmaster": {
-          "left": 81.077,
-          "top": 10.167428327645052,
-          "width": 10.913651877133105,
-          "height": 7.6395563139931735
+          "left": 81.16751269035532,
+          "top": 9.68342162344747,
+          "width": 7.908095110873624,
+          "height": 5.535666577611537
         }
       },
       "style": {
-        "--window-left": "11.3%",
-        "--window-right": "89.1%",
-        "--window-top": "14.8%",
-        "--window-bottom": "82.1%",
-        "--metal-light": "#fff1df",
-        "--metal-mid": "#e6b8a0",
-        "--metal-low": "#934a38",
+        "--window-left": "10%",
+        "--window-right": "90%",
+        "--window-top": "13%",
+        "--window-bottom": "87.66666666666667%",
+        "--metal-light": "#fff5e8",
+        "--metal-mid": "#e8b49c",
+        "--metal-low": "#864536",
         "--mat": "#260b13"
+      },
+      "legacyWindow": {
+        "left": 0.113,
+        "top": 0.14800000000000002,
+        "width": 0.7779999999999999,
+        "height": 0.6729999999999999
+      },
+      "refined": {
+        "sourceWidth": 1036,
+        "sourceHeight": 1518,
+        "layout": {
+          "opening": [
+            123,
+            227,
+            911,
+            1288
+          ],
+          "rating": [
+            250,
+            178,
+            230,
+            55
+          ],
+          "name": [
+            515,
+            1333,
+            350,
+            44
+          ],
+          "placing": [
+            515,
+            1416,
+            57,
+            48
+          ],
+          "rank": [
+            824,
+            168,
+            74,
+            94
+          ],
+          "palette": [
+            "#fff5e8",
+            "#e8b49c",
+            "#864536"
+          ]
+        }
+      },
+      "rankDefaultFit": {
+        "left": 81.16751269035532,
+        "top": 9.62114537444934,
+        "width": 7.5126903553299424,
+        "height": 5.383259911894274
       }
     },
     "signature": {
@@ -592,7 +751,7 @@
       }
     },
     "whore-stage": {
-      "name": "Whore \u00b7 Stage",
+      "name": "Whore · Stage",
       "automatic": false,
       "art": "assets/cards/editions/whore-stage.webp",
       "layout": {
@@ -610,7 +769,7 @@
         ],
         "placing": [
           50,
-          91.0,
+          91,
           24,
           3.1
         ],
@@ -732,6 +891,9 @@
     "assets/cards/editions/halloween.webp": "575a5d90c8247279e301ac514f9c980e4c10afe903dce82bb991c309b1c08c8e",
     "assets/cards/editions/hidden-gem.webp": "aa578ca3e3ddca4e11a100d8e480387983ad5102ab9049c6965aa186180468c6",
     "assets/cards/editions/whore-stage.webp": "781e1cbfde7f732213f8cd81beb644ff4a7dc1d44fc318a71207c94b3ae97b30",
-    "assets/cards/editions/christmas.webp": "0f920d52d5944a54b51ccb3c8bcd51ad763dcd8ccafeb3c6a4bf4d1ee757d36f"
+    "assets/cards/editions/christmas.webp": "0f920d52d5944a54b51ccb3c8bcd51ad763dcd8ccafeb3c6a4bf4d1ee757d36f",
+    "assets/cards/editions/refined/former-one.png": "8c6e78057cfea080839d580d42efa368c201118192c05452d77c1defe42eb5bc",
+    "assets/cards/editions/refined/valentines.png": "86c259f733d7aea14d77be6eb6388108f81d399566af987264b81346a530f247",
+    "assets/cards/editions/refined/cosplay.png": "f00323f82bc6c02726ec1564c89c08c5f43d8ad508429fd14e8fc54ed6f81972"
   }
 }

@@ -1,0 +1,177 @@
+{
+  "status": "studio review; not deployed",
+  "canvas": {
+    "width": 1050,
+    "height": 1500
+  },
+  "photo_viewport": {
+    "x": 105,
+    "y": 195,
+    "width": 840,
+    "height": 1120,
+    "ratio": "3:4"
+  },
+  "note": "The common rectangular photo viewport is exact. Decorative top motifs and rounded/ornate corners overlap portions of that rectangle. Original generated alpha and pixels are retained; source frame grids are mapped by renderer.js. Do not treat source PNGs alone as the normalized final layout. These are studio assets awaiting visual approval and app integration.",
+  "layouts": {
+    "former-one": {
+      "opening": [
+        134,
+        213,
+        901,
+        1234
+      ],
+      "rating": [
+        198,
+        197,
+        190,
+        55
+      ],
+      "name": [
+        520,
+        1289,
+        680,
+        56
+      ],
+      "placing": [
+        519,
+        1381,
+        73,
+        58
+      ],
+      "rank": [
+        838,
+        200,
+        124,
+        116
+      ],
+      "palette": [
+        "#fff8e5",
+        "#e0c17d",
+        "#6c4824"
+      ]
+    },
+    "valentines": {
+      "opening": [
+        123,
+        227,
+        911,
+        1288
+      ],
+      "rating": [
+        250,
+        178,
+        230,
+        55
+      ],
+      "name": [
+        515,
+        1333,
+        350,
+        44
+      ],
+      "placing": [
+        515,
+        1416,
+        57,
+        48
+      ],
+      "rank": [
+        824,
+        168,
+        74,
+        94
+      ],
+      "palette": [
+        "#fff5e8",
+        "#e8b49c",
+        "#864536"
+      ]
+    },
+    "cosplay": {
+      "opening": [
+        119,
+        193,
+        928,
+        1308
+      ],
+      "rating": [
+        224,
+        150,
+        151,
+        48
+      ],
+      "name": [
+        522,
+        1351,
+        640,
+        36
+      ],
+      "placing": [
+        520,
+        1404,
+        169,
+        30
+      ],
+      "rank": [
+        824,
+        154,
+        92,
+        84
+      ],
+      "palette": [
+        "#fff9ff",
+        "#d4c5e3",
+        "#655477"
+      ]
+    }
+  },
+  "sources": {
+    "former-one": {
+      "file": "assets/frames/former-one.png",
+      "sha256": "f6babe542317982ec9c850ae60624d4444ab8127567f6f2f251471c93f07378d",
+      "source_generation_file": "exec-f324dbff-7b26-4600-bf31-ce61ffb05ae2.png"
+    },
+    "valentines": {
+      "file": "assets/frames/valentines.png",
+      "sha256": "32880fd57c671d88bdb1b8d7b90c3fd9cb56857cbc65db78284c920d064114f1",
+      "source_generation_file": "exec-8f3c5785-b23a-4669-8fee-584f867c7d28.png"
+    },
+    "cosplay": {
+      "file": "assets/frames/cosplay.png",
+      "sha256": "5a4e694571dbc2c692fa544d1e1aa2ad944e68945f98bc2787371b90ce8627d9",
+      "source_generation_file": "exec-b8870827-d549-4f0b-a5a5-bfee734f18db.png"
+    }
+  },
+  "rankGeometry": {
+    "Bronze": {
+      "width": 400,
+      "height": 400,
+      "bounds": [
+        10,
+        6,
+        391,
+        395
+      ]
+    },
+    "Diamond": {
+      "width": 400,
+      "height": 400,
+      "bounds": [
+        10,
+        6,
+        390,
+        384
+      ]
+    },
+    "Grandmaster": {
+      "width": 400,
+      "height": 400,
+      "bounds": [
+        10,
+        6,
+        390,
+        385
+      ]
+    }
+  }
+}

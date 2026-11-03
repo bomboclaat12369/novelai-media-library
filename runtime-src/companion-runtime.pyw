@@ -2389,8 +2389,19 @@ class LibraryStore:
                 fit=frame.get('fit','contain')
                 if fit not in ('fill','contain'):
                     raise ValueError('Choose fill opening or fit whole photo.')
+                reference=frame.get('reference')
+                if reference is not None:
+                    if not isinstance(reference,dict) or set(reference)!=set(('left','top','width','height')):
+                        raise ValueError('Invalid card framing reference.')
+                    if any(type(v) not in (int,float) or not math.isfinite(v) for v in reference.values()):
+                        raise ValueError('Invalid card framing reference.')
+                    if not (0 <= reference['left'] < 1 and 0 <= reference['top'] < 1 and
+                            0 < reference['width'] <= 1 and 0 < reference['height'] <= 1 and
+                            reference['left']+reference['width'] <= 1.001 and reference['top']+reference['height'] <= 1.001):
+                        raise ValueError('Invalid card framing reference.')
                 data['frames'][key] = {name:frame[name] for name in ('x','y','zoom')}
                 data['frames'][key]['fit']=fit
+                if reference is not None:data['frames'][key]['reference']=dict(reference)
             elif action == 'review':
                 mid = body.get('media_id')
                 if mid not in media:
