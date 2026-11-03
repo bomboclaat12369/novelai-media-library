@@ -1,0 +1,332 @@
+{
+  "version": 1,
+  "canvas": {
+    "width": 1050,
+    "height": 1500
+  },
+  "sourceSize": [
+    1036,
+    1518
+  ],
+  "opening": [
+    96,
+    194,
+    938,
+    1237
+  ],
+  "outer": [
+    [
+      100,
+      59
+    ],
+    [
+      935,
+      59
+    ],
+    [
+      980,
+      106
+    ],
+    [
+      980,
+      1377
+    ],
+    [
+      908,
+      1453
+    ],
+    [
+      126,
+      1453
+    ],
+    [
+      55,
+      1377
+    ],
+    [
+      55,
+      107
+    ]
+  ],
+  "aperture": [
+    [
+      110,
+      194
+    ],
+    [
+      726,
+      194
+    ],
+    [
+      766,
+      216
+    ],
+    [
+      902,
+      216
+    ],
+    [
+      924,
+      195
+    ],
+    [
+      938,
+      213
+    ],
+    [
+      938,
+      1206
+    ],
+    [
+      912,
+      1237
+    ],
+    [
+      124,
+      1237
+    ],
+    [
+      96,
+      1208
+    ],
+    [
+      96,
+      212
+    ]
+  ],
+  "zones": {
+    "rating": {
+      "outline": [
+        [
+          131,
+          100
+        ],
+        [
+          379,
+          100
+        ],
+        [
+          411,
+          135
+        ],
+        [
+          379,
+          169
+        ],
+        [
+          101,
+          169
+        ],
+        [
+          101,
+          127
+        ]
+      ],
+      "anchor": [
+        254,
+        134.5
+      ],
+      "fit": [
+        275,
+        58
+      ],
+      "padding": 5,
+      "maxFontSize": 90
+    },
+    "rank": {
+      "outline": [
+        [
+          770,
+          80
+        ],
+        [
+          895,
+          80
+        ],
+        [
+          925,
+          108
+        ],
+        [
+          925,
+          169
+        ],
+        [
+          895,
+          199
+        ],
+        [
+          770,
+          199
+        ],
+        [
+          742,
+          169
+        ],
+        [
+          742,
+          108
+        ]
+      ],
+      "anchor": [
+        833.5,
+        139.5
+      ],
+      "fit": [
+        130,
+        111
+      ],
+      "padding": 4,
+      "maxFontSize": 0,
+      "overflowPercent": 0
+    },
+    "name": {
+      "outline": [
+        [
+          140,
+          1260
+        ],
+        [
+          885,
+          1260
+        ],
+        [
+          932,
+          1313
+        ],
+        [
+          886,
+          1356
+        ],
+        [
+          140,
+          1356
+        ],
+        [
+          101,
+          1313
+        ]
+      ],
+      "anchor": [
+        516.5,
+        1308
+      ],
+      "fit": [
+        744,
+        75
+      ],
+      "padding": 5,
+      "maxFontSize": 100
+    },
+    "placing": {
+      "outline": [
+        [
+          458,
+          1377
+        ],
+        [
+          575,
+          1377
+        ],
+        [
+          595,
+          1403
+        ],
+        [
+          574,
+          1433
+        ],
+        [
+          458,
+          1433
+        ],
+        [
+          438,
+          1403
+        ]
+      ],
+      "anchor": [
+        516.5,
+        1405
+      ],
+      "fit": [
+        127,
+        45
+      ],
+      "padding": 4,
+      "maxFontSize": 80
+    }
+  },
+  "frames": {
+    "Bronze": {
+      "art": "assets/cards/base/refined/bronze.avif",
+      "palette": [
+        "#ffe2c6",
+        "#cc8654",
+        "#502b17"
+      ],
+      "sourceSha256": "66efc77eaba5074c349ef4a263b78cc212c7835d9d09a195b4399713f6f85883",
+      "sha256": "f2ff3505c30a8b0aa95c0d7087474394de94618af01a8fb96fa0d6fadade03bb"
+    },
+    "Silver": {
+      "art": "assets/cards/base/refined/silver.avif",
+      "palette": [
+        "#ffffff",
+        "#becbd6",
+        "#35404f"
+      ],
+      "sourceSha256": "2950c340645d881809c46f1701693855b9e1d6d87dd79f31cdac949e90dfe1d0",
+      "sha256": "d711819a010eb8057bfb2b6659c7651363cbc20ce5376f2a23945de50fdc76a8"
+    },
+    "Gold": {
+      "art": "assets/cards/base/refined/gold.avif",
+      "palette": [
+        "#fff2c8",
+        "#e6b753",
+        "#57371b"
+      ],
+      "sourceSha256": "ebca6829ff6d81bed00cbd92da1809558180f12558ab2f930daad12c0071607f",
+      "sha256": "718f3601f893af71721423abadba943cb60197cbecf490f65af3e20dc750f06b"
+    },
+    "Platinum": {
+      "art": "assets/cards/base/refined/platinum.avif",
+      "palette": [
+        "#effffd",
+        "#b8e2dc",
+        "#214e48"
+      ],
+      "sourceSha256": "b841b607a0624ff0c537966e94a374458506f067efe6382a7c273417040cc95d",
+      "sha256": "66aaed7e7127d8d74b88df02becb16a910bafba4f474cd90d52b2c864fa2886c"
+    },
+    "Diamond": {
+      "art": "assets/cards/base/refined/diamond.avif",
+      "palette": [
+        "#effaff",
+        "#afd9ff",
+        "#254d70"
+      ],
+      "sourceSha256": "d868ae6804753d486cf4a964050a56f2d536701f9f4cc8110772d3df97b53b29",
+      "sha256": "656c4bb9cd71ddee94dea356063a8a3e8b952d864bf6ae1814b1646b57387c30"
+    },
+    "Master": {
+      "art": "assets/cards/base/refined/master.avif",
+      "palette": [
+        "#fff0ff",
+        "#d9b4f7",
+        "#46215f"
+      ],
+      "sourceSha256": "af7c1a6da05595c6e9c2507a3ad56a05751ee871ff7c1c298be5fbaa56b2010b",
+      "sha256": "8ba6746cb08c0ac26f59d351c3138e96c42e6d2330480480c2c8aebde81910a9"
+    },
+    "Grandmaster": {
+      "art": "assets/cards/base/refined/grandmaster.avif",
+      "palette": [
+        "#fff3cf",
+        "#e3b550",
+        "#5c3715"
+      ],
+      "sourceSha256": "044532a2421dd89db28458e1e9d5cc3d9d0fd60324b36f0da95b1445e4b75b25",
+      "sha256": "d4de98f464fa1beff6e91e6a767663c1ff360244469802c90af31b9c2f1debac"
+    }
+  }
+}

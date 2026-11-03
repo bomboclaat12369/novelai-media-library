@@ -1,3 +1,19 @@
+## Approved base card family (Media Library 2.9.20)
+
+Replaces the geometric base frames with the approved machined-metal artwork for
+all seven ranks. The top edge is flat, and placement is inset into a continuous
+bottom frame. Grandmaster uses black metal with gold trim, Diamond blue metal,
+and Platinum teal metal so each remains distinct from Gold and Silver.
+
+Each frame is embedded in the interface for offline use. Measured contours and
+slot polygons map to the same 1050×1500 canvas and 840×1120 photo opening as the
+special editions. Text uses visible glyph bounds for centering; rank emblems use
+their visible alpha bounds. Source photos, crops, and special-edition artwork are
+preserved. Companion remains 2.7.71.
+
+Validation: all seven frames and a mixed eight-column leaderboard, names and
+placements 7/92, emblem centering, saved crops, Position editor, and set battles.
+
 ## Uniform base and special card proportions (Media Library 2.9.19)
 
 Replaces the oversized rectangular base-frame treatment from 2.9.18 with a

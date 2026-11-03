@@ -1,0 +1,63 @@
+// Approved machined base frames, with live typography and the shared 3:4 aperture.
+(()=>{
+ 'use strict';
+ const root=document.getElementById('nai-media-host')?.shadowRoot,cards=root?.naiCards;
+ const pack=typeof naiCardEditionAssets==='undefined'?null:naiCardEditionAssets,base=typeof naiCardBaseAssets==='undefined'?null:naiCardBaseAssets;
+ if(!cards?.frameTypography||!pack||!base)return;
+ const {guide:G,refined:R,ready}=cards.frameTypography,legacy={left:.05,top:.038,width:.90,height:.84};
+ const source={width:base.sourceSize[0],height:base.sourceSize[1]},layout={opening:base.opening},axes=R.axes(source,layout);
+ const point=([x,y])=>[R.map(x,axes.sx,axes.dx),R.map(y,axes.sy,axes.dy)];
+ const zones=Object.fromEntries(Object.entries(base.zones).map(([key,z])=>{
+  const anchor=point(z.anchor),a=point([z.anchor[0]-z.fit[0]/2,z.anchor[1]-z.fit[1]/2]),b=point([z.anchor[0]+z.fit[0]/2,z.anchor[1]+z.fit[1]/2]);
+  return [key,{...z,outline:z.outline.map(point),anchor,fit:[b[0]-a[0],b[1]-a[1]],padding:3}];
+ }));
+ cards.baseLayout={canvas:base.canvas,window:R.geometry.window,zones};
+ const style=document.createElement('style');style.textContent=`
+ .naiTradingCard.naiBaseUniform.naiCardShell{background:transparent!important;border:0!important;border-radius:0!important;padding:0!important;box-shadow:none!important;overflow:hidden!important;clip-path:none!important;aspect-ratio:7/10;--window-left:10%;--window-right:90%;--window-top:13%;--window-bottom:87.66666666666667%}
+ .naiBaseUniform>.naiCardOrnament,.naiBaseUniform>.naiCardRail,.naiBaseUniform>.naiCardName,.naiBaseUniform>.naiCardTitleArt{display:none!important}
+ .naiTradingCard.naiBaseUniform.naiCardShell>.naiCardPhotoWindow,.naiTradingCard.naiBaseUniform.naiCardShell>.naiBattleGalleryVisual{position:absolute!important;left:10%!important;top:13%!important;right:10%!important;bottom:12.33333333333333%!important;width:80%!important;height:74.66666666666667%!important;margin:0!important;padding:0!important;border:0!important;box-shadow:none!important;overflow:hidden;background:#080c12;z-index:1}
+ .naiBaseUniform>.naiBaseFrame,.naiBaseUniform>.naiBaseLetters{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;pointer-events:none!important;transform:none!important;border:0!important;padding:0!important;background-size:100% 100%;background-repeat:no-repeat}
+ .naiBaseFrame{z-index:4}.naiBaseLetters{z-index:5}
+ .naiBaseUniform>.naiBaseRank{position:absolute!important;z-index:5;pointer-events:none;transform:none!important;max-width:none!important;max-height:none!important}
+ `;root.append(style);
+
+ // Clip to measured frame contours. This excludes the extraction matte and keeps
+ // the photograph behind the bevels, including the upper-right emblem housing.
+ function contour(ctx,points){points.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.closePath();}
+ const frames=new Map();
+ cards.baseReady=Promise.all(Object.entries(base.frames).map(async([tier,frame])=>{
+  const image=new Image();image.src=frame.art;await image.decode();
+  const canvas=document.createElement('canvas');canvas.width=1050;canvas.height=1500;
+  const ctx=canvas.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+  ctx.beginPath();contour(ctx,base.outer.map(point));contour(ctx,base.aperture.map(point));ctx.clip('evenodd');R.frame(ctx,image,layout);
+  const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!blob)throw Error('Could not render '+tier+' frame');
+  frames.set(tier,URL.createObjectURL(blob));
+ }));
+ const tracked=new Map(),observer=new ResizeObserver(es=>{for(const {target}of es)draw(target,tracked.get(target));});
+ new MutationObserver(()=>{for(const [card]of tracked)if(!card.isConnected){observer.unobserve(card);tracked.delete(card);}}).observe(root,{childList:true,subtree:true});
+ function label(ctx,text,key,palette){
+  const z=zones[key],font='Arial, sans-serif';let lo=0,hi=z.maxFontSize;
+  for(let i=0;i<26;i++){const size=(lo+hi)/2;ctx.font='700 '+size+'px '+font;const m=ctx.measureText(text);if(G.fits(z,m.actualBoundingBoxLeft+m.actualBoundingBoxRight,m.actualBoundingBoxAscent+m.actualBoundingBoxDescent))lo=size;else hi=size;}
+  return R.centered(ctx,text,{x:z.anchor[0],y:z.anchor[1],width:z.fit[0],height:z.fit[1]},lo,font,palette);
+ }
+ function draw(card,info){
+  if(!info)return;const {entry,rows,owner,show,tier,palette}=info,canvas=card.querySelector('.naiBaseLetters');
+  const art=card.querySelector('.naiBaseFrame'),uri=frames.get(tier);if(uri&&art.dataset.ready!=='1'){art.style.backgroundImage='url("'+uri+'")';art.dataset.ready='1';}
+  const width=Math.max(1,Math.min(1575,Math.ceil((card.clientWidth||420)*2)));canvas.width=width;canvas.height=Math.round(width*1500/1050);const ctx=canvas.getContext('2d');ctx.setTransform(canvas.width/1050,0,0,canvas.height/1500,0,0);
+  const name=String(card.dataset.cardKind==='set'?entry.name:root.naiGetLibrary?.()?.characters?.find(c=>c.id===owner)?.name||'Collection');
+  const rating=show?String(cards.ovr(entry,rows)??'—'):'—',placing=show&&entry.position?String(entry.position):'—';
+  card.naiBaseTextMetrics={name:label(ctx,name.trim().toUpperCase()||'UNTITLED','name',palette),rating:label(ctx,rating+' OVR','rating',palette),placing:label(ctx,placing,'placing',palette)};
+  canvas.setAttribute('aria-label',name+', '+rating+' OVR, placing '+placing);
+ }
+ Promise.all([ready,cards.baseReady]).then(()=>{for(const [card,info]of tracked)draw(card,info);}).catch(error=>console.error('Base card artwork failed to load',error));
+ function prepare(card,entry,rows,owner,show){
+  if(!card?.classList.contains('naiPortraitCard')||card.classList.contains('naiEdition'))return card;
+  card.classList.add('naiBaseUniform');
+  const im=card.querySelector('.naiFramedSource,.naiBattleGalleryVisual img,.naiBattlePhoto');if(im&&!im.naiLegacyFramingReference)im.naiLegacyFramingReference=legacy;
+  const tier=show&&base.frames[entry.tier]?entry.tier:'Silver',palette=base.frames[tier].palette;
+  const art=document.createElement('div');art.className='naiBaseFrame';art.setAttribute('aria-hidden','true');const canvas=document.createElement('canvas');canvas.className='naiBaseLetters';card.append(art,canvas);
+  if(show){const rank=root.naiRanks.emblem(entry.tier||'Unranked');rank.classList.add('naiBaseRank');const source=pack.rankGeometry[entry.tier],box=source?G.rank(source,zones.rank,R):{x:zones.rank.anchor[0]-50,y:zones.rank.anchor[1]-50,width:100,height:100};rank.style.left=box.x/10.5+'%';rank.style.top=box.y/15+'%';rank.style.width=box.width/10.5+'%';rank.style.height=box.height/15+'%';rank.naiSlot=box;card.append(rank);}
+  const info={entry,rows,owner,show,tier,palette};draw(card,info);queueMicrotask(()=>{if(card.isConnected){tracked.set(card,info);observer.observe(card);draw(card,info);}});return card;
+ }
+ for(const method of ['battle','lightCard']){const original=cards[method];cards[method]=function(...args){return prepare(original(...args),args[method==='battle'?1:0],args[method==='battle'?2:1],args[method==='battle'?3:2],args[4]!==false);};}
+})();

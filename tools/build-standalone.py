@@ -12,6 +12,13 @@ payload = ''.join(Path(p).read_text() for p in config['parts'])
 bootstrap = Path('standalone-src/bootstrap.js').read_text()
 artwork={key:'data:image/webp;base64,'+base64.b64encode(Path(path).read_bytes()).decode('ascii') for key,path in config.get('title_artwork',{}).items()}
 asset_code='const naiCardTitleAssets=Object.freeze('+json.dumps(artwork,separators=(',',':'))+');\n'
+if config.get('base_catalog'):
+    bases=json.loads(Path(config['base_catalog']).read_text())
+    for frame in bases['frames'].values():
+        path=frame['art']
+        mime=mimetypes.guess_type(path)[0] or 'application/octet-stream'
+        frame['art']='data:'+mime+';base64,'+base64.b64encode(Path(path).read_bytes()).decode('ascii')
+    asset_code+='const naiCardBaseAssets=Object.freeze('+json.dumps(bases,separators=(',',':'))+');\n'
 if config.get('edition_catalog'):
     catalog=json.loads(Path(config['edition_catalog']).read_text())
     def embedded(path):
