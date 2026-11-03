@@ -3,7 +3,7 @@
 const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert/strict'),crypto=require('crypto'),{createRequire}=require('module');
 const req=createRequire(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/package.json'),{createCanvas,loadImage,GlobalFonts}=req('@napi-rs/canvas');
 const pack=JSON.parse(fs.readFileSync('assets/cards/editions/catalog.json')),R=require('../assets/cards/editions/refined/frame-renderer'),G=require('../assets/cards/editions/refined/guide-renderer');
-const source=fs.readFileSync('payload/userscript-2.9.14.editions.txt','utf8');
+const source=fs.readFileSync('payload/userscript-2.9.17.editions.txt','utf8');
 for(const [f,p]of Object.entries(pack.fonts))GlobalFonts.registerFromPath(p,f);
 class E{
  constructor(tag){this.tag=tag;this.children=[];this.className='';this.dataset={};this.attrs={};this.style={setProperty(k,v){this[k]=v}};this.classList={add:(...ns)=>{this.className+=' '+ns.join(' ')},contains:n=>this.className.split(' ').includes(n)};this.clientWidth=420;this.isConnected=false;}
@@ -31,13 +31,13 @@ vm.runInNewContext(fs.readFileSync('payload/userscript-2.9.15.ranks.txt','utf8')
    assert.equal(rank.src,pack.ranks[tier]);assert.equal(card.querySelector('.naiEditionFrame').src,e.art);
    const a=alphas[tier],[l,t,r,b]=a.bounds,w=parseFloat(rank.style.width)*10.5,h=parseFloat(rank.style.height)*15,x=parseFloat(rank.style.left)*10.5-w/2,y=parseFloat(rank.style.top)*15-h/2,z=e.guides.rank;
    assert(Math.abs(x+(l+r)/2*w/a.width-z.anchor[0])<1e-7);assert(Math.abs(y+(t+b)/2*h/a.height-z.anchor[1])<1e-7);
-   const expected=createCanvas(letters.width,letters.height),ctx=expected.getContext('2d');ctx.setTransform(letters.width/1050,0,0,letters.height/1500,0,0);const metrics=G.lettering(ctx,e.refined.layout,e.guides,{name:'Alexandria Montgomery',rating:'99',placing:String(position),ratingStyle:rating_style},R);
+   const expected=createCanvas(letters.width,letters.height),ctx=expected.getContext('2d');ctx.setTransform(letters.width/1050,0,0,letters.height/1500,0,0);const metrics=G.lettering(ctx,e.refined.layout,e.guides,{name:'Alexandria Montgomery',rating:'99',placing:String(position),ratingStyle:'side'},R);
    assert(letters.toBuffer('image/png').equals(expected.toBuffer('image/png')),'Production lettering mismatch: '+id);
-   assert.equal(letters.log.includes('OVR'),rating_style==='side');
+   assert.equal(letters.log.includes('OVR'),true);
    for(const [key,v]of Object.entries(metrics)){assert(v);assert(G.fits(e.guides[key],v.width,v.height));assert(Math.abs(v.x+v.width/2-e.guides[key].anchor[0])<.05);assert(Math.abs(v.y+v.height/2-e.guides[key].anchor[1])<.05)}
    count++;
   }
  }
  assert.deepEqual(pack.editions['ass-chrome'].guides.placing.anchor,[525.5,1426.5]);
- console.log(`Passed: ${count} production card renders; 13 native frames, seven actual alpha bounds, 7/92 whole-string centering, long names, both OVR modes, fallback ranks and saved Ass anchor.`);
+ console.log(`Passed: ${count} production card renders; 13 native frames, seven actual alpha bounds, 7/92 whole-string centering, long names, OVR forced beside the number for both legacy preferences, fallback ranks and saved Ass anchor.`);
 })().catch(e=>{console.error(e);process.exitCode=1});

@@ -41,7 +41,7 @@ class CardEditions(unittest.TestCase):
         rows={r['id']:r for r in self.board()['entries']}
         for item in (a,b):self.assertEqual(rows[item['id']]['edition_id'],'number-one')
         self.assertIsNone(rows[c['id']]['edition_id'])
-        self.assertEqual(rows[a['id']]['edition_settings']['rating_style'],'number')
+        self.assertEqual(rows[a['id']]['edition_settings']['rating_style'],'side')
         self.assertEqual(rows[a['id']]['edition_settings']['captain_corner'],'right')
         self.assertFalse(rows[a['id']]['edition_settings']['show_captain'])
         self.assertEqual(data['collection']['frames'],frames)
@@ -54,6 +54,24 @@ class CardEditions(unittest.TestCase):
         other=self.store.add_character('Other');c['character_id']=other['id']
         with self.assertRaises(ValueError):self.collection('edition',revision=data['collection']['revision'],entry_ids=[a['id'],c['id']],choice='none')
         self.assertEqual(self.collection()['collection']['editions'],before)
+
+    def test_single_owned_trait_auto_selection_and_legacy_overall(self):
+        a=self.import_image(0);data=self.collection()
+        data=self.collection('edition',revision=data['collection']['revision'],entry_id=a['id'],add_traits=['cosplay'])
+        self.assertEqual(self.board()['entries'][0]['edition_id'],'cosplay')
+        data=self.collection('edition',revision=data['collection']['revision'],entry_id=a['id'],add_traits=['christmas'])
+        self.assertIsNone(self.board()['entries'][0]['edition_id'])
+        data=self.collection('edition',revision=data['collection']['revision'],entry_id=a['id'],remove_traits=['cosplay'])
+        self.assertEqual(self.board()['entries'][0]['edition_id'],'christmas')
+        data=self.collection('edition',revision=data['collection']['revision'],entry_id=a['id'],choice='none')
+        self.assertIsNone(self.board()['entries'][0]['edition_id'])
+        # An old saved number-only card now renders OVR without rewriting its records.
+        self.character['collection']['editions'][a['id']].update(choice='auto',rating_style='number')
+        before=copy.deepcopy(self.character['collection'])
+        row=self.board()['entries'][0]
+        self.assertEqual(row['edition_id'],'christmas')
+        self.assertEqual(row['edition_settings']['rating_style'],'side')
+        self.assertEqual(before,self.character['collection'])
 
     def test_fill_and_contain_do_not_change_source(self):
         a=self.import_image(0);data=self.collection();original=copy.deepcopy(a)

@@ -974,11 +974,11 @@ class BattleRankings:
             owned=list(dict.fromkeys(traits+automatic))
             row['owned_editions']=owned
             row['automatic_editions']=automatic
-            row['edition_settings']={'choice':choice,'rating_style':settings.get('rating_style','side'),
+            row['edition_settings']={'choice':choice,'rating_style':'side',
                                      'captain_corner':settings.get('captain_corner','left'),
                                      'show_captain':bool(row.get('captain_sets')),'traits':traits}
             row['available_editions']=available
-            row['edition_id']=(automatic[0] if automatic else None) if choice=='auto' else (choice if choice in owned else None)
+            row['edition_id']=(automatic[0] if automatic else owned[0] if len(owned)==1 else None) if choice=='auto' else (choice if choice in owned else None)
 
     @staticmethod
     def _in_scope(entry, session, scheduling=False):
@@ -2366,7 +2366,7 @@ class LibraryStore:
                     if 'choice' not in body and choice not in ['auto','none']+owned:choice='auto'
                     if choice not in ['auto','none']+owned:
                         raise ValueError('Choose an available finished edition for eligible cards belonging to this person.')
-                    rating_style=body.get('rating_style',settings.get('rating_style','side'))
+                    rating_style='side'  # OVR always accompanies the number in the designed slot.
                     captain_corner=body.get('captain_corner',settings.get('captain_corner','left'))
                     show_captain=body.get('show_captain',settings.get('show_captain',row['title_choice']!='none'))
                     if type(show_captain) is not bool:

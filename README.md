@@ -1,3 +1,14 @@
+## Card maintenance mode (2.9.17 / companion 2.7.71)
+
+Leaderboard Debug mode shows the Position editor's red photo boundary, default
+versus custom cropping, owned/automatic traits, and inline trait/frame controls.
+Filter to custom crops, edit framing directly, and keep your scroll position after
+saving. Debug mode always displays the actual special frame and remembers its
+switch across reloads. Inline changes save immediately using revision checks.
+Automatic frame selection uses a sole owned edition when no automatic title takes
+priority; explicit frame/Base choices remain respected. OVR always appears beside
+the number, including old number-only records. Existing photo framing is retained.
+
 ## Earlier ranks and higher tier distribution (2.9.16 / companion 2.7.70)
 
 Placement now requires three comparisons, three distinct opponents and RD at most
