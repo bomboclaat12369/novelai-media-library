@@ -25,8 +25,8 @@ class CardEditions(unittest.TestCase):
         self.assertEqual(self.store.battles._load(),battle);self.assertEqual(self.store.data['media'],media)
         self.store.save();loaded=type(self.store)(self.store.root)
         rows=loaded.battles.request('summary',{'character_id':self.character['id']})['entries']
-        self.assertEqual(next(r for r in rows if r['id']==a['id'])['edition_id'],'christmas')
-        for choice in ('naked','ass-chrome','video-premiere'):
+        self.assertEqual(next(r for r in rows if r['id']==a['id'])['edition_id'],'ass-chrome')
+        for choice in ('naked','video-premiere'):
             with self.assertRaises(ValueError):self.collection('edition',revision=data['collection']['revision'],entry_id=a['id'],choice=choice)
         with self.assertRaises(ValueError):self.collection('edition',revision='stale',entry_id=a['id'],choice='cosplay')
         other=self.store.add_character('Other');b['character_id']=other['id']

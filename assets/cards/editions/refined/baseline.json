@@ -1,0 +1,710 @@
+{
+  "status": "review drafts; #1 OVR box enlarged, centered text checked, previous rank and overlap corrections retained; not approved or pushed",
+  "canvas": {
+    "width": 1050,
+    "height": 1500
+  },
+  "photo_viewport": {
+    "x": 105,
+    "y": 195,
+    "width": 840,
+    "height": 1120,
+    "ratio": "3:4"
+  },
+  "note": "Same exact viewport as the three approved editions. Decorative motifs overlap some photo pixels. Source PNGs retain their generated resolution and alpha. Per-frame source grids map to the common renderer; standalone source PNGs are not normalized final layouts.",
+  "layouts": {
+    "number-one": {
+      "opening": [
+        97,
+        250,
+        953,
+        1320
+      ],
+      "rating": [
+        238,
+        205,
+        220,
+        50
+      ],
+      "rank": [
+        880,
+        216,
+        88,
+        88
+      ],
+      "placing": [
+        525,
+        1430,
+        43,
+        44
+      ],
+      "palette": [
+        "#fff8e5",
+        "#e0c17d",
+        "#6c4824"
+      ],
+      "rankScale": 1.15,
+      "headerDrop": 30,
+      "name": [
+        522,
+        1365,
+        700,
+        40
+      ]
+    },
+    "pregnant-orchid": {
+      "opening": [
+        90,
+        212,
+        960,
+        1310
+      ],
+      "rating": [
+        214,
+        145,
+        200,
+        62
+      ],
+      "rank": [
+        835,
+        145,
+        100,
+        85
+      ],
+      "placing": [
+        523,
+        1430,
+        90,
+        42
+      ],
+      "palette": [
+        "#fff3f6",
+        "#ddb8cc",
+        "#8c5b79"
+      ],
+      "ratingDark": true,
+      "name": [
+        522,
+        1354,
+        720,
+        46
+      ]
+    },
+    "hall-of-fame": {
+      "opening": [
+        96,
+        191,
+        954,
+        1237
+      ],
+      "rating": [
+        203,
+        155,
+        140,
+        48
+      ],
+      "rank": [
+        867,
+        156,
+        78,
+        65
+      ],
+      "placing": [
+        524,
+        1379,
+        114,
+        46
+      ],
+      "palette": [
+        "#fff4d3",
+        "#d5b16c",
+        "#806033"
+      ],
+      "name": [
+        524,
+        1290,
+        720,
+        52
+      ]
+    },
+    "signature": {
+      "opening": [
+        109,
+        190,
+        942,
+        1310
+      ],
+      "rating": [
+        275,
+        126,
+        220,
+        50
+      ],
+      "rank": [
+        855,
+        125,
+        86,
+        86
+      ],
+      "placing": [
+        523,
+        1431,
+        126,
+        39
+      ],
+      "palette": [
+        "#fff9e7",
+        "#c7b18c",
+        "#76624b"
+      ],
+      "name": [
+        526,
+        1355,
+        720,
+        42
+      ]
+    },
+    "birthday": {
+      "opening": [
+        118,
+        241,
+        920,
+        1310
+      ],
+      "rating": [
+        229,
+        186,
+        210,
+        45
+      ],
+      "rank": [
+        874,
+        196,
+        84,
+        84
+      ],
+      "placing": [
+        517,
+        1441,
+        128,
+        52
+      ],
+      "palette": [
+        "#fff7df",
+        "#e5be72",
+        "#95631f"
+      ],
+      "rankScale": 1.15,
+      "headerDrop": 44,
+      "name": [
+        516,
+        1355,
+        520,
+        43
+      ]
+    },
+    "halloween": {
+      "opening": [
+        88,
+        184,
+        967,
+        1297
+      ],
+      "rating": [
+        250,
+        140,
+        210,
+        40
+      ],
+      "rank": [
+        854,
+        144,
+        80,
+        70
+      ],
+      "placing": [
+        524,
+        1410,
+        64,
+        62
+      ],
+      "palette": [
+        "#fff0d8",
+        "#c7a070",
+        "#765033"
+      ],
+      "name": [
+        524,
+        1329,
+        650,
+        34
+      ]
+    },
+    "hidden-gem": {
+      "opening": [
+        99,
+        250,
+        952,
+        1265
+      ],
+      "rating": [
+        236,
+        194,
+        220,
+        48
+      ],
+      "rank": [
+        883,
+        204,
+        95,
+        86
+      ],
+      "placing": [
+        523,
+        1398,
+        63,
+        62
+      ],
+      "palette": [
+        "#fff5d9",
+        "#e3bd70",
+        "#82531d"
+      ],
+      "rankScale": 1.15,
+      "headerDrop": 30,
+      "name": [
+        523,
+        1306,
+        720,
+        40
+      ]
+    },
+    "whore-stage": {
+      "opening": [
+        119,
+        252,
+        967,
+        1238
+      ],
+      "rating": [
+        243,
+        181,
+        210,
+        45
+      ],
+      "rank": [
+        880,
+        187,
+        96,
+        90
+      ],
+      "placing": [
+        543,
+        1359,
+        140,
+        45
+      ],
+      "palette": [
+        "#fff0e7",
+        "#c5b2a7",
+        "#79645e"
+      ],
+      "name": [
+        544,
+        1280,
+        710,
+        38
+      ]
+    },
+    "christmas": {
+      "opening": [
+        96,
+        191,
+        954,
+        1290
+      ],
+      "rating": [
+        256,
+        132,
+        220,
+        48
+      ],
+      "rank": [
+        862,
+        131,
+        84,
+        84
+      ],
+      "placing": [
+        522,
+        1411,
+        70,
+        66
+      ],
+      "palette": [
+        "#fff6c9",
+        "#e6b55e",
+        "#9b581b"
+      ],
+      "name": [
+        526,
+        1322,
+        720,
+        25
+      ]
+    },
+    "former-one": {
+      "opening": [
+        134,
+        213,
+        901,
+        1234
+      ],
+      "rating": [
+        198,
+        197,
+        190,
+        55
+      ],
+      "name": [
+        520,
+        1289,
+        680,
+        56
+      ],
+      "placing": [
+        519,
+        1381,
+        73,
+        58
+      ],
+      "rank": [
+        838,
+        200,
+        124,
+        116
+      ],
+      "palette": [
+        "#fff8e5",
+        "#e0c17d",
+        "#6c4824"
+      ]
+    },
+    "valentines": {
+      "opening": [
+        123,
+        227,
+        911,
+        1288
+      ],
+      "rating": [
+        250,
+        178,
+        230,
+        55
+      ],
+      "name": [
+        515,
+        1333,
+        350,
+        44
+      ],
+      "placing": [
+        515,
+        1416,
+        57,
+        48
+      ],
+      "rank": [
+        824,
+        168,
+        74,
+        94
+      ],
+      "palette": [
+        "#fff5e8",
+        "#e8b49c",
+        "#864536"
+      ]
+    },
+    "cosplay": {
+      "opening": [
+        119,
+        193,
+        928,
+        1308
+      ],
+      "rating": [
+        224,
+        150,
+        151,
+        48
+      ],
+      "name": [
+        522,
+        1351,
+        640,
+        36
+      ],
+      "placing": [
+        520,
+        1404,
+        169,
+        30
+      ],
+      "rank": [
+        824,
+        154,
+        92,
+        84
+      ],
+      "palette": [
+        "#fff9ff",
+        "#d4c5e3",
+        "#655477"
+      ]
+    },
+    "ass-chrome": {
+      "opening": [
+        105,
+        195,
+        945,
+        1315
+      ],
+      "renderMode": "preserved-upper",
+      "footerStart": 1200,
+      "palette": [
+        "#fffaf1",
+        "#bfbcb9",
+        "#665d5a"
+      ],
+      "rating": [
+        243.306,
+        121.995,
+        283.5,
+        73.5
+      ],
+      "rank": [
+        866.523,
+        122.8,
+        135.5,
+        135.5
+      ],
+      "name": [
+        524.5,
+        1349,
+        680,
+        42
+      ],
+      "placing": [
+        524.5,
+        1421,
+        100,
+        55
+      ]
+    }
+  },
+  "rankGeometry": {
+    "Bronze": {
+      "width": 400,
+      "height": 400,
+      "bounds": [
+        13,
+        8,
+        388,
+        382
+      ]
+    },
+    "Silver": {
+      "width": 400,
+      "height": 400,
+      "bounds": [
+        11,
+        7,
+        389,
+        391
+      ]
+    },
+    "Gold": {
+      "width": 400,
+      "height": 400,
+      "bounds": [
+        11,
+        5,
+        389,
+        387
+      ]
+    },
+    "Platinum": {
+      "width": 400,
+      "height": 400,
+      "bounds": [
+        12,
+        5,
+        388,
+        390
+      ]
+    },
+    "Diamond": {
+      "width": 400,
+      "height": 400,
+      "bounds": [
+        12,
+        8,
+        388,
+        382
+      ]
+    },
+    "Master": {
+      "width": 400,
+      "height": 400,
+      "bounds": [
+        10,
+        4,
+        390,
+        390
+      ]
+    },
+    "Grandmaster": {
+      "width": 400,
+      "height": 400,
+      "bounds": [
+        12,
+        8,
+        388,
+        383
+      ]
+    }
+  },
+  "sources": {
+    "number-one": {
+      "file": "assets/frames/number-one.png",
+      "sha256": "e89ef955c72ffa3b4ffe6a1f99d8af3b84e495424c363202e9418e6b8cb8c08d",
+      "size": [
+        1049,
+        1500
+      ]
+    },
+    "pregnant-orchid": {
+      "file": "assets/frames/pregnant-orchid.png",
+      "sha256": "3b8916fa7a18d4a58245832814662ac6cced237ab6a599727e08eb47b1cf14ac",
+      "size": [
+        1049,
+        1499
+      ]
+    },
+    "hall-of-fame": {
+      "file": "assets/frames/hall-of-fame.png",
+      "sha256": "8f892e57815af416c62e748d213689b3726c816fd9684858484a2e1444aac419",
+      "size": [
+        1049,
+        1499
+      ]
+    },
+    "signature": {
+      "file": "assets/frames/signature.png",
+      "sha256": "03c2b3d9660aec5b91ee53417cd87ad05e6f069550e010844ecb97f7bde71dd9",
+      "size": [
+        1052,
+        1495
+      ]
+    },
+    "birthday": {
+      "file": "assets/frames/birthday.png",
+      "sha256": "ba084ffcfb34221c5397271e0daf2cbcf8cbaf931d30c63d3ff793e0a92c2a30",
+      "size": [
+        1036,
+        1518
+      ]
+    },
+    "halloween": {
+      "file": "assets/frames/halloween.png",
+      "sha256": "6401710e1deb195064c362fcafdf838522a41fea6b24e463080f68af7e132129",
+      "size": [
+        1049,
+        1500
+      ]
+    },
+    "hidden-gem": {
+      "file": "assets/frames/hidden-gem.png",
+      "sha256": "133bc4941fcd557d4a9fb21baa7fbca6ca198cc1651c34469e71924ec521f9b9",
+      "size": [
+        1049,
+        1500
+      ]
+    },
+    "whore-stage": {
+      "file": "assets/frames/whore-stage.png",
+      "sha256": "fad26606538ff64b754fb9314ae92809e272575b5efab6801989c65785c0d248",
+      "size": [
+        1086,
+        1448
+      ]
+    },
+    "christmas": {
+      "file": "assets/frames/christmas.png",
+      "sha256": "77973383f841b58032793eca813fa9fbf10c1e0593a677dd3c149620a9070119",
+      "size": [
+        1049,
+        1499
+      ]
+    },
+    "former-one": {
+      "file": "assets/frames/former-one.png",
+      "sha256": "f6babe542317982ec9c850ae60624d4444ab8127567f6f2f251471c93f07378d",
+      "size": [
+        1036,
+        1518
+      ]
+    },
+    "valentines": {
+      "file": "assets/frames/valentines.png",
+      "sha256": "32880fd57c671d88bdb1b8d7b90c3fd9cb56857cbc65db78284c920d064114f1",
+      "size": [
+        1036,
+        1518
+      ]
+    },
+    "cosplay": {
+      "file": "assets/frames/cosplay.png",
+      "sha256": "5a4e694571dbc2c692fa544d1e1aa2ad944e68945f98bc2787371b90ce8627d9",
+      "size": [
+        1049,
+        1499
+      ]
+    },
+    "ass-chrome": {
+      "file": "assets/frames/ass-chrome.png",
+      "sha256": "8530aa95b3476b7140eb07be6ced57b9b5fbcbcc12ad311c01e76ee5a60be9cc",
+      "size": [
+        1049,
+        1499
+      ]
+    }
+  },
+  "names": {
+    "number-one": "#1",
+    "pregnant-orchid": "Pregnant \u00b7 Orchid",
+    "hall-of-fame": "Hall of Fame",
+    "signature": "Signature",
+    "birthday": "Birthday",
+    "halloween": "Halloween",
+    "hidden-gem": "Hidden Gem",
+    "whore-stage": "Whore \u00b7 Stage",
+    "christmas": "Christmas",
+    "former-one": "Former #1",
+    "valentines": "Valentine\u2019s",
+    "cosplay": "Cosplay",
+    "ass-chrome": "Ass \u00b7 Dark Chrome"
+  },
+  "preservedUpperSources": {
+    "ass-chrome": {
+      "file": "assets/frames/ass-original.webp",
+      "sha256": "9b4d9abdfd2292a4809e04e6e98923297f6728dfbd2ca1c5db62a678cdced0c2",
+      "size": [
+        1053,
+        1494
+      ]
+    }
+  }
+}

@@ -1,5 +1,21 @@
 # NovelAI Media Library
 
+## Final card layouts and seven rank emblems (standalone 2.9.14 / runtime 2.7.69)
+
+All 13 approved special editions now use the larger exact 3:4 photo opening,
+full-resolution frame artwork and calibrated name, OVR, placement and rank slots.
+Ass · Dark Chrome is available as an owned edition trait, with its original upper
+artwork and approved lower number position. All seven rank tiers use the approved
+metallic emblems, centered by their visible bounds; permitted overlap is retained.
+
+Existing traits, ratings and saved photo framing are preserved. Fit whole photo
+remains the default and Reset behavior. No media changes or rescans are required.
+The NovelAI overlay and Duplicate Review releases are unchanged.
+
+Restart/update the Companion first, then apply the Media Library interface update.
+Companion 2.7.69 raises the verified standalone document allowance to 32 MiB so
+the complete lossless card package can load without reducing artwork quality.
+
 ## Owned edition traits, media search and appearance (standalone 2.9.12 / runtime 2.7.67 / NovelAI 2.8.99 / Duplicate Review 2.0.16)
 
 **Edit special edition** shows owned edition traits separately from the displayed frame, with a live original-image card preview. Add or remove traits, then choose which owned frame to display. Existing manually equipped editions become owned traits. Automatic Current #1 / Former #1 awards remain available; those editions can also be added as manual traits. Bulk actions separately add a trait or display a frame shared by the selected cards. Captain crests follow actual set-captain assignments automatically and have no manual display controls.

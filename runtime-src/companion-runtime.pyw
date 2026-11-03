@@ -41,7 +41,7 @@ API_VERSION = 9
 
 # Finished studio designs only. Automatic mode uses battle provenance; every finished frame is also selectable.
 MANUAL_CARD_EDITIONS = ('cosplay', 'pregnant-orchid', 'hall-of-fame', 'valentines',
-                        'signature', 'birthday', 'halloween', 'hidden-gem', 'whore-stage', 'christmas')
+                        'signature', 'birthday', 'halloween', 'hidden-gem', 'whore-stage', 'christmas', 'ass-chrome')
 
 
 def set_name_colors(name, existing=None):
@@ -3935,6 +3935,8 @@ class LibraryStore:
 class StandaloneUI:
     """Download the verified standalone document on demand; keep an offline copy."""
     BASE = "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/"
+    # Thirteen lossless native card frames exceed the former 12 MiB document cap.
+    MAX_DOCUMENT_BYTES = 32 * 1024 * 1024
 
     def __init__(self, root: Path):
         self.directory = root / ".ui-cache"
@@ -3971,7 +3973,7 @@ class StandaloneUI:
                 if not re.fullmatch(r"[0-9a-f]{64}", digest):
                     raise ValueError("The standalone update is not available yet. Please retry shortly.")
                 if self.cached is None or hashlib.sha256(self.cached).hexdigest() != digest:
-                    body = self._download(url, 12 * 1024 * 1024)
+                    body = self._download(url, self.MAX_DOCUMENT_BYTES)
                     if hashlib.sha256(body).hexdigest() != digest:
                         raise ValueError("Standalone download verification failed")
                     self.directory.mkdir(parents=True, exist_ok=True)
@@ -4044,7 +4046,7 @@ class UIUpdates:
                         code_bytes = b"".join(pool.map(lambda url: ui._download(url, 4 * 1024 * 1024), parts))
                 if hashlib.sha256(code_bytes).hexdigest() != digest:
                     raise ValueError("Interface verification failed; current version kept")
-                html = ui._download(manifest.get("standalone_url", ""), 12 * 1024 * 1024)
+                html = ui._download(manifest.get("standalone_url", ""), ui.MAX_DOCUMENT_BYTES)
                 if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){2}", standalone_version) or hashlib.sha256(html).hexdigest() != html_digest or f'data-nai-media-payload-version="{standalone_version}"'.encode() not in html:
                     raise ValueError("Standalone verification failed; current version kept")
                 code = code_bytes.decode("utf-8")

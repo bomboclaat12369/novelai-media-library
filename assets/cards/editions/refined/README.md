@@ -1,4 +1,38 @@
-# Approved larger-photo cards
+# Approved larger-photo cards — all 13 editions
+
+The authoritative production checkpoint is now `baseline.json` and
+`layout-guides.json`, using `frame-renderer.js` and `guide-renderer.js`. The older
+trio-only `studio-layout.json` and `renderer.js` below remain historical files.
+
+Every `*-source.png` is byte-identical to the approved source artwork. Normalized
+`.png` frames are transparent 1050 × 1500 lossless renders. Production `.webp`
+frames are lossless, pixel-identical encodings of these PNGs. Run
+`python3 tools/encode-card-frames.py` after importing a checkpoint. The viewport is exactly
+x105 / y195 / width840 / height1120 (3:4), with the accepted frame overlaps.
+Ass's original upper WebP is composited unchanged above y1200; its refined footer
+is below that line. No private preview photographs are included in the release.
+
+The 52 saved guides specify actual plaque outlines, fitting limits and centers.
+The complete visible name/number is centered and fits its polygon. Side-by-side
+OVR is one centered group; existing number-only preferences remain supported.
+Ass's user-corrected placement anchor is [525.5,1426.5].
+
+All seven emblem assets remain unchanged from the approved checkpoint. Visible
+bounds use alpha >8 consistently, so nearly transparent fringe does not skew
+centering. Rank fits preserve proportions and center on the saved slot anchor,
+including the accepted 15% enlargement on #1, Birthday and Hidden Gem. They are
+not clipped to their plaques. Existing saved photo references are preserved.
+
+Validation uses native canvas and a lightweight DOM harness for the production
+decorator, actual rank alpha bounds, 7/92 and long-name alignment, both OVR modes,
+all 13 native frames and asset hashes. Focused runtime tests cover Ass eligibility,
+owned traits, automatic editions, save/reload and unchanged media/battle state.
+Framing checks cover all 12 previously published editions, saved compositions,
+Fit/Fill, reset and hidden frames at three display sizes. A real browser was not
+available; these are not browser CSS/layout tests. The actual larger-than-12-MiB release also
+passes both verified document-download paths with the new 32 MiB allowance.
+
+## Previous trio release
 
 Former #1, Valentine's and Cosplay reproduce the approved November 2026 card studio, including the narrowed Valentine's rank plaque. The common outer canvas is 1050 × 1500; the rectangular photo viewport is x=105, y=195, width=840, height=1120 (3:4). Ornaments overlap parts of the viewport.
 

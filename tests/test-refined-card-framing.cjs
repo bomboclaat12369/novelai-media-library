@@ -11,7 +11,7 @@ function render(code,window,frame,{width=420,size=[1080,1439],legacy,hidden}={})
 }
 const near=(a,b)=>a.forEach((n,i)=>assert(Math.abs(n-b[i])<1e-9,`${n} != ${b[i]}`));
 const modern={left:.1,top:.13,width:.8,height:1120/1500},base={left:.05,top:.038,width:.9,height:.84};
-for(const id of ['former-one','valentines','cosplay']){
+for(const id of Object.keys(catalog.editions).filter(id=>catalog.editions[id].legacyWindow)){
  const e=catalog.editions[id];assert(e.refined);assert.equal(parseFloat(e.style['--window-right'])-parseFloat(e.style['--window-left']),80);
  for(const width of [240,420,1050])for(const size of [[1080,1439],[2400,800]])for(const fit of ['contain','fill']){
   const custom={x:12,y:-9,zoom:1.7,fit},opts={width,size};
@@ -24,4 +24,4 @@ for(const id of ['former-one','valentines','cosplay']){
   const fresh={...custom,reference:modern};near(render(old,modern,custom,opts),render(current,modern,fresh,{...opts,legacy:e.legacyWindow}));
  }
 }
-console.log('Passed: three editions; portrait/landscape Fit/Fill; legacy and saved composition; reset/new geometry; display-only toggle; three card sizes.');
+console.log('Passed: all twelve previously published editions; portrait/landscape Fit/Fill; legacy and saved composition; reset/new geometry; display-only toggle; three card sizes.');
