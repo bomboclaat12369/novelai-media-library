@@ -1,3 +1,16 @@
+## Uniform base and special card proportions (Media Library 2.9.19)
+
+Replaces the oversized rectangular base-frame treatment from 2.9.18 with a
+transparent compact frame around the shared 840×1120 photo opening. Rank colors,
+angular metallic rails and restrained tier engravings remain; the empty top band
+and broad background mat are removed. The OVR plaque, emblem slot, nameplate and
+placement seal now use explicit interior bounds and the same lettering fitter as
+special editions. Placement is a centered whole number (including 7 and 92).
+
+Validated in a mixed eight-column production leaderboard with base and special
+cards together, plus all seven ranks, crop preservation, debug/Position editing
+and set voting mosaics. Only the interface changes; companion remains 2.7.71.
+
 ## Matched base-card photographs (Media Library 2.9.18)
 
 All seven base ranks now use the special-edition photo opening: x=105, y=195,

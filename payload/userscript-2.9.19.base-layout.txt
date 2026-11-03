@@ -1,0 +1,80 @@
+// Compact, transparent base frames share the edition canvas, opening and typography.
+(()=>{
+ 'use strict';
+ const root=document.getElementById('nai-media-host')?.shadowRoot,cards=root?.naiCards,pack=typeof naiCardEditionAssets==='undefined'?null:naiCardEditionAssets;
+ if(!cards?.frameTypography||!pack)return;
+ const {guide:G,refined:R,ready}=cards.frameTypography;
+ const legacy={left:.05,top:.038,width:.90,height:.84};
+ const zones={
+  name:{outline:[[163,1332],[887,1332],[902,1355],[887,1378],[163,1378],[148,1355]],anchor:[525,1355],fit:[700,38],padding:3,maxFontSize:64},
+  placing:{outline:[[481,1394],[569,1394],[583,1420],[569,1446],[481,1446],[467,1420]],anchor:[525,1420],fit:[83,43],padding:3,maxFontSize:60},
+  rating:{outline:[[122,147],[319,147],[332,176],[319,205],[122,205],[109,176]],anchor:[220.5,176],fit:[188,48],padding:3,maxFontSize:88},
+  rank:{outline:[[833,132],[917,132],[936,151],[936,209],[917,228],[833,228],[814,209],[814,151]],anchor:[875,180],fit:[106,98],padding:3,maxFontSize:0,overflowPercent:0}
+ };
+ cards.baseLayout={canvas:{width:1050,height:1500},window:{x:105,y:195,width:840,height:1120},zones};
+ const style=document.createElement('style');style.textContent=`
+ .naiTradingCard.naiBaseUniform.naiCardShell{background:transparent!important;border:0!important;border-radius:0!important;padding:0!important;box-shadow:none!important;overflow:hidden!important;clip-path:none!important;aspect-ratio:7/10;--window-left:10%;--window-right:90%;--window-top:13%;--window-bottom:87.66666666666667%}
+ .naiBaseUniform>.naiCardOrnament,.naiBaseUniform>.naiCardRail,.naiBaseUniform>.naiCardName,.naiBaseUniform>.naiCardTitleArt{display:none!important}
+ .naiTradingCard.naiBaseUniform.naiCardShell>.naiCardPhotoWindow,.naiTradingCard.naiBaseUniform.naiCardShell>.naiBattleGalleryVisual{position:absolute!important;left:10%!important;top:13%!important;right:10%!important;bottom:12.33333333333333%!important;width:80%!important;height:74.66666666666667%!important;margin:0!important;padding:0!important;border:0!important;box-shadow:none!important;overflow:hidden;background:#080c12;z-index:1}
+ .naiBaseUniform>.naiBaseFrame,.naiBaseUniform>.naiBaseLetters{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;pointer-events:none!important;transform:none!important;border:0!important;padding:0!important;background-size:100% 100%;background-repeat:no-repeat}
+ .naiBaseFrame{z-index:4}.naiBaseLetters{z-index:5}
+ .naiBaseUniform>.naiBaseRank{position:absolute!important;z-index:5;pointer-events:none;transform:none!important;max-width:none!important;max-height:none!important}
+ `;root.append(style);
+ const cache=new Map();
+ function artwork(tier,p){
+  const key=tier+':'+p.join(':');if(cache.has(key))return cache.get(key);
+  const [light,mid,dark]=p;
+  const decorations={
+   Bronze:'<g fill="'+dark+'" stroke="'+light+'" stroke-width="2"><circle cx="79" cy="450" r="5"/><circle cx="971" cy="450" r="5"/><circle cx="79" cy="1040" r="5"/><circle cx="971" cy="1040" r="5"/></g>',
+   Silver:'<path d="M77 390V610M83 390V610M967 390V610M973 390V610M77 900V1120M83 900V1120M967 900V1120M973 900V1120" stroke="'+light+'" stroke-width="1.5"/>',
+   Gold:'<path d="M78 625Q92 647 78 670Q92 693 78 716M972 625Q958 647 972 670Q958 693 972 716" fill="none" stroke="'+light+'" stroke-width="3"/>',
+   Platinum:'<path d="M72 630H89V660H80V730H89V760H72M978 630H961V660H970V730H961V760H978" fill="none" stroke="'+mid+'" stroke-width="4"/>',
+   Diamond:'<path d="M80 625L94 660L80 695L66 660ZM970 625L984 660L970 695L956 660ZM80 714L91 741L80 768L69 741ZM970 714L981 741L970 768L959 741Z" fill="#8ad7ee" stroke="'+light+'" stroke-width="2"/>',
+   Master:'<path d="M80 610L93 636V752L80 780L67 752V636ZM970 610L983 636V752L970 780L957 752V636Z" fill="#8752b8" stroke="'+light+'" stroke-width="3"/><path d="M80 620V767M970 620V767" stroke="#e5bdff" stroke-width="2"/>',
+   Grandmaster:'<path d="M67 606H93V784H67ZM957 606H983V784H957Z" fill="#481529" stroke="'+mid+'" stroke-width="3"/><path d="M80 618Q103 644 80 670Q57 696 80 722Q103 748 80 772M970 618Q947 644 970 670Q993 696 970 722Q947 748 970 772" fill="none" stroke="'+light+'" stroke-width="2"/>'
+  };
+  const gem=tier==='Master'?'#a16ee6':tier==='Diamond'?'#7ddcf5':tier==='Platinum'?'#70d2b9':tier==='Grandmaster'?'#a93452':mid;
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1050 1500">
+  <defs><linearGradient id="metal" x1="0" y1="0" x2="1" y2="1"><stop stop-color="${light}"/><stop offset=".18" stop-color="${mid}"/><stop offset=".32" stop-color="${dark}"/><stop offset=".46" stop-color="${light}"/><stop offset=".59" stop-color="${mid}"/><stop offset=".74" stop-color="${dark}"/><stop offset=".88" stop-color="${light}"/><stop offset="1" stop-color="${mid}"/></linearGradient><linearGradient id="enamel" x2=".4" y2="1"><stop stop-color="#222934"/><stop offset=".6" stop-color="#080c12"/><stop offset="1" stop-color="#18212b"/></linearGradient></defs>
+  <path d="M104 149H946L985 187V1321L947 1359H103L65 1321V187Z M105 195V1315H945V195Z" fill="#10151d" fill-rule="evenodd"/>
+  <path d="M104 149H946L985 187V1321L947 1359H103L65 1321V187Z" fill="none" stroke="url(#metal)" stroke-width="13"/>
+  <path d="M108 158H942L975 191V1317L943 1350H107L75 1317V191Z" fill="none" stroke="${light}" stroke-opacity=".7" stroke-width="2"/>
+  <path d="M105 194H945V1316H105Z" fill="none" stroke="url(#metal)" stroke-width="5"/>
+  <path d="M99 201V1308M951 201V1308" stroke="${dark}" stroke-width="2"/>
+  <g fill="url(#metal)" stroke="${light}" stroke-width="1.3"><path d="M67 213L95 186V318L67 348ZM983 213L955 186V318L983 348ZM67 1156L95 1186V1300L67 1328ZM983 1156L955 1186V1300L983 1328Z"/><path d="M67 370L78 358V566L67 578ZM983 370L972 358V566L983 578ZM67 845L78 857V1055L67 1043ZM983 845L972 857V1055L983 1043Z"/></g>
+  ${decorations[tier]||''}
+  <path d="M111 1316H939L973 1349L941 1394H109L77 1349Z" fill="url(#enamel)" stroke="url(#metal)" stroke-width="7"/>
+  <path d="M150 1325H900L923 1355L900 1385H150L127 1355Z" fill="#080c12" stroke="url(#metal)" stroke-width="6"/>
+  <path d="M163 1332H887L902 1355L887 1378H163L148 1355Z" fill="none" stroke="${dark}" stroke-width="1.5"/>
+  <g fill="url(#metal)" stroke="${light}" stroke-width="1"><path d="M78 1294L119 1328L150 1362L184 1394H113L78 1361ZM972 1294L931 1328L900 1362L866 1394H937L972 1361Z"/></g>
+  <path d="M88 1315L116 1340L156 1384M962 1315L934 1340L894 1384" fill="none" stroke="${dark}" stroke-width="4"/>
+  <path d="M474 1384H576L596 1420L576 1457H474L454 1420Z" fill="url(#enamel)" stroke="url(#metal)" stroke-width="7"/>
+  <path d="M481 1394H569L583 1420L569 1446H481L467 1420Z" fill="none" stroke="${light}" stroke-opacity=".7" stroke-width="1.5"/>
+  <path d="M114 136H327L346 176L327 216H114L95 176Z" fill="url(#enamel)" stroke="url(#metal)" stroke-width="7"/>
+  <path d="M122 147H319L332 176L319 205H122L109 176Z" fill="none" stroke="${light}" stroke-opacity=".6" stroke-width="1.5"/>
+  <path d="M828 121H922L947 146V214L922 239H828L803 214V146Z" fill="url(#enamel)" stroke="url(#metal)" stroke-width="7"/>
+  <path d="M833 132H917L936 151V209L917 228H833L814 209V151Z" fill="none" stroke="${light}" stroke-opacity=".6" stroke-width="1.5"/>
+  <path d="M472 149L497 129L525 65L553 129L578 149L549 166H501Z" fill="url(#metal)" stroke="${light}" stroke-width="1.5"/>
+  <path d="M525 88L543 134L525 157L507 134Z" fill="${gem}" stroke="${dark}" stroke-width="2"/><path d="M525 88V157L507 134Z" fill="${light}" opacity=".6"/>
+  </svg>`;
+  const uri='url("data:image/svg+xml,'+encodeURIComponent(svg)+'")';cache.set(key,uri);return uri;
+ }
+ const tracked=new Map(),observer=new ResizeObserver(es=>{for(const {target}of es)draw(target,tracked.get(target));});
+ new MutationObserver(()=>{for(const [card]of tracked)if(!card.isConnected){observer.unobserve(card);tracked.delete(card);}}).observe(root,{childList:true,subtree:true});
+ function draw(card,info){if(!info)return;const {entry,rows,owner,show,palette}=info,canvas=card.querySelector('.naiBaseLetters'),width=Math.max(1,Math.min(1575,Math.ceil((card.clientWidth||420)*2)));canvas.width=width;canvas.height=Math.round(width*1500/1050);const ctx=canvas.getContext('2d');ctx.setTransform(canvas.width/1050,0,0,canvas.height/1500,0,0);
+  const name=card.dataset.cardKind==='set'?entry.name:root.naiGetLibrary?.()?.characters?.find(c=>c.id===owner)?.name||'Collection';
+  const metrics=G.lettering(ctx,{palette},zones,{name,rating:show?String(cards.ovr(entry,rows)??'—'):'—',placing:show&&entry.position?String(entry.position):'—',ratingStyle:'side'},R);
+  card.naiBaseTextMetrics=metrics;canvas.setAttribute('aria-label',name+', '+(show?String(cards.ovr(entry,rows)??'unrated'):'hidden')+' OVR, placing '+(show?entry.position||'unplaced':'hidden'));
+ }
+ ready.then(()=>{for(const [card,info]of tracked)draw(card,info);});
+ function prepare(card,entry,rows,owner,show){
+  if(!card?.classList.contains('naiPortraitCard')||card.classList.contains('naiEdition'))return card;
+  card.classList.add('naiBaseUniform');
+  const im=card.querySelector('.naiFramedSource,.naiBattleGalleryVisual img,.naiBattlePhoto');if(im&&!im.naiLegacyFramingReference)im.naiLegacyFramingReference=legacy;
+  const palette=['--metal-light','--metal-mid','--metal-dark'].map(k=>card.style.getPropertyValue(k)),tier=show?entry.tier:'Unranked';
+  const art=document.createElement('div');art.className='naiBaseFrame';art.setAttribute('aria-hidden','true');art.style.backgroundImage=artwork(tier,palette);const canvas=document.createElement('canvas');canvas.className='naiBaseLetters';card.append(art,canvas);
+  if(show){const rank=root.naiRanks.emblem(tier||'Unranked');rank.classList.add('naiBaseRank');const source=pack.rankGeometry[tier],box=source?G.rank(source,zones.rank,R):{x:826,y:131,width:98,height:98};rank.style.left=box.x/10.5+'%';rank.style.top=box.y/15+'%';rank.style.width=box.width/10.5+'%';rank.style.height=box.height/15+'%';card.append(rank);}
+  const info={entry,rows,owner,show,palette};draw(card,info);queueMicrotask(()=>{if(card.isConnected){tracked.set(card,info);observer.observe(card);draw(card,info);}});return card;
+ }
+ for(const method of ['battle','lightCard']){const original=cards[method];cards[method]=function(...args){return prepare(original(...args),args[method==='battle'?1:0],args[method==='battle'?2:1],args[method==='battle'?3:2],args[4]!==false);};}
+})();
