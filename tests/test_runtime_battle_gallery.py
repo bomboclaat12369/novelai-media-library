@@ -54,7 +54,7 @@ class BattleGalleryTests(unittest.TestCase):
         ratings={i:{'rating':2000-int(i)*3.,'played':20,'rd':70,'opponents':{str(k):1 for k in range(10)},'wins':10,'losses':10,'ties':0} for i in entries}
         board={'ratings':ratings}
         rows=battle._ranked_rows(board,entries)
-        self.assertEqual(Counter(r['tier'] for r in rows),{'Grandmaster':2,'Master':8,'Diamond':10,'Platinum':30,'Gold':50,'Silver':60,'Bronze':40})
+        self.assertEqual(Counter(r['tier'] for r in rows),{'Grandmaster':4,'Master':12,'Diamond':24,'Platinum':50,'Gold':50,'Silver':40,'Bronze':20})
         self.assertTrue(rows[0]['leader']);self.assertFalse(any(r['leader'] for r in rows[1:]))
         ratings['1']['rating']=ratings['0']['rating']
         rows=battle._ranked_rows(board,entries)

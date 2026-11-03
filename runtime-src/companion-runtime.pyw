@@ -856,7 +856,7 @@ class BattleRankings:
         varied = len(score.get('opponents', {}))
         if not score['played']:
             return 'Unrated'
-        if score['played'] < 6 or varied < 4 or score['rd'] > 140:
+        if score['played'] < 3 or varied < 3 or score['rd'] > 220:
             return 'Provisional'
         if score['played'] >= 12 and varied >= 8 and score['rd'] <= 85:
             return 'Established'
@@ -1079,7 +1079,7 @@ class BattleRankings:
                 rating = round(row['rating'], 8)
                 rank = positions[rating]
                 row['tier_rank'] = rank
-                tier = next((name for fraction,name in ((.01,'Grandmaster'),(.05,'Master'),(.10,'Diamond'),(.25,'Platinum'),(.50,'Gold'),(.80,'Silver'))
+                tier = next((name for fraction,name in ((.02,'Grandmaster'),(.08,'Master'),(.20,'Diamond'),(.45,'Platinum'),(.70,'Gold'),(.90,'Silver'))
                              if rank <= max(1,math.ceil(len(placed)*fraction))), 'Bronze')
             row['leader'] = bool(enough and row['tier_rank'] == 1 and counts.get(round(row['rating'],8)) == 1)
             row['tier'] = tier

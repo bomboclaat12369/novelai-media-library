@@ -1,3 +1,13 @@
+## Earlier ranks and higher tier distribution (2.9.16 / companion 2.7.70)
+
+Placement now requires three comparisons, three distinct opponents and RD at most
+220. Established confidence still requires twelve comparisons, eight opponents
+and RD at most 85. Ranked shares are Grandmaster 2%, Master 6%, Diamond 12%,
+Platinum 25%, Gold 25%, Silver 20% and Bronze 10%, subject to rounding and ties.
+Existing records qualify immediately on reading the board; MMR, comparisons,
+Undo and saved layouts are preserved. Update the companion and Media Library UI.
+NovelAI overlay 2.8.100 also explains the revised rules.
+
 # NovelAI Media Library
 
 ## Rank badge sizing correction (standalone 2.9.15)
@@ -566,7 +576,7 @@ Upcoming previews are prepared for possible vote outcomes without recording a vo
 
 Battle MMR now uses uncertainty-aware Glicko updates: new images and sets move quickly, while established ratings change more cautiously. Matchmaking keeps a persistent batch of up to eight unfinished placements, mixes in calibration comparisons, and favors informative, varied opponents. **Place this image** beneath the viewer and **Place this set** inside a set start a focused ten-comparison round; both are also available from the leaderboard. Choosing placement never grants rating points by itself.
 
-Ratings show Unrated, Provisional, Developing or Established confidence. Placement requires at least six comparisons against four distinct opponents and sufficiently low uncertainty; Established requires twelve comparisons, eight opponents and tighter uncertainty. Tiers require completed placement and at least five placed eligible entries. Ratings do not decay with inactivity. These are estimates of your preferences, not guarantees of an exact ordering. Only wins, losses and ties affect MMR; there is no “Both are great” bonus.
+Ratings show Unrated, Provisional, Developing or Established confidence. Placement requires at least three comparisons against three distinct opponents and RD of 220 or less; Established requires twelve comparisons, eight opponents and tighter uncertainty. Tiers require completed placement and at least five placed eligible entries. Ratings do not decay with inactivity. These are estimates of your preferences, not guarantees of an exact ordering. Only wins, losses and ties affect MMR; there is no “Both are great” bonus.
 
 Existing MMR and vote totals are preserved. Older ratings begin with estimated uncertainty and need new varied comparisons to establish confidence. A one-time pre-migration battle backup is retained. Each new comparison records the before/after ratings and uncertainty; Undo restores the previous state and records the reversal. Older comparisons are not reconstructed.
 

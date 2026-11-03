@@ -10,13 +10,43 @@ class RankTests(unittest.TestCase):
     post=BattleTests.post
     call=BattleTests.call
 
+    def test_earlier_placement_keeps_confidence_and_diversity_guards(self):
+        quality=self.store.battles._quality
+        score={'played':3,'rd':220.,'opponents':{'a':1,'b':1,'c':1}}
+        self.assertEqual(quality(score),'Developing')
+        for changes in ({'played':2},{'opponents':{'a':2,'b':1}},{'rd':220.01}):
+            self.assertEqual(quality({**score,**changes}),'Provisional')
+        self.assertEqual(quality({**score,'played':0}),'Unrated')
+        established={**score,'played':12,'rd':85.,'opponents':{str(i):1 for i in range(8)}}
+        self.assertEqual(quality(established),'Established')
+        for changes in ({'played':11},{'rd':85.01},{'opponents':score['opponents']}):
+            self.assertEqual(quality({**established,**changes}),'Developing')
+
+    def test_existing_records_rank_on_reopen_without_rewriting_history_or_mmr(self):
+        images=[self.import_image(i) for i in range(6)]
+        battle=self.store.battles;key=self.character['id']+':images'
+        ratings={m['id']:{'rating':1500-i*30.,'played':3,'rd':220.,'wins':2,'losses':1,'ties':0,
+                         'opponents':{images[(i+j)%6]['id']:1 for j in (1,2,3)}}
+                 for i,m in enumerate(images)}
+        board={'revision':'existing','ratings':ratings,'recent':[],'undo':[],
+               'history':[],'votes':9,'session':None,'trophies':{}}
+        battle._save({'version':1,'rating_model':battle.MODEL,'boards':{key:board}})
+        before=battle.path.read_bytes()
+        reopened=fixtures.RUNTIME['LibraryStore'](self.store.root)
+        state=reopened.battles.request('summary',{'character_id':self.character['id'],'kind':'images'})
+        self.assertEqual(state['ranked_count'],6)
+        self.assertTrue(all(e['rating_status']=='Developing' for e in state['entries']))
+        self.assertEqual({e['id']:e['rating'] for e in state['entries']},{i:s['rating'] for i,s in ratings.items()})
+        self.assertEqual(state['votes'],9)
+        self.assertEqual(battle.path.read_bytes(),before)
+
     def test_rank_cutoffs_ties_and_legacy_records(self):
         images=[self.import_image(i) for i in range(20)]
         battle=self.store.battles;key=self.character['id']+':images'
         board={'revision':'legacy','ratings':{m['id']:{'rating':1600-i*10.,'played':6,'wins':4,'losses':2,'ties':0,'rd':100.,'opponents':{o['id']:1 for o in images if o['id']!=m['id']}} for i,m in enumerate(images)},'recent':[],'undo':[],'votes':50,'session':None}
         battle._save({'version':1,'boards':{key:board}})
         state=self.call('state');tiers=[r['tier'] for r in state['entries']]
-        self.assertEqual(tiers,['Grandmaster','Diamond']+['Platinum']*3+['Gold']*5+['Silver']*6+['Bronze']*4)
+        self.assertEqual(tiers,['Grandmaster','Master']+['Diamond']*2+['Platinum']*5+['Gold']*5+['Silver']*4+['Bronze']*2)
         self.assertTrue(all(t['legacy'] and t['earned_at'] is None for t in state['trophies']))
         self.assertFalse(any(t['id'].startswith('streak:') for t in state['trophies']))
         board['ratings'][images[1]['id']]['rating']=1600
@@ -24,7 +54,7 @@ class RankTests(unittest.TestCase):
         self.assertEqual([e['tier'] for e in self.call('state')['entries'][:2]],['Grandmaster','Grandmaster'])
         for m in images[4:]:m['in_review']=True
         self.assertTrue(all(e['tier']=='Placement' for e in self.call('state')['entries']))
-        board['ratings'][images[0]['id']]['played']=4
+        board['ratings'][images[0]['id']]['played']=2
         battle._save({'version':1,'boards':{key:board}})
         self.assertEqual(next(e for e in self.call('state')['entries'] if e['id']==images[0]['id'])['tier'],'Provisional')
 
