@@ -1,3 +1,20 @@
+## Fresher Media Library update checks (companion 2.7.72)
+
+The standalone Media Library now discovers releases through GitHub's contents
+API with a unique request URL, avoiding the raw-file branch cache as its primary
+manifest source. API quota/network failures fall back to the existing cache-busted
+raw URL. Payload origin checks, SHA-256 verification and the offline copy remain
+in place. Manual Check updates bypasses the local cooldown; ordinary loads keep it.
+The interface stays 2.9.22 and the NovelAI overlay stays 2.8.100. Restart the
+companion to load the updated runtime, or allow its launcher to update automatically.
+
+Release publication: build and publish artifacts together with their manifest;
+do not announce availability after only pushing source or release configuration.
+Run `python3 tools/verify-published-release.py` after publication and wait for both
+manifest routes and the verified downloads to match before saying an update is
+ready. This checks availability from the build machine; regional propagation or
+temporary GitHub API failures can still delay another client.
+
 ## Resume organizer collections and filter suggestions (Duplicate Review 2.0.18)
 
 Each collection now remembers its tab, search, filters, sorting, open post/set and

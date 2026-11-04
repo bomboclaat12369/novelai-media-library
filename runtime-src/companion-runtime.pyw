@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import traceback
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -3935,6 +3936,7 @@ class LibraryStore:
 class StandaloneUI:
     """Download the verified standalone document on demand; keep an offline copy."""
     BASE = "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/"
+    MANIFEST_API = "https://api.github.com/repos/bomboclaat12369/novelai-media-library/contents/manifest.json"
     # Thirteen lossless native card frames exceed the former 12 MiB document cap.
     MAX_DOCUMENT_BYTES = 32 * 1024 * 1024
 
@@ -3947,6 +3949,24 @@ class StandaloneUI:
     def _download(self, url: str, limit: int, timeout: int = 20) -> bytes:
         if not url.startswith(self.BASE):
             raise ValueError("Untrusted standalone payload URL")
+        if url.split("?", 1)[0] == self.BASE + "manifest.json":
+            # Read the branch through the contents API instead of depending on
+            # raw GitHub's cached branch resolution. Never redirect payload URLs.
+            request = urllib.request.Request(
+                self.MANIFEST_API + "?ref=main&_=" + str(time.time_ns()),
+                headers={"User-Agent": "NovelAI-Media-Library", "Accept": "application/vnd.github.raw+json",
+                         "Cache-Control": "no-cache, no-store", "Pragma": "no-cache"})
+            try:
+                with urllib.request.urlopen(request, timeout=min(timeout, 8)) as response:
+                    data = response.read(limit + 1)
+            except (OSError, urllib.error.URLError):
+                # Unauthenticated API quotas and temporary outages must not
+                # prevent updates through the existing verified download path.
+                url = self.BASE + "manifest.json?_=" + str(time.time_ns())
+            else:
+                if len(data) > limit:
+                    raise ValueError("Standalone manifest is too large")
+                return data
         request = urllib.request.Request(url, headers={"User-Agent": "NovelAI-Media-Library", "Cache-Control": "no-cache"})
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = response.read(limit + 1)
