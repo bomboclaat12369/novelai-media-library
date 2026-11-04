@@ -9,6 +9,7 @@ from contextlib import contextmanager, closing
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import runpy
 import sqlite3
@@ -52,9 +53,10 @@ class Workbench:
         self.lock=threading.RLock();self.cancel=threading.Event();self.thread=None
         self.encoder_factory=encoder_factory
         self.phase_clock=time.monotonic();self.phase_done=0
-        self.current=None
+        self.current=None;self._collections_cache=None
         with self.db() as db:
             db.executescript('''CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, updated REAL, data TEXT);
+                CREATE TABLE IF NOT EXISTS preferences(key TEXT PRIMARY KEY,value TEXT);
                 CREATE TABLE IF NOT EXISTS hashes(path TEXT PRIMARY KEY, stamp TEXT, sha TEXT, pixel TEXT);
                 CREATE TABLE IF NOT EXISTS vectors(sha TEXT, recipe TEXT, data BLOB, PRIMARY KEY(sha,recipe));
                 CREATE TABLE IF NOT EXISTS origin_review(sha TEXT PRIMARY KEY, status TEXT, updated REAL);
@@ -64,7 +66,8 @@ class Workbench:
             for ident,raw in db.execute('SELECT id,data FROM jobs').fetchall():
                 job=json.loads(raw)
                 if add_set_colors(job):db.execute('UPDATE jobs SET data=? WHERE id=?',(json.dumps(job),ident))
-            row=db.execute('SELECT data FROM jobs ORDER BY updated DESC LIMIT 1').fetchone()
+            row=db.execute("SELECT data FROM jobs WHERE id=(SELECT value FROM preferences WHERE key='active_job')").fetchone()
+            if not row:row=db.execute('SELECT data FROM jobs ORDER BY updated DESC LIMIT 1').fetchone()
         if row:
             self.current=json.loads(row[0])
             if self.current.get('history_verifying'):
@@ -87,6 +90,8 @@ class Workbench:
             if self.current:
                 add_set_colors(self.current)
                 db.execute('INSERT OR REPLACE INTO jobs VALUES (?,?,?)',(self.current['id'],time.time(),json.dumps(self.current)))
+                db.execute("INSERT OR REPLACE INTO preferences VALUES ('active_job',?)",(self.current['id'],))
+                self._collections_cache=None
 
     def update(self,**fields):
         with self.lock:
@@ -128,7 +133,27 @@ class Workbench:
             with self.db() as db:row=db.execute('SELECT data FROM jobs WHERE id=?',(ident,)).fetchone()
             if not row:raise ValueError('Evaluation not found.')
             self.current=json.loads(row[0]);self.current['running']=False
+            with self.db() as db:db.execute("INSERT OR REPLACE INTO preferences VALUES ('active_job',?)",(ident,))
+            self._collections_cache=None
             return self.status()
+
+    def collections(self):
+        """One named entry per existing organizer scope, without rebuilding inventories."""
+        with self.lock:
+            if self._collections_cache is None:
+                with self.db() as db:
+                    rows=db.execute("SELECT id,updated,json_extract(data,'$.config') FROM jobs WHERE json_type(data,'$.source_catalog')='object' AND json_extract(data,'$.source_catalog')!='{}' ORDER BY updated DESC").fetchall()
+                groups={};active=(self.current or {}).get('id')
+                for ident,stamp,raw in rows:
+                    config=json.loads(raw or '{}');roots=config.get('roots',[])
+                    if not roots:continue
+                    scope=json.dumps(roots,sort_keys=True)
+                    if scope in groups and ident!=active:continue
+                    # The folder names remain reliable even when an old run inherited another person's label.
+                    names=[re.split(r'[\\/]',root.rstrip('\\/'))[-1] for root in roots]
+                    groups[scope]={'id':ident,'name':' + '.join(names),'roots':roots,'at':stamp}
+                self._collections_cache=sorted(groups.values(),key=lambda g:g['name'].casefold())
+            return copy.deepcopy(self._collections_cache)
 
     def context(self):
         result={'characters':[], 'connected':False}

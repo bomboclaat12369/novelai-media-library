@@ -1,3 +1,14 @@
+## Folder organizer collections and Instagram provenance (Duplicate Review 2.0.17)
+
+Use the Collection picker in Folder organizer to reopen saved collections by folder
+name. Switching preserves each collection's sets, draft selection/name, reference,
+view and saved analysis; the selected collection also survives app restarts.
+Widening the suggestions sidebar adds columns of fixed-size thumbnails.
+Sets automatically show an Instagram tag when a current member has a recorded
+Instagram origin, including origins recovered through linked duplicates. Existing
+sets qualify immediately without a scan. Set dates, memberships and source history
+are preserved; the tag is recalculated as membership or provenance changes.
+
 ## Temporary Yoga artwork preview (Media Library 2.9.22)
 
 Adds a Yoga preview button beside Collection HQ. It opens the current unaltered

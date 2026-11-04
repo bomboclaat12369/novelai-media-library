@@ -26,7 +26,7 @@ const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwr
  // Dragging makes both the panel and its suggestion images larger.
  const side=page.locator('#relatedSidebar'),handle=page.locator('#sidebarResize');const original=await side.boundingBox(),oldImage=await page.locator('#suggestions .card img').first().boundingBox();
  const bounds=await handle.boundingBox();await page.mouse.move(bounds.x+bounds.width/2,bounds.y+300);await page.mouse.down();await page.mouse.move(bounds.x-195,bounds.y+300,{steps:8});await page.mouse.up();
- const widened=await side.boundingBox();assert(widened.width>original.width+180);assert((await page.locator('#suggestions .card img').first().boundingBox()).height>oldImage.height);
+ const widened=await side.boundingBox();assert(widened.width>original.width+180);assert.equal((await page.locator('#suggestions .card img').first().boundingBox()).height,oldImage.height);
  await handle.focus();await page.keyboard.press('ArrowLeft');assert((await side.boundingBox()).width>widened.width);
  const savedWidth=(await side.boundingBox()).width;
  await page.locator('#draftSetColors').click();await page.locator('#setFavorite').check();await page.locator('#saveSetColors').click();await page.waitForFunction(()=>!busy&&!document.querySelector('#colorDetails').open);

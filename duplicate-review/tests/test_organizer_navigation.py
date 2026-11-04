@@ -42,11 +42,11 @@ class NavigationTests(unittest.TestCase):
             engine,bulk,org,ids=fixture(temp)
             org.mutate('save',{'job':'fixture-job','revision':0,'name':'blue and white outfit','ids':[ids[2]],'colors':['black with gold','blue','Blue']})
             group=next(g for g in org.sets().values() if not g.get('library_id'))
-            self.assertEqual(group['name'],'Blue and White Outfit');self.assertEqual(group['colors'],['Black with Gold','Blue'])
+            self.assertEqual(group['name'],'Blue and White Outfit');self.assertEqual(group['colors'],['Black with Gold','Blue','White'])
             target=group['id']
             org.mutate('set_details',{'job':'fixture-job','revision':1,'target':target,'colors':['light blue or green']})
             reopened=Organizer(engine,bulk);reopened.bind()
-            self.assertEqual(reopened.sets()[target]['colors'],['Light Blue or Green'])
+            self.assertEqual(reopened.sets()[target]['colors'],['Light Blue or Green','Blue','White'])
             reopened.mutate('undo',{'job':'fixture-job','revision':2})
             self.assertEqual(reopened.sets()[target]['colors'],group['colors'])
             self.assertEqual(reopened.export()['sets'][-1]['name'],group['name'])

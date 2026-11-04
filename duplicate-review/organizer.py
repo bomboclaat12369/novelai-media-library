@@ -156,7 +156,30 @@ class Organizer:
         for g in result.values():g['colors']=set_name_colors(g['name'],g.get('colors',[]))
         if not include_discarded:
             for g in result.values():g['members']=[i for i in g['members'] if i in self.catalog and i not in self.discarded]
+        for g in result.values():
+            # Sources and origins include confirmed duplicate-to-keeper provenance.
+            # Derive this tag so removals and undone connections cannot leave a stale label.
+            g['instagram']=any(self.has_instagram(self.catalog.get(i,{})) for i in g['members'])
         return result
+
+    @staticmethod
+    def has_instagram(item):
+        sources=list(item.get('sources',{}).values())+item.get('origins',[])
+        return any(s.get('kind')=='instagram' or str(s.get('key','')).startswith('instagram:') for s in sources)
+
+    def switch_collection(self,body):
+        with self.engine.lock,self.lock,self.bulk.lock:
+            if self.engine.status['running'] or self.job['running'] or (self.bulk.current or {}).get('running'):
+                raise ValueError('Finish or pause the current scan or analysis before switching collections.')
+            if body.get('job')!=(self.bulk.current or {}).get('id'):
+                raise ValueError('Collection changed in another window. Reload before switching.')
+            ident=str(body.get('id',''))
+            if ident not in {c['id'] for c in self.bulk.collections()}:
+                raise ValueError('Choose an available saved collection.')
+            self.bulk.activate(ident)
+            self.bound=None
+            self.job={'running':False,'phase':'Saved inventory ready','done':0,'total':0,'eta_seconds':None}
+            return self.summary()
 
     def summary(self):
         with self.lock,self.bulk.lock:
@@ -170,7 +193,7 @@ class Organizer:
                 posts.append({k:v for k,v in p.items() if k!='ids'}|{'count':len(visible),'remaining':sum(i not in assigned for i in live),'unresolved':len(visible)-len(live),'status':statuses.get(p['id'],'pending'),'mixed':self.is_mixed(p['id'],state.get('post_evidence',{})),'large':len(p['ids'])>=1000,'source_count':len(p['ids']),'cover':next(iter(live or visible),None)})
             posts.sort(key=lambda p:(p['status']!='pending',p['remaining']==0,natural(p['label'])))
             total=sum(not r.get('quarantine_only') and i not in self.discarded for i,r in self.catalog.items())
-            return {'job':(self.bulk.current or {}).get('id'),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
+            return {'job':(self.bulk.current or {}).get('id'),'collections':self.bulk.collections(),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
                 'reference_image':self.image(reference)|{'analyzed':reference in self.vector_by_id} if reference else None,'category_catalog':self.category_catalog(),'state':state,'images':total,'unresolved':sum(bool(r.get('quarantine_only')) for i,r in self.catalog.items() if i not in self.discarded),'indexed':sum(i in self.vector_by_id for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded),
                 'unassigned_count':sum(not r.get('quarantine_only') and i not in self.discarded and i not in assigned for i,r in self.catalog.items()),'unsorted_count':len(self.unsorted_ids()),'discarded_count':sum(not self.catalog[i].get('quarantine_only') for i in self.discarded),
                 'progress':dict(self.job),'inventory_complete':bool((self.bulk.current or {}).get('inventory_complete') or (self.bulk.current or {}).get('complete'))}
@@ -357,6 +380,7 @@ class Organizer:
             if body.get('job')!=self.bound[0]:raise ValueError('Inventory changed. Reopen the organizer.')
             state=self.state()
             if action=='draft':
+                if 'new_name' in body:state['new_name']=str(body['new_name'])[:200]
                 if 'suggestion_reference' in body:
                     reference=body['suggestion_reference']
                     if reference:self.valid_ids([reference])
@@ -400,7 +424,7 @@ class Organizer:
                     group=dict(previous or {},id=ident,name=name,colors=set_name_colors(name,colors),categories=categories,favorite=favorite,members=members,updated=stamp,library_id=(previous or {}).get('library_id'))
                     if previous is None:group['created']=stamp
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,ident,json.dumps(group)))
-                    state.update(selection=[],target='',new_colors=[],new_categories=[],new_favorite=False)
+                    state.update(selection=[],target='',new_name='',new_colors=[],new_categories=[],new_favorite=False)
                 elif action in ('set_colors','set_details'):
                     target=str(body.get('target',''));group=self.sets(include_discarded=True).get(target)
                     if not group:raise ValueError('Choose an available set.')

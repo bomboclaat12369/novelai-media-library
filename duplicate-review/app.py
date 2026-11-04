@@ -188,6 +188,8 @@ def make_server(engine, port=0, token=None):
                         raise ValueError('Finish or stop the active scan before restarting. Your progress is saved.')
                     result=updater.activate()
                     threading.Thread(target=self.server.shutdown,daemon=True).start()
+                elif path == '/api/organizer/switch':
+                    result=organizer.switch_collection(body)
                 elif path == '/api/organizer/related':
                     result=organizer.related(body)
                 elif path == '/api/organizer/index':
