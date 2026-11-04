@@ -1,0 +1,43 @@
+const assert=require('node:assert/strict'),{spawn}=require('node:child_process');
+const {chromium}=require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwright');
+(async()=>{
+ const server=spawn('python3',['duplicate-review/tests/serve_organizer.py','--collections','--resume'],{env:process.env});let browser,stderr='';server.stderr.on('data',b=>stderr+=b);
+ try{
+ const info=await new Promise((resolve,reject)=>{let out='';server.stdout.on('data',b=>{out+=b;if(out.includes('\n'))resolve(JSON.parse(out.split('\n')[0]))});server.on('exit',c=>reject(Error(stderr+c)))});
+ browser=await chromium.launch({executablePath:process.env.NAI_CHROMIUM,headless:true,args:['--no-sandbox','--disable-gpu','--disable-dev-shm-usage']});
+ const page=await browser.newPage({viewport:{width:1800,height:1000}}),errors=[],requests=[];
+ page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.method()==='POST')requests.push(new URL(r.url()).pathname)});page.setDefaultTimeout(15000);
+ const ready=job=>page.waitForFunction(job=>sessionReady&&!busy&&data?.job===job,job);
+ await page.goto(info.url);await ready('fixture-job');
+ await page.locator('#filter').selectOption('large');await page.locator('#postList .post').click();await page.waitForFunction(()=>!busy&&currentId==='post:dump');
+ await page.locator('#grid [data-pick]').first().click();await page.waitForFunction(()=>document.querySelectorAll('#suggestions .card').length===30);
+ const before=await page.locator('#suggestions .section-title').last().textContent();
+ assert(await page.locator('#suggestions .membership').count()>0);
+ await page.locator('#unassignedOnly').check();await page.waitForFunction(()=>!busy&&unassignedOnly&&document.querySelectorAll('#suggestions .membership').length===0);
+ assert.equal(await page.locator('#suggestions .card').count(),30);assert.notEqual(await page.locator('#suggestions .section-title').last().textContent(),before);
+ await page.locator('#additionArea').getByRole('button',{name:'Next',exact:true}).click();await page.waitForFunction(()=>relatedOffset===30);
+ await page.locator('#suggestions .match').filter({hasText:'Sidebar Shoot'}).getByRole('button',{name:'View',exact:true}).click();await page.waitForFunction(()=>!busy&&sidebarSet);
+ await page.locator('#additionArea').getByRole('button',{name:'Next',exact:true}).click();await page.waitForFunction(()=>!busy&&sidebarOffset===60);
+ await page.locator('#nextPage').click();await page.waitForFunction(()=>!busy&&offset===60);
+ await page.locator('#filter').selectOption('all');await page.locator('#postSort').selectOption('nameAsc');
+ await page.locator('#columns').fill('4');await page.locator('#highlightUnassigned').click();
+ const handle=await page.locator('#sidebarResize').boundingBox();await page.mouse.move(handle.x+5,handle.y+100);await page.mouse.down();await page.mouse.move(handle.x-200,handle.y+100,{steps:10});await page.mouse.up();
+ await page.locator('#grid').evaluate(e=>e.scrollTop=400);await page.locator('.workspace>nav').evaluate(e=>e.scrollTop=250);await page.locator('#suggestions').evaluate(e=>e.scrollTop=450);
+ const expected=await page.evaluate(()=>captureSession());assert(expected.gridScroll>0);assert(expected.navScroll>0);assert(expected.suggestionsScroll>0);
+ await page.locator('#collectionPicker').selectOption('alice-job');await ready('alice-job');
+ await page.locator('#setsTab').click();await page.locator('#search').fill('Alice');await page.locator('#setSort').selectOption('nameDesc');
+ await page.locator('#postList .post').filter({hasText:'Alice Shoot'}).click();await page.waitForFunction(()=>!busy&&currentKind==='set');
+ await page.locator('#unassignedOnly').uncheck();
+ await page.locator('#collectionPicker').selectOption('fixture-job');await ready('fixture-job');
+ const actual=await page.evaluate(()=>captureSession());
+ for(const key of ['tab','filter','sourceFilter','postSort','search','columns','sidebarWidth','sidebarSet','sidebarOffset','relatedOffset','unassignedOnly','highlight'])assert.deepEqual(actual[key],expected[key],key);
+ assert.deepEqual(actual.view,expected.view);for(const key of ['gridScroll','navScroll','suggestionsScroll'])assert(Math.abs(actual[key]-expected[key])<3,`${key}: ${actual[key]} != ${expected[key]}`);
+ await page.reload();await ready('fixture-job');assert.equal(await page.locator('#unassignedOnly').isChecked(),true);assert.equal(await page.evaluate(()=>sidebarOffset),60);assert.equal(await page.evaluate(()=>$('grid').scrollTop),expected.gridScroll);
+ await page.getByRole('button',{name:'← Suggestions',exact:true}).click();await page.waitForFunction(()=>!sidebarSet&&document.querySelectorAll('#suggestions .card').length===30);
+ assert.equal(await page.locator('#suggestions .membership').count(),0);
+ await page.locator('#unassignedOnly').uncheck();await page.waitForFunction(()=>!busy&&!unassignedOnly);assert(await page.locator('#suggestions .membership').count()>0);
+ await page.locator('#collectionPicker').selectOption('alice-job');await ready('alice-job');assert.equal(await page.locator('#search').inputValue(),'Alice');assert.equal(await page.locator('#setSort').inputValue(),'nameDesc');assert.equal(await page.evaluate(()=>tab),'sets');assert.match(await page.locator('#title').textContent(),/Alice Shoot/);assert.equal(await page.locator('#unassignedOnly').isChecked(),false);
+ assert(!requests.some(p=>/\/api\/(scan|history\/inventory|bulk\/start|selection\/move|organizer\/index)/.test(p)));assert.deepEqual(errors,[]);
+ console.log('Resume UI passed: isolated filters, open view/page, all scroll positions, preview paging, sidebar width, reload, unassigned toggle and full suggestion pages; no scans.');
+ }finally{await browser?.close();server.kill()}
+})().catch(e=>{console.error(e);process.exitCode=1});

@@ -193,7 +193,7 @@ class Organizer:
                 posts.append({k:v for k,v in p.items() if k!='ids'}|{'count':len(visible),'remaining':sum(i not in assigned for i in live),'unresolved':len(visible)-len(live),'status':statuses.get(p['id'],'pending'),'mixed':self.is_mixed(p['id'],state.get('post_evidence',{})),'large':len(p['ids'])>=1000,'source_count':len(p['ids']),'cover':next(iter(live or visible),None)})
             posts.sort(key=lambda p:(p['status']!='pending',p['remaining']==0,natural(p['label'])))
             total=sum(not r.get('quarantine_only') and i not in self.discarded for i,r in self.catalog.items())
-            return {'job':(self.bulk.current or {}).get('id'),'collections':self.bulk.collections(),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
+            return {'job':(self.bulk.current or {}).get('id'),'scope':self.scope,'collections':self.bulk.collections(),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
                 'reference_image':self.image(reference)|{'analyzed':reference in self.vector_by_id} if reference else None,'category_catalog':self.category_catalog(),'state':state,'images':total,'unresolved':sum(bool(r.get('quarantine_only')) for i,r in self.catalog.items() if i not in self.discarded),'indexed':sum(i in self.vector_by_id for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded),
                 'unassigned_count':sum(not r.get('quarantine_only') and i not in self.discarded and i not in assigned for i,r in self.catalog.items()),'unsorted_count':len(self.unsorted_ids()),'discarded_count':sum(not self.catalog[i].get('quarantine_only') for i in self.discarded),
                 'progress':dict(self.job),'inventory_complete':bool((self.bulk.current or {}).get('inventory_complete') or (self.bulk.current or {}).get('complete'))}
@@ -293,14 +293,15 @@ class Organizer:
             visual=self.scores(evidence_ids);selected=set(seeds)|set(evidence_ids);sources={s for i in evidence_ids for s in self.catalog[i]['sources'] if s in self.posts and not self.is_mixed(s,evidence)}
             with self.db() as db:rejected={r[0] for r in db.execute('SELECT id FROM rejected WHERE scope=? AND context=?',(self.scope,context))}
             ranked=[]
+            assigned={i for g in allsets.values() for i in g['members']} if body.get('unassigned_only') is True else set()
             for ident,item in self.catalog.items():
-                if ident in selected or ident in rejected or ident in self.discarded or item.get('quarantine_only'):continue
+                if ident in selected or ident in rejected or ident in self.discarded or ident in assigned or item.get('quarantine_only'):continue
                 shared=sources & item['sources'].keys();v=visual.get(ident,0)
                 if not shared and v<.60:continue
                 source_score=sum(1/(max(1,len(self.posts[s]['ids']))**.5) for s in shared)
                 score=min(.35,.3*source_score)+v
                 ranked.append((score,ident,'Shared source post'+(' · visually similar' if v>=.60 else '') if shared else 'Visually similar'))
-            ranked.sort(key=lambda r:(-r[0],r[1]));offset=max(0,int(body.get('offset',0)));sets=[];labels={}
+            ranked.sort(key=lambda r:(-r[0],r[1]));offset=min(max(0,int(body.get('offset',0))),max(0,(len(ranked)-1)//30*30));sets=[];labels={}
             for g in allsets.values():
                 members=set(g['members']);overlap=len(selected & members)
                 for i in members:labels.setdefault(i,[]).append(g['name'])
@@ -374,11 +375,43 @@ class Organizer:
             raise ValueError('Choose available Set categories.')
         return list(dict.fromkeys(value))
 
+    @staticmethod
+    def session_preferences(value):
+        if not isinstance(value,dict):raise ValueError('Invalid organizer preferences.')
+        result={}
+        choices={'tab':('posts','sets'),'sourceFilter':('all','instagram','forum'),
+            'filter':('pending','all','remaining','large','ignored','deferred','reviewed'),
+            'postSort':('default','nameAsc','nameDesc','most','fewest','remaining'),
+            'setFilter':('all','favorites','uncategorized','categorized'),
+            'setSort':('default','nameAsc','nameDesc','createdAsc','createdDesc','updatedDesc'),
+            'order':('similar','original','filename')}
+        for key,options in choices.items():
+            if value.get(key) in options:result[key]=value[key]
+        for key in ('search','sidebarSet'):
+            if isinstance(value.get(key),str):result[key]=value[key][:500]
+        for key in ('unassignedOnly','highlight','relatedVisible'):
+            if isinstance(value.get(key),bool):result[key]=value[key]
+        for key,maximum in [('limit',1000000),('columns',8),('sidebarWidth',5000),('sidebarOffset',1000000),('relatedOffset',1000000),('gridScroll',100000000),('navScroll',100000000),('suggestionsScroll',100000000),('savedAt',10000000000000)]:
+            n=value.get(key)
+            if isinstance(n,(int,float)) and 0<=n<=maximum:result[key]=int(n)
+        view=value.get('view')
+        if isinstance(view,dict) and view.get('kind') in ('post','set','unsorted','discarded') and isinstance(view.get('id'),str):
+            n=view.get('offset',0)
+            if isinstance(n,(int,float)) and 0<=n<=1000000:
+                result['view']={'kind':view['kind'],'id':view['id'][:500],'offset':int(n)}
+        return result
+
     def mutate(self,action,body):
         with self.lock,self.bulk.lock:
             self.bind()
             if body.get('job')!=self.bound[0]:raise ValueError('Inventory changed. Reopen the organizer.')
             state=self.state()
+            if action=='session':
+                ui=self.session_preferences(body.get('ui'))
+                if ui.get('savedAt',0)<state.get('ui',{}).get('savedAt',0):return {'saved':False,'stale':True}
+                state['ui']=ui
+                with self.db() as db:self.put_state(db,state)
+                return {'saved':True}
             if action=='draft':
                 if 'new_name' in body:state['new_name']=str(body['new_name'])[:200]
                 if 'suggestion_reference' in body:

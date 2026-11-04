@@ -1,3 +1,14 @@
+## Resume organizer collections and filter suggestions (Duplicate Review 2.0.18)
+
+Each collection now remembers its tab, search, filters, sorting, open post/set and
+page, all three scroll positions, sidebar preview/page and width, thumbnail columns,
+and unassigned highlighting. State is saved locally with the collection and restored
+when switching back or reopening the app. Older saved sets and analysis are reused.
+The Unassigned only checkbox filters Suggested Additions before counting and paging,
+excluding members of any saved draft or existing library set. It is optional and
+remembered separately for each collection; related posts and set previews remain
+available. No scan, reanalysis or membership changes are needed.
+
 ## Folder organizer collections and Instagram provenance (Duplicate Review 2.0.17)
 
 Use the Collection picker in Folder organizer to reopen saved collections by folder

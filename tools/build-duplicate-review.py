@@ -21,7 +21,7 @@ for at,start in enumerate(range(0,len(encoded),60000),1):
     parts.append({'path':path.relative_to(root).as_posix(),'sha256':hashlib.sha256(content).hexdigest()})
 if args.commit:
     if not re.fullmatch('[0-9a-f]{40}',args.commit):raise ValueError('Use the full payload commit SHA.')
-    manifest={'schema':1,'version':version,'sha256':hashlib.sha256(payload).hexdigest(),'notes':'Switch saved collections directly in Folder organizer, retain the active collection across restarts, show more fixed-size suggestions when widening the sidebar, and automatically tag sets with recorded Instagram origins including linked duplicates. Saved sets, timestamps, decisions, inventories and visual analysis are preserved; no rescan.',
+    manifest={'schema':1,'version':version,'sha256':hashlib.sha256(payload).hexdigest(),'notes':'Resume each organizer collection with its own filters, scroll positions, open view, sidebar preview and layout. Add a remembered Unassigned only filter for Suggested Additions, with filtered counts and full pages. Saved sets, source connections, decisions and analysis are preserved; no rescan.',
               'parts':[{'url':'https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/'+args.commit+'/'+r['path'],'sha256':r['sha256']} for r in parts]}
     (root/'release-duplicate-review.json').write_text(json.dumps(manifest,indent=2)+'\n')
 print(json.dumps({'version':version,'archive':str(archive),'bytes':len(payload),'parts':len(parts)}))

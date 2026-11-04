@@ -50,6 +50,7 @@ def make_server(engine, port=0, token=None):
     html = html.replace('</body>',update_tag+'</body>')
     bulk_html = bulk_html.replace('</body>',update_tag+'</body>')
     organizer_html = organizer_html.replace('__UPDATER__',update_js)
+    organizer_html = organizer_html.replace('__ORGANIZER_SESSION__',(Path(__file__).parent/'organizer-session.js').read_text(encoding='utf-8'))
 
     autofill_js=(Path(__file__).parent/'no-autofill.js').read_text(encoding='utf-8')
     def no_autofill(page):
