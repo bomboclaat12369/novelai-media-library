@@ -1,0 +1,38 @@
+{
+  "status": "published_verified",
+  "log": "/home/runner/work/novelai-media-library/novelai-media-library/.release-output/report.log",
+  "source_commit": "e7a37845d423ef50c1cc712778376dab1111d90c",
+  "components": [
+    "runtime",
+    "standalone",
+    "userscript",
+    "workbench"
+  ],
+  "publish": true,
+  "artifacts": {
+    "runtime": {
+      "version": "2.7.73",
+      "sha256": "bead611842dab02704ee95cb76f0dfa1ea5c799de17aacfe316f116ad7e150b0",
+      "bytes": 310484
+    },
+    "standalone": {
+      "version": "2.9.23",
+      "sha256": "af8e061e480b4bd7db594b2039ccf64941683a4e4e011a64e73d015dd1486f38",
+      "bytes": 16720385
+    },
+    "userscript": {
+      "version": "2.8.101",
+      "sha256": "0b4984aaa08eb33c2f9f284f8aa672d783725bcbcf1afee249a30829f1b8b2bd",
+      "bytes": 480773
+    },
+    "workbench": {
+      "version": "2.0.19",
+      "sha256": "2b1728be87dc24a41dd9cf03365abfd466ef8b00c5ce3ef0d059727e76946494",
+      "bytes": 303199
+    }
+  },
+  "payload_commit": "b5ef110cb1e79dea4cc4db8ab2052de2d75a7768",
+  "release_commit": "cba7b4ec14342a4f418a5b9502bc33177312c380",
+  "generated_files": 51,
+  "push_attempted": true
+}
