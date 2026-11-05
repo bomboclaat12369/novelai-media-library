@@ -51,6 +51,11 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+      - name: Check Git publishing access without changing refs
+        if: github.ref == 'refs/heads/main'
+        env:
+          GIT_TERMINAL_PROMPT: '0'
+        run: git push --dry-run origin HEAD:refs/heads/main
       - name: Build, validate and optionally publish
         id: build
         env:
@@ -77,9 +82,11 @@ jobs:
           report = json.loads(Path('.release-output/report.json').read_text())
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
               out.write('publish=' + str(report['publish']).lower() + '\n')
+              unchanged = report['release_commit'] == report['source_commit']
+              out.write('unchanged=' + str(unchanged).lower() + '\n')
           PY
-      - name: Verify downloadable artifacts and update manifests
-        if: steps.build.outputs.publish == 'true'
+      - name: Verify published or unchanged release downloads
+        if: steps.build.outputs.publish == 'true' || (steps.build.outputs.unchanged == 'true' && github.ref == 'refs/heads/main')
         run: |
           python - <<'PY'
           import json, subprocess, sys

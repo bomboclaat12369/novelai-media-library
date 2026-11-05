@@ -89,7 +89,7 @@ if __name__ == '__main__':
             verify(args.components, args.expected_dir)
             if args.report:
                 report = json.loads(args.report.read_text())
-                report['status'] = 'published_verified'
+                report['status'] = 'published_verified' if report.get('publish') else 'existing_release_verified'
                 args.report.write_text(json.dumps(report, indent=2) + '\n')
             break
         except (OSError, ValueError, KeyError) as error:
@@ -97,7 +97,8 @@ if __name__ == '__main__':
             if attempt + 1 == args.attempts:
                 if args.report:
                     report = json.loads(args.report.read_text())
-                    report.update(status='published_verification_failed', verification_error=str(error)[:1000])
+                    status = 'published_verification_failed' if report.get('publish') else 'existing_release_verification_failed'
+                    report.update(status=status, verification_error=str(error)[:1000])
                     args.report.write_text(json.dumps(report, indent=2) + '\n')
                 raise SystemExit('Published release is not yet verified; rerun verification before announcing it ready.')
             time.sleep(args.interval)

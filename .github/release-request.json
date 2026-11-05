@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "publishing-pipeline-check-2026-11-05",
-  "components": ["standalone"],
+  "id": "publishing-pipeline-download-check-2026-11-05",
+  "components": ["standalone", "runtime", "userscript"],
   "publish": false
 }

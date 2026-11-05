@@ -15,8 +15,10 @@ first added through an external GitHub connection.
 ## First installation
 
 The checked-in `.github/release-request.json` has `publish: false`. Pushing this
-pipeline and request runs its regression tests and a real standalone build,
-without publishing an application update. The run appears under **Actions →
+pipeline and request runs its regression tests and real component builds,
+without publishing an application update. On main it also checks Git publishing
+authentication with a dry-run push. If the rebuilt release is unchanged, it
+checks the existing downloadable payloads and both manifest routes. The run appears under **Actions →
 Build and publish from source**. Its `release-receipt` artifact contains the
 result, byte counts, checksums and build log. The application release configs,
 manifest, source modules and artwork do not change during this installation.
@@ -101,6 +103,10 @@ not advance `main` to an incomplete release.
   already be complete. Retry verification using the saved expected manifests;
   do not bump versions or rebuild merely because a raw URL was still cached.
 - `dry_run_passed`: packaging checks passed, with no remote release write.
+- `existing_release_verified`: a dry run reproduced the current release and its
+  downloadable bytes matched. No application update was published.
+- `existing_release_verification_failed`: an unchanged dry run could not verify
+  the live downloads; inspect/retry the verification without republishing.
 - `published_verified`: both manifest routes and downloaded artifacts match.
 
 For example, from the original source checkout with its saved receipt:
