@@ -1,7 +1,7 @@
 // Exercise the production card decorator with native canvas and a minimal DOM.
 // This verifies rendering/data wiring, not browser CSS layout.
 const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert/strict'),crypto=require('crypto'),{createRequire}=require('module');
-const req=createRequire(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/package.json'),{createCanvas,loadImage,GlobalFonts}=req('@napi-rs/canvas');
+const req=process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES?createRequire(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/package.json'):require,{createCanvas,loadImage,GlobalFonts}=req('@napi-rs/canvas');
 const pack=JSON.parse(fs.readFileSync('assets/cards/editions/catalog.json')),R=require('../assets/cards/editions/refined/frame-renderer'),G=require('../assets/cards/editions/refined/guide-renderer');
 const config=JSON.parse(fs.readFileSync('release-standalone.json'));
 const source=fs.readFileSync(config.parts.find(p=>p.endsWith('.editions.txt')),'utf8');

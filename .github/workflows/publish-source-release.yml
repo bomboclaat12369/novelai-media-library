@@ -30,7 +30,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,6 +45,16 @@ jobs:
           node-version: '22'
       - name: Install pinned build dependencies
         run: npm ci --prefix tools --ignore-scripts --no-audit --no-fund
+      - name: Install product test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          python -m pip install -r requirements.txt -r duplicate-review/requirements.txt
+          npm install --prefix "$RUNNER_TEMP/nai-dom-test" jsdom@26.1.0 @napi-rs/canvas@0.1.80 --no-audit --no-fund
+      - name: Validate current source and product workflows
+        env:
+          NODE_PATH: ${{ runner.temp }}/nai-dom-test/node_modules
+        run: python tools/check-product.py
       - name: Check release transport and failure handling
         run: python -m unittest discover -s tests -p test_release_pipeline.py -v
       - name: Set release commit identity

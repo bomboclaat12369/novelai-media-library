@@ -142,7 +142,7 @@ class OrganizerTests(unittest.TestCase):
             org.mutate('save',dict(body,membership_confirmation=warning['membership_confirmation']))
             reopened=Organizer(engine,bulk)
             saved=suggestions(reopened)
-            self.assertEqual(saved[ids[0]]['sets'],['Existing shoot','Second Shoot'])
+            self.assertEqual(saved[ids[0]]['sets'],['Second Shoot'])
             self.assertEqual(saved[ids[3]]['sets'],['Second Shoot'])
             self.assertEqual(saved[ids[4]]['sets'],[])
             self.assertEqual(list(saved),list(initial))
@@ -163,10 +163,10 @@ class OrganizerTests(unittest.TestCase):
             self.assertTrue(stale['confirmation_required']);self.assertEqual(org.state(),before)
             result=org.mutate('save',dict(body,membership_confirmation=warning['membership_confirmation']))
             self.assertEqual(len(result['sets']),2)
-            # Re-selecting an image already in the destination adds no membership.
-            result=org.mutate('save',{'job':'fixture-job','revision':1,'target':'library:existing','ids':[ids[0]]})
+            # Re-select an image that still belongs to this destination.
+            result=org.mutate('save',{'job':'fixture-job','revision':1,'target':'library:existing','ids':[ids[1]]})
             self.assertNotIn('confirmation_required',result)
-            self.assertEqual(org.sets()['library:existing']['members'].count(ids[0]),1)
+            self.assertEqual(org.sets()['library:existing']['members'].count(ids[1]),1)
             local=next(g for g in org.sets().values() if g['name']=='Second Shoot')
             warning=org.mutate('save',{'job':'fixture-job','revision':2,'target':'library:existing','ids':[ids[2]]})
             self.assertEqual(warning['conflicts'][0]['sets'][0]['id'],local['id'])

@@ -5,9 +5,12 @@ import json
 import mimetypes
 import subprocess
 import sys
+import runpy
 from pathlib import Path
 
-config = json.loads(Path(sys.argv[1] if len(sys.argv) > 1 else 'release-standalone.json').read_text())
+config_path=sys.argv[1] if len(sys.argv)>1 else 'release-standalone.json'
+runpy.run_path('tools/sync-ui-sources.py')['sync'](config_path)
+config = json.loads(Path(config_path).read_text())
 version = config['version']
 payload = ''.join(Path(p).read_text() for p in config['parts'])
 bootstrap = Path('standalone-src/bootstrap.js').read_text()

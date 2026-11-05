@@ -12,15 +12,15 @@ class TraitsAndColors(unittest.TestCase):
     def test_owned_traits_separate_from_display_and_migrate_existing_choice(self):
         a,b=[self.import_image(i) for i in range(2)];owner=self.character['id'];self.rows()
         data=self.store.collection_request('state',{'character_id':owner});self.character['collection']['editions'][a['id']]={'choice':'christmas'}
-        self.assertEqual(self.rows()[0]['owned_editions'],['christmas'])
+        self.assertEqual(next(r for r in self.rows() if r['id']==a['id'])['owned_editions'],['christmas'])
         before=copy.deepcopy(self.store.battles._load())
         self.call(entry_ids=[a['id'],b['id']],add_traits=['hall-of-fame','former-one'])
         rows={r['id']:r for r in self.rows()};self.assertEqual(rows[a['id']]['edition_id'],'christmas');self.assertIsNone(rows[b['id']]['edition_id'])
         self.call(entry_id=a['id'],choice='hall-of-fame');self.call(entry_id=a['id'],choice='none')
-        self.assertEqual(set(self.rows()[0]['owned_editions']),{'christmas','hall-of-fame','former-one'})
+        self.assertEqual(set(next(r for r in self.rows() if r['id']==a['id'])['owned_editions']),{'christmas','hall-of-fame','former-one'})
         with self.assertRaises(ValueError):self.call(entry_id=b['id'],choice='christmas')
         self.call(entry_id=a['id'],remove_traits=['christmas'])
-        self.assertNotIn('christmas',self.rows()[0]['owned_editions'])
+        self.assertNotIn('christmas',next(r for r in self.rows() if r['id']==a['id'])['owned_editions'])
         snapshot=copy.deepcopy(self.character['collection']['editions'])
         with self.assertRaises(ValueError):self.call(entry_ids=[a['id'],'missing'],add_traits=['birthday'])
         self.assertEqual(snapshot,self.character['collection']['editions']);self.assertEqual(before,self.store.battles._load())

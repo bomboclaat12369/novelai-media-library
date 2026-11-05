@@ -42,6 +42,7 @@ class Organizer:
                 CREATE TABLE IF NOT EXISTS rejected(scope TEXT,context TEXT,id TEXT,PRIMARY KEY(scope,context,id));
                 CREATE TABLE IF NOT EXISTS discarded(hash TEXT PRIMARY KEY,batch TEXT,data TEXT);
                 CREATE TABLE IF NOT EXISTS parked(scope TEXT,post TEXT,hash TEXT,PRIMARY KEY(scope,post,hash));''')
+            db.execute('CREATE TABLE IF NOT EXISTS video_references(scope TEXT,sha TEXT,data TEXT,PRIMARY KEY(scope,sha))')
             # Upgrade every saved collection's tags without touching membership,
             # timestamps, inventory, matching results, selections or progress.
             for scope,ident,raw in db.execute('SELECT scope,id,data FROM sets').fetchall():
@@ -61,8 +62,12 @@ class Organizer:
         key=(current.get('id'),len(cat))
         if self.bound==key:return
         if self.job['running']:return
-        self.bound=key;self.catalog=cat;self.posts={};self.order_cache={}
+        self.bound=key;self.catalog=dict(cat);self.posts={};self.order_cache={}
         self.scope=hashlib.sha256(json.dumps(current.get('config',{}).get('roots',[]),sort_keys=True).encode()).hexdigest()
+        with self.db() as db:
+            for digest,raw in db.execute('SELECT sha,data FROM video_references WHERE scope=?',(self.scope,)):
+                record=json.loads(raw);self.catalog[record['id']]=record
+        cat=self.catalog
         for ident,item in cat.items():
             for sid,source in item.get('sources',{}).items():
                 if source.get('kind')=='library':continue
@@ -119,7 +124,7 @@ class Organizer:
         with self.bulk.db() as db:
             rows={sha:raw for sha,raw in db.execute('SELECT sha,data FROM vectors WHERE recipe=?',(self.recipe,))}
         for ident,item in self.catalog.items():
-            raw=rows.get(item['sha'])
+            raw=rows.get(item.get('analysis_sha',item['sha']))
             if not raw:continue
             v=np.frombuffer(raw,dtype=np.float32)
             if v.size!=2304 or not np.isfinite(v).all():continue
@@ -147,11 +152,15 @@ class Organizer:
         with self.db() as db:
             for sid,raw in db.execute('SELECT id,data FROM sets WHERE scope=?',(self.scope,)):
                 g=json.loads(raw)
+                library_key='library:'+str(g.get('library_id') or '')
+                if library_key!=sid and library_key in result:
+                    result[sid]=result.pop(library_key)
                 g.setdefault('colors',result.get(sid,{}).get('colors',[]))
                 g.setdefault('categories',result.get(sid,{}).get('categories',[]))
                 g.setdefault('favorite',bool(result.get(sid,{}).get('favorite')))
                 # Existing library members remain visible alongside locally reviewed additions.
-                g['members']=list(dict.fromkeys(result.get(sid,{}).get('members',[])+g['members']))
+                removed=set(g.get('removed_members',[]))
+                g['members']=list(dict.fromkeys(i for i in result.get(sid,{}).get('members',[])+g['members'] if i not in removed))
                 g['saved']=True;result[sid]=g
         for g in result.values():g['colors']=set_name_colors(g['name'],g.get('colors',[]))
         if not include_discarded:
@@ -194,6 +203,7 @@ class Organizer:
             posts.sort(key=lambda p:(p['status']!='pending',p['remaining']==0,natural(p['label'])))
             total=sum(not r.get('quarantine_only') and i not in self.discarded for i,r in self.catalog.items())
             return {'job':(self.bulk.current or {}).get('id'),'scope':self.scope,'collections':self.bulk.collections(),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
+                'up_next':self.pinned_ids(state),'later_count':sum(p['status']=='deferred' for p in posts),
                 'reference_image':self.image(reference)|{'analyzed':reference in self.vector_by_id} if reference else None,'category_catalog':self.category_catalog(),'state':state,'images':total,'unresolved':sum(bool(r.get('quarantine_only')) for i,r in self.catalog.items() if i not in self.discarded),'indexed':sum(i in self.vector_by_id for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded),
                 'unassigned_count':sum(not r.get('quarantine_only') and i not in self.discarded and i not in assigned for i,r in self.catalog.items()),'unsorted_count':len(self.unsorted_ids()),'discarded_count':sum(not self.catalog[i].get('quarantine_only') for i in self.discarded),
                 'progress':dict(self.job),'inventory_complete':bool((self.bulk.current or {}).get('inventory_complete') or (self.bulk.current or {}).get('complete'))}
@@ -249,8 +259,21 @@ class Organizer:
 
     def image(self,ident):
         r=self.catalog[ident]
-        return {'id':ident,'name':re.split(r'[\\/]',r['path'])[-1],'path':r['path'],'quarantined':bool(r.get('quarantine_only')),
+        return {'id':ident,'name':re.split(r'[\\/]',r['path'])[-1],'path':r['path'],'media_type':r.get('media_type','image'),'frame_seconds':r.get('frame_seconds'),'quarantined':bool(r.get('quarantine_only')),
                 'sources':list(r.get('sources',{})),'origins':r.get('origins',[]),'reference':bool(r.get('reference')),'discarded':ident in self.discarded}
+
+    def pinned_ids(self,state=None):
+        """Resolve saved hashes through verified keeper/copy provenance after rescans."""
+        pins=(state if state is not None else self.state()).get('pins',[])
+        by_hash={}
+        for ident,item in self.catalog.items():
+            if item.get('quarantine_only') or ident in self.discarded:continue
+            for digest in self.hashes(ident):by_hash[digest]=ident
+        result=[]
+        for pin in pins:
+            ident=next((by_hash[h] for h in pin['hashes'] if h in by_hash),None)
+            if ident and ident not in result:result.append(ident)
+        return result
 
     def page(self,kind,ident,offset=0,order='similar',remember=True,focus_id=None):
         with self.lock,self.bulk.lock:
@@ -261,6 +284,7 @@ class Organizer:
             elif kind=='set':
                 group=self.sets().get(ident);ids=group.get('members',[]) if group else []
             elif kind=='unsorted':group={'label':'Unsorted'};ids=self.unsorted_ids()
+            elif kind=='up_next':group={'label':'★ Up next'};ids=self.pinned_ids()
             elif kind=='discarded':group={'label':'Discarded · recoverable'};ids=[i for i in self.discarded if not self.catalog[i].get('quarantine_only')]
             else:raise ValueError('Invalid collection.')
             if not group:raise ValueError('Choose an available post or set.')
@@ -395,7 +419,7 @@ class Organizer:
             n=value.get(key)
             if isinstance(n,(int,float)) and 0<=n<=maximum:result[key]=int(n)
         view=value.get('view')
-        if isinstance(view,dict) and view.get('kind') in ('post','set','unsorted','discarded') and isinstance(view.get('id'),str):
+        if isinstance(view,dict) and view.get('kind') in ('post','set','unsorted','discarded','up_next') and isinstance(view.get('id'),str):
             n=view.get('offset',0)
             if isinstance(n,(int,float)) and 0<=n<=1000000:
                 result['view']={'kind':view['kind'],'id':view['id'][:500],'offset':int(n)}
@@ -425,8 +449,15 @@ class Organizer:
                 with self.db() as db:self.put_state(db,state)
                 return {'saved':True}
             if int(body.get('revision',-1))!=state.get('revision',0):raise ValueError('Review changed in another window. Reload before saving.')
+            previous_undo=copy.deepcopy(state.get('undo'))
             with self.db() as db:
-                if action=='save':
+                if action=='pin':
+                    ident=self.valid_ids([body.get('id')])[0];hashes=self.hashes(ident)
+                    if not isinstance(body.get('pinned'),bool):raise ValueError('Choose star or unstar.')
+                    pins=[p for p in state.get('pins',[]) if not hashes.intersection(p['hashes'])]
+                    if body['pinned']:pins.append({'hashes':sorted(hashes),'created':time.time()})
+                    state['pins']=pins
+                elif action=='save':
                     ids=self.valid_ids(body.get('ids',[]))
                     if not ids:raise ValueError('Select at least one image.')
                     target=str(body.get('target',''));allsets=self.sets(include_discarded=True);previous=allsets.get(target)
@@ -449,12 +480,23 @@ class Organizer:
                     ident=target or uuid.uuid4().hex
                     old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,ident)).fetchone()
                     state['undo']={'action':'set','id':ident,'previous':old[0] if old else None,'selection':ids}
+                    # A confirmed assignment is a move, matching the main library.
+                    moved={}
+                    for sid,other in allsets.items():
+                        if sid==ident or not adding.intersection(other['members']):continue
+                        old_other=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,sid)).fetchone()
+                        moved[sid]=old_other[0] if old_other else None
+                        other=dict(other,members=[i for i in other['members'] if i not in adding],
+                            removed_members=list(set(other.get('removed_members',[]))|adding.intersection(other['members'])),updated=time.time())
+                        db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,sid,json.dumps(other)))
+                    state['undo']['moved']=moved
                     members=list(dict.fromkeys((previous or {}).get('members',[])+ids))
                     colors=self.colors(body.get('colors',(previous or {}).get('colors',state.get('new_colors',[]))))
                     categories=self.categories(body.get('categories',(previous or {}).get('categories',state.get('new_categories',[]))),(previous or {}).get('categories',[]))
                     stamp=time.time()
                     favorite=self.favorite(body.get('favorite',(previous or {}).get('favorite',state.get('new_favorite',False))))
                     group=dict(previous or {},id=ident,name=name,colors=set_name_colors(name,colors),categories=categories,favorite=favorite,members=members,updated=stamp,library_id=(previous or {}).get('library_id'))
+                    group['removed_members']=[i for i in group.get('removed_members',[]) if i not in ids]
                     if previous is None:group['created']=stamp
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,ident,json.dumps(group)))
                     state.update(selection=[],target='',new_name='',new_colors=[],new_categories=[],new_favorite=False)
@@ -532,6 +574,9 @@ class Organizer:
                     if undo['action']=='set':
                         db.execute('DELETE FROM sets WHERE scope=? AND id=?',(self.scope,undo['id']))
                         if undo['previous']:db.execute('INSERT INTO sets VALUES (?,?,?)',(self.scope,undo['id'],undo['previous']))
+                        for sid,raw in undo.get('moved',{}).items():
+                            db.execute('DELETE FROM sets WHERE scope=? AND id=?',(self.scope,sid))
+                            if raw:db.execute('INSERT INTO sets VALUES (?,?,?)',(self.scope,sid,raw))
                         state['selection']=undo.get('selection',[])
                     elif undo['action']=='disposition':
                         table=undo['table']
@@ -553,15 +598,22 @@ class Organizer:
                     elif undo['action']=='reject':
                         for ident in undo['ids']:db.execute('DELETE FROM rejected WHERE scope=? AND context=? AND id=?',(self.scope,undo['context'],ident))
                 else:raise ValueError('Unknown organizer action.')
+                if action=='undo':
+                    history=state.get('undo_stack',[])
+                    if history:state['undo']=history.pop()
+                elif action!='pin' and previous_undo and state.get('undo')!=previous_undo:
+                    state['undo_stack']=(state.get('undo_stack',[])+[previous_undo])[-19:]
                 state['revision']=state.get('revision',0)+1;self.put_state(db,state)
             self.load_dispositions()
             return self.summary()
 
-    def index(self):
+    def index(self,only=None):
         with self.lock,self.bulk.lock:
             self.bind()
             if self.job['running'] or self.engine.status['running'] or (self.bulk.current or {}).get('running'):raise ValueError('Wait for the current operation.')
             todo=[copy.copy(r) for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.vector_by_id and i not in self.discarded]
+            if only is not None:
+                requested=set(self.valid_ids(only));todo=[r for r in todo if r['id'] in requested]
             if not todo:return dict(self.job)|{'phase':'All saved images already indexed','remaining':0}
             self.cancel.clear();self.job={'running':True,'phase':'Preparing visual matching','done':0,'total':len(todo),'eta_seconds':None,'elapsed_seconds':0,'reused':len(self.vector_by_id),'issues':[]}
             self.thread=threading.Thread(target=self.run_index,args=(todo,),daemon=True);self.thread.start();return dict(self.job)
@@ -590,10 +642,11 @@ class Organizer:
                 try:
                     path=Path(item['path'])
                     if linked(path) or stat_key(path)!=item['stamp']:raise ValueError('File changed since the saved inventory.')
-                    value=np.concatenate((encoder._encode(path),encoder._encode_scene(path).reshape(-1))).astype(np.float32)
+                    search_path=Path(item.get('matching_frame_path') or path)
+                    value=np.concatenate((encoder._encode(search_path),encoder._encode_scene(search_path).reshape(-1))).astype(np.float32)
                     if value.size!=2304 or not np.isfinite(value).all():raise ValueError('Invalid visual analysis')
                     if stat_key(path)!=item['stamp']:raise ValueError('File changed during analysis.')
-                    with self.bulk.db() as db:db.execute('INSERT OR REPLACE INTO vectors VALUES (?,?,?)',(item['sha'],self.recipe,value.tobytes()))
+                    with self.bulk.db() as db:db.execute('INSERT OR REPLACE INTO vectors VALUES (?,?,?)',(item.get('analysis_sha',item['sha']),self.recipe,value.tobytes()))
                 except InterruptedError:raise
                 except Exception as e:
                     with self.lock:self.job['issues'].append({'path':item['path'],'message':str(e)})
@@ -612,7 +665,8 @@ class Organizer:
             path=Path(item['path']);stamp=stat_key(path)
             if linked(path) or stamp!=item['stamp']:raise ValueError('Image changed or moved since inventory.')
             size=min(2400,max(240,int(size)))
-            key=hashlib.sha256((item['sha']+':'+stamp+':'+str(size)+':preview-v1').encode()).hexdigest()
+            key=hashlib.sha256((item.get('analysis_sha',item['sha'])+':'+stamp+':'+str(size)+':preview-v1').encode()).hexdigest()
+            path=Path(item.get('matching_frame_path') or path)
         target=self.engine.state_dir/'organizer-thumbnails'/key[:2]/(key+'.jpg')
         if target.is_file():return target.read_bytes()
         im,_,_=load_image(path,size);out=io.BytesIO();im.save(out,format='JPEG',quality=94)
@@ -628,3 +682,77 @@ class Organizer:
             return {'format':'folder-organizer-2','dispositions':dispositions,'source_job':self.bound[0],'config':(self.bulk.current or {}).get('config',{}),'sets':summary['sets'],'state':summary['state'],'category_catalog':summary['category_catalog'],
                     'post_review':[{k:p[k] for k in ('id','status')} for p in summary['posts']],'source_catalog':self.catalog,
                     'notice':'Locally saved set drafts; no images moved, restored or imported.'}
+
+    def transfer(self,action,body):
+        with self.lock,self.bulk.lock:
+            self.bind()
+            if body.get('job')!=self.bound[0]:raise ValueError('Collection changed. Preview again.')
+            if self.job['running'] or self.engine.status['running'] or (self.bulk.current or {}).get('running'):
+                raise ValueError('Pause analysis before applying drafts.')
+            if action=='preview':
+                library=self.engine.library.request('/api/library')
+                owner=str(body.get('character_id') or self.category_catalog().get('character_id') or (self.bulk.current or {}).get('config',{}).get('character_id') or '')
+                if not owner and len(library.get('characters',[]))==1:owner=library['characters'][0]['id']
+                if not owner:return {'choose_character':[{'id':c['id'],'name':c['name']} for c in library.get('characters',[])]}
+                draft=self.export();draft['scope']=self.scope
+                draft['sets']=[g for g in draft['sets'] if g.get('saved')]
+                wanted={i for g in draft['sets'] for i in g['members']+g.get('removed_members',[])}
+                draft['source_catalog']={i:r for i,r in self.catalog.items() if i in wanted}
+                result=self.engine.library.request('/api/organizer/preview',{'character_id':owner,'draft':draft})
+                self.transfer_plan={'token':result['token'],'revision':self.state()['revision'],'scope':self.scope}
+                return result
+            plan=getattr(self,'transfer_plan',{})
+            if plan.get('token')!=body.get('token') or plan.get('scope')!=self.scope or plan.get('revision')!=self.state()['revision']:
+                raise ValueError('Drafts changed. Preview again to resume safely.')
+            if action=='import':return self.engine.library.request('/api/organizer/import',{'token':body['token'],'id':body.get('id')})
+            if action!='apply':raise ValueError('Unknown transfer action.')
+            result=self.engine.library.request('/api/organizer/apply',{'token':body['token'],'conflicts':body.get('conflicts','move')})
+            with self.db() as db:
+                for ident,sid in result['mapping'].items():
+                    row=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,ident)).fetchone()
+                    if not row:continue
+                    group=json.loads(row[0]);group['library_id']=sid;group['applied_at']=time.time();group['applied_partial']=bool(result.get('skipped'))
+                    db.execute('UPDATE sets SET data=? WHERE scope=? AND id=?',(json.dumps(group),self.scope,ident))
+            return result
+
+    def video_queue(self):
+        from bulk.sources import source_of
+        with self.lock,self.bulk.lock:
+            self.bind();roots=(self.bulk.current or {}).get('config',{}).get('roots',[])
+            self.video_files={};rows=[];assigned={i for g in self.sets().values() for i in g['members']}
+            references={r['path']:r for r in self.catalog.values() if r.get('media_type')=='video'}
+            for root in roots:
+                folder=Path(root)
+                if not folder.is_dir() or linked(folder):continue
+                for path in folder.rglob('*'):
+                    if path.suffix.lower() not in ('.mp4','.webm','.mov','.mkv','.m4v','.avi') or not path.is_file() or linked(path):continue
+                    if any('_Duplicate_Review_Quarantine'==p for p in path.parts):continue
+                    key=hashlib.sha256(str(path).encode()).hexdigest();self.video_files[key]=path
+                    record=references.get(str(path));source=source_of(str(path))
+                    rows.append({'id':key,'name':path.name,'source':source.get('label',''),'frame_seconds':record.get('frame_seconds') if record else None,
+                        'assigned':bool(record and record['id'] in assigned)})
+                    if len(rows)>=10000:break
+            return {'videos':sorted(rows,key=lambda r:(r['assigned'],natural(r['name'])))}
+
+    def video_action(self,action,body):
+        with self.lock,self.bulk.lock:
+            self.bind()
+            if body.get('job')!=(self.bulk.current or {}).get('id'):raise ValueError('Collection changed. Reopen videos.')
+            if self.job['running']:raise ValueError('Pause analysis before changing its reference frames.')
+            path=getattr(self,'video_files',{}).get(str(body.get('id')))
+            if not path or not path.is_file() or linked(path):raise ValueError('Video unavailable. Refresh the video queue.')
+            scope=self.scope;stamp=stat_key(path)
+        result=runtime_helpers()['video_frame_data'](path,body.get('seconds',0),self.engine.state_dir/'video-tools',int(body.get('direction',0)),capture=action=='frame')
+        if action=='step':return result
+        if action!='frame':raise ValueError('Unknown video action.')
+        from bulk.sources import source_of
+        digest=sha256(path);frame_sha=hashlib.sha256(result['image']).hexdigest();frame=self.engine.state_dir/'video-frames'/(frame_sha+'.jpg');frame.parent.mkdir(exist_ok=True);frame.write_bytes(result['image'])
+        with self.lock,self.bulk.lock:
+            if self.scope!=scope or stat_key(path)!=stamp:raise ValueError('Video or collection changed. Select the frame again.')
+            source=source_of(str(path));ident='video:'+digest
+            record={'id':ident,'sha':digest,'analysis_sha':frame_sha,'path':str(path),'stamp':stamp,'media_type':'video',
+                'matching_frame_path':str(frame),'frame_seconds':result['seconds'],'origins':[source],'sources':{source['key']:source},'copies':[],'reference':False,'existing_sets':[]}
+            with self.db() as db:db.execute('INSERT OR REPLACE INTO video_references VALUES (?,?,?)',(scope,digest,json.dumps(record)))
+            self.bound=None;self.bind();state=self.state();state['suggestion_reference']=ident
+            with self.db() as db:self.put_state(db,state)
+            return {'id':ident,'seconds':result['seconds'],'state':self.summary()}

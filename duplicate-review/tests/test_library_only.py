@@ -69,7 +69,7 @@ class LibraryOnlyTests(unittest.TestCase):
         self.store.update_set(self.group['id'],name='Later edit')
         with self.assertRaisesRegex(ValueError,'Set changed'):self.engine.undo()
         self.assertIsNone(self.store.media_item(self.item['id']))
-        self.assertEqual(self.store.set_item(self.group['id'])['name'],'Later edit')
+        self.assertEqual(self.store.set_item(self.group['id'])['name'],'Later Edit')
 
     def test_changed_original_rejected_without_partial_removal(self):
         group,records,second,third=self.prepare_library()

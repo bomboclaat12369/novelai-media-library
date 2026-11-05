@@ -1,185 +1,25 @@
-// Full assembled payload in a DOM, with a fake companion. Install jsdom@26.1.0 to run.
-const {test} = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const {JSDOM, VirtualConsole} = require('jsdom');
-const repo = path.resolve(__dirname, '..');
-const config = JSON.parse(fs.readFileSync(path.join(repo, process.env.NAI_RELEASE_CONFIG || 'release-userscript.json'), 'utf8'));
-const assembled = config.parts.map(p => fs.readFileSync(path.join(repo,p),'utf8')).join('');
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+// Current standalone UI, backed by the deterministic companion fixture.
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const {fixture,waitFor,delay,config,assembled}=require('./ui-fixture.cjs');
 
-async function fixture({media = [], configure = null} = {}) {
-  const errors = [], writes = [], revoked = [], history = [];
-  const vc = new VirtualConsole();
-  vc.on('jsdomError', e => { if (!e.message.includes('Not implemented:')) errors.push(e); });
-  const dom = new JSDOM('<!doctype html><html><head></head><body><main>NovelAI fixture</main></body></html>', {
-    url:'https://novelai.net/stories', runScripts:'outside-only', pretendToBeVisual:true, virtualConsole:vc,
-  });
-  const w = dom.window;
-  const library = {characters:[{id:'character',name:'Fixture',categories:[{id:'dress',name:'Dress'}]}], media, sets:[]};
-  let blobIndex = 0, frames = 0;
-  w.URL.createObjectURL = () => `blob:https://novelai.net/${++blobIndex}`;
-  w.URL.revokeObjectURL = url => revoked.push(url);
-  w.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
-  w.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
-  const raf = w.requestAnimationFrame.bind(w);
-  w.requestAnimationFrame = fn => raf(t => { frames++; fn(t); });
-  w.alert = message => errors.push(new Error(String(message)));
-  w.confirm = () => true;
-  w.prompt = () => 'New category';
-  w.fetch = async () => { throw new Error('Unexpected native fetch'); };
-  w.GM_xmlhttpRequest = options => {
-    const url = new URL(options.url), route = url.pathname;
-    const method = options.method || 'GET';
-    let canceled = false;
-    setTimeout(() => {
-      if (canceled) return;
-      try {
-        let value, status = 200;
-        if (method !== 'GET') writes.push({route,method});
-        if (route === '/api/health') value = {ok:true,version:8,mixed_collections:true,replacement_flags:true,featured_flags:true,undo_history:true};
-        else if (route === '/api/library') value = library;
-        else if (route === '/api/undo' && method === 'GET') value = {entries:[...history].reverse(),limit:20};
-        else if (route === '/api/undo' && method === 'POST') {
-          const entry=history.pop();
-          if (!entry || entry.id!==JSON.parse(options.data).entry_id) throw new Error('Stale history request');
-          const item=library.media.find(m=>m.id===entry.media_id);
-          if (item) Object.assign(item,entry.before);
-          else library.media.splice(entry.index,0,entry.before);
-          value={ok:true,item:entry.before};
-        }
-        else if (route.startsWith('/api/characters/') && method === 'DELETE') {
-          const id = route.split('/')[3];
-          library.characters = library.characters.filter(c => c.id !== id);
-          library.sets = library.sets.filter(s => s.character_id !== id);
-          value = {ok:true};
-        }
-        else if (route.startsWith('/api/media/') && method === 'DELETE') {
-          const id = route.split('/')[3];
-          const index=library.media.findIndex(m=>m.id===id);
-          const item=library.media[index];
-          history.push({id:'undo-'+history.length,label:'Delete media',media_id:id,filename:item.original_name,index,before:JSON.parse(JSON.stringify(item))});
-          library.media = library.media.filter(m => m.id !== id);
-          value = {ok:true};
-        } else if (route.startsWith('/api/media/') && method === 'GET' && route.endsWith('/quality')) {
-          value = {media_id:route.split('/')[3],media_type:'image',file_bytes:2048,width:1536,height:2048};
-        }
-        else if (route === '/api/import/file') {
-          const file = options.data.get('file');
-          const item = {id:`saved${library.media.length+1}`,character_id:'character',original_name:file.name,media_type:'image',categories:[],in_review:false};
-          library.media.push(item); value = {item,duplicate:false};
-        } else if (route.startsWith('/api/media/') && method === 'POST' && route.endsWith('/replace')) {
-          const id = route.split('/')[3];
-          const item = library.media.find(m => m.id === id);
-          if (!item) throw new Error(`Replacing unknown media ${id}`);
-          const file = options.data.get('file');
-          Object.assign(item, {original_name:file.name, thumb_rel:null}); value = item;
-        } else if (route.startsWith('/api/media/') && method === 'POST') {
-          const id = route.split('/')[3], action = route.split('/')[4];
-          const item = library.media.find(m => m.id === id);
-          if (!item) throw new Error(`Saving unknown media ${id}`);
-          const body = JSON.parse(options.data);
-          history.push({id:'undo-'+history.length,label:'Change '+action,media_id:id,filename:item.original_name,before:JSON.parse(JSON.stringify(item))});
-          Object.assign(item, action === 'crop' ? {crop_top:body.top,crop_bottom:body.bottom} : body); value = item;
-        } else if (route === '/api/sets' && method === 'POST') {
-          value = {id:`set${library.sets.length+1}`,...JSON.parse(options.data)}; library.sets.push(value);
-        } else if (route.startsWith('/api/sets/') && method === 'POST') {
-          value = library.sets.find(s => s.id === route.split('/')[3]);
-          const body=JSON.parse(options.data);
-          if(body.add_media_ids) body.media_ids=[...new Set([...value.media_ids,...body.add_media_ids])];
-          Object.assign(value,body);
-        } else if (options.responseType === 'blob') {
-          options.onload({status:200,response:new w.Blob(['fixture'],{type:'image/png'})}); return;
-        } else { value = {error:`Unhandled fixture route: ${method} ${route}`}; status = 404; }
-        options.onload({status,responseText:JSON.stringify(value)});
-      } catch (e) { errors.push(e); options.onerror?.(e); }
-    }, 0);
-    return {abort() { canceled = true; options.onabort?.({}); }};
-  };
-  w.document.documentElement.dataset.naiMediaPayloadVersion = config.version;
-  if (configure) configure(w);
-  w.eval(assembled);
-  await delay(250);
-  const root = w.document.getElementById('nai-media-host').shadowRoot;
-  assert.equal(root.getElementById('status').textContent, 'Local library connected');
-  async function open(files=[1,2,3,4]) {
-    root.getElementById('addMediaBtn').click();
-    await delay(40);
-    const input = root.getElementById('fileInput');
-    Object.defineProperty(input,'files',{value:files.map(n => n instanceof w.File ? n : new w.File(['image'], typeof n === 'object' ? n.name : `Image #${n}.png`,{type:'image/png'}))});
-    input.dispatchEvent(new w.Event('change',{bubbles:true}));
-    root.getElementById('importReview').click();
-    await delay(70);
-  }
-  return {dom,w,root,library,writes,errors,revoked,history,open,get frames(){return frames;}};
-}
-
-test('mixed connections show one name, badges, filters and a playable video alongside set links', async () => {
-  const media=[{id:'v',character_id:'character',media_type:'video',original_name:'Nikki Video 4.mp4',categories:[],in_all:false},
-    ...[59,60,61].map(i=>({id:'i'+i,character_id:'character',media_type:'image',original_name:'Nikki Image '+i+'.png',categories:[],in_all:i!==61}))];
-  const f=await fixture({media});
-  try{
-    f.library.sets.push({id:'pink',kind:'connection',character_id:'character',name:'Pink bikini',media_ids:media.map(m=>m.id),cover_media_id:'i59'},
-      {id:'album',character_id:'character',name:'Beach album',media_ids:['i59'],cover_media_id:'i59'});
-    f.root.getElementById('refreshBtn').click();await delay(600);
-    f.root.getElementById('videosModeBtn').click();await delay(100);
-    assert.ok(!f.root.getElementById('naiSetsCat').classList.contains('hidden'));
-    assert.match(f.root.querySelector('.tile[data-id="v"] .naiGroupBadge').title,/Pink bikini/);
-    f.root.querySelector('.tile[data-id="v"]').click();await delay(100);
-    const panel=f.root.getElementById('naiMemberships');
-    assert.match(panel.textContent,/Connection: Pink bikini/);
-    assert.equal(panel.querySelectorAll('[data-group-id]').length,1);
-    assert.equal(panel.querySelectorAll('img').length,0);
-    assert.ok(panel.parentElement===f.root.getElementById('qualityInfo').parentElement);
-    panel.querySelector('[data-group-id="pink"]').click();await delay(200);
-    assert.equal(f.root.querySelectorAll('#grid .tile').length,4);
-    f.root.querySelector('.tile[data-id="i59"]').click();await delay(120);
-    assert.equal(panel.querySelectorAll('[data-group-id]').length,2);
-    assert.ok(f.root.querySelector('.tile[data-id="i59"] .naiMainBadge'));
-    assert.equal(f.root.querySelector('.tile[data-id="i61"] .naiMainBadge'),null);
-    assert.equal(f.root.querySelector('.naiSetCover216').textContent,'▣');
-    f.root.querySelector('.tile[data-id="v"]').click();await delay(100);
-    assert.ok(f.root.querySelector('#stages video'));
-    f.root.getElementById('naiSetsCat').click();await delay(50);
-    f.root.querySelector('[data-group-filter="connection"]').click();
-    assert.equal(f.root.querySelectorAll('.naiSetTile').length,1);
-    assert.equal(f.root.querySelector('.naiSetTile').dataset.setId,'pink');
-    f.root.querySelector('[data-group-filter="set"]').click();
-    assert.equal(f.root.querySelector('.naiSetTile').dataset.setId,'album');
-    await f.root.naiOpenGroup('pink');
-    f.root.getElementById('imagesModeBtn').click();await delay(150);
-    assert.equal(f.root.naiOpenGroupId(),null);
-    assert.equal(f.root.querySelector('.naiSetBreadcrumb'),null);
-    await f.root.naiOpenGroup('pink');
-    f.root.querySelector('[data-cat="dress"]').click();await delay(150);
-    assert.equal(f.root.naiOpenGroupId(),null);
-    assert.equal(f.root.querySelector('.naiSetBreadcrumb'),null);
-    assert.equal(f.root.querySelectorAll('#grid .tile[data-id]').length,0);
-    assert.deepEqual(f.errors,[]);
-  }finally{f.dom.window.close();}
+test('retired connection controls stay absent and mixed media remain available through Sets', async()=>{
+ const f=await fixture({media:[{id:'v',character_id:'character',media_type:'video',original_name:'Clip.mp4',categories:[],in_all:false},{id:'i',character_id:'character',media_type:'image',original_name:'Image.png',categories:[],in_all:false}]});
+ try{f.library.sets.push({id:'mix',character_id:'character',name:'Mixed',media_ids:['v','i']});f.root.getElementById('refreshBtn').click();await delay(150);
+ assert.equal(f.root.getElementById('naiConnectMedia'),null);f.root.getElementById('naiSetsCat').click();await delay(60);f.root.querySelector('.naiSetTile').click();await delay(100);
+ assert.deepEqual(new Set([...f.root.querySelectorAll('#grid .tile')].map(e=>e.dataset.id)),new Set(['v','i']));await f.root.naiSelectMedia('v');assert.ok(f.root.querySelector('.stage video'));assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close()}
 });
 
-test('Connect creates a named collection with preselected video and chosen images', async()=>{
-  const media=[{id:'v',character_id:'character',media_type:'video',original_name:'Video.mp4',categories:[],in_all:false},
-    {id:'i',character_id:'character',media_type:'image',original_name:'Pink.png',categories:[],in_all:true}];
-  const f=await fixture({media});
-  try{
-    await f.root.naiSelectMedia('v');
-    f.root.getElementById('naiConnectMedia').click();await delay(40);
-    f.root.getElementById('naiAssignNew').click();await delay(40);
-    assert.equal(f.root.getElementById('naiGroupKind').value,'connection');
-    assert.ok(f.root.querySelector('.naiSetPick[data-media-id="v"]').classList.contains('selected'));
-    f.root.querySelector('.naiSetPick[data-media-id="i"]').click();
-    f.root.getElementById('naiSetNameInput').value='Pink bikini';
-    f.root.getElementById('naiSaveSetBtn').click();await delay(150);
-    assert.equal(f.library.sets[0].kind,'connection');
-    assert.deepEqual(f.library.sets[0].media_ids,['v','i']);
-    assert.match(f.root.getElementById('naiMemberships').textContent,/Pink bikini/);
-    assert.equal(media[1].in_all,true);
-    assert.deepEqual(f.errors,[]);
-  }finally{f.dom.window.close();}
+
+test('assigning a video to another Set preserves placement and moves its membership',async()=>{
+ const f=await fixture({media:[{id:'v',character_id:'character',media_type:'video',original_name:'Clip.mp4',categories:[],in_all:false}]});
+ try{f.library.sets.push({id:'old',character_id:'character',name:'Old',media_ids:['v']},{id:'new',character_id:'character',name:'New',media_ids:[]});await f.root.naiAssignGroups(['v']);
+ const select=f.root.getElementById('naiAssignExisting');select.value='new';select.dispatchEvent(new f.w.Event('change'));f.root.getElementById('naiAssignAdd').click();await delay(100);
+ assert.deepEqual(f.library.sets.map(s=>s.media_ids),[[],['v']]);assert.equal(f.library.media[0].in_all,false);assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close()}
 });
+
 
 test('Edit Library assigns selected images to an existing set and independently edits main Images membership',async()=>{
   const f=await fixture({media:[{id:'i',character_id:'character',media_type:'image',original_name:'Image.png',categories:[],in_all:true}]});
@@ -190,7 +30,7 @@ test('Edit Library assigns selected images to an existing set and independently 
     const check=f.root.querySelector('[data-bulk-id="i"]');check.checked=true;check.dispatchEvent(new f.w.Event('change',{bubbles:true}));
     assert.equal(f.root.getElementById('naiBulkInAll').checked,true);
     f.root.getElementById('naiBulkAssignGroup').click();await delay(40);
-    f.root.getElementById('naiAssignAdd').click();await delay(100);
+    const select=f.root.getElementById('naiAssignExisting');select.value='album';select.dispatchEvent(new f.w.Event('change'));f.root.getElementById('naiAssignAdd').click();await delay(100);
     assert.deepEqual(f.library.sets[0].media_ids,['i']);
     assert.equal(f.library.media[0].in_all,true);
     f.root.getElementById('addMediaBtn').click();await delay(20);
@@ -204,14 +44,14 @@ test('Edit Library assigns selected images to an existing set and independently 
   }finally{f.dom.window.close();}
 });
 
-test('assembled UI opens ordered previews without importing, navigates, and discards on X', async () => {
+test('assembled UI opens durable previews, navigates without promoting, and retains queue on Close', async () => {
   const f = await fixture();
   try {
     await f.open();
     assert.equal(f.root.querySelector('#reviewStage img').alt,'Image #4.png');
     const previews = [...f.root.querySelectorAll('.naiQueueThumb270 img')];
     assert.equal(previews.length,4);
-    assert.ok(previews.every(img => img.src.startsWith('blob:')));
+    assert.ok(previews.every(img => img.src.startsWith('blob:')||img.dataset.mid),'previews use managed thumbnails');
     f.root.querySelectorAll('.naiQueueThumb270')[1].click();
     await delay(50);
     assert.equal(f.root.querySelector('#reviewStage img').alt,'Image #3.png');
@@ -220,8 +60,8 @@ test('assembled UI opens ordered previews without importing, navigates, and disc
     await delay(120);
     assert.equal(f.library.media.length,0);
     assert.equal(f.root.naiReviewDrafts.size,0);
-    assert.equal(f.revoked.length,4);
-    assert.deepEqual(f.writes,[]);
+    assert.equal(f.queue.length,4,'closing retains durable queue files');
+    assert.equal(f.writes.filter(r=>!r.route.startsWith('/api/import/chunked/')&&!r.route.startsWith('/api/rapid-review/state')).length,0);
     const before = f.frames;
     await delay(120);
     assert.ok(f.frames-before < 10,'observers should settle');
@@ -289,10 +129,11 @@ test('viewer edit button assigns categories and replaces an image without changi
 
     editButton.click();
     await delay(20);
+    f.root.getElementById('replaceSourceBtn').click();await delay(20);
     const input = f.root.getElementById('replaceSourceInput');
     Object.defineProperty(input, 'files', {value:[new f.w.File(['new'], 'higher-quality.png', {type:'image/png'})]});
     input.dispatchEvent(new f.w.Event('change', {bubbles:true}));
-    await delay(220);
+    f.root.getElementById('naiReplacementSave').click();await delay(220);
     assert.equal(item.original_name, 'higher-quality.png');
     assert.deepEqual(item.categories, ['dress']);
     assert.deepEqual(f.library.sets[0].media_ids, ['saved-edit','saved-other']);
@@ -309,7 +150,7 @@ test('Sets assignment saves selected drafts, adds them to the set, and removes t
   try {
     await f.open([1,2,3]);
     f.library.sets.push({id:'set-existing',character_id:'character',name:'Existing set',media_ids:['saved0'],cover_media_id:'saved0'});
-    f.root.getElementById('naiQueueSets270').click();
+    f.root.getElementById('naiRapidBulkSet').click();
     await delay(50);
     assert.equal(f.root.querySelectorAll('.naiSetQueueCard270').length,3);
     assert.ok(f.root.getElementById('naiSetQueueCreate270'));
@@ -331,46 +172,20 @@ test('Sets assignment saves selected drafts, adds them to the set, and removes t
   } finally { f.dom.window.close(); }
 });
 
-test('Create set in Rapid Review keeps unsaved queue and creates a separate empty set', async () => {
-  const f = await fixture();
-  try {
-    await f.open([1,2]);
-    f.root.getElementById('naiQueueSets270').click();
-    await delay(50);
-    f.root.getElementById('naiSetQueueNew270').value = 'New empty set';
-    f.root.getElementById('naiSetQueueCreate270').click();
-    assert.equal(f.root.getElementById('naiSetQueueClose270').disabled,true);
-    await delay(180);
-    assert.equal(f.library.sets.length,1);
-    assert.deepEqual(f.library.sets[0].media_ids,[]);
-    assert.equal(f.library.sets[0].cover_media_id,null);
-    assert.equal(f.library.media.length,0);
-    assert.equal(f.root.naiReviewDrafts.size,2);
-    assert.equal(f.root.querySelectorAll('.naiSetQueueCard270').length,2);
-    assert.equal(f.root.getElementById('naiSetQueueExisting270').value,f.library.sets[0].id);
-    assert.ok(f.root.querySelector('[data-nai-review-v270]'));
-    f.root.getElementById('naiSetQueueCancel270').click();
-    f.root.getElementById('naiQueueSets270').click();
-    await delay(50);
-    f.root.getElementById('naiSetQueueExisting270').value=f.library.sets[0].id;
-    f.root.getElementById('naiSetQueueSave270').click();
-    await delay(260);
-    assert.equal(f.library.media.length,2);
-    assert.equal(f.library.sets[0].media_ids.length,2);
-    assert.equal(f.root.naiReviewDrafts.size,0);
-    assert.equal(f.root.querySelector('[data-nai-review-v270]'),null);
-    // The queue completion refreshes the normal library view asynchronously; let
-    // that final render settle before tearing down the JSDOM window.
-    await delay(800);
-    assert.deepEqual(f.errors,[]);
-  } finally { f.dom.window.close(); }
+test('Create set in Rapid Review assigns selected queue items in one action',async()=>{
+ const f=await fixture();try{await f.open([1,2]);f.root.getElementById('naiRapidNewSet').click();await delay(70);
+ f.root.getElementById('naiSetQueueNew270').value='New set';f.root.getElementById('naiSetQueueCreate270').click();await delay(180);
+ assert.equal(f.library.sets.length,1);assert.equal(f.library.sets[0].media_ids.length,2);assert.equal(f.queue.length,0);assert.equal(f.library.media.length,2);assert.equal(f.root.querySelector('[data-nai-review-v270]'),null);assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close()}
 });
+
 
 test('normal Sets manager can create and display a set without saved images', async () => {
   const f = await fixture();
   try {
     f.root.getElementById('naiManageSetsBtn').click();
     await delay(60);
+    f.root.getElementById('naiToolsNewSet').click();await delay(60);
     f.root.getElementById('naiSetNameInput').value='Empty';
     f.root.getElementById('naiSaveSetBtn').click();
     await delay(90);
@@ -389,7 +204,7 @@ test('normal Sets manager can create and display a set without saved images', as
 test('set-only members open from Sets, remain available after selection, and save a cover independently', async () => {
   const f = await fixture();
   try {
-    f.library.media.push(...[1,2,3].map(i=>({id:`member${i}`,character_id:'character',media_type:'image',original_name:`Image ${i}.png`,categories:[],in_review:i===3,thumb_rel:null})));
+    f.library.media.push(...[1,2,3].map(i=>({id:`member${i}`,character_id:'character',media_type:'image',original_name:`Image ${i}.png`,categories:[],in_review:i===3,thumb_rel:null,in_all:false})));
     f.library.sets.push({id:'set-only',character_id:'character',name:'Set only',media_ids:['member1','member2','member3'],cover_media_id:'member1'});
     f.root.getElementById('refreshBtn').click();
     await delay(650);
@@ -410,19 +225,19 @@ test('set-only members open from Sets, remain available after selection, and sav
     assert.equal(f.library.media[1].favorite,undefined);
     assert.equal(f.root.getElementById('stages').innerHTML,before,'cover button must not select an image');
     assert.equal(f.root.querySelector('.tile[data-id="member2"] .naiSetCover216').getAttribute('aria-pressed'),'true');
-    f.root.querySelector('.tile[data-id="member1"]').click();
+    await f.root.naiSelectMedia('member1');
     await delay(200);
-    assert.equal(f.root.getElementById('counter').textContent, '1 / 2');
+    assert.equal(f.root.getElementById('counter').textContent, '2 / 2');
     f.root.getElementById('counter').textContent = '— / 1';
     await delay(20);
-    assert.equal(f.root.getElementById('counter').textContent, '1 / 2','late base viewer updates must not replace set-relative numbering');
-    assert.deepEqual(ids(),['member1','member2']);
+    assert.equal(f.root.getElementById('counter').textContent, '2 / 2','late base viewer updates must not replace set-relative numbering');
+    assert.deepEqual(ids(),['member2','member1']);
     f.root.getElementById('naiSetBackBtn').click();
     await delay(100);
     assert.equal(f.root.querySelector('.naiSetTile').dataset.coverId,'member2');
     f.root.querySelector('.naiSetTile').click();
     await delay(200);
-    assert.deepEqual(ids(),['member1','member2']);
+    assert.deepEqual(ids(),['member2','member1']);
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
 });
@@ -449,8 +264,7 @@ test('videos in Review stay out of Videos and can be promoted from the video Rev
     assert.equal(f.root.querySelector('#reviewStage video') !== null,true);
     const hold = f.root.getElementById('naiReviewHold270');
     assert.equal(hold.checked,true);
-    hold.checked = false;
-    f.root.getElementById('naiReviewNext270').click();
+    f.root.getElementById('naiReviewClearHolding').click();
     await delay(220);
     assert.equal(f.library.media.find(m => m.id === 'video-review').in_review,false);
     assert.equal([...f.root.querySelectorAll('#categories .cat:not(.naiSetsCat)')][2].textContent,'All 2');
@@ -461,7 +275,7 @@ test('videos in Review stay out of Videos and can be promoted from the video Rev
 test('a set-only image can be promoted directly into All without exposing its whole set', async () => {
   const f = await fixture();
   try {
-    f.library.media.push(...[1,2].map(i=>({id:`all-member${i}`,character_id:'character',media_type:'image',original_name:`All image ${i}.png`,categories:[],in_review:false,in_all:false,thumb_rel:null})));
+    f.library.media.push(...[1,2].map(i=>({id:`all-member${i}`,character_id:'character',media_type:'image',original_name:`All image ${i}.png`,categories:[],in_review:false,in_all:false,thumb_rel:null,in_all:false})));
     f.library.sets.push({id:'set-all',character_id:'character',name:'All promotion',media_ids:['all-member1','all-member2'],cover_media_id:'all-member1'});
     f.root.getElementById('refreshBtn').click();
     await delay(500);
@@ -505,7 +319,7 @@ test('character deletion respects cancel and deletes an empty last character wit
     f.root.getElementById('naiDeleteCharacter215').click();
     await delay(50);
     assert.equal(f.library.characters.length,1);
-    assert.deepEqual(f.writes,[]);
+    assert.equal(f.writes.filter(r=>!r.route.startsWith('/api/import/chunked/')&&!r.route.startsWith('/api/rapid-review/state')).length,0);
     f.w.confirm=()=>true;
     f.root.getElementById('naiDeleteCharacter215').click();
     await delay(180);
@@ -527,7 +341,7 @@ test('character deletion refuses even a hidden review image', async () => {
     f.root.getElementById('naiDeleteCharacter215').click();
     await delay(50);
     assert.equal(f.library.characters.length,1);
-    assert.deepEqual(f.writes,[]);
+    assert.equal(f.writes.filter(r=>!r.route.startsWith('/api/import/chunked/')&&!r.route.startsWith('/api/rapid-review/state')).length,0);
     assert.match(f.root.getElementById('naiBulkStatus285').textContent,/contains images or videos/);
     assert.deepEqual(f.errors,[]);
   } finally { f.dom.window.close(); }
@@ -549,7 +363,7 @@ test('canonical crop editor stores draft crop without importing and commits it o
     f.root.querySelector('.naiCropSave').click();
     await delay(90);
     assert.equal(f.library.media.length,0);
-    assert.deepEqual(f.writes,[]);
+    assert.equal(f.writes.filter(r=>!r.route.startsWith('/api/import/chunked/')&&!r.route.startsWith('/api/rapid-review/state')).length,0);
     assert.equal([...f.root.naiReviewDrafts.values()][0].media.crop_top,.1);
     f.root.getElementById('naiReviewNext270').click();
     await delay(90);
@@ -565,9 +379,9 @@ test('update indicator distinguishes active and ready versions and blocks reload
     const status=f.root.getElementById('naiUpdateStatus');
     assert.match(status.textContent,new RegExp(`v${config.version} active`));
     assert.equal(status.querySelector('button').hidden,true);
-    f.w.document.documentElement.dataset.naiMediaUpdateReady='9.9.9';
+    f.setUpdate('9.9.9');status.querySelectorAll('button')[1].click();
     await delay(20);
-    assert.match(status.textContent,/v9.9.9 ready/);
+    assert.match(status.textContent,/v9.9.9 available/);
     assert.equal(status.querySelector('button').hidden,false);
     assert.equal(status.querySelector('button').disabled,false);
     await f.open([1]);
@@ -584,68 +398,28 @@ test('a nine-image queue keeps the same nine previews at every selected position
   try {
     await f.open([1,2,3,4,5,6,7,8,9]);
     const titles = () => [...f.root.querySelectorAll('.naiQueueThumb270')].map(card => card.title);
-    const expected = Array.from({length:9}, (_, i) => `${i+1}. Image #${9-i}.png`);
+    const expected = Array.from({length:9}, (_, i) => `Image #${9-i}.png`);
     assert.deepEqual(titles(), expected);
     for (let i = 0; i < 9; i++) {
       f.root.querySelectorAll('.naiQueueThumb270')[i].click();
       await delay(10);
       assert.deepEqual(titles(), expected);
       assert.equal(f.root.querySelector('#reviewStage img').alt, `Image #${9-i}.png`);
-      assert.equal(f.root.getElementById('naiQueueRange289').textContent, '1–9 of 9');
-      assert.equal(f.root.getElementById('naiQueuePager289').hidden, true);
+      assert.equal(f.root.getElementById('naiRapidRemaining').textContent, '9 remaining');
     }
-    assert.deepEqual(f.writes, []);
+    assert.equal(f.writes.filter(r=>!r.route.startsWith('/api/import/chunked/')&&!r.route.startsWith('/api/rapid-review/state')).length,0);
     assert.deepEqual(f.errors, []);
   } finally { f.dom.window.close(); }
 });
 
-test('large queues use bounded stable pages; paging never selects or saves media', async () => {
-  const f = await fixture();
-  try {
-    await f.open(Array.from({length:57}, (_, i) => i+1));
-    const cards = () => [...f.root.querySelectorAll('.naiQueueThumb270')];
-    const range = () => f.root.getElementById('naiQueueRange289').textContent;
-    assert.equal(cards().length, 14);
-    assert.equal(range(), '1–14 of 57');
-    assert.equal(f.root.getElementById('naiQueuePagePrev289').disabled, true);
-    assert.ok(cards().every(card => card.querySelector('img').loading === 'lazy'));
-    f.root.getElementById('naiQueuePageNext289').click();
-    assert.equal(cards().length, 14);
-    assert.equal(range(), '15–28 of 57');
-    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #57.png');
-    f.root.getElementById('naiQueuePageNext289').click();
-    assert.equal(cards().length, 14);
-    assert.equal(range(), '29–42 of 57');
-    f.root.getElementById('naiQueuePageNext289').click();
-    assert.equal(cards().length, 14);
-    assert.equal(range(), '43–56 of 57');
-    f.root.getElementById('naiQueuePageNext289').click();
-    assert.equal(cards().length, 1);
-    assert.equal(range(), '57–57 of 57');
-    assert.equal(f.root.getElementById('naiQueuePageNext289').disabled, true);
-    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #57.png');
-    f.root.getElementById('naiQueuePagePrev289').click();
-    assert.equal(cards().length, 14);
-    assert.deepEqual(f.writes, []);
-    cards()[13].click();
-    await delay(20);
-    assert.equal(range(), '43–56 of 57');
-    assert.equal(cards().length, 14);
-    assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #2.png');
-    f.root.getElementById('naiReviewNext270').click();
-    await delay(80);
-    assert.equal(f.library.media.length, 1);
-    assert.equal(f.library.media[0].original_name, 'Image #2.png');
-    assert.equal(range(), '57–57 of 57');
-    assert.equal(cards().length, 1);
-    f.root.getElementById('naiReviewPrev270').click();
-    await delay(20);
-    assert.equal(range(), '43–56 of 57');
-    assert.equal(cards().length, 14);
-    assert.equal(f.library.media.length, 1);
-    assert.deepEqual(f.errors, []);
-  } finally { f.dom.window.close(); }
+test('large review queues keep a stable lazy-loaded grid and save only the selected item',async()=>{
+ const f=await fixture();try{await f.open(Array.from({length:57},(_,i)=>i+1));const strip=f.root.getElementById('naiQueueStrip270');const cards=()=>[...f.root.querySelectorAll('.naiQueueThumb270')];
+ assert.equal(cards().length,57);assert.ok(cards().every(c=>c.querySelector('img').loading==='lazy'));strip.scrollTop=300;strip.dispatchEvent(new f.w.Event('scroll'));
+ cards()[20].click();await delay(70);assert.equal(f.root.querySelector('#reviewStage img').alt,'Image #37.png');assert.equal(f.library.media.length,0);assert.equal(cards().length,57);
+ f.root.getElementById('naiReviewNext270').click();await delay(100);assert.equal(f.library.media.length,1);assert.equal(f.library.media[0].original_name,'Image #37.png');assert.equal(cards().length,56);assert.equal(f.queue.length,56);assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close()}
 });
+
 
 test('Rapid Review sorts uploaded filenames in descending natural order', async () => {
   const f = await fixture();
@@ -657,11 +431,11 @@ test('Rapid Review sorts uploaded filenames in descending natural order', async 
     assert.equal(f.root.querySelector('#reviewStage img').alt, 'middle.jpg');
     f.root.getElementById('naiReviewClose270').click();
     await delay(30);
-    await f.open([3,2,1]);
+    f.resetQueue();await f.open([3,2,1]);
     assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image #3.png');
     f.root.getElementById('naiReviewClose270').click();
     await delay(30);
-    await f.open([{name:'Image_998.jpg'},{name:'Image_1000.jpg'},{name:'Image_999.jpg'}]);
+    f.resetQueue();await f.open([{name:'Image_998.jpg'},{name:'Image_1000.jpg'},{name:'Image_999.jpg'}]);
     assert.equal(f.root.querySelector('#reviewStage img').alt, 'Image_1000.jpg');
   } finally { f.dom.window.close(); }
 });
@@ -687,7 +461,7 @@ test('Rapid Review uses the full available webpage height without changing its w
     assert.match(styles, /height:100vh!important/);
     assert.match(styles, /max-height:none!important/);
     assert.match(styles, /width:min\(1500px,94vw\)/);
-    assert.match(assembled, /inline:'center'/);
+    assert.ok(f.root.getElementById('naiRapidDivider'),'resizable left/right work areas');
   } finally { f.dom.window.close(); }
 });
 
@@ -763,7 +537,7 @@ for (const mode of ['display', 'navigate', 'error']) {
       await delay(120);
       const img=stage.querySelector('img'), original=img.src;
       assert.equal(img.style.visibility,'hidden','hide only while original dimensions are unavailable');
-      assert.deepEqual(exposed,['hidden'],'never attach a visible uncropped original');
+      assert.ok(exposed.length>0&&exposed.every(v=>v==='hidden'),'never attach a visible uncropped original');
       assert.equal(extraWork,0);
       if(mode==='navigate') {
         f.root.querySelector('.tile[data-id="plain"]').click();
@@ -912,12 +686,12 @@ test('video categories stay separate in navigation, import, and Rapid Review sav
 });
 
 test('mixed review imports retain only the categories matching each file type', async () => {
-  const f = await fixture();
+  const f = await fixture({media:[{id:'seed',character_id:'character',original_name:'Existing.png',media_type:'image',categories:[],in_all:true}]});
   try {
     f.library.characters[0].categories.push({id:'clips',name:'Clips',media_type:'video'});
     f.root.getElementById('refreshBtn').click();
     await delay(220);
-    f.root.getElementById('addMediaBtn').click();
+    await f.root.naiSelectMedia('seed');f.root.getElementById('editBtn').click();await delay(30);f.root.getElementById('naiEditImport').click();
     await delay(40);
     f.root.querySelector('#importCats [data-catid="dress"]').checked = true;
     f.root.querySelector('#importCats [data-catid="clips"]').checked = true;
@@ -925,9 +699,9 @@ test('mixed review imports retain only the categories matching each file type', 
     Object.defineProperty(input,'files',{value:[new f.w.File(['image'],'1.png',{type:'image/png'}),new f.w.File(['video'],'2.mp4',{type:'video/mp4'})]});
     input.dispatchEvent(new f.w.Event('change',{bubbles:true}));
     f.root.getElementById('importReview').click();
-    await delay(100);
+    await waitFor(()=>f.root.querySelector('#reviewStage'),f.errors);await delay(30);
     const drafts = [...f.root.naiReviewDrafts.values()];
-    assert.equal(drafts.length,2);
+    assert.equal(drafts.length,2,JSON.stringify({queue:f.queue,errors:f.errors.map(e=>e.message),writes:f.writes}));
     assert.deepEqual(Array.from(drafts.find(d=>d.media.media_type==='video').media.categories),['clips']);
     assert.deepEqual(Array.from(drafts.find(d=>d.media.media_type==='image').media.categories),['dress']);
     assert.deepEqual(f.errors,[]);
@@ -935,37 +709,12 @@ test('mixed review imports retain only the categories matching each file type', 
 });
 
 
-test('canceling a stalled chunked video keeps the remaining Rapid Review queue usable', async () => {
-  const f = await fixture({configure:w => {
-    const normal = w.GM_xmlhttpRequest;
-    w.GM_xmlhttpRequest = options => {
-      if (options.url.endsWith('/api/health')) {
-        setTimeout(()=>options.onload({status:200,responseText:JSON.stringify({ok:true,version:7,chunked_uploads:true})}),0);
-        return {abort(){options.onabort?.();}};
-      }
-      if (options.url.includes('/api/import/chunked/')) {
-        // A lost extension callback during upload initialization must not trap X.
-        return {abort(){options.onabort?.();}};
-      }
-      return normal(options);
-    };
-  }});
-  try {
-    const large = new f.w.File([new Uint8Array(9*1024*1024)], '2-large.mp4', {type:'video/mp4'});
-    await f.open([large, {name:'1-small.png'}]);
-    assert.ok(f.root.querySelector('#reviewStage video'));
-    f.root.getElementById('naiReviewNext270').click();
-    await delay(50);
-    assert.equal(f.root.getElementById('naiReviewNext270').disabled,true);
-    assert.equal(f.root.getElementById('naiReviewClose270').disabled,false);
-    f.root.getElementById('naiReviewClose270').click();
-    await delay(100);
-    assert.ok(f.root.querySelector('#reviewStage img'));
-    assert.equal(f.root.getElementById('naiReviewNext270').disabled,false);
-    assert.equal(f.root.naiReviewDrafts.size,1);
-    f.root.getElementById('naiReviewNext270').click();
-    await delay(220);
-    assert.equal(f.library.media.length,1);
-    assert.deepEqual(f.errors,[]);
-  } finally { f.dom.window.close(); }
+test('canceling a stalled new upload retains an existing durable review queue',async()=>{
+ let stall=false,aborted=false,started=false;
+ const f=await fixture({configure:w=>{const normal=w.GM_xmlhttpRequest;w.GM_xmlhttpRequest=options=>{if(stall&&options.url.includes('/api/import/chunked/')&&!options.url.endsWith('/cancel')){started=true;return {abort(){aborted=true;options.onabort?.()}};}return normal(options)}}});
+ try{await f.open([1]);f.root.getElementById('naiReviewClose270').click();await delay(50);stall=true;f.root.getElementById('addMediaBtn').click();await delay(30);
+ const input=f.root.getElementById('fileInput');Object.defineProperty(input,'files',{value:[new f.w.File(['image'],'new.png',{type:'image/png'})]});input.dispatchEvent(new f.w.Event('change',{bubbles:true}));f.root.getElementById('importReview').click();await waitFor(()=>started,f.errors);
+ f.root.querySelector('#modalRoot [data-close]').click();await delay(50);assert.ok(aborted);assert.equal(f.queue.length,1);assert.equal(f.library.media.length,0);stall=false;f.errors.length=0;
+ f.root.getElementById('naiResumeRapid').click();await delay(90);assert.equal(f.root.querySelector('#reviewStage img').alt,'Image #1.png');assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close()}
 });

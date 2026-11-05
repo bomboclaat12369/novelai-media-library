@@ -155,6 +155,17 @@ class OutfitMatcher:
         target_set_id = str(body.get('target_set_id', ''))
         media_id = str(body.get('media_id', ''))
         encoded = body.get('image_base64', '')
+        video_source=None
+        if body.get('video_frame_id'):
+            with self.store.lock:
+                video_source=copy.deepcopy(self.store.media_item(str(body['video_frame_id'])))
+                frame=(video_source or {}).get('video_match_frame')
+                if not video_source or video_source.get('character_id')!=owner or video_source.get('media_type')!='video' or not frame or frame.get('video_sha256')!=video_source.get('sha256'):
+                    raise ValueError('Select a current frame from this video first.')
+                frame_path=self.store.root/frame['stored_rel']
+                if self.store._hash_file(frame_path)!=frame['sha256']:raise ValueError('Saved matching frame changed. Select it again.')
+                if not encoded:encoded=base64.b64encode(frame_path.read_bytes()).decode()
+                body=dict(body,source_media_id=video_source['id'])
         source_id = str(body.get('source_media_id', ''))
         if scan and (media_id or encoded or source_id):
             raise ValueError('Scan uses existing library images only.')
@@ -178,7 +189,7 @@ class OutfitMatcher:
             if mode not in ('outfit', 'photoshoot'):
                 raise ValueError('Choose Outfit or Photoshoot matching.')
             media = {m['id']: m for m in self.store.data['media'] if m.get('character_id') == owner and m.get('media_type', 'image') == 'image'}
-            if any(mid not in media for mid in example_ids) or (media_id and media_id not in media) or (source_id and source_id not in media):
+            if any(mid not in media for mid in example_ids) or (media_id and media_id not in media) or (source_id and source_id not in media and not (video_source and source_id==video_source['id'])):
                 raise ValueError('Choose an image from this character.')
             sets = copy.deepcopy([s for s in self.store.data.get('sets', []) if s.get('character_id') == owner and s.get('kind', 'set') == 'set'])
             if target_set_id and (not scan or not any(s['id'] == target_set_id for s in sets)):
@@ -192,7 +203,10 @@ class OutfitMatcher:
                 self.contexts.pop(expired, None)
             ident = uuid.uuid4().hex
             self.jobs[ident] = {'id': ident, 'character_id': owner, 'matching_mode': mode, 'scan': scan, 'running': True, 'phase': 'Preparing Set scan' if scan else 'Preparing ' + mode + ' search', 'done': 0, 'total': len(candidates), 'results': [], 'individual_results': [], 'scan_results': [], 'assigned_ids': [], 'issues': []}
-            self.contexts[ident] = {'owner': owner, 'media': candidates, 'stamps': {}, 'query_id': (media_id or source_id) if not scan else '', 'target_set_id': target_set_id, 'example_ids': list(dict.fromkeys(example_ids)), 'example_bytes': example_bytes}
+            self.contexts[ident] = {'owner': owner, 'media': copy.deepcopy(candidates), 'stamps': {}, 'query_id': (media_id or source_id) if not scan else '', 'target_set_id': target_set_id, 'example_ids': list(dict.fromkeys(example_ids)), 'example_bytes': example_bytes}
+            if video_source:
+                self.contexts[ident]['media'][video_source['id']]=video_source
+                self.contexts[ident]['stamps'][video_source['id']]=self._stamp(video_source)
             self.thread = threading.Thread(target=self._run, args=(ident, sets, candidates, query, query_bytes, revision, owner, scan), daemon=True)
             self.thread.start()
             return self.status(ident)
@@ -717,6 +731,21 @@ class BattleRankings:
         No change to priors, evidence, convergence or uncertainty semantics.
         """
         n = len(diagonal)
+        # Reuse one native factorization. NumPy also ships with the local matcher;
+        # the established pure-Python solver remains available without it.
+        if not edges:return [1/value for value in diagonal]
+        if 24 <= n <= 2048 and len(edges)>=n*3:
+            try:
+                import numpy as np
+                matrix=np.diag(np.asarray(diagonal,dtype=np.float64))
+                for a,b,weight in edges:
+                    matrix[a,b]-=weight;matrix[b,a]-=weight
+                lower=np.linalg.cholesky(matrix)
+                inverse=np.linalg.solve(lower,np.eye(n))
+                values=np.sum(inverse*inverse,axis=0)
+                if np.isfinite(values).all() and (values>0).all():return values.tolist()
+            except (ImportError,ValueError,ArithmeticError):
+                pass
         if not 24 <= n <= 384 or len(edges) < n * 3:
             return None
         lower = [[0.] * n for _ in range(n)]
@@ -738,6 +767,20 @@ class BattleRankings:
             for j in range(i):
                 inverse[i][j] = -sum(row[k]*inverse[k][j] for k in range(j,i)) / row[i]
         return [sum(inverse[k][i]**2 for k in range(i,n)) for i in range(n)]
+
+    def _fit_during_vote(self,board):
+        """Fit a private board while allowing unrelated library reads/writes.
+
+        Called only by vote/undo with one store-lock acquisition. Optimistic
+        validation discards the private fit if either persisted state changed.
+        """
+        revision=self.store.revision;previous=self.data;started=time.perf_counter()
+        self.store.lock.release()
+        try:self._fit_history(board)
+        finally:self.store.lock.acquire()
+        self.store.record_timing('battle_fit',time.perf_counter()-started)
+        if revision!=self.store.revision or self.data is not previous:
+            raise ValueError('Library or battles changed during calculation. Refresh and retry; this vote was not saved.')
 
     def _fit_history(self, board, confidence=True):
         """Regularized joint Bradley-Terry fit; a tie is one half-result.
@@ -1348,7 +1391,7 @@ class BattleRankings:
                     board['history'].append({'id':event_id,'type':'vote','at':now_iso(),'left':ids[0],'right':ids[1],
                                              'outcome':outcome,'model':self.MODEL,'before':[summary(a),summary(b)],
                                              'after':[summary(board['ratings'][i]) for i in ids]})
-                    self._fit_history(board)
+                    self._fit_during_vote(board)
                     self._record_rating_path(board,previous_ratings,'vote',pair)
                     board['history'][-1]['after'] = [summary(board['ratings'][i]) for i in ids]
                     awards = self._awards(board, self._ranked_rows(board, entries))
@@ -1377,7 +1420,7 @@ class BattleRankings:
                     for ident in before['ratings']:
                         score = self._score(board, ident)
                         board['history_priors'][ident] = {k:score[k] for k in ('rating','rd')}
-                self._fit_history(board)
+                self._fit_during_vote(board)
                 self._record_rating_path(board,previous_ratings,'undo',before['session'].get('pair') or {})
                 if 'awarded_trophy_ids' in before:
                     for trophy_id in before['awarded_trophy_ids']:
@@ -1389,6 +1432,58 @@ class BattleRankings:
             board['revision']=uuid.uuid4().hex
             self._save(data)
             return self._view(board,entries,owner,kind)
+
+
+_VIDEO_TOOL_LOCK=threading.Lock()
+
+def local_video_tool(cache):
+    """Use an installed FFmpeg, or prepare the small local-only decoder on demand."""
+    executable=shutil.which('ffmpeg')
+    if executable:return executable
+    with _VIDEO_TOOL_LOCK:
+        deps=Path(cache)/('python-'+str(sys.version_info.major)+'.'+str(sys.version_info.minor))
+        if deps.is_dir() and str(deps) not in sys.path:sys.path.insert(0,str(deps))
+        try:import imageio_ffmpeg
+        except ImportError:
+            deps.parent.mkdir(parents=True,exist_ok=True)
+            stage=deps.parent/('install-'+uuid.uuid4().hex)
+            try:
+                result=subprocess.run([sys.executable,'-m','pip','install','--disable-pip-version-check','--only-binary=:all:',
+                    '--target',str(stage),'imageio-ffmpeg==0.6.0'],capture_output=True,timeout=180,
+                    creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+                if result.returncode:raise ValueError('Could not prepare local video controls. Check internet access and retry.')
+                if deps.exists():shutil.rmtree(deps)
+                stage.rename(deps)
+            finally:
+                if stage.exists():shutil.rmtree(stage,ignore_errors=True)
+            sys.path.insert(0,str(deps));import importlib;importlib.invalidate_caches();import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+
+def video_frame_data(path,at,cache,direction=0,capture=False):
+    at=float(at)
+    if not math.isfinite(at) or at<0 or at>7*86400:raise ValueError('Choose a valid video timestamp.')
+    if direction not in (-1,0,1):raise ValueError('Choose previous or next frame.')
+    tool=local_video_tool(cache);start=max(0,at-2)
+    command=[tool,'-hide_banner','-nostdin','-copyts','-ss',str(start),'-i',str(path),'-t','4.2',
+        '-vf','showinfo','-an','-sn','-f','null','-']
+    result=subprocess.run(command,capture_output=True,timeout=120,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    if result.returncode:raise ValueError('The local video decoder could not read this clip.')
+    times=sorted(set(float(t) for t in re.findall(r'\bpts_time:([0-9.eE+-]+)',result.stderr.decode(errors='replace'))))
+    times=[t for t in times if math.isfinite(t) and t>=0]
+    if not times:raise ValueError('No video frames found near this position.')
+    current=max((t for t in times if t<=at+1e-6),default=times[0])
+    if direction<0:chosen=max((t for t in times if t<current-1e-6),default=current)
+    elif direction>0:chosen=min((t for t in times if t>current+1e-6),default=current)
+    else:chosen=current
+    data={'seconds':chosen,'times':times,'exact':True}
+    if capture:
+        # Select the same presentation timestamp, then encode an uncropped frame.
+        command=[tool,'-hide_banner','-loglevel','error','-nostdin','-ss',str(chosen),'-i',str(path),
+            '-frames:v','1','-vf','scale=min(1920\\,iw):-2','-f','image2pipe','-vcodec','mjpeg','-q:v','2','-']
+        result=subprocess.run(command,capture_output=True,timeout=120,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        if result.returncode or not result.stdout:raise ValueError('Could not capture the selected frame.')
+        data['image']=result.stdout
+    return data
 
 
 class LibraryStore:
@@ -1410,7 +1505,13 @@ class LibraryStore:
         self.media_dir.mkdir(parents=True, exist_ok=True)
         self.thumb_dir.mkdir(parents=True, exist_ok=True)
         self.backup_dir.mkdir(parents=True, exist_ok=True)
+        self._recover_restore()
         self.data = self._load()
+        self._saved_data=copy.deepcopy(self.data)
+        self.timings={}
+        self.recent_errors=[]
+        matching_deps=self.root/'.outfit-search'/('python-'+str(sys.version_info.major)+'.'+str(sys.version_info.minor))
+        if matching_deps.is_dir() and str(matching_deps) not in sys.path:sys.path.insert(0,str(matching_deps))
         if self._refresh_auto_set_covers():
             self.save()
         self._upload_lock = threading.RLock()
@@ -1585,10 +1686,35 @@ class LibraryStore:
 
     def save(self) -> None:
         with self.lock:
-            self._refresh_auto_set_covers()
-            self.data["updated_at"] = now_iso()
-            self._write_atomic(self.data)
+            started=time.perf_counter()
+            try:
+                self._refresh_auto_set_covers()
+                self.data["updated_at"] = now_iso()
+                self._write_atomic(self.data)
+            except Exception as error:
+                self.data=copy.deepcopy(self._saved_data)
+                self.recent_errors=(self.recent_errors+[{'operation':'metadata_save','error':str(error),'at':now_iso()}])[-20:]
+                raise
+            self._saved_data=copy.deepcopy(self.data)
             self.revision = uuid.uuid4().hex
+            self.record_timing('metadata_save',time.perf_counter()-started)
+
+    def record_timing(self,name,seconds):
+        with self.lock:
+            samples=self.timings.setdefault(name,[])
+            samples.append(round(seconds*1000,3));del samples[:-100]
+
+    def diagnostics(self):
+        with self.lock:
+            timings={}
+            for name,values in self.timings.items():
+                ranked=sorted(values)
+                timings[name]={'count':len(values),'last_ms':values[-1],'median_ms':ranked[len(ranked)//2],
+                    'p95_ms':ranked[min(len(ranked)-1,int(len(ranked)*.95))],'max_ms':max(values)}
+            return {'schema':1,'api_version':API_VERSION,'revision':self.revision,'python':sys.version.split()[0],
+                'counts':{name:len(self.data.get(name,[])) for name in ('media','sets','characters')},
+                'timings':timings,'recent_errors':copy.deepcopy(self.recent_errors),
+                'note':'Session measurements, no media contents or original filenames.'}
 
     def undo_history(self) -> dict[str, Any]:
         with self.lock:
@@ -1805,6 +1931,274 @@ class LibraryStore:
                 raise
             self._purge_undo_files(history)
             return {"ok": True}
+
+    def _organizer_fingerprint(self,owner):
+        # Thumbnail completion does not invalidate a membership preview.
+        return hashlib.sha256(json.dumps({'character':self.character(owner),
+            'sets':[g for g in self.data.get('sets',[]) if g.get('character_id')==owner],
+            'media':[(m['id'],m['sha256'],m.get('in_review'),m.get('in_purgatory')) for m in self.data['media']
+                     if m['character_id']==owner and not m.get('source',{}).get('organizer_pending')]},sort_keys=True).encode()).hexdigest()
+
+    def organizer_preview(self,body):
+        draft=body.get('draft',{});owner=str(body.get('character_id',''))
+        if draft.get('format')!='folder-organizer-2':raise ValueError('Unsupported organizer export.')
+        with self.lock:
+            if not self.character(owner):raise ValueError('Choose the destination character.')
+            groups=[copy.deepcopy(g) for g in draft.get('sets',[]) if g.get('saved')]
+            if len(groups)>10000:raise ValueError('Too many draft sets.')
+            namespace=str(draft.get('scope') or hashlib.sha256(json.dumps(draft.get('config',{}).get('roots',[]),sort_keys=True).encode()).hexdigest())+':'+owner
+            linked=self.data.get('organizer_links',{}).get(namespace,{})
+            catalog=draft.get('source_catalog',{});known={m['sha256']:m for m in self.data['media'] if m['character_id']==owner}
+            mapping={};imports=[];issues=[];conflicts=[];claims={};plan=[]
+            selected=set(i for g in groups for i in g['members'])
+            for ident in sorted(selected):
+                record=catalog.get(ident,{})
+                if record.get('quarantine_only') or not re.fullmatch('[0-9a-f]{64}',str(record.get('sha',''))):
+                    issues.append('Unresolved or invalid source: '+str(ident));continue
+                existing=known.get(record['sha'])
+                if existing:mapping[ident]=existing['id'];continue
+                path=Path(record.get('path',''))
+                if not path.is_file() or path.is_symlink():issues.append('Missing or linked source: '+str(path));continue
+                stamp=[path.stat().st_size,path.stat().st_mtime_ns]
+                imports.append({'id':ident,'name':path.name,'path':str(path),'sha':record['sha'],'stamp':stamp})
+            for group in groups:
+                sid=group.get('library_id') or linked.get(group['id'])
+                target=self.set_item(sid) if sid else None
+                if sid and (not target or target.get('character_id')!=owner):issues.append('Destination set unavailable: '+group['name']);continue
+                name=title_case_label(group['name'])
+                if not name or len(name)>250:issues.append('Invalid set name.');continue
+                collision=next((g for g in self.data.get('sets',[]) if g.get('character_id')==owner and g['id']!=sid and g['name'].casefold()==name.casefold()),None)
+                if collision:issues.append('Name already exists; choose that library set as the draft destination: '+name)
+                for ident in group['members']:
+                    if ident in claims and claims[ident]!=group['id']:issues.append('Image appears in two saved drafts: '+ident)
+                    claims[ident]=group['id']
+                    mid=mapping.get(ident)
+                    others=[g['name'] for g in self.data.get('sets',[]) if mid and g['id']!=sid and mid in g.get('media_ids',[])]
+                    if others:conflicts.append({'id':ident,'name':Path(catalog[ident]['path']).name,'from':others,'to':name})
+                group['destination_id']=sid;plan.append(group)
+            token=uuid.uuid4().hex
+            sessions=getattr(self,'_organizer_sessions',{});self._organizer_sessions=sessions
+            while len(sessions)>=8:sessions.pop(next(iter(sessions)))
+            sessions[token]={'owner':owner,'namespace':namespace,'groups':plan,'mapping':mapping,'imports':imports,'issues':issues,'conflicts':conflicts,
+                'fingerprint':self._organizer_fingerprint(owner),'catalog':copy.deepcopy(catalog),'categories':draft.get('category_catalog',{}).get('categories',[]),'created':time.monotonic()}
+            return {'token':token,'sets':[{'id':g['id'],'name':g['name'],'count':len(g['members']),'action':'update' if g['destination_id'] else 'create'} for g in plan],
+                    'imports':[{'id':i['id'],'name':i['name']} for i in imports],'existing_count':len(mapping),'conflicts':conflicts,'issues':list(dict.fromkeys(issues))}
+
+    def _organizer_session(self,token):
+        session=getattr(self,'_organizer_sessions',{}).get(str(token))
+        if not session or time.monotonic()-session['created']>24*3600:raise ValueError('Preview expired. Preview again to resume.')
+        if session['issues']:raise ValueError('Resolve the preview issues first.')
+        return session
+
+    def organizer_import(self,body):
+        with self.lock:
+            session=self._organizer_session(body.get('token'));ident=body.get('id')
+            row=next((r for r in session['imports'] if r['id']==ident),None)
+            if not row:raise ValueError('Image is not in this preview.')
+            existing=next((m for m in self.data['media'] if m['character_id']==session['owner'] and m['sha256']==row['sha']),None)
+            if existing:
+                session['mapping'][ident]=existing['id']
+                seconds=session['catalog'][ident].get('frame_seconds')
+                if existing.get('media_type')=='video' and seconds is not None:
+                    self.video_workflow(existing['id'],'frame',{'seconds':seconds})
+                return {'id':existing['id'],'reused':True}
+        path=Path(row['path']);temp=self.root/'.incoming'/('organizer-'+uuid.uuid4().hex+'.part');temp.parent.mkdir(exist_ok=True)
+        try:
+            if path.is_symlink() or not path.is_file() or [path.stat().st_size,path.stat().st_mtime_ns]!=row['stamp']:raise ValueError('Source changed. Preview again: '+row['name'])
+            shutil.copyfile(path,temp)
+            if self._hash_file(temp)!=row['sha']:raise ValueError('Source bytes changed. Preview again: '+row['name'])
+            content_type=mimetypes.guess_type(row['name'])[0] or ''
+            if not content_type.startswith(('image/','video/')):raise ValueError('Unsupported media file.')
+            item,reused=self._register_file(temp,row['name'],session['owner'],[],
+                {'kind':'organizer','organizer_pending':True,'original_path':str(path),'origins':session['catalog'][ident].get('origins',[])},content_type)
+            with self.lock:session['mapping'][ident]=item['id']
+            # Recreate the attached reference from the verified video bytes;
+            # never trust an arbitrary sidecar path supplied by the organizer.
+            seconds=session['catalog'][ident].get('frame_seconds')
+            if item.get('media_type')=='video' and seconds is not None:
+                self.video_workflow(item['id'],'frame',{'seconds':seconds})
+            return {'id':item['id'],'reused':reused}
+        finally:temp.unlink(missing_ok=True)
+
+    def organizer_apply(self,body):
+        with self.lock:
+            session=self._organizer_session(body.get('token'))
+            if session.get('result'):return copy.deepcopy(session['result'])
+            mode=body.get('conflicts','move')
+            if mode not in ('move','skip'):raise ValueError('Choose Move or Skip.')
+            if self._organizer_fingerprint(session['owner'])!=session['fingerprint']:raise ValueError('Library membership changed. Preview again before applying.')
+            mapping=session['mapping'];groups=session['groups'];catalog=session['catalog'];owner=session['owner']
+            for ident in {i for g in groups for i in g['members']}:
+                media=self.media_item(mapping.get(ident,''))
+                if not media or media['character_id']!=owner or media['sha256']!=catalog[ident]['sha']:raise ValueError('Imports are incomplete or changed. Preview again to resume.')
+            checkpoint=self.create_checkpoint({'label':'Before organizer transfer'})
+            before=copy.deepcopy(self.data)
+            try:
+                category_map={};character=self.character(owner);categories=character.setdefault('set_categories',[])
+                for category in session['categories']:
+                    match=next((c for c in categories if c['id']==category['id'] or c['name'].casefold()==category['name'].casefold()),None)
+                    if match is None:
+                        match={'id':uuid.uuid4().hex,'name':title_case_label(category['name']),'created_at':now_iso()};categories.append(match)
+                    category_map[category['id']]=match['id']
+                skipped={c['id'] for c in session['conflicts']} if mode=='skip' else set()
+                for ident in {i for g in groups for i in g['members']} - skipped:
+                    item=self.media_item(mapping[ident]);seconds=catalog[ident].get('frame_seconds')
+                    if item.get('media_type')!='video' or seconds is None:continue
+                    current=item.get('video_match_frame') or {}
+                    if current.get('seconds')==seconds and current.get('video_sha256')==item['sha256']:continue
+                    frame=video_frame_data(self.root/item['stored_rel'],seconds,self.root/'.video-tools',capture=True)
+                    digest=hashlib.sha256(frame['image']).hexdigest();target=self.thumb_dir/(item['id']+'-match-'+digest[:16]+'.jpg')
+                    target.parent.mkdir(exist_ok=True);target.write_bytes(frame['image'])
+                    item['video_match_frame']={'seconds':frame['seconds'],'sha256':digest,'video_sha256':item['sha256'],'stored_rel':target.relative_to(self.root).as_posix()}
+                links=self.data.setdefault('organizer_links',{}).setdefault(session['namespace'],{})
+                for group in groups:
+                    sid=group['destination_id'] or uuid.uuid4().hex;target=self.set_item(sid)
+                    members=[mapping[i] for i in group['members'] if i not in skipped]
+                    if target is None:
+                        target={'id':sid,'character_id':owner,'kind':'set','created_at':now_iso(),'cover_source':'auto','cover_media_id':None}
+                        self.data.setdefault('sets',[]).append(target)
+                    # Do not lose unrepresented library members in an older inventory.
+                    removed={mapping[i] for i in group.get('removed_members',[]) if i in mapping and i not in skipped}
+                    old=target.get('media_ids',[])
+                    members=list(dict.fromkeys([mid for mid in old if mid not in removed]+members))
+                    self._detach_set_members(owner,members,except_set_id=sid)
+                    target.update(name=title_case_label(group['name']),media_ids=members,colors=self._set_details(colors=group.get('colors',[])).get('colors',[]),
+                        favorite=bool(group.get('favorite')),categories=[category_map.get(c,c) for c in group.get('categories',[])],updated_at=now_iso())
+                    self._validate_set_categories(owner,target['categories'])
+                    for mid in members:
+                        item=self.media_item(mid)
+                        item['in_review']=False;item['in_purgatory']=False;item['set_added_at']=now_iso()
+                        if item.get('source',{}).get('organizer_pending'):item['source'].pop('organizer_pending',None)
+                    links[group['id']]=sid
+                self.save()
+            except Exception:
+                self.data=before
+                raise
+            result={'sets':len(groups),'mapping':dict(links),'skipped':sorted(skipped),'checkpoint':checkpoint['id']}
+            session['result']=result
+            return copy.deepcopy(result)
+
+    def create_checkpoint(self,body):
+        import zipfile
+        with self.lock:
+            ident=datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:8]
+            path=self.backup_dir/('checkpoint-'+ident+'.zip');files={'library.json':json.dumps(self.data,ensure_ascii=False).encode()}
+            if self.battles.path.exists():files['battles.json']=self.battles.path.read_bytes()
+            media=bool(body.get('include_media'));manifest={'schema':1,'id':ident,'at':now_iso(),'label':str(body.get('label','Manual checkpoint'))[:200],
+                'include_media':media,'files':{k:hashlib.sha256(v).hexdigest() for k,v in files.items()}}
+            temp=path.with_suffix('.tmp')
+            try:
+                with zipfile.ZipFile(temp,'w',zipfile.ZIP_DEFLATED) as archive:
+                    for name,content in files.items():archive.writestr(name,content)
+                    for item in self.data['media']+self.data.get('rapid_queue',[]):
+                            # A selected matching frame is application state,
+                            # so metadata-only checkpoints include it too.
+                            refs=[(item.get('video_match_frame') or {}).get('stored_rel')]
+                            if media:refs.extend(item.get(key) for key in ('stored_rel','thumb_rel'))
+                            for rel in refs:
+                                if not rel or rel in manifest['files']:continue
+                                source=(self.root/rel).resolve()
+                                if not source.is_relative_to(self.root.resolve()):raise ValueError('Unsafe checkpoint media path.')
+                                if not source.is_file():
+                                    if not media:
+                                        manifest.setdefault('missing_files',[]).append(rel);continue
+                                    raise ValueError('Cannot checkpoint missing media: '+str(rel))
+                                archive.write(source,rel);manifest['files'][rel]=self._hash_file(source)
+                    archive.writestr('checkpoint.json',json.dumps(manifest))
+                os.replace(temp,path)
+            finally:temp.unlink(missing_ok=True)
+            return {'id':ident,'path':str(path),'manifest':manifest}
+
+    def checkpoint_list(self):
+        import zipfile
+        result=[]
+        for path in sorted(self.backup_dir.glob('checkpoint-*.zip'),reverse=True):
+            try:
+                with zipfile.ZipFile(path) as z:entry=json.loads(z.read('checkpoint.json'))
+                result.append({k:entry.get(k) for k in ('id','at','label','include_media')})
+            except (OSError,ValueError,KeyError,zipfile.BadZipFile):continue
+        return {'checkpoints':result}
+
+    def _read_checkpoint(self,ident):
+        import zipfile
+        if not re.fullmatch(r'[0-9]{8}-[0-9]{6}-[0-9a-f]{8}',str(ident)):raise ValueError('Invalid checkpoint.')
+        path=self.backup_dir/('checkpoint-'+ident+'.zip');files={}
+        with zipfile.ZipFile(path) as z:
+            manifest=json.loads(z.read('checkpoint.json'))
+            if manifest.get('schema')!=1 or manifest.get('id')!=ident:raise ValueError('Invalid checkpoint manifest.')
+            for name,digest in manifest['files'].items():
+                if name not in ('library.json','battles.json') and (Path(name).is_absolute() or '..' in Path(name).parts or Path(name).parts[0] not in ('media','thumbnails')):raise ValueError('Unsafe checkpoint path.')
+                if name in ('library.json','battles.json'):
+                    content=z.read(name)
+                    if hashlib.sha256(content).hexdigest()!=digest:raise ValueError('Checkpoint verification failed.')
+                    files[name]=content
+            library=json.loads(files['library.json'])
+            if not isinstance(library.get('media'),list) or not isinstance(library.get('characters'),list):raise ValueError('Invalid library snapshot.')
+            if 'battles.json' in files:
+                battles=json.loads(files['battles.json'])
+                if battles.get('version')!=1 or not isinstance(battles.get('boards'),dict):raise ValueError('Invalid battle snapshot.')
+        return path,manifest,files,library
+
+    def checkpoint_preview(self,body):
+        with self.lock:
+            path,manifest,files,library=self._read_checkpoint(body.get('id'))
+            missing=[]
+            for item in library['media']+library.get('rapid_queue',[]):
+                rel=item.get('stored_rel','');target=(self.root/rel).resolve()
+                if not target.is_relative_to(self.media_dir.resolve()):missing.append(rel);continue
+                if not target.is_file() and rel not in manifest['files']:missing.append(rel)
+            token=hashlib.sha256(path.read_bytes()+self.revision.encode()+(self.battles.path.read_bytes() if self.battles.path.exists() else b'')).hexdigest()
+            return {'id':manifest['id'],'token':token,'current':{k:len(self.data.get(k,[])) for k in ('media','sets','characters')},
+                'restore':{k:len(library.get(k,[])) for k in ('media','sets','characters')},'missing_media':missing,
+                'includes_battles':'battles.json' in files,'include_media':manifest['include_media']}
+
+    def checkpoint_restore(self,body):
+        import zipfile
+        with self.lock:
+            preview=self.checkpoint_preview(body)
+            if preview['token']!=body.get('token'):raise ValueError('State changed. Preview restore again.')
+            if preview['missing_media']:raise ValueError('Required media is missing. Restore those files first.')
+            path,manifest,files,library=self._read_checkpoint(body['id'])
+            rollback=self.create_checkpoint({'label':'Before checkpoint restore'})
+            journal=self.root/'.restore-pending';journal.mkdir(exist_ok=False)
+            if self.db_path.exists():(journal/'library.json').write_bytes(self.db_path.read_bytes())
+            if self.battles.path.exists():(journal/'battles.json').write_bytes(self.battles.path.read_bytes())
+            (journal/'ready').write_text('1')
+            try:
+                with zipfile.ZipFile(path) as z:
+                    for name,digest in manifest['files'].items():
+                        if name in ('library.json','battles.json'):continue
+                        target=self.root/name
+                        if target.is_file() and self._hash_file(target)==digest:continue
+                        # Stored media names are unique. Do not overwrite changed originals.
+                        if target.exists():raise ValueError('A media file differs from the checkpoint: '+name)
+                        target.parent.mkdir(parents=True,exist_ok=True);temporary=target.with_suffix(target.suffix+'.restore')
+                        try:
+                            with z.open(name) as src,temporary.open('wb') as dst:shutil.copyfileobj(src,dst)
+                            if self._hash_file(temporary)!=digest:raise ValueError('Media checkpoint verification failed.')
+                            os.replace(temporary,target)
+                        finally:temporary.unlink(missing_ok=True)
+                self._write_atomic(library)
+                if 'battles.json' in files:
+                    temp=self.battles.path.with_suffix('.restore');temp.write_bytes(files['battles.json']);os.replace(temp,self.battles.path)
+                else:self.battles.path.unlink(missing_ok=True)
+                self.data=library;self._saved_data=copy.deepcopy(library);self.battles.data=None;self.revision=uuid.uuid4().hex
+                shutil.rmtree(journal)
+            except Exception:
+                self._recover_restore();self.data=self._load();self._saved_data=copy.deepcopy(self.data);self.battles.data=None
+                raise
+            return {'restored':body['id'],'rollback':rollback['id']}
+
+    def _recover_restore(self):
+        journal=self.root/'.restore-pending'
+        if not journal.exists():return
+        if (journal/'ready').exists():
+            for name in ('library.json','battles.json'):
+                source=journal/name;target=self.root/name
+                if source.exists():shutil.copyfile(source,target)
+                else:target.unlink(missing_ok=True)
+        shutil.rmtree(journal)
+
 
     def manual_backup(self) -> Path:
         with self.lock:
@@ -2969,6 +3363,8 @@ class LibraryStore:
             if not pending:
                 item["main_added_at"] = item["created_at"]
             item['category_added_at'] = {key:item['created_at'] for key in categories}
+            if source.get("organizer_pending"):
+                item["in_all"]=False;item["in_videos"]=False
             self._apply_resolution_flag(item)
             self.data.setdefault("rapid_queue" if pending else "media", []).append(item)
             self.save()
@@ -3651,6 +4047,31 @@ class LibraryStore:
             if changed:
                 self.save()
             return m
+
+    def video_workflow(self,media_id,action,body):
+        with self.lock:
+            media=self.media_item(media_id)
+            if not media or media.get('media_type')!='video':raise ValueError('Choose a video.')
+            original=copy.deepcopy(media);path=self.root/media['stored_rel']
+            if action=='loop':
+                loop=body.get('loop')
+                if loop is not None:
+                    if not isinstance(loop,dict):raise ValueError('Invalid loop.')
+                    start,end=float(loop.get('start',-1)),float(loop.get('end',-1))
+                    if not math.isfinite(start) or not math.isfinite(end) or not 0<=start<end<=7*86400:raise ValueError('Loop end must follow its start.')
+                    loop={'start':start,'end':end}
+                return self._change_media(media,{'video_loop':loop},'Change video loop')
+        if action not in ('step','frame'):raise ValueError('Unknown video action.')
+        frame=video_frame_data(path,body.get('seconds',0),self.root/'.video-tools',int(body.get('direction',0)),capture=action=='frame')
+        with self.lock:
+            media=self.media_item(media_id)
+            if not media or media['sha256']!=original['sha256'] or media['stored_rel']!=original['stored_rel']:raise ValueError('Video changed. Select a frame again.')
+            if action=='step':return frame
+            directory=self.root/'thumbnails';directory.mkdir(exist_ok=True)
+            digest=hashlib.sha256(frame['image']).hexdigest();target=directory/(media_id+'-match-'+digest[:16]+'.jpg')
+            target.write_bytes(frame['image'])
+            return self._change_media(media,{'video_match_frame':{'seconds':frame['seconds'],'sha256':digest,'video_sha256':media['sha256'],
+                'stored_rel':target.relative_to(self.root).as_posix()}},'Select video matching frame')
 
     def set_video_thumbnail_bytes(self, media_id: str, payload: bytes, content_type: str, seconds: float | None = None, automatic: bool = False) -> dict[str, Any]:
         with self.lock:
@@ -4369,6 +4790,17 @@ class MediaHandler(BaseHTTPRequestHandler):
                 with self.store.lock:
                     self._send_json(200, {"revision": self.store.revision})
                 return
+            frame_match=re.fullmatch(r'/api/media/([0-9a-f]+)/matching-frame',path)
+            if frame_match:
+                with self.store.lock:
+                    m=self.store.media_item(frame_match[1]);f=(m or {}).get('video_match_frame')
+                    if not f or f.get('video_sha256')!=m['sha256']:raise ValueError('Select a matching frame first.')
+                    frame_path=self.store.root/f['stored_rel']
+                self._send_file_with_range(frame_path,'image/jpeg');return
+            if path == "/api/diagnostics":
+                self._send_json(200,self.store.diagnostics());return
+            if path == "/api/checkpoints":
+                self._send_json(200,self.store.checkpoint_list());return
             if path == "/api/health":
                 self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "character_profiles": True, "image_set_battles": True, "outfit_matching": True, "outfit_library_scan": True, "photoshoot_matching": True, "persistent_rapid_review": True, "set_examples": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
@@ -4426,6 +4858,14 @@ class MediaHandler(BaseHTTPRequestHandler):
             return
         try:
             path = urllib.parse.urlparse(self.path).path
+            if path in ('/api/organizer/preview','/api/organizer/import','/api/organizer/apply','/api/checkpoints/create','/api/checkpoints/preview','/api/checkpoints/restore'):
+                methods={'/api/organizer/preview':self.store.organizer_preview,'/api/organizer/import':self.store.organizer_import,
+                    '/api/organizer/apply':self.store.organizer_apply,'/api/checkpoints/create':self.store.create_checkpoint,
+                    '/api/checkpoints/preview':self.store.checkpoint_preview,'/api/checkpoints/restore':self.store.checkpoint_restore}
+                self._send_json(200,methods[path](self._read_json()));return
+            video_match=re.fullmatch(r'/api/media/([0-9a-f]+)/video-(loop|step|frame)',path)
+            if video_match:
+                self._send_json(200,self.store.video_workflow(video_match[1],video_match[2],self._read_json()));return
             if path == "/api/duplicate-review/replace":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 field = lambda key: query.get(key, [""])[0]

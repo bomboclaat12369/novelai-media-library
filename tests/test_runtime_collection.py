@@ -30,7 +30,7 @@ class CollectionTests(unittest.TestCase):
         code,saved=self.call('save',revision=data['collection']['revision'],attributes=attrs);self.assertEqual(code,200,saved)
         self.assertEqual(self.call('save',revision=data['collection']['revision'],attributes=attrs)[0],400)
         rev=saved['collection']['revision']
-        for frame in [{'x':51,'y':0,'zoom':1},{'x':0,'y':float('nan'),'zoom':1},{'x':0,'y':0,'zoom':0}]:
+        for frame in [{'x':1001,'y':0,'zoom':1},{'x':0,'y':float('nan'),'zoom':1},{'x':0,'y':0,'zoom':0}]:
             self.assertEqual(self.call('frame',revision=rev,media_id=m['id'],key='image:'+m['id'],frame=frame)[0],400)
         code,saved=self.call('frame',revision=rev,media_id=m['id'],key='image:'+m['id'],frame={'x':10,'y':-5,'zoom':1.5});self.assertEqual(code,200,saved)
         code,profile=self.post('/api/profile/save',{'character_id':self.character['id'],'revision':'','profile':{'photos':[m['id']],'measurements':{},'notes':'old client'}});self.assertEqual(code,200)

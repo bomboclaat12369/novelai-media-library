@@ -20,6 +20,10 @@ def read(path):
 
 
 def build(components):
+    import runpy
+    sync=runpy.run_path('tools/sync-ui-sources.py')['sync']
+    for component in components:
+        if component in ('userscript','standalone'):sync('release-'+component+'.json')
     manifest = read('manifest.json')
     artifacts = []
     if 'userscript' in components:

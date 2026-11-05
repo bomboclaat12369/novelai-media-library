@@ -157,7 +157,7 @@ for (const videoVisible of [false,true]) {
 }
 
 test('the complete selected userscript and stable loader parse', () => {
-  const config=JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-userscript.json'));
+  const config=JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-standalone.json'));
   const assembled=config.parts.map(read).join('');
   new vm.Script(assembled, {filename:'assembled-userscript.js'});
   new vm.Script(read('novelai-media.user.js'));
@@ -181,8 +181,8 @@ test('cached loader startup happens before any GitHub request', () => {
 });
 
 test('a second payload execution cannot create a second library host', () => {
-  const config = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-userscript.json'));
-  const source = read(config.parts.find(p => /userscript-2\.8\..*\.part01\.txt$/.test(p)));
+  const config = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-standalone.json'));
+  const source = read(config.parts.find(p => /userscript-.*\.part01\.txt$/.test(p)));
   assert.match(source, /const existingHost = document\.getElementById\('nai-media-host'\)/);
   assert.match(source, /naiMediaDuplicateSuppressed/);
   assert.match(source, /return;\n  }\n  document\.documentElement\.dataset\.naiMediaPayloadInstance/);
@@ -192,7 +192,7 @@ test('the active drag cleanup layer does not synthesize page-wide drag events', 
   const source = read('payload/userscript-2.8.4.drag-safety.txt');
   assert.doesNotMatch(source, /dispatchEvent|DragEvent|dragleave|dragend/);
   assert.match(source, /naiMediaV284DragSafety/);
-  const releasePath = process.env.NAI_RELEASE_CONFIG || 'release-userscript.json';
+  const releasePath = process.env.NAI_RELEASE_CONFIG || 'release-standalone.json';
   const release = JSON.parse(read(releasePath));
   assert.equal(release.parts.includes('payload/userscript-2.5.5.patch01.txt'), false);
   assert.equal(release.parts.includes('payload/userscript-2.8.4.drag-safety.txt'), true);
@@ -203,13 +203,13 @@ test('the UI patches reset viewer state and expose bulk image editing', () => {
   assert.match(reset, /saved\.selectedMediaId = null/);
   assert.match(reset, /saved\.slotMediaIds = \[null, null\]/);
   assert.match(reset, /saved\.splitView = false/);
-  const config = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-userscript.json'));
+  const config = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-standalone.json'));
   const ui = read(config.parts.find(p => p.endsWith('.ui-updates.txt')));
   assert.match(ui, /openBulkEditModal/);
   assert.match(ui, /Delete selected images/);
   assert.match(ui, /All \$\{count\} files in this Rapid Review queue are shown/);
   assert.doesNotMatch(ui, /Permanently delete/);
-  const release = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-userscript.json'));
+  const release = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-standalone.json'));
   const review = read(release.parts.find(p => p.endsWith('.review-core.txt')));
   assert.doesNotMatch(review, /\? Review/);
   assert.match(review, /setTextIfChanged\(review, `Review /);
@@ -217,13 +217,13 @@ test('the UI patches reset viewer state and expose bulk image editing', () => {
   assert.match(review, /naiFavVideoFilter270/);
   assert.match(review, /naiReviewVideoFilter270/);
   assert.match(review, /m\.media_type === 'video' && !m\.in_review/);
-  assert.match(review, /post\('review', \{in_review:m\.in_review\}\)/);
+  assert.match(review, /if\(m\.in_review\)await post\('review',\{in_review:true\}\)/);
   assert.doesNotMatch(ui, /cleanReviewLabels|labelCleanupQueued|observe\(catWrap/);
 });
 
 // Exercise the production queue functions, including the DOM attachment guard.
 function reviewQueueFixture() {
-  const release = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-userscript.json'));
+  const release = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-standalone.json'));
   const source = read(release.parts.find(p => p.endsWith('.review-core.txt')));
   class Element {
     constructor(tag) { this.tagName = tag; this.children = []; this.listeners = {}; this.dataset={}; this.style={setProperty(){}}; }

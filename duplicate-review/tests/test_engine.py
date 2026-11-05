@@ -43,11 +43,12 @@ class EngineTests(unittest.TestCase):
             self.engine.thread.join(10)
         self.temp.cleanup()
 
-    def scan(self, references=False, mode='balanced'):
+    def scan(self, references=False, mode='balanced', issues=False):
         self.engine.start([str(self.incoming)], [str(self.reference)] if references else [], mode)
         self.engine.thread.join(20)
         self.assertFalse(self.engine.status['running'])
-        self.assertEqual(self.engine.status['phase'], 'Scan complete', self.engine.status)
+        if issues:self.assertTrue(self.engine.status['phase'].startswith('Scan incomplete'),self.engine.status)
+        else:self.assertEqual(self.engine.status['phase'], 'Scan complete', self.engine.status)
         return self.engine.view()
 
     def test_exact_resized_recompressed_watermark_and_unrelated(self):
@@ -140,9 +141,9 @@ class EngineTests(unittest.TestCase):
         artwork().save(q/'ignored.jpg')
         if os.name != 'nt':
             (self.incoming/'link.jpg').symlink_to(self.incoming/'valid.jpg')
-        view=self.scan()
+        view=self.scan(issues=True)
         self.assertEqual(view['stats']['total'],1)
-        self.assertEqual(len(view['errors']),2)
+        self.assertEqual(len(view['errors']),2 if os.name=='nt' else 3)
 
     def test_crash_journal_recovers_pending_move(self):
         artwork().save(self.incoming/'a.jpg')

@@ -102,7 +102,7 @@ class RuntimeStabilityTests(unittest.TestCase):
         self.assertEqual(self.store.update_set(empty['id'], name='Renamed')['name'], 'Renamed')
         # Since 2.7.35, duplicate names receive a suffix rather than an error.
         numbered = self.store.create_set(self.character['id'], 'renamed', [])
-        self.assertEqual(numbered['name'], 'renamed 1')
+        self.assertEqual(numbered['name'], 'Renamed 1')
         self.assertEqual(self.store.set_item(empty['id'])['name'], 'Renamed')
         with self.assertRaises((KeyError, ValueError)):
             self.store.update_set(empty['id'], media_ids=['missing'])
@@ -199,6 +199,8 @@ class RuntimeStabilityTests(unittest.TestCase):
         first['crop_top'] = 0.12
         first['crop_bottom'] = 0.07
         set_item = self.store.create_set(self.character['id'], 'Keep me', [first['id']], first['id'])
+        # Set assignment intentionally leaves Review; test replacement separately.
+        first['in_review'] = True
         self.store.save()
         old_path = self.store.root / first['stored_rel']
         old_path.write_bytes(b'old-source')

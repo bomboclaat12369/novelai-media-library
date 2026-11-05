@@ -17,7 +17,7 @@
     "payload/userscript-2.4.5.patch01.txt",
     "payload/userscript-2.4.7.patch01.txt",
     "payload/userscript-2.8.57.video-labels.txt",
-    "payload/userscript-2.8.96.outfit-matching.txt",
+    "payload/userscript-2.9.23.outfit-matching.txt",
     "payload/userscript-2.8.95.set-scan.txt",
     "payload/userscript-2.8.96.set-picker.txt",
     "payload/userscript-2.9.12.sets.txt",
@@ -38,8 +38,8 @@
     "payload/userscript-2.8.76.search-fields.txt",
     "payload/userscript-2.9.16.ranks.txt",
     "payload/userscript-2.8.96.ranking-library.txt",
-    "payload/userscript-2.9.18.collection.txt",
-    "payload/userscript-2.9.21.editions.txt",
+    "payload/userscript-2.9.23.collection.txt",
+    "payload/userscript-2.9.23.editions.txt",
     "payload/userscript-2.9.20.base-layout.txt",
     "payload/userscript-2.9.17.card-debug.txt",
     "payload/userscript-2.9.17.battles.txt",
@@ -49,15 +49,21 @@
     "payload/userscript-2.9.7.no-autofill.txt",
     "payload/userscript-2.9.12.search-clear.txt",
     "payload/userscript-2.9.22.yoga-preview.txt",
+    "payload/userscript-2.9.23.video-workflow.txt",
+    "payload/userscript-2.9.23.project-tools.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 177,
-  "version": "2.9.22",
+  "release_build": 178,
+  "version": "2.9.23",
   "title_artwork": {
     "team_captain": "assets/cards/captain-royal-ink.webp",
     "former_number_one": "assets/cards/former-number-one-legacy-gold.webp"
   },
   "edition_catalog": "assets/cards/editions/catalog.json",
   "base_catalog": "assets/cards/base/catalog.json",
-  "minify_javascript": true
+  "minify_javascript": true,
+  "module_sources": {
+    "payload/userscript-2.9.23.video-workflow.txt": "ui-src/video-workflow.js",
+    "payload/userscript-2.9.23.project-tools.txt": "ui-src/project-tools.js"
+  }
 }

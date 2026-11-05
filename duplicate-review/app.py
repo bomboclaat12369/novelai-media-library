@@ -41,6 +41,9 @@ def make_server(engine, port=0, token=None):
     from organizer import Organizer
     from updater import Updater
     organizer = Organizer(engine, bulk)
+    from checkpoints import Checkpoints
+    checkpoints=Checkpoints(engine,bulk,organizer)
+    checkpoints.recover()
     updater = Updater(engine.state_dir, VERSION)
     operation_lock = threading.RLock()
     bulk_html = (Path(__file__).parent / 'bulk' / 'ui.html').read_text(encoding='utf-8')
@@ -50,6 +53,7 @@ def make_server(engine, port=0, token=None):
     html = html.replace('</body>',update_tag+'</body>')
     bulk_html = bulk_html.replace('</body>',update_tag+'</body>')
     organizer_html = organizer_html.replace('__UPDATER__',update_js)
+    organizer_html = organizer_html.replace('__ORGANIZER_WORKFLOW__',(Path(__file__).parent/'organizer-workflow.js').read_text(encoding='utf-8'))
     organizer_html = organizer_html.replace('__ORGANIZER_SESSION__',(Path(__file__).parent/'organizer-session.js').read_text(encoding='utf-8'))
 
     autofill_js=(Path(__file__).parent/'no-autofill.js').read_text(encoding='utf-8')
@@ -100,6 +104,36 @@ def make_server(engine, port=0, token=None):
             if self.headers.get('X-Review-Token') != token and params.get('token', [''])[0] != token:
                 return self.send(403, {'error': 'Reopen the app using its launcher.'})
             try:
+                if url.path == '/api/organizer/checkpoints':
+                    return self.send(200,checkpoints.list())
+                if url.path == '/api/organizer/diagnostics':
+                    return self.send(200,{'workbench_version':VERSION,'job':(bulk.current or {}).get('id'),'organizer':organizer.summary()['progress'],'library':engine.library.request('/api/diagnostics')})
+                if url.path == '/api/organizer/videos':
+                    return self.send(200,organizer.video_queue())
+                if url.path == '/api/organizer/video-file':
+                    path=getattr(organizer,'video_files',{}).get(params.get('id',[''])[0])
+                    if not path or not path.is_file():raise ValueError('Refresh the video list.')
+                    import re,mimetypes
+                    size=path.stat().st_size;start=0;end=size-1;partial=False
+                    requested=self.headers.get('Range','')
+                    if requested:
+                        match=re.fullmatch(r'bytes=(\d*)-(\d*)',requested)
+                        if not match:raise ValueError('Unsupported video range.')
+                        if match[1]:start=int(match[1]);end=min(end,int(match[2])) if match[2] else end
+                        else:start=max(0,size-int(match[2]))
+                        if start>end or start>=size:raise ValueError('Video range unavailable.')
+                        partial=True
+                    self.send_response(206 if partial else 200);self.send_header('Content-Type',mimetypes.guess_type(path.name)[0] or 'video/mp4')
+                    self.send_header('Accept-Ranges','bytes');self.send_header('Content-Length',str(end-start+1))
+                    if partial:self.send_header('Content-Range',f'bytes {start}-{end}/{size}')
+                    self.end_headers()
+                    with path.open('rb') as stream:
+                        stream.seek(start);remaining=end-start+1
+                        while remaining:
+                            chunk=stream.read(min(1024*1024,remaining))
+                            if not chunk:break
+                            self.wfile.write(chunk);remaining-=len(chunk)
+                    return
                 if url.path == '/api/update/status':
                     return self.send(200, updater.status())
                 if url.path == '/api/organizer/state':
@@ -189,12 +223,21 @@ def make_server(engine, port=0, token=None):
                         raise ValueError('Finish or stop the active scan before restarting. Your progress is saved.')
                     result=updater.activate()
                     threading.Thread(target=self.server.shutdown,daemon=True).start()
+                elif path in ('/api/organizer/checkpoint-create','/api/organizer/checkpoint-preview','/api/organizer/checkpoint-restore'):
+                    method=path.rsplit('-',1)[-1];result=getattr(checkpoints,method)(body)
+                elif path in ('/api/organizer/transfer-preview','/api/organizer/transfer-import','/api/organizer/transfer-apply'):
+                    if path.endswith('transfer-apply') and not getattr(organizer,'transfer_checkpoint',None):
+                        organizer.transfer_checkpoint=checkpoints.create({'label':'Before organizer application'})['id']
+                    result=organizer.transfer(path.rsplit('-',1)[-1],body)
+                    if path.endswith('transfer-preview'):organizer.transfer_checkpoint=None
                 elif path == '/api/organizer/switch':
                     result=organizer.switch_collection(body)
                 elif path == '/api/organizer/related':
                     result=organizer.related(body)
                 elif path == '/api/organizer/index':
-                    result=organizer.index()
+                    result=organizer.index(body.get('ids'))
+                elif path in ('/api/organizer/video-step','/api/organizer/video-frame'):
+                    result=organizer.video_action(path.rsplit('-',1)[-1],body)
                 elif path == '/api/organizer/pause':
                     organizer.cancel.set();result={'paused':True}
                 elif path in ('/api/organizer/load_categories','/api/organizer/create_category'):

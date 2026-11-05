@@ -32,13 +32,13 @@ class TitleCaseTests(unittest.TestCase):
         status,group=self.post('/api/sets',{'character_id':owner,'name':'blue and white outfit','media_ids':[],
                                          'colors':[' blue ','Blue','black with gold'],'aliases':['leave this lowercase'],'notes':'leave this too'})
         self.assertEqual(status,200);self.assertEqual(group['name'],'Blue and White Outfit')
-        self.assertEqual(group['colors'],['Blue','Black with Gold']);self.assertEqual(group['aliases'],['leave this lowercase'])
+        self.assertEqual(group['colors'],['Blue','Black with Gold','White']);self.assertEqual(group['aliases'],['leave this lowercase'])
         second=self.store.create_set(owner,'blue and white outfit',[])
         self.assertEqual(second['name'],'Blue and White Outfit 1')
         status,edited=self.post('/api/sets/'+group['id'],{'name':'red or blue','colors':['light blue','white and gold']})
         self.assertEqual(status,200);self.assertEqual(edited['name'],'Red or Blue')
         reloaded=fixtures.RUNTIME['LibraryStore'](self.store.root)
-        self.assertEqual(reloaded.set_item(group['id'])['colors'],['Light Blue','White and Gold'])
+        self.assertEqual(reloaded.set_item(group['id'])['colors'],['Light Blue','White and Gold','Red','Blue'])
         self.assertEqual(reloaded.set_item(group['id'])['notes'],'leave this too')
 
     def test_existing_data_is_not_bulk_renamed_or_changed_by_unrelated_edits(self):

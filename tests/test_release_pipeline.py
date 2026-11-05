@@ -32,7 +32,7 @@ class SourceReleaseTests(unittest.TestCase):
         git(self.root, 'init', '-q', '-b', 'main')
         git(self.root, 'config', 'user.name', 'Release Test')
         git(self.root, 'config', 'user.email', 'release-test@example.invalid')
-        for name in ('build-release.py', 'build-standalone.py', 'build-duplicate-review.py'):
+        for name in ('build-release.py', 'build-standalone.py', 'build-duplicate-review.py', 'sync-ui-sources.py'):
             self.put('tools/' + name, (REPO / 'tools' / name).read_bytes())
         self.put('.gitignore', '.release-output/\n__pycache__/\n')
         self.put('payload/source.js', 'globalThis.example = 1;\n')

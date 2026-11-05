@@ -23,10 +23,11 @@ Build and publish from source**. Its `release-receipt` artifact contains the
 result, byte counts, checksums and build log. The application release configs,
 manifest, source modules and artwork do not change during this installation.
 
-The legacy runtime/userscript workflows remain intact. Their existing product
-test failures are not suppressed by this transport fix. This new workflow checks
-release integrity and publication mechanics; it does not claim those product
-suites or browser checks passed.
+The legacy runtime/userscript workflow entry points now run product validation
+only. The source workflow is the single publisher, which prevents independent
+manifest commits from racing each other. It also runs the current runtime,
+Workbench, DOM and native renderer checks before building a release. See
+`docs/PROJECT-MAP.md` for the source map and local test setup.
 
 ## An authorized application release
 

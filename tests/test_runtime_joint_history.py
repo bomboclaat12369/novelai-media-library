@@ -122,7 +122,7 @@ class JointHistoryTests(unittest.TestCase):
         for ident,score in board['ratings'].items():
             self.assertEqual(score['rating'],reference['ratings'][ident]['rating'])
             self.assertAlmostEqual(score['rd'],reference['ratings'][ident]['rd'],places=6)
-        self.assertIsNone(self.store.battles._inverse_diagonal([1.]*400,[]))
+        self.assertEqual(self.store.battles._inverse_diagonal([1.]*400,[]),[1.]*400)
         self.assertIsNone(self.store.battles._inverse_diagonal([1.]*64,[(0,1,.1)]))
 
 if __name__=='__main__':unittest.main()

@@ -16,7 +16,7 @@ class LibraryClient:
         request = Request(self.base + path, data=body,
                           headers={'Content-Type': 'application/octet-stream' if raw else 'application/json'})
         try:
-            with self.opener.open(request, timeout=30) as response:
+            with self.opener.open(request, timeout=180 if path.startswith(('/api/checkpoints/','/api/organizer/import')) else 30) as response:
                 return json.load(response)
         except HTTPError as error:
             try:
