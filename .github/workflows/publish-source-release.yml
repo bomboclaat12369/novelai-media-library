@@ -1,0 +1,101 @@
+name: Build and publish from source
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/release-request.json']
+  workflow_dispatch:
+    inputs:
+      components:
+        description: 'Space-separated: standalone userscript runtime workbench'
+        required: true
+        default: standalone
+        type: string
+      publish:
+        description: 'Publish the checked release to main (false only tests the build)'
+        default: false
+        type: boolean
+      workbench_notes:
+        description: 'Required when releasing Workbench'
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: media-release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Re-running an interrupted job starts with the current branch head.
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned build dependencies
+        run: npm ci --prefix tools --ignore-scripts --no-audit --no-fund
+      - name: Check release transport and failure handling
+        run: python -m unittest discover -s tests -p test_release_pipeline.py -v
+      - name: Set release commit identity
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+      - name: Build, validate and optionally publish
+        id: build
+        env:
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_COMPONENTS: ${{ inputs.components }}
+          RELEASE_PUBLISH: ${{ inputs.publish }}
+          RELEASE_NOTES: ${{ inputs.workbench_notes }}
+        run: |
+          python - <<'PY'
+          import json, os, subprocess, sys
+          from pathlib import Path
+          command = [sys.executable, 'tools/publish-source-release.py']
+          if os.environ['RELEASE_EVENT'] == 'push':
+              command += ['--request', '.github/release-request.json']
+          else:
+              command += ['--components', *os.environ['RELEASE_COMPONENTS'].split()]
+              if os.environ['RELEASE_PUBLISH'] == 'true':
+                  if os.environ['GITHUB_REF'] != 'refs/heads/main':
+                      raise SystemExit('Publishing is allowed only from main; use a dry run for other branches.')
+                  command.append('--publish')
+              if os.environ['RELEASE_NOTES']:
+                  command += ['--workbench-notes', os.environ['RELEASE_NOTES']]
+          subprocess.run(command, check=True)
+          report = json.loads(Path('.release-output/report.json').read_text())
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('publish=' + str(report['publish']).lower() + '\n')
+          PY
+      - name: Verify downloadable artifacts and update manifests
+        if: steps.build.outputs.publish == 'true'
+        run: |
+          python - <<'PY'
+          import json, subprocess, sys
+          from pathlib import Path
+          report = json.loads(Path('.release-output/report.json').read_text())
+          subprocess.run([sys.executable, 'tools/verify-published-release.py',
+                          '--components', *report['components'],
+                          '--expected-dir', '.release-output', '--attempts', '24',
+                          '--interval', '15', '--report', '.release-output/report.json'], check=True)
+          PY
+      - name: Save compact release receipt and build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-receipt-${{ github.run_id }}
+          path: .release-output/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14

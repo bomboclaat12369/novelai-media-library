@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "id": "replace-with-a-unique-release-id",
+  "components": ["standalone"],
+  "publish": false
+}

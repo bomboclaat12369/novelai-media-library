@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "id": "publishing-pipeline-check-2026-11-05",
+  "components": ["standalone"],
+  "publish": false
+}
