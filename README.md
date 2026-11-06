@@ -1,3 +1,15 @@
+## Character sections and approved card repairs (2.0.22 / UI 2.9.25)
+
+Folder Organizer now lists every library girl, including Nikki, and keeps multiple
+source folders under her section. Use **Folders…** to add or refresh folders;
+saved duplicate hashes are reused. Existing sets, stars, analysis and progress
+are preserved. Older collections with no known girl can be connected explicitly
+with **Assign to girl…**. See [character sections](docs/CHARACTER-SECTIONS.md).
+
+The standalone library includes the six approved Signature, Hall of Fame, #1,
+Valentine’s, Christmas and Whore artwork repairs. Photo framing and runtime
+labels are preserved; Pregnant is unchanged. Companion remains 2.7.75.
+
 ## Fresher Media Library update checks (companion 2.7.72)
 
 The standalone Media Library now discovers releases through GitHub's contents

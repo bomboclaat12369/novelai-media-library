@@ -237,6 +237,12 @@ def make_server(engine, port=0, token=None):
                     if path.endswith('transfer-preview'):organizer.transfer_checkpoint=None
                 elif path == '/api/organizer/switch':
                     result=organizer.switch_collection(body)
+                elif path == '/api/organizer/collections':
+                    result=organizer.refresh_collections(body)
+                elif path == '/api/organizer/folders':
+                    result=organizer.collection_folders(body)
+                elif path == '/api/organizer/assign-collection':
+                    result=organizer.assign_collection(body)
                 elif path == '/api/organizer/related':
                     result=organizer.related(body)
                 elif path == '/api/organizer/index':

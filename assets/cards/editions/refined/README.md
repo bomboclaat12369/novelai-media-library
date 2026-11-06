@@ -1,3 +1,28 @@
+# Approved seam repairs — 2.9.25
+
+Signature, Hall of Fame, #1, Valentine’s, Christmas and Whore now use the six
+approved November 4 repairs recovered intact from the handoff. Original PNGs
+and their checksums are retained under `../repairs/2026-11-04/` and in
+`tools/import-approved-card-repairs.cjs`. Integration adds one transparent row
+and column to the native 1049×1499 art; it does not crop or resample it.
+Production WebP is a lossless encoding of the normalized PNG. The importer and
+encoder can reproduce these six frames without touching the other seven.
+
+The approved 840×1120 photo viewport, runtime overlay guides, saved photo
+positions and Pregnant card are unchanged. Native render checks cover all
+13 editions, seven ranks and both placement/legacy-rating modes. Visual review
+uses the real renderer with neutral photo placeholders; it is not a live
+Windows/browser layout test.
+
+Rebuild only these repairs:
+
+```
+node tools/import-approved-card-repairs.cjs
+python tools/encode-card-frames.py signature hall-of-fame number-one valentines christmas whore-stage
+```
+
+---
+
 # Current production checkpoint: 2.9.21
 
 `../catalog.json` and its referenced `.webp` assets are authoritative for current

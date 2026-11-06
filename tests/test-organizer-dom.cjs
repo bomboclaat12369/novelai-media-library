@@ -37,3 +37,10 @@ test('organizer transfer preview blocks Apply when source issues are present',as
 test('Organizer exposes the shared missing-file finder',async()=>{
  const f=await fixture();try{const launch=[...f.dom.window.document.querySelectorAll('button')].find(b=>b.textContent==='Missing files');assert.ok(launch);launch.click();await ready(()=>f.dom.window.document.querySelector('.naiMissingPanel'));assert.ok(f.dom.window.document.querySelector('[aria-label="Folders to search for missing originals"]'));assert.deepEqual(f.errors,[]);}finally{f.dom.window.close()}
 });
+
+test('girl selector follows section identity while a new inventory has its own job ID',async()=>{
+ const f=await fixture();try{f.state.section_id='girl:nikki';f.state.roots=['C:/Nikki'];f.state.collections=[{id:'girl:alice',name:'Alice',roots:[],character_id:'alice'},{id:'girl:nikki',name:'Nikki',roots:['C:/Nikki'],character_id:'nikki'}];await f.dom.window.eval('refresh()');assert.equal(f.d.getElementById('collectionPicker').value,'girl:nikki');assert.equal(f.d.getElementById('collectionFolders').disabled,false);f.d.getElementById('collectionFolders').click();assert.equal(f.d.getElementById('foldersDialog').open,true);assert.equal(f.d.getElementById('savedFolders').textContent,'C:/Nikki');assert.deepEqual(f.errors,[]);}finally{f.dom.window.close()}
+});
+test('folders submit additional paths with the current inventory guard',async()=>{
+ const f=await fixture();try{f.state.section_id='girl:nikki';await f.dom.window.eval('refresh()');f.d.getElementById('collectionFolders').click();f.d.getElementById('newFolders').value='D:/New Nikki\nE:/More Nikki';f.d.getElementById('refreshInventory').click();await ready(()=>f.calls.some(c=>c.route==='folders'));const request=f.calls.find(c=>c.route==='folders');assert.equal(request.body.job,'job');assert.deepEqual(request.body.roots,['D:/New Nikki','E:/More Nikki']);await ready(()=>f.calls.some(c=>c.route==='state'));assert.deepEqual(f.errors,[]);}finally{f.dom.window.close()}
+});

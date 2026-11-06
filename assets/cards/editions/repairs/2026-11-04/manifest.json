@@ -1,0 +1,121 @@
+{
+  "schema": 1,
+  "approved_checkpoint": "2026-11-04",
+  "integration": "Native pixels on 1050x1500 canvas; one transparent row/column added; lossless WebP",
+  "assets": [
+    {
+      "edition": "christmas",
+      "original": "assets/cards/editions/repairs/2026-11-04/christmas.png",
+      "sha256": "bfc9135864aa26dfcf9cc7236f7e34f8042951b606a43f724fd61390255ecae8",
+      "width": 1049,
+      "height": 1499,
+      "production": [
+        {
+          "path": "assets/cards/editions/refined/christmas.png",
+          "sha256": "7f736f670bf3901e2252897ec19fd0cce9c859af60eecdf92d3ca8dcf347a39e",
+          "bytes": 1126259
+        },
+        {
+          "path": "assets/cards/editions/refined/christmas.webp",
+          "sha256": "9a483e8265c5ffce669d0204e9e6f5d980277338fd04dcfce385d882a6a34325",
+          "bytes": 882958
+        }
+      ]
+    },
+    {
+      "edition": "hall-of-fame",
+      "original": "assets/cards/editions/repairs/2026-11-04/hall-of-fame.png",
+      "sha256": "014c8b1ef7858c33fe4e7abc3580ffa8797589b259ac219a5b71c2bf9c05ae08",
+      "width": 1049,
+      "height": 1499,
+      "production": [
+        {
+          "path": "assets/cards/editions/refined/hall-of-fame.png",
+          "sha256": "1a6af7eb301889bf4cff553736ac502c330fea6148b6b1ba8bbfb34334c4d6c9",
+          "bytes": 1032436
+        },
+        {
+          "path": "assets/cards/editions/refined/hall-of-fame.webp",
+          "sha256": "b8715bd158c7b0cd924f38619c169e2c249087c62e9d95747f5e28638b0bb0fd",
+          "bytes": 760488
+        }
+      ]
+    },
+    {
+      "edition": "number-one",
+      "original": "assets/cards/editions/repairs/2026-11-04/number-one.png",
+      "sha256": "5a1ab8d6a9e7fa906b5117f8b717c1a13bdc648b230b1f9fe0fffabe29476779",
+      "width": 1049,
+      "height": 1499,
+      "production": [
+        {
+          "path": "assets/cards/editions/refined/number-one.png",
+          "sha256": "5506ce929cf244105287fd46adb7f095b96645b46947e270e137398d6f07c8cb",
+          "bytes": 983383
+        },
+        {
+          "path": "assets/cards/editions/refined/number-one.webp",
+          "sha256": "4674b0966957cee38aa5e6d8a0b7daed3ad451c041fc00471fc98f201181f3d5",
+          "bytes": 750494
+        }
+      ]
+    },
+    {
+      "edition": "signature",
+      "original": "assets/cards/editions/repairs/2026-11-04/signature.png",
+      "sha256": "b9bc866fa3555b20d9375da833e8ecdc456ca2f1615975f1a3100feab94a94ee",
+      "width": 1049,
+      "height": 1499,
+      "production": [
+        {
+          "path": "assets/cards/editions/refined/signature.png",
+          "sha256": "8e5cda3ea0c4af68c585229ff0a01ba33763d2bbdbca4050e1f94225ae5c3641",
+          "bytes": 1071138
+        },
+        {
+          "path": "assets/cards/editions/refined/signature.webp",
+          "sha256": "f499153736cc0596444740c71d4058750797e9d22afea962462f8fdaa3f19090",
+          "bytes": 722886
+        }
+      ]
+    },
+    {
+      "edition": "valentines",
+      "original": "assets/cards/editions/repairs/2026-11-04/valentines.png",
+      "sha256": "97e50cd663b70e2b512d1f0754c80aaf36e5f30d219895b637d2a67bc3e5a277",
+      "width": 1049,
+      "height": 1499,
+      "production": [
+        {
+          "path": "assets/cards/editions/refined/valentines.png",
+          "sha256": "06c002bed090c3ca8c6d9fad1aec4d46d0e6a43343e991f9e0f9250825b68872",
+          "bytes": 1267828
+        },
+        {
+          "path": "assets/cards/editions/refined/valentines.webp",
+          "sha256": "3272242d559687926843595f1c60a1c6d7856cb7a21ad541cc331b31c470d7cc",
+          "bytes": 955726
+        }
+      ]
+    },
+    {
+      "edition": "whore-stage",
+      "original": "assets/cards/editions/repairs/2026-11-04/whore-stage.png",
+      "sha256": "39cbcbda36118486c6291464b17a4bcdc68c59be98c7564dc75452daf1891d2e",
+      "width": 1049,
+      "height": 1499,
+      "production": [
+        {
+          "path": "assets/cards/editions/refined/whore-stage.png",
+          "sha256": "5eeb90e3f25d8a5373a505e47e178c7c9664b027e8f1db9aae6f63f281266d1a",
+          "bytes": 1318732
+        },
+        {
+          "path": "assets/cards/editions/refined/whore-stage.webp",
+          "sha256": "87e125b93ee747ffa5213fdcf6c747f1050bb1b99174ea33c4d5cf2aa312f631",
+          "bytes": 997548
+        }
+      ]
+    }
+  ]
+}

@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "id": "2026-11-06-durable-background-tracking-2.7.75",
+  "id": "2026-11-06-character-sections-approved-card-repairs",
   "components": [
-    "runtime",
+    "standalone",
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Durable background source, folder, duplicate-decision, set-membership, replacement and analysis history. Preserves known legacy evidence, separates rejections from deferred work, includes history in checkpoints/exports and resumable transfers. No new normal interface controls. Includes companion 2.7.75."
+  "workbench_notes": "One Folder Organizer section for every library girl, including Nikki. Combine additional folders under the same girl; preserve existing sets, stars, drafts, analysis and source evidence. Offline cached sections, explicit assignment for older unlabelled collections, and refresh using saved duplicate hashes. Includes companion 2.7.75."
 }

@@ -78,9 +78,13 @@ class Workbench:
             if self.current.get('history_verifying'):
                 self.current.update(running=False,history_verifying=False,interrupted=False,phase='Recovery paused. Use the same verification button to resume.')
                 self.persist()
+
             elif self.current['running']:
                 self.current.update(running=False,phase='Interrupted. Start again to reuse cached work.',interrupted=True)
                 self.persist()
+
+        from character_collections import Sections
+        self.sections=Sections(self)
 
     @contextmanager
     def db(self):
@@ -162,7 +166,7 @@ class Workbench:
                     # The folder names remain reliable even when an old run inherited another person's label.
                     names=[re.split(r'[\\/]',root.rstrip('\\/'))[-1] for root in roots]
                     groups[scope]={'id':ident,'name':' + '.join(names),'roots':roots,'at':stamp}
-                self._collections_cache=sorted(groups.values(),key=lambda g:g['name'].casefold())
+                self._collections_cache=self.sections.entries(sorted(groups.values(),key=lambda g:g['name'].casefold()))
             return copy.deepcopy(self._collections_cache)
 
     def context(self):
@@ -174,7 +178,7 @@ class Workbench:
         result['config']=self.current.get('config',{}) if self.current else {}
         return result
 
-    def start(self,body,inventory_only=False):
+    def start(self,body,inventory_only=False,section=None):
         with self.engine.lock,self.lock:
             if self.engine.status['running'] or (self.current and self.current['running']):raise ValueError('Wait for the current scan or file operation to finish.')
             roots=[]
@@ -195,6 +199,11 @@ class Workbench:
             self.current={'id':uuid.uuid4().hex,'config':config,'recipe':RECIPE,'running':True,'phase':'Inventorying original and quarantined files',
                           'done':0,'total':0,'issues':[],'items':{},'proposals':[],'unassigned':[], 'created':time.time()}
             self.current['inventory_only']=inventory_only
+            if section:
+                self.current.update(section_id=section['section_id'],organizer_scope=section['organizer_scope'],
+                    collection_id=section['collection_id'],collection_roots=roots[:],
+                    previous_section_job=section['id'])
+                self.current['config']['library_instance']=section['config']['library_instance']
             self.cancel.clear();self.persist()
             self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
             return self.status()
@@ -246,6 +255,13 @@ class Workbench:
         self.current['library_sets']={}
         if config['character_id']:
             catalog=self.engine.library.catalog(config['character_id'])
+            if config.get('library_instance'):
+                instance=self.engine.library.request('/api/tracking/status')['instance']
+                if instance!=config['library_instance']:raise ValueError('A different media library is connected. Reconnect this girl’s library before refreshing folders.')
+            else:
+                # Record the namespace for new inventories, including bulk runs.
+                try:config['library_instance']=self.engine.library.request('/api/tracking/status')['instance']
+                except (ValueError,KeyError):pass
             library=self.engine.library.request('/api/library')
             self.current['model_root']=catalog['root']
             memberships={}
@@ -580,7 +596,15 @@ class Workbench:
                                 source_candidate_caps=capped,phase='Evaluation ready — review draft sets',done=len(chosen),total=len(chosen),complete=True)
         except InterruptedError as e:self.update(phase=str(e),interrupted=True)
         except Exception as e:self.update(phase='Evaluation stopped',error=str(e))
-        finally:self.update(running=False);self.persist()
+        finally:
+            if self.current.get('previous_section_job'):
+                from character_collections import merge_catalog
+                with self.db() as db:row=db.execute('SELECT data FROM jobs WHERE id=?',(self.current['previous_section_job'],)).fetchone()
+                if row:
+                    previous=json.loads(row[0]);catalog=copy.deepcopy(previous.get('source_catalog',{}))
+                    merge_catalog(catalog,self.current.get('source_catalog',{}));self.current['source_catalog']=catalog
+                    self.current['library_sets']={**previous.get('library_sets',{}),**self.current.get('library_sets',{})}
+            self.update(running=False);self.persist()
 
     def detail(self,ident):
         with self.lock:

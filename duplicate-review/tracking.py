@@ -61,7 +61,7 @@ def inventory(db, job, legacy=False, previous=None):
     def folder(path):
         if ('folder',path) not in cache:
             log.identity(db,'folder',path);cache[('folder',path)]=True
-    alias=hashlib.sha256(json.dumps(roots,sort_keys=True).encode()).hexdigest()
+    alias='section:'+job['section_id'] if job.get('section_id') else hashlib.sha256(json.dumps(roots,sort_keys=True).encode()).hexdigest()
     collection=log.identity(db,'collection',alias,job.get('collection_id') if job.get('collection_roots')==roots else None)
     job['collection_id']=collection;job['collection_roots']=list(roots)
     observe('inventory.batch',job['id'],{'collection_id':collection,'config':config,

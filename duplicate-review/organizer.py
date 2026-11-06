@@ -36,6 +36,7 @@ class Organizer:
         self.bound=None;self.catalog={};self.posts={};self.order_cache={};self.vector_by_id={};self.quick={}
         self.encoder_type=None;self.recipe=None;self.scope='';self.revision=0;self.discarded=set();self.parked={}
         with self.db() as db:
+            db.execute('CREATE TABLE IF NOT EXISTS scope_merges(target TEXT,source TEXT,PRIMARY KEY(target,source))')
             db.executescript('''CREATE TABLE IF NOT EXISTS state(scope TEXT PRIMARY KEY,data TEXT);
                 CREATE TABLE IF NOT EXISTS category_catalog(scope TEXT PRIMARY KEY,data TEXT);
                 CREATE TABLE IF NOT EXISTS sets(scope TEXT,id TEXT,data TEXT,PRIMARY KEY(scope,id));
@@ -66,12 +67,13 @@ class Organizer:
         if self.bound==key:return
         if self.job['running']:return
         self.bound=key;self.catalog=dict(cat);self.posts={};self.order_cache={}
-        alias=hashlib.sha256(json.dumps(current.get('config',{}).get('roots',[]),sort_keys=True).encode()).hexdigest()
+        alias='section:'+current['section_id'] if current.get('section_id') else hashlib.sha256(json.dumps(current.get('config',{}).get('roots',[]),sort_keys=True).encode()).hexdigest()
         with self.db() as db:
             collection=tracking.journal().identity(db,'collection',alias,current.get('collection_id') if current.get('collection_roots')==current.get('config',{}).get('roots',[]) else None)
             # Keep existing scope keys and explicitly bind their stable identity.
-            self.scope=tracking.journal().identity(db,'organizer_scope',collection,alias)
+            self.scope=tracking.journal().identity(db,'organizer_scope',collection,current.get('organizer_scope') or alias)
         self.collection_id=collection
+        self.merge_scopes(current.get('source_scopes',[]))
         with self.db() as db:
             for digest,raw in db.execute('SELECT sha,data FROM video_references WHERE scope=?',(self.scope,)):
                 record=json.loads(raw);self.catalog[record['id']]=record
@@ -193,9 +195,83 @@ class Organizer:
             ident=str(body.get('id',''))
             if ident not in {c['id'] for c in self.bulk.collections()}:
                 raise ValueError('Choose an available saved collection.')
-            self.bulk.activate(ident)
+            if ident.startswith('girl:'):self.bulk.sections.activate(ident)
+            else:self.bulk.activate(ident)
             self.bound=None
             self.job={'running':False,'phase':'Saved inventory ready','done':0,'total':0,'eta_seconds':None}
+            return self.summary()
+
+    def merge_scopes(self,sources):
+        """Copy once; retain original rows and journal all adopted evidence."""
+        with self.db() as db:
+            for source in sources:
+                if source==self.scope or db.execute('SELECT 1 FROM scope_merges WHERE target=? AND source=?',(self.scope,source)).fetchone():continue
+                for table,columns in [('sets','id,data'),('posts','id,status'),('rejected','context,id'),('parked','post,hash'),('video_references','sha,data')]:
+                    for row in db.execute('SELECT '+columns+' FROM '+table+' WHERE scope=?',(source,)).fetchall():
+                        if table=='sets':
+                            old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,row[0])).fetchone()
+                            if old and old[0]!=row[1]:
+                                g=json.loads(row[1]);g['id']='recovered:'+source+':'+row[0];row=(g['id'],json.dumps(g))
+                        db.execute('INSERT OR IGNORE INTO '+table+' VALUES (?,?,?)',(self.scope,*row))
+                other=db.execute('SELECT data FROM state WHERE scope=?',(source,)).fetchone()
+                if other:
+                    from character_collections import union
+                    old=json.loads(other[0]);live=db.execute('SELECT data FROM state WHERE scope=?',(self.scope,)).fetchone()
+                    state=json.loads(live[0]) if live else old
+                    if live:
+                        state['pins']=union(state.get('pins',[]),old.get('pins',[]))
+                        state['post_evidence']={**old.get('post_evidence',{}),**state.get('post_evidence',{})}
+                        # Keep independent unfinished drafts and resume states recoverable.
+                        state.setdefault('previous_collections',{})[source]=old
+                    self.put_state(db,state)
+                db.execute('INSERT INTO scope_merges VALUES (?,?)',(self.scope,source))
+                tracking.journal().observe(db,'organizer.scope_merge',self.scope+':'+source,{'source':source,'target':self.scope})
+
+    def refresh_collections(self,body):
+        with self.engine.lock,self.lock,self.bulk.lock:
+            self.check_collection_idle(body)
+            try:result=self.bulk.sections.sync()
+            except ValueError as error:return {'connected':False,'connection_note':str(error)}
+            # Adopt only a known character UUID, never an inherited display name.
+            current=self.bulk.current or {}
+            row=next((r for r in self.bulk.sections.rows() if self.bulk.sections.belongs(current,r)),None)
+            if row:self.bulk.sections.activate(row['id']);self.bound=None
+            elif not current:
+                rows=self.bulk.sections.rows()
+                if rows:self.bulk.sections.activate(rows[0]['id']);self.bound=None
+            return result
+
+    def check_collection_idle(self,body):
+        if self.engine.status['running'] or self.job['running'] or (self.bulk.current or {}).get('running'):
+            raise ValueError('Finish or pause the current scan or analysis first.')
+        if body.get('job')!=(self.bulk.current or {}).get('id'):
+            raise ValueError('Collection changed in another window. Reload before continuing.')
+
+    def collection_folders(self,body):
+        with self.engine.lock,self.lock,self.bulk.lock:
+            self.check_collection_idle(body)
+            current=self.bulk.current or {}
+            if not current.get('section_id'):raise ValueError('Choose a girl in Collection first.')
+            from character_collections import union
+            roots=union(current['config']['roots'],body.get('roots',[]))
+            if not roots:raise ValueError('Add at least one folder.')
+            # All previous roots remain attached; hashes and saved decisions are reused.
+            previous=copy.deepcopy(current)
+            result=self.bulk.start({**current['config'],'roots':roots,'limit':0},inventory_only=True,section=previous)
+            self.bound=None
+            return result
+
+    def assign_collection(self,body):
+        with self.engine.lock,self.lock,self.bulk.lock:
+            self.check_collection_idle(body)
+            current=self.bulk.current or {}
+            if not current or current.get('section_id'):raise ValueError('Choose an unassigned folder collection first.')
+            row=next((r for r in self.bulk.sections.rows() if r['id']==body.get('id')),None)
+            if not row:raise ValueError('Choose a girl from the library.')
+            owner=current.get('config',{}).get('character_id')
+            if owner and owner!=row['character_id']:raise ValueError('This collection already belongs to a different girl.')
+            current['config'].update(character_id=row['character_id'],library_instance=row['library_instance'],person=row['name'])
+            self.bulk.persist();self.bulk.sections.activate(row['id']);self.bound=None
             return self.summary()
 
     def summary(self):
@@ -210,7 +286,7 @@ class Organizer:
                 posts.append({k:v for k,v in p.items() if k!='ids'}|{'count':len(visible),'remaining':sum(i not in assigned for i in live),'unresolved':len(visible)-len(live),'status':statuses.get(p['id'],'pending'),'mixed':self.is_mixed(p['id'],state.get('post_evidence',{})),'large':len(p['ids'])>=1000,'source_count':len(p['ids']),'cover':next(iter(live or visible),None)})
             posts.sort(key=lambda p:(p['status']!='pending',p['remaining']==0,natural(p['label'])))
             total=sum(not r.get('quarantine_only') and i not in self.discarded for i,r in self.catalog.items())
-            return {'job':(self.bulk.current or {}).get('id'),'scope':self.scope,'collections':self.bulk.collections(),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
+            return {'job':(self.bulk.current or {}).get('id'),'section_id':(self.bulk.current or {}).get('section_id'),'roots':(self.bulk.current or {}).get('config',{}).get('roots',[]),'inventory_running':bool((self.bulk.current or {}).get('running')),'scope':self.scope,'collections':self.bulk.collections(),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
                 'up_next':self.pinned_ids(state),'later_count':sum(p['status']=='deferred' for p in posts),
                 'reference_image':self.image(reference)|{'analyzed':reference in self.vector_by_id} if reference else None,'category_catalog':self.category_catalog(),'state':state,'images':total,'unresolved':sum(bool(r.get('quarantine_only')) for i,r in self.catalog.items() if i not in self.discarded),'indexed':sum(i in self.vector_by_id for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded),
                 'unassigned_count':sum(not r.get('quarantine_only') and i not in self.discarded and i not in assigned for i,r in self.catalog.items()),'unsorted_count':len(self.unsorted_ids()),'discarded_count':sum(not self.catalog[i].get('quarantine_only') for i in self.discarded),

@@ -1,0 +1,17 @@
+{
+  "status": "validated_not_published",
+  "base_commit": "221ba785ec505b38c9c729547f0c64698b610c76",
+  "standalone": "2.9.25",
+  "workbench": "2.0.22",
+  "runtime_unchanged": "2.7.75",
+  "checks": {
+    "runtime_tests": 194,
+    "workbench_tests_before_final_crash_regression": 162,
+    "character_section_tests": 7,
+    "js_dom_tests": 64,
+    "native_card_renders": 364,
+    "release_pipeline_tests": 13,
+    "visual_review": "Six native renderer composites inspected; no live Windows/browser layout test"
+  },
+  "asset_manifest": "assets/cards/editions/repairs/2026-11-04/manifest.json"
+}

@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import hashlib
 import json
+import sys
 from PIL import Image
 
 catalog_path=Path('assets/cards/editions/catalog.json')
@@ -16,10 +17,12 @@ def encode(item):
     decoded=Image.open(target).convert('RGBA')
     assert original.size==decoded.size and original.tobytes()==decoded.tobytes(),key
     return key,target.as_posix(),hashlib.sha256(target.read_bytes()).hexdigest()
+keys=sys.argv[1:] or list(catalog['editions'])
+if any(key not in catalog['editions'] for key in keys):raise ValueError('Unknown edition')
 with ThreadPoolExecutor(max_workers=4) as pool:
-    for key,path,digest in pool.map(encode,catalog['editions'].items()):
+    for key,path,digest in pool.map(encode,[(key,catalog['editions'][key]) for key in keys]):
         catalog['editions'][key]['art']=path
         catalog['sha256'][path]=digest
         print(key,Path(path).stat().st_size,flush=True)
 catalog_path.write_text(json.dumps(catalog,indent=2)+'\n')
-print('All 13 WebP frames are pixel-identical to the full-resolution PNG renders.')
+print(f'All {len(keys)} selected WebP frames are pixel-identical to the full-resolution PNG renders.')
