@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "status": "published_verified",
+  "source_commit": "c70df20e961346681e0e2f46d480f80bf6a8cfb9",
+  "payload_commit": "e15588e9b0dd7c245fc5b3b4638d93e39af0db9d",
+  "release_commit": "14cfb33762b15f30b2deb068b38184fff3f4dd81",
+  "workflow_url": "https://github.com/bomboclaat12369/novelai-media-library/actions/runs/42191313380",
+  "artifact_id": 13490092567,
+  "artifacts": {
+    "runtime": {
+      "version": "2.7.74",
+      "sha256": "70dff2844c5e813f8661f84b5abfdf13f83838c726b75f281773f50370ce83d9",
+      "bytes": 327009
+    },
+    "standalone": {
+      "version": "2.9.24",
+      "sha256": "fc2bed2ab1d6ca9698cda068fd656608429e8a8898a49b065bd70bd926144bd9",
+      "bytes": 16726039
+    },
+    "workbench": {
+      "version": "2.0.20",
+      "sha256": "5ccbdc52584f70b772a605232b99b048feb1f655c06594c91e0c21d0b44d0816",
+      "bytes": 311106
+    }
+  },
+  "validation": {
+    "runtime_tests": 180,
+    "workbench_tests": 149,
+    "javascript_checks": 62,
+    "production_card_renders": 364,
+    "release_pipeline_tests": 13,
+    "download_verification": "Both manifest routes and downloaded component bytes verified by the release workflow; artifact checksums also match the local packaging dry run."
+  },
+  "benchmarks": {
+    "environment": "Synthetic Linux fixtures; not the user's Windows collection",
+    "battle_2050_entries_16400_votes_seconds": {
+      "before": 95.0732,
+      "after": 6.3789
+    },
+    "favorite_change_30000_items_seconds": {
+      "before": 1.08,
+      "after": 0.07413
+    },
+    "duplicate_catalog_30000_items_seconds": {
+      "before": 5.93965,
+      "after": 0.85067
+    }
+  },
+  "scope_notes": [
+    "Missing-original scans and explicit hash-verified copies back to expected paths; no general folder relocation.",
+    "Automatic clothing-color detection and browser-access troubleshooting remain paused."
+  ]
+}
