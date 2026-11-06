@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "status": "published_verified",
+  "source_commit": "9b97718695fc7a02b1f9e6645d62d6c08a8feece",
+  "payload_commit": "7c025b42fa3c88c583f2785e49d2d8840306aa79",
+  "release_commit": "57c52ff04dda8430c1843792f8cfce515e4b7f76",
+  "workflow_url": "https://github.com/bomboclaat12369/novelai-media-library/actions/runs/42202283689",
+  "artifact_id": 13495376225,
+  "artifacts": {
+    "runtime": {
+      "version": "2.7.75",
+      "sha256": "9466fd9d95e0f1828b52da338f990775677256d8608d8fc3afec986f8e9fc447",
+      "bytes": 352835
+    },
+    "workbench": {
+      "version": "2.0.21",
+      "sha256": "2e780e56a6d5de8cc3d5619364e6d8152793e95eddb33cb324716ccaaa556e8f",
+      "bytes": 321124
+    }
+  },
+  "validation": {
+    "runtime_tests": 194,
+    "workbench_tests": 156,
+    "javascript_checks": 62,
+    "production_card_renders": 364,
+    "release_pipeline_tests": 13,
+    "download_verification": "Both manifest routes and downloaded component bytes verified by the release workflow. Artifact versions, sizes and checksums match the local source packaging dry run."
+  },
+  "benchmarks": "docs/benchmarks/2026-11-06-background-tracking.json",
+  "scope_notes": [
+    "Background metadata history, known-source recovery, typed decisions and relationships, stable identities, set/replacement history, analysis coverage, and checkpoint/export/transfer preservation.",
+    "No new normal interface controls or click telemetry. Automatic clothing-color detection and browser-access troubleshooting remain paused.",
+    "Legacy observations preserve surviving evidence and leave unknown historical facts unknown; no automatic rescan."
+  ]
+}
