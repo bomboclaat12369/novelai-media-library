@@ -150,3 +150,5 @@ async function openCheckpoints(){
  dialog.append(el('h2','Complete project checkpoints'),el('p','Includes library metadata, cards, battle history, and Workbench databases. Original media is optional.'),label,create,status,list,button('Close',()=>dialog.close()));
  dialog.addEventListener('close',()=>dialog.remove(),{once:true});document.body.append(dialog);dialog.showModal();await reload();
 }
+
+const missingFilesButton=button('Missing files',()=>window.naiOpenMissingFiles({host:document.body,request:(action,body)=>api('missing-'+action,body)}));$('export').before(missingFilesButton);

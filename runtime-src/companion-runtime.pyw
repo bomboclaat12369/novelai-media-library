@@ -723,6 +723,62 @@ class BattleRankings:
         return priors
 
     @staticmethod
+    def _sparse_inverse_diagonal(diagonal, edges):
+        """Exact-to-solver-tolerance inverse diagonal with bounded NumPy batches.
+
+        CSR gathers avoid an n-by-n allocation and Python edge loops. Each RHS
+        has the same 1e-18 squared residual tolerance as the established PCG.
+        No stochastic approximation or change to the rating/uncertainty model.
+        """
+        import numpy as np
+        d = np.asarray(diagonal, dtype=np.float64)
+        n = len(d)
+        a = np.fromiter((e[0] for e in edges), dtype=np.intp)
+        b = np.fromiter((e[1] for e in edges), dtype=np.intp)
+        w = np.fromiter((e[2] for e in edges), dtype=np.float64)
+        order = np.argsort(np.concatenate((a, b)), kind='stable')
+        rows = np.concatenate((a, b))[order]
+        columns = np.concatenate((b, a))[order]
+        weights = np.concatenate((w, w))[order]
+        nodes, starts = np.unique(rows, return_index=True)
+        # Bound the largest gather to 16 MiB, even for a very dense vote graph.
+        batch = max(1, min(32, (16 * 1024 * 1024) // max(8, 8 * len(rows))))
+        answer = np.empty(n, dtype=np.float64)
+        for first in range(0, n, batch):
+            selected = np.arange(first, min(first + batch, n))
+            size = len(selected)
+            x = np.zeros((n, size), dtype=np.float64)
+            residual = np.zeros_like(x)
+            residual[selected, np.arange(size)] = 1.
+            direction = residual / d[:, None]
+            product = np.sum(residual * direction, axis=0)
+            active = np.ones(size, dtype=bool)
+            for _ in range(max(20, n * 2)):
+                hd = d[:, None] * direction
+                hd[nodes] -= np.add.reduceat(weights[:, None] * direction[columns], starts, axis=0)
+                denominator = np.sum(direction * hd, axis=0)
+                if np.any(denominator[active] <= 0):
+                    raise ValueError('Historical uncertainty solver failed; no vote has been saved.')
+                alpha = np.divide(product, denominator, out=np.zeros(size), where=active)
+                x += direction * alpha
+                residual -= hd * alpha
+                active = np.sum(residual * residual, axis=0) > 1e-18
+                if not active.any():
+                    break
+                z = residual / d[:, None]
+                updated = np.sum(residual * z, axis=0)
+                beta = np.divide(updated, product, out=np.zeros(size), where=active)
+                direction = z + direction * beta
+                direction[:, ~active] = 0.
+                product = updated
+            else:
+                raise ValueError('Historical uncertainty did not converge; no vote has been saved.')
+            answer[selected] = x[selected, np.arange(size)]
+        if not np.isfinite(answer).all() or (answer <= 0).any():
+            raise ValueError('Invalid historical uncertainty; no vote has been saved.')
+        return answer.tolist()
+
+    @staticmethod
     def _inverse_diagonal(diagonal, edges):
         """Exact dense Cholesky inverse diagonal for medium-sized boards.
 
@@ -746,6 +802,11 @@ class BattleRankings:
                 if np.isfinite(values).all() and (values>0).all():return values.tolist()
             except (ImportError,ValueError,ArithmeticError):
                 pass
+        if n > 2048:
+            try:
+                return BattleRankings._sparse_inverse_diagonal(diagonal, edges)
+            except ImportError:
+                pass  # Compatibility fallback when NumPy is unavailable.
         if not 24 <= n <= 384 or len(edges) < n * 3:
             return None
         lower = [[0.] * n for _ in range(n)]
@@ -1486,6 +1547,164 @@ def video_frame_data(path,at,cache,direction=0,capture=False):
     return data
 
 
+class MissingFileFinder:
+    """Read-only inventory/search, followed by explicit hash-verified recovery.
+
+    Recovering copies bytes to the recorded location; it never rewrites paths,
+    memberships, duplicate decisions, or the source file. Existing destinations
+    are never replaced. Reports describe the selected inventory at scan time.
+    """
+    def __init__(self, provider, guard, authorize=None):
+        self.provider, self.guard = provider, guard
+        self.authorize = authorize
+        self.lock = threading.RLock()
+        self.cancel = threading.Event()
+        self.thread = None
+        self.job = None
+        self.records = {}
+        self.issues = []
+
+    @staticmethod
+    def linked(path):
+        return any(p.is_symlink() or (hasattr(p, 'is_junction') and p.is_junction())
+                   for p in (path, *path.parents))
+
+    @staticmethod
+    def digest(path, cancel=None):
+        h = hashlib.sha256()
+        with path.open('rb') as f:
+            for block in iter(lambda: f.read(1024 * 1024), b''):
+                if cancel is not None and cancel.is_set():raise InterruptedError('Scan stopped')
+                h.update(block)
+        return h.hexdigest()
+
+    def status(self, ident=None, offset=0, limit=100):
+        with self.lock:
+            if not self.job or (ident and ident != self.job['id']):
+                raise ValueError('Start a new missing-file scan.')
+            offset=max(0,int(offset));limit=max(1,min(500,int(limit)))
+            return {**self.job, 'issues':copy.deepcopy(self.issues[offset:offset+limit]),
+                    'offset':offset, 'total_issues':len(self.issues),
+                    'recoverable':sum(bool(i.get('candidate')) and not i.get('recovered') for i in self.issues)}
+
+    def start(self, body):
+        roots=body.get('search_roots',[])
+        if not isinstance(roots,list) or len(roots)>8 or any(not isinstance(p,str) for p in roots):
+            raise ValueError('Choose up to eight search folders.')
+        folders=[]
+        for name in roots:
+            path=Path(name).expanduser()
+            if not path.is_absolute() or not path.is_dir() or self.linked(path):
+                raise ValueError('Search folder is unavailable or is a link: '+str(path))
+            if path not in folders:folders.append(path)
+        with self.lock:
+            if self.thread and self.thread.is_alive():raise ValueError('Wait for the current scan, or stop it first.')
+            with self.guard:records=self.provider()
+            self.records={r['id']:dict(r) for r in records}
+            self.issues=[];self.cancel.clear()
+            self.job={'id':uuid.uuid4().hex,'running':True,'phase':'Checking originals','checked':0,
+                      'total':len(records),'searched':0,'missing':0,'errors':[], 'cancelled':False}
+            self.thread=threading.Thread(target=self._run,args=(folders,),daemon=True)
+            self.thread.start()
+            return self.status()
+
+    def stop(self, ident):
+        with self.lock:
+            self.status(ident);self.cancel.set()
+            return {'stopping':True}
+
+    def _update(self, **fields):
+        with self.lock:self.job.update(fields)
+
+    def _run(self, folders):
+        try:
+            missing=[]
+            for number,row in enumerate(self.records.values(),1):
+                if self.cancel.is_set():break
+                path=Path(row['path']);problem=None
+                try:
+                    if not row.get('path') or not path.is_absolute() or self.linked(path):problem='Unsafe or linked path'
+                    elif not path.is_file():problem='Missing original' if not path.exists() else 'Expected a file'
+                    else:
+                        with path.open('rb') as stream:stream.read(1)
+                except OSError as error:problem='Unavailable: '+str(error)
+                if problem:
+                    issue={**row,'problem':problem,'candidate':None,'recovered':False}
+                    if not re.fullmatch('[0-9a-fA-F]{64}',str(row.get('sha256',''))):issue['problem']+='; no saved checksum'
+                    missing.append(issue)
+                    with self.lock:self.issues.append(issue)
+                self._update(checked=number,missing=len(missing))
+            unresolved={i['sha256'].lower() for i in missing if re.fullmatch('[0-9a-fA-F]{64}',str(i.get('sha256','')))}
+            sizes={i['bytes'] for i in missing if i.get('bytes') is not None}
+            unknown=any(i.get('bytes') is None for i in missing)
+            seen=set()
+            self._update(phase='Searching selected folders' if folders and unresolved else 'Scan complete')
+            for folder in folders:
+                if not unresolved or self.cancel.is_set():break
+                def failed(error):
+                    with self.lock:
+                        if len(self.job['errors'])<100:self.job['errors'].append(str(error))
+                for directory,dirs,files in os.walk(folder,followlinks=False,onerror=failed):
+                    dirs[:]=[d for d in dirs if not self.linked(Path(directory)/d)]
+                    if self.cancel.is_set() or not unresolved:break
+                    for name in files:
+                        if self.cancel.is_set() or not unresolved:break
+                        path=Path(directory)/name
+                        if str(path) in seen:continue
+                        seen.add(str(path))
+                        if len(seen)>500000:raise ValueError('Search limit reached. Choose a smaller folder and scan again.')
+                        self._update(searched=len(seen))
+                        try:
+                            if self.linked(path) or not path.is_file():continue
+                            before=path.stat()
+                            if not unknown and before.st_size not in sizes:continue
+                            digest=self.digest(path,self.cancel)
+                            after=path.stat()
+                            if (before.st_size,before.st_mtime_ns)!=(after.st_size,after.st_mtime_ns):continue
+                            if digest in unresolved:
+                                with self.lock:
+                                    for issue in missing:
+                                        if str(issue.get('sha256','')).lower()==digest:issue['candidate']=str(path)
+                                unresolved.remove(digest)
+                        except OSError as error:
+                            with self.lock:
+                                if len(self.job['errors'])<100:self.job['errors'].append(str(error))
+            self._update(phase='Stopped' if self.cancel.is_set() else 'Scan complete',cancelled=self.cancel.is_set())
+        except Exception as error:
+            self._update(phase='Scan failed',error=str(error))
+        finally:self._update(running=False)
+
+    def recover(self, body):
+        with self.lock:
+            self.status(body.get('job_id'))
+            if self.job['running'] or self.job.get('error') or self.job.get('cancelled'):
+                raise ValueError('Finish a complete scan before recovering originals.')
+            issue=next((r for r in self.issues if r['id']==body.get('id')),None)
+            if not issue or not issue.get('candidate') or issue.get('recovered'):
+                raise ValueError('Choose a missing original with a verified match.')
+            source=Path(issue['candidate']);target=Path(issue['path'])
+            if not source.is_absolute() or not target.is_absolute() or self.linked(source) or self.linked(target):raise ValueError('Relative or linked paths cannot be recovered automatically.')
+            with self.guard:
+                current={r['id']:r for r in self.provider()}.get(issue['id'])
+                if not current or any(current.get(k)!=issue.get(k) for k in ('path','sha256')):
+                    raise ValueError('The collection changed. Scan again before recovering.')
+                if target.exists():raise ValueError('The original location is occupied. Existing files are never replaced.')
+                target.parent.mkdir(parents=True,exist_ok=True)
+                temporary=target.with_name('.nai-recover-'+uuid.uuid4().hex+'.tmp')
+                try:
+                    with source.open('rb') as src,temporary.open('xb') as dst:
+                        shutil.copyfileobj(src,dst,1024*1024);dst.flush();os.fsync(dst.fileno())
+                    if self.digest(temporary)!=issue['sha256'].lower():raise ValueError('The matching file changed. Scan again.')
+                    if self.linked(target):raise ValueError('The original location changed. Scan again.')
+                    if self.authorize is not None:self.authorize(current)
+                    # Atomic no-clobber publication; the temporary and target are on one volume.
+                    os.link(temporary,target)
+                finally:temporary.unlink(missing_ok=True)
+            issue['recovered']=True
+            self.job['missing']=sum(not i.get('recovered') for i in self.issues)
+            return {'id':issue['id'],'recovered':True,'path':str(target)}
+
+
 class LibraryStore:
     def __init__(self, root: Path):
         self.root = root
@@ -1505,9 +1724,13 @@ class LibraryStore:
         self.media_dir.mkdir(parents=True, exist_ok=True)
         self.thumb_dir.mkdir(parents=True, exist_ok=True)
         self.backup_dir.mkdir(parents=True, exist_ok=True)
+        self._encoded_media = None
+        self._save_media_ids = None
+        self._media_lookup = None
         self._recover_restore()
         self.data = self._load()
         self._saved_data=copy.deepcopy(self.data)
+        self._saved_positions={m["id"]:i for i,m in enumerate(self.data["media"])}
         self.timings={}
         self.recent_errors=[]
         matching_deps=self.root/'.outfit-search'/('python-'+str(sys.version_info.major)+'.'+str(sys.version_info.minor))
@@ -1519,6 +1742,7 @@ class LibraryStore:
         self._upload_dir = self.root / ".incoming" / "chunked-uploads"
         self.battles = BattleRankings(self)
         self.outfit_matcher = OutfitMatcher(self)
+        self.missing_files = MissingFileFinder(self.missing_file_records, self.lock)
 
     def _empty(self) -> dict[str, Any]:
         return {
@@ -1660,11 +1884,25 @@ class LibraryStore:
             except Exception:
                 pass
         temp = self.db_path.with_suffix(".json.tmp")
-        with temp.open("w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        encode = lambda value: json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+        changed = getattr(self, '_save_media_ids', None)
+        cached = getattr(self, '_encoded_media', None)
+        positions = getattr(self, '_saved_positions', {})
+        if changed is not None and cached is not None and len(cached) == len(data['media']):
+            encoded = list(cached)
+            for ident in changed:
+                index = positions[ident]
+                encoded[index] = encode(data['media'][index])
+        else:
+            encoded = [encode(m) for m in data['media']]
+        metadata = encode({k:v for k,v in data.items() if k != 'media'})
+        document = metadata[:-1] + ',"media":[' + ','.join(encoded) + ']}'
+        with temp.open("w", encoding="utf-8", newline='') as f:
+            f.write(document)
             f.flush()
             os.fsync(f.fileno())
         os.replace(temp, self.db_path)
+        self._encoded_media = encoded
 
     def _refresh_auto_set_covers(self) -> bool:
         """Prefer Main images without changing manual or unknown legacy covers."""
@@ -1684,18 +1922,38 @@ class LibraryStore:
                     changed = True
         return changed
 
-    def save(self) -> None:
+    def save(self, media_ids=None) -> None:
         with self.lock:
             started=time.perf_counter()
+            positions=getattr(self,'_saved_positions',{})
+            incremental=(media_ids is not None and self._encoded_media is not None
+                         and len(self._saved_data['media'])==len(self.data['media'])
+                         and all(i in positions and self.data['media'][positions[i]]['id']==i for i in media_ids))
+            self._save_media_ids=set(media_ids) if incremental else None
             try:
                 self._refresh_auto_set_covers()
                 self.data["updated_at"] = now_iso()
                 self._write_atomic(self.data)
             except Exception as error:
                 self.data=copy.deepcopy(self._saved_data)
+                self._encoded_media=None
+                self._media_lookup=None
                 self.recent_errors=(self.recent_errors+[{'operation':'metadata_save','error':str(error),'at':now_iso()}])[-20:]
                 raise
-            self._saved_data=copy.deepcopy(self.data)
+            finally:
+                self._save_media_ids=None
+            if incremental:
+                for ident in media_ids:
+                    index=positions[ident]
+                    self._saved_data['media'][index]=copy.deepcopy(self.data['media'][index])
+                for key in list(self._saved_data):
+                    if key not in self.data:del self._saved_data[key]
+                for key,value in self.data.items():
+                    if key!='media':self._saved_data[key]=copy.deepcopy(value)
+            else:
+                self._saved_data=copy.deepcopy(self.data)
+                self._saved_positions={m['id']:i for i,m in enumerate(self.data['media'])}
+            self._media_lookup=None
             self.revision = uuid.uuid4().hex
             self.record_timing('metadata_save',time.perf_counter()-started)
 
@@ -1766,7 +2024,7 @@ class LibraryStore:
         combined = previous + [entry]
         self.data["undo_history"] = combined[-20:]
         try:
-            self.save()
+            self.save(media_ids=[entry['media_id']] if entry['kind']=='fields' else None)
         except Exception:
             self.data["undo_history"] = previous
             raise
@@ -2182,7 +2440,7 @@ class LibraryStore:
                 if 'battles.json' in files:
                     temp=self.battles.path.with_suffix('.restore');temp.write_bytes(files['battles.json']);os.replace(temp,self.battles.path)
                 else:self.battles.path.unlink(missing_ok=True)
-                self.data=library;self._saved_data=copy.deepcopy(library);self.battles.data=None;self.revision=uuid.uuid4().hex
+                self.data=library;self._saved_data=copy.deepcopy(library);self._encoded_media=None;self._media_lookup=None;self.battles.data=None;self.revision=uuid.uuid4().hex
                 shutil.rmtree(journal)
             except Exception:
                 self._recover_restore();self.data=self._load();self._saved_data=copy.deepcopy(self.data);self.battles.data=None
@@ -2370,6 +2628,20 @@ class LibraryStore:
             result['notes'] = notes.strip()
         return result
 
+    def missing_file_records(self):
+        with self.lock:
+            owners={c['id']:c['name'] for c in self.data['characters']}
+            records=[]
+            for m in self.data['media']+self.data.get('rapid_queue',[]):
+                rel=m.get('stored_rel','')
+                path=self.root/rel
+                if not rel or not path.resolve().is_relative_to(self.root.resolve()):
+                    path=Path('')
+                records.append({'id':m['id'],'name':m.get('original_name',m['id']),
+                    'collection':owners.get(m.get('character_id'),'Pending import'),
+                    'path':str(path),'sha256':m.get('sha256',''),'bytes':m.get('file_bytes')})
+            return records
+
     def public_library(self) -> dict[str, Any]:
         with self.lock:
             return json.loads(json.dumps({**{k: v for k, v in self.data.items() if k not in ("undo_history", "duplicate_replacements", "duplicate_cleanups", "rapid_queue", "rapid_states")}, "revision": self.revision}))
@@ -2379,6 +2651,11 @@ class LibraryStore:
         with self.lock:
             library_id = hashlib.sha256(str(self.db_path.resolve()).encode()).hexdigest()
             files = []
+            characters={c['id']:c for c in self.data['characters']}
+            categories={c['id']:{v['id']:v['name'] for v in c.get('categories',[])} for c in self.data['characters']}
+            memberships={}
+            for group in self.data.get('sets',[]):
+                for mid in group.get('media_ids',[]):memberships.setdefault(mid,[]).append(group['name'])
             if character_id:
                 if character_id != "*" and not self.character(character_id):
                     raise ValueError("Choose an existing character")
@@ -2389,12 +2666,12 @@ class LibraryStore:
                                   "sha": item["sha256"], "name": item.get("original_name", ""),
                                   "in_all": item.get("in_all", True),
                                   "favorite": bool(item.get("favorite")), "featured": bool(item.get("featured")),
-                                  "categories": [c["name"] for c in (self.character(item["character_id"]) or {}).get("categories", []) if c["id"] in item.get("categories", [])],
+                                  "categories": [name for cid,name in categories.get(item['character_id'],{}).items() if cid in item.get('categories',[])],
                                   "in_review": bool(item.get("in_review")),
                                   "in_purgatory": bool(item.get("in_purgatory")),
                                   "character_id": item["character_id"],
-                                  "character_name": (self.character(item["character_id"]) or {}).get("name", "Unknown"),
-                                  "sets": [s["name"] for s in self.data.get("sets", []) if item["id"] in s.get("media_ids", [])]})
+                                  "character_name": characters.get(item['character_id'],{}).get('name','Unknown'),
+                                  "sets": memberships.get(item['id'],[])})
             return {"library_id": library_id, "root": str(self.root.resolve()), "revision": self.revision,
                     "characters": [{"id": c["id"], "name": c["name"]} for c in self.data["characters"]],
                     "coverage_version": 2, "library_cleanup": True, "files": files}
@@ -2916,7 +3193,12 @@ class LibraryStore:
             return {'character_id': owner, 'name': character['name'], 'profile': profile}
 
     def media_item(self, media_id: str) -> dict[str, Any] | None:
-        return next((m for m in self.data["media"] if m["id"] == media_id), None)
+        media=self.data['media']
+        cache=getattr(self,'_media_lookup',None)
+        if cache is None or cache[0] is not media or cache[1]!=len(media):
+            cache=(media,len(media),{m['id']:m for m in media})
+            self._media_lookup=cache
+        return cache[2].get(media_id)
 
     def set_item(self, set_id: str) -> dict[str, Any] | None:
         return next((s for s in self.data.get("sets", []) if s.get("id") == set_id), None)
@@ -4797,6 +5079,9 @@ class MediaHandler(BaseHTTPRequestHandler):
                     if not f or f.get('video_sha256')!=m['sha256']:raise ValueError('Select a matching frame first.')
                     frame_path=self.store.root/f['stored_rel']
                 self._send_file_with_range(frame_path,'image/jpeg');return
+            if path == '/api/missing-files/status':
+                query=urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._send_json(200,self.store.missing_files.status(query.get('id',[None])[0],query.get('offset',[0])[0],query.get('limit',[100])[0]));return
             if path == "/api/diagnostics":
                 self._send_json(200,self.store.diagnostics());return
             if path == "/api/checkpoints":
@@ -4858,6 +5143,10 @@ class MediaHandler(BaseHTTPRequestHandler):
             return
         try:
             path = urllib.parse.urlparse(self.path).path
+            if path in ('/api/missing-files/start','/api/missing-files/stop','/api/missing-files/recover'):
+                body=self._read_json();finder=self.store.missing_files
+                result=finder.start(body) if path.endswith('/start') else finder.stop(body.get('job_id')) if path.endswith('/stop') else finder.recover(body)
+                self._send_json(200,result);return
             if path in ('/api/organizer/preview','/api/organizer/import','/api/organizer/apply','/api/checkpoints/create','/api/checkpoints/preview','/api/checkpoints/restore'):
                 methods={'/api/organizer/preview':self.store.organizer_preview,'/api/organizer/import':self.store.organizer_import,
                     '/api/organizer/apply':self.store.organizer_apply,'/api/checkpoints/create':self.store.create_checkpoint,

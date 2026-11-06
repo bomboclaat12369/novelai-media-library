@@ -53,7 +53,7 @@ def make_server(engine, port=0, token=None):
     html = html.replace('</body>',update_tag+'</body>')
     bulk_html = bulk_html.replace('</body>',update_tag+'</body>')
     organizer_html = organizer_html.replace('__UPDATER__',update_js)
-    organizer_html = organizer_html.replace('__ORGANIZER_WORKFLOW__',(Path(__file__).parent/'organizer-workflow.js').read_text(encoding='utf-8'))
+    organizer_html = organizer_html.replace('__ORGANIZER_WORKFLOW__',(Path(__file__).parent/'missing-files.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-workflow.js').read_text(encoding='utf-8'))
     organizer_html = organizer_html.replace('__ORGANIZER_SESSION__',(Path(__file__).parent/'organizer-session.js').read_text(encoding='utf-8'))
 
     autofill_js=(Path(__file__).parent/'no-autofill.js').read_text(encoding='utf-8')
@@ -110,6 +110,8 @@ def make_server(engine, port=0, token=None):
                     return self.send(200,{'workbench_version':VERSION,'job':(bulk.current or {}).get('id'),'organizer':organizer.summary()['progress'],'library':engine.library.request('/api/diagnostics')})
                 if url.path == '/api/organizer/videos':
                     return self.send(200,organizer.video_queue())
+                if url.path == '/api/organizer/missing-status':
+                    return self.send(200,organizer.file_finder().status(params.get('id',[None])[0],params.get('offset',[0])[0],params.get('limit',[100])[0]))
                 if url.path == '/api/organizer/video-file':
                     path=getattr(organizer,'video_files',{}).get(params.get('id',[''])[0])
                     if not path or not path.is_file():raise ValueError('Refresh the video list.')
@@ -223,6 +225,9 @@ def make_server(engine, port=0, token=None):
                         raise ValueError('Finish or stop the active scan before restarting. Your progress is saved.')
                     result=updater.activate()
                     threading.Thread(target=self.server.shutdown,daemon=True).start()
+                elif path in ('/api/organizer/missing-start','/api/organizer/missing-stop','/api/organizer/missing-recover'):
+                    finder=organizer.file_finder()
+                    result=finder.start(body) if path.endswith('-start') else finder.stop(body.get('job_id')) if path.endswith('-stop') else finder.recover(body)
                 elif path in ('/api/organizer/checkpoint-create','/api/organizer/checkpoint-preview','/api/organizer/checkpoint-restore'):
                     method=path.rsplit('-',1)[-1];result=getattr(checkpoints,method)(body)
                 elif path in ('/api/organizer/transfer-preview','/api/organizer/transfer-import','/api/organizer/transfer-apply'):

@@ -64,3 +64,13 @@ test('checkpoint controls show missing media and keep Restore disabled',async()=
  const panel=f.root.querySelector('.naiWorkflowPanel');assert.ok(panel.textContent.includes('missing.jpg'));assert.ok([...panel.querySelectorAll('button')].find(b=>b.textContent==='Restore checkpoint').disabled);assert.deepEqual(f.errors,[]);
  }finally{f.dom.window.close()}
 });
+
+
+test('Missing file finder is reachable from Project tools and Escape closes only the finder',async()=>{
+ const f=await fixture({configure:w=>{const normal=w.GM_xmlhttpRequest;w.GM_xmlhttpRequest=o=>{const route=new URL(o.url).pathname;let value;
+ if(route==='/api/checkpoints')value={checkpoints:[]};else if(route==='/api/missing-files/status')value={id:'scan',running:false,phase:'Scan complete',checked:0,total:0,missing:0,recoverable:0,total_issues:0,issues:[]};else return normal(o);
+ queueMicrotask(()=>o.onload({status:200,responseText:JSON.stringify(value)}));return {abort(){}};}}});
+ try{click(f.root,'Project tools');await delay(20);click(f.root,'Missing file finder');await waitFor(()=>f.root.querySelector('.naiMissingPanel'),f.errors);
+ f.w.document.dispatchEvent(new f.w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await waitFor(()=>!f.root.querySelector('.naiMissingPanel'),f.errors);assert.ok(f.root.querySelector('.naiWorkflowPanel'));assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close()}
+});

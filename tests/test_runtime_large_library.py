@@ -1,0 +1,132 @@
+"""Large-board numerical equivalence and persisted edit/recovery invariants."""
+import copy, hashlib, json, os, random, tempfile, threading, unittest
+from pathlib import Path
+from unittest.mock import patch
+import numpy as np
+import test_runtime_stability as fixtures
+
+R=fixtures.RUNTIME
+
+class LargeBoardTests(unittest.TestCase):
+    def test_sparse_covariance_matches_dense_above_old_cutoff(self):
+        n=2050;rng=random.Random(18);edges=[];diagonal=np.ones(n)*.35
+        for _ in range(12000):
+            a,b=rng.sample(range(n),2);w=.02+rng.random()*.3
+            edges.append((a,b,w));diagonal[a]+=w;diagonal[b]+=w
+        matrix=np.diag(diagonal)
+        for a,b,w in edges:matrix[a,b]-=w;matrix[b,a]-=w
+        expected=np.diag(np.linalg.inv(matrix))
+        actual=R['BattleRankings']._inverse_diagonal(diagonal.tolist(),edges)
+        np.testing.assert_allclose(actual,expected,rtol=1e-8,atol=1e-9)
+
+    def test_disconnected_and_uneven_sparse_boards(self):
+        n=2051;diagonal=[1.]*n;edges=[(0,1,.1),(2,3,.3),(2,4,.2)]
+        actual=R['BattleRankings']._inverse_diagonal(diagonal,edges)
+        matrix=np.eye(5)
+        for a,b,w in edges:matrix[a,b]-=w;matrix[b,a]-=w
+        np.testing.assert_allclose(actual[:5],np.diag(np.linalg.inv(matrix)),rtol=1e-9)
+        self.assertEqual(actual[5:],[1.]*(n-5))
+
+class PersistedEditsTests(unittest.TestCase):
+    setUp=fixtures.RuntimeStabilityTests.setUp
+    tearDown=fixtures.RuntimeStabilityTests.tearDown
+    import_image=fixtures.RuntimeStabilityTests.import_image
+
+    def test_small_edits_reload_undo_and_full_changes(self):
+        a=self.import_image(1);b=self.import_image(2)
+        group=self.store.create_set(self.character['id'],'Saved',[a['id']],preserve_placement=True)
+        self.store.set_favorite(a['id'],True)
+        self.store.set_categories(a['id'],[],in_all=False)
+        self.store.set_favorite(b['id'],True)
+        reopened=type(self.store)(self.store.root)
+        self.assertTrue(reopened.media_item(a['id'])['favorite'])
+        self.assertTrue(reopened.media_item(b['id'])['favorite'])
+        self.assertEqual(reopened.set_item(group['id'])['media_ids'],[a['id']])
+        self.assertFalse(reopened.media_item(a['id'])['in_all'])
+        c=self.import_image(3);self.store.delete_media(b['id']);self.store.set_favorite(c['id'],True)
+        reopened=type(self.store)(self.store.root)
+        self.assertIsNone(reopened.media_item(b['id']))
+        self.assertTrue(reopened.media_item(c['id'])['favorite'])
+        self.assertTrue(reopened.media_item(a['id'])['favorite'])
+
+    def test_failed_atomic_replace_does_not_poison_later_cached_save(self):
+        a=self.import_image(4);b=self.import_image(5);before=self.store.db_path.read_bytes()
+        with patch.object(os,'replace',side_effect=OSError('locked on Windows')):
+            with self.assertRaises(OSError):self.store.set_favorite(a['id'],True)
+        self.assertEqual(before,self.store.db_path.read_bytes())
+        self.store.set_favorite(b['id'],True)
+        reopened=type(self.store)(self.store.root)
+        self.assertFalse(reopened.media_item(a['id'])['favorite'])
+        self.assertTrue(reopened.media_item(b['id'])['favorite'])
+
+    def test_checkpoint_restore_then_small_edit_uses_restored_records(self):
+        a=self.import_image(6);cp=self.store.create_checkpoint({})
+        b=self.import_image(7);self.store.set_favorite(a['id'],True)
+        plan=self.store.checkpoint_preview({'id':cp['id']})
+        self.store.checkpoint_restore({'id':cp['id'],'token':plan['token']})
+        self.store.set_favorite(a['id'],True)
+        reopened=type(self.store)(self.store.root)
+        self.assertEqual(len(reopened.data['media']),1)
+        self.assertIsNone(reopened.media_item(b['id']))
+        self.assertTrue(reopened.media_item(a['id'])['favorite'])
+
+    def test_duplicate_catalog_matches_memberships_and_owner_scope(self):
+        a=self.import_image(8);b=self.import_image(9)
+        group=self.store.create_set(self.character['id'],'One',[a['id']])
+        self.store.create_set(self.character['id'],'Two',[b['id']])
+        result=self.store.duplicate_catalog(self.character['id'])
+        self.assertEqual({f['id']:f['sets'] for f in result['files']},{a['id']:['One'],b['id']:['Two']})
+        self.store.update_set(group['id'],add_media_ids=[b['id']])
+        result=self.store.duplicate_catalog(self.character['id'])
+        self.assertEqual({f['id']:f['sets'] for f in result['files']},{a['id']:['One'],b['id']:['One']})
+
+class MissingFileTests(unittest.TestCase):
+    setUp=fixtures.RuntimeStabilityTests.setUp
+    tearDown=fixtures.RuntimeStabilityTests.tearDown
+    import_image=fixtures.RuntimeStabilityTests.import_image
+
+    def missing(self):
+        item=self.import_image(10);path=self.store.root/item['stored_rel'];data=path.read_bytes();path.unlink()
+        folder=self.store.root/'moved-folder';folder.mkdir();candidate=folder/'renamed.jpg';candidate.write_bytes(data)
+        return item,path,candidate,folder
+
+    def scan(self,folder=None):
+        finder=self.store.missing_files;start=finder.start({'search_roots':[str(folder)] if folder else []})
+        finder.thread.join(10);self.assertFalse(finder.thread.is_alive())
+        result=finder.status(start['id']);self.assertNotIn('error',result)
+        return result
+
+    def test_scan_and_hash_recovery_preserve_all_metadata(self):
+        item,path,source,folder=self.missing();group=self.store.create_set(self.character['id'],'Keep',[item['id']]);before=self.store.db_path.read_bytes()
+        report=self.scan();self.assertEqual(report['missing'],1);self.assertEqual(report['recoverable'],0)
+        (folder/'wrong-same-name.jpg').write_bytes(b'not the original')
+        report=self.scan(folder);self.assertEqual(report['recoverable'],1)
+        self.assertFalse(path.exists());self.assertEqual(before,self.store.db_path.read_bytes())
+        self.store.missing_files.recover({'job_id':report['id'],'id':item['id']})
+        self.assertEqual(path.read_bytes(),source.read_bytes());self.assertTrue(source.exists())
+        self.assertEqual(before,self.store.db_path.read_bytes())
+        self.assertEqual(self.scan()['missing'],0)
+
+    def test_changed_match_existing_target_and_stale_job_are_rejected(self):
+        item,path,source,folder=self.missing();report=self.scan(folder);source.write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError,'changed'):self.store.missing_files.recover({'job_id':report['id'],'id':item['id']})
+        self.assertFalse(path.exists());self.assertEqual(list(path.parent.glob('.nai-recover-*')),[])
+        source.write_bytes(b'fixture-10');report=self.scan(folder);path.write_bytes(b'occupied')
+        with self.assertRaisesRegex(ValueError,'occupied'):self.store.missing_files.recover({'job_id':report['id'],'id':item['id']})
+        self.assertEqual(path.read_bytes(),b'occupied')
+        path.unlink();new=self.scan(folder)
+        with self.assertRaises(ValueError):self.store.missing_files.recover({'job_id':report['id'],'id':item['id']})
+        self.store.delete_media(item['id'])
+        with self.assertRaisesRegex(ValueError,'changed'):self.store.missing_files.recover({'job_id':new['id'],'id':item['id']})
+
+    def test_wrong_hash_links_and_cancel_do_not_recover(self):
+        item,path,source,folder=self.missing();source.write_bytes(b'wrong')
+        report=self.scan(folder);self.assertEqual(report['recoverable'],0)
+        link=self.store.root/'linked-folder';link.symlink_to(folder,target_is_directory=True)
+        with self.assertRaises(ValueError):self.store.missing_files.start({'search_roots':[str(link)]})
+        finder=self.store.missing_files;entered=threading.Event();release=threading.Event();original=finder._run
+        def run(roots):entered.set();release.wait(3);original(roots)
+        with patch.object(finder,'_run',side_effect=run):
+            job=finder.start({});self.assertTrue(entered.wait(3));finder.stop(job['id']);release.set();finder.thread.join(3)
+        self.assertTrue(finder.status(job['id'])['cancelled'])
+        with self.assertRaises(ValueError):finder.recover({'job_id':job['id'],'id':item['id']})

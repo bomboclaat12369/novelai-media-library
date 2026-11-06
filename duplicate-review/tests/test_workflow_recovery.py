@@ -92,3 +92,23 @@ class CoordinatedCheckpointTests(unittest.TestCase):
         self.assertEqual(len(self.store.data['characters']),2);self.assertEqual(self.org.summary()['up_next'],[self.ids[3]]);self.assertFalse(self.manager.journal.exists())
 
 if __name__=='__main__':unittest.main()
+
+class MissingOriginalFinderTests(unittest.TestCase):
+    def test_organizer_recovery_keeps_stars_sets_and_saved_inventory(self):
+        from test_organizer import fixture
+        with tempfile.TemporaryDirectory() as folder:
+            engine,bulk,org,ids=fixture(folder)
+            item=org.catalog[ids[0]];path=Path(item['path']);content=path.read_bytes()
+            org.mutate('pin',{'job':bulk.current['id'],'revision':org.state().get('revision',0),'id':ids[0],'pinned':True})
+            state=org.state();sets=org.sets();inventory=copy.deepcopy(bulk.current)
+            moved=Path(folder)/'moved';moved.mkdir();source=moved/'new-name.jpg';source.write_bytes(content);path.unlink()
+            finder=org.file_finder();job=finder.start({'search_roots':[str(moved)]});finder.thread.join(10)
+            report=finder.status(job['id']);self.assertEqual(report['missing'],1);self.assertEqual(report['recoverable'],1)
+            finder.recover({'job_id':job['id'],'id':report['issues'][0]['id']})
+            self.assertEqual(path.read_bytes(),content)
+            self.assertTrue(org.preview(ids[0],240))
+            self.assertEqual(engine.validate(item),path)
+            from engine import Engine
+            reopened=Engine(engine.state_dir)
+            self.assertEqual(reopened.validate(item),path)
+            self.assertEqual(org.state(),state);self.assertEqual(org.sets(),sets);self.assertEqual(bulk.current,inventory)

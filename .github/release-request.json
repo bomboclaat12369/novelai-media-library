@@ -1,7 +1,11 @@
 {
   "schema": 1,
-  "id": "2026-11-05-recovered-organizer-workflows-2.9.23",
-  "components": ["standalone", "userscript", "runtime", "workbench"],
+  "id": "2026-11-06-performance-missing-originals-2.9.24",
+  "components": [
+    "standalone",
+    "runtime",
+    "workbench"
+  ],
   "publish": true,
-  "workbench_notes": "Persistent Up next stars and Later posts; preview and apply saved drafts to the library with resumable imports and single-set moves; coordinated project checkpoints; selected video-frame set matching; diagnostics and recovery improvements. Includes companion 2.7.73."
+  "workbench_notes": "Missing-original finder with cancellable scans, paged reports and checksum-verified recovery into the original locations. Faster library edits and duplicate catalog preparation; bounded-memory large battle calculations. Preserves sets, stars, duplicate history and ranking rules. Includes companion 2.7.74."
 }

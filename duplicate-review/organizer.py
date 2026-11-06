@@ -641,11 +641,11 @@ class Organizer:
                 encoder._check_cancel('organizer')
                 try:
                     path=Path(item['path'])
-                    if linked(path) or stat_key(path)!=item['stamp']:raise ValueError('File changed since the saved inventory.')
+                    if linked(path) or (stat_key(path)!=item['stamp'] and not self.engine.recovered_original(item)):raise ValueError('File changed since the saved inventory.')
                     search_path=Path(item.get('matching_frame_path') or path)
                     value=np.concatenate((encoder._encode(search_path),encoder._encode_scene(search_path).reshape(-1))).astype(np.float32)
                     if value.size!=2304 or not np.isfinite(value).all():raise ValueError('Invalid visual analysis')
-                    if stat_key(path)!=item['stamp']:raise ValueError('File changed during analysis.')
+                    if stat_key(path)!=item['stamp'] and not self.engine.recovered_original(item):raise ValueError('File changed during analysis.')
                     with self.bulk.db() as db:db.execute('INSERT OR REPLACE INTO vectors VALUES (?,?,?)',(item.get('analysis_sha',item['sha']),self.recipe,value.tobytes()))
                 except InterruptedError:raise
                 except Exception as e:
@@ -663,7 +663,7 @@ class Organizer:
             self.bind();item=self.catalog.get(ident)
             if not item:raise ValueError('Image is not in the saved inventory.')
             path=Path(item['path']);stamp=stat_key(path)
-            if linked(path) or stamp!=item['stamp']:raise ValueError('Image changed or moved since inventory.')
+            if linked(path) or (stamp!=item['stamp'] and not self.engine.recovered_original(item)):raise ValueError('Image changed or moved since inventory.')
             size=min(2400,max(240,int(size)))
             key=hashlib.sha256((item.get('analysis_sha',item['sha'])+':'+stamp+':'+str(size)+':preview-v1').encode()).hexdigest()
             path=Path(item.get('matching_frame_path') or path)
@@ -714,6 +714,20 @@ class Organizer:
                     group=json.loads(row[0]);group['library_id']=sid;group['applied_at']=time.time();group['applied_partial']=bool(result.get('skipped'))
                     db.execute('UPDATE sets SET data=? WHERE scope=? AND id=?',(json.dumps(group),self.scope,ident))
             return result
+
+    def missing_file_records(self):
+        with self.lock,self.bulk.lock:
+            if self.engine.status['running'] or self.job['running'] or (self.bulk.current or {}).get('running'):
+                raise ValueError('Pause scanning and analysis before checking original files.')
+            self.bind()
+            return [{'id':self.scope+':'+i,'name':Path(r['path']).name,'collection':str((self.bulk.current or {}).get('id','')),
+                     'path':r['path'],'sha256':r.get('sha',''),'bytes':None}
+                    for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded]
+
+    def file_finder(self):
+        if not hasattr(self,'_file_finder'):
+            self._file_finder=runtime_helpers()['MissingFileFinder'](self.missing_file_records,self.lock,self.engine.authorize_original_recovery)
+        return self._file_finder
 
     def video_queue(self):
         from bulk.sources import source_of

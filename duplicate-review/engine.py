@@ -25,7 +25,7 @@ import crop_match
 import same_photo
 from search_index import SearchIndexes
 
-VERSION = '2.0.19'
+VERSION = '2.0.20'
 ALGORITHM = 1
 QUARANTINE = '_Duplicate_Review_Quarantine'
 EXTENSIONS = {'.jpg', '.jpeg', '.jpe', '.jfif', '.png', '.webp', '.bmp', '.tif', '.tiff', '.avif', '.gif'}
@@ -834,6 +834,30 @@ class Engine:
             raise ValueError('This file is no longer available; refresh the results.')
         return dict(row)
 
+    def authorize_original_recovery(self, record):
+        # Authorize only this user-selected, hash-verified restoration. Store
+        # intent before file publication so a crash cannot strand its new inode.
+        with self.db() as db:
+            db.execute('CREATE TABLE IF NOT EXISTS recovered_originals(path TEXT PRIMARY KEY,sha TEXT)')
+            db.execute('INSERT OR REPLACE INTO recovered_originals VALUES (?,?)',(record['path'],record['sha256']))
+
+    def recovered_original(self, record):
+        """An explicitly recovered original may have new filesystem timestamps."""
+        path=Path(record['path']);digest=record.get('sha','')
+        try:
+            if linked(path) or not path.is_file():return False
+            stamp=stat_key(path)
+            cache=getattr(self,'_recovered_checks',{})
+            if cache.get(str(path))==(stamp,digest):return True
+            with self.db() as db:
+                if not db.execute("SELECT 1 FROM sqlite_master WHERE name='recovered_originals'").fetchone():return False
+                row=db.execute('SELECT sha FROM recovered_originals WHERE path=?',(str(path),)).fetchone()
+            if not row or row[0]!=digest or sha256(path)!=digest or stat_key(path)!=stamp:return False
+            if len(cache)>=1000:cache.clear()
+            cache[str(path)]=(stamp,digest);self._recovered_checks=cache
+            return True
+        except OSError:return False
+
     def validate(self, record, verify_hash=True):
         if verify_hash and record.get('library'):
             meta = json.loads(record['library'])
@@ -843,7 +867,7 @@ class Engine:
         path = Path(record['path'])
         if not path.is_file() or linked(path) or str(canonical(path)) != record['path']:
             raise ValueError('The file moved or is a link. Scan again before reviewing it.')
-        if stat_key(path) != record['stamp']:
+        if stat_key(path) != record['stamp'] and not self.recovered_original(record):
             raise ValueError('File changed since the scan. Scan again before moving anything.')
         if verify_hash and sha256(path) != record['sha']:
             raise ValueError('File contents changed. Scan again.')

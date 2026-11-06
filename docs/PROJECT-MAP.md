@@ -20,6 +20,7 @@ Read selected source files, not generated HTML or encoded runtime chunks.
 | Scan/duplicate decisions | `duplicate-review/engine.py`, `matching.py`, `bulk_sets.py` | Existing duplicate engine unchanged by the video workflow |
 | Organizer collections, drafts, Up next and Later | `duplicate-review/organizer.py`, `organizer.html`, `organizer-workflow.js` | SQLite state scoped to collection; star identity follows surviving copies |
 | Coordinated restore | `duplicate-review/checkpoints.py` | Review, bulk and organizer DBs plus companion checkpoint and video frame sidecars |
+| Missing originals | `MissingFileFinder` in the runtime, `duplicate-review/missing-files.js` | Cancellable inventory/search, paged reports, checksum-verified copies to expected paths |
 | Publishing | `tools/PUBLISHING.md`, `publish-source-release.py`, `verify-published-release.py` | Source-only request; one authenticated Git push; verified receipt |
 
 `module_sources` in release configs maps stable UI sources to new immutable
@@ -53,8 +54,20 @@ filename before changing their published bytes.
 - Loop boundaries are stored independently of playback. Play locks editing;
   Off keeps saved boundaries. FFmpeg runs locally and decodes actual timestamps
   rather than estimating frame positions using a nominal frame rate.
+- Missing-original scans never remove records or infer identity from filenames.
+  Search is restricted to explicitly selected folders and skips linked paths.
+  Recovery revalidates collection identity, verifies the copied bytes, and uses
+  atomic no-clobber publication. Workbench records approved recoveries before
+  publication; previews and duplicate actions recheck their hashes when inode or
+  timestamps change. Existing sets, stars, saved inventory and history stay linked.
+- Small field edits reuse serialized unchanged media and copy only changed
+  records into the rollback snapshot. `library.json` is still complete after
+  every successful edit, fsynced and atomically replaced; backups stay readable.
+  General edits invalidate serialization and lookup caches. There is no journal
+  migration, background pending save, or new database dependency.
 - Battle ratings/priors are unchanged. Dense covariance calculation uses NumPy
-  when available, with the prior solver retained as fallback. Vote calculation
+  for medium boards; larger boards use bounded sparse batches with the same
+  residual tolerance. The prior solver remains available without NumPy. Vote calculation
   releases the library lock and rejects a stale fit before saving.
 
 ## Tests and diagnostics
