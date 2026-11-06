@@ -110,6 +110,8 @@ async function fixture({media = [], configure = null} = {}) {
           Object.assign(item, action === 'crop' ? {crop_top:body.top,crop_bottom:body.bottom} : body); value = item;
         } else if (route === '/api/sets' && method === 'POST') {
           value = {id:`set${library.sets.length+1}`,...JSON.parse(options.data)}; library.sets.push(value);
+        } else if (route === '/api/sets/purgatory-bulk' && method === 'POST') {
+          const body=JSON.parse(options.data);for(const set of library.sets)if(body.set_ids.includes(set.id))set.in_purgatory=body.in_purgatory;value={updated:body.set_ids.length};
         } else if (route.startsWith('/api/sets/') && method === 'POST') {
           value = library.sets.find(s => s.id === route.split('/')[3]);
           const body=JSON.parse(options.data);

@@ -1,0 +1,9 @@
+{
+  "fixture": "10,000 images, 2,000 sets; metadata search with category filter; 10 runs",
+  "returned": 60,
+  "total": 10000,
+  "median_seconds": 0.0247,
+  "max_seconds": 0.0406,
+  "reads_original_images": false,
+  "limitations": "Synthetic Linux metadata benchmark; not a Windows desktop timing."
+}

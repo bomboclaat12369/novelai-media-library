@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "status": "validated_not_published",
+  "source_commit": "470241fe7956036c99fff2c6b0990f33b12a0323",
+  "base_commit": "a2a2de8eb8cdef427fbb13747ca4b500e6761810",
+  "artifacts": {
+    "runtime": {
+      "version": "2.7.76",
+      "sha256": "dc5f82565e7859d71e0f21ea8aa9cc23400c1f58ac20245c015c4ae1d050c818",
+      "bytes": 359883
+    },
+    "workbench": {
+      "version": "2.0.23",
+      "sha256": "b7da71aa2acad963e38007da1dda42273fdae865a57b9080231d331c68df3642",
+      "bytes": 332749
+    }
+  },
+  "packaging_status": "dry_run_passed",
+  "checks": {
+    "runtime_tests": 205,
+    "workbench_tests": 171,
+    "javascript_dom_tests": 68,
+    "native_card_renders": 364,
+    "release_pipeline_tests": 13
+  },
+  "benchmark": "docs/benchmarks/2026-11-06-solo-imports.json",
+  "scope": "docs/WORKBENCH-BULK-IMPORT.md",
+  "limitations": [
+    "DOM and native-renderer checks do not establish live Windows or browser layout correctness. Browser-access troubleshooting remains paused.",
+    "Detailed crop/review uses the shared Media Library Rapid Review queue. Loose-file drag/drop and URL input were not moved into Workbench.",
+    "No source branch or application release has been pushed. Publish runtime and Workbench together only after user authorization."
+  ]
+}

@@ -1,10 +1,12 @@
 {
   "schema": 1,
-  "id": "2026-11-06-character-sections-approved-card-repairs",
+  "id": "2026-11-06-bulk-import-manual-search-set-purgatory",
   "components": [
     "standalone",
+    "userscript",
+    "runtime",
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "One Folder Organizer section for every library girl, including Nikki. Combine additional folders under the same girl; preserve existing sets, stars, drafts, analysis and source evidence. Offline cached sections, explicit assignment for older unlabelled collections, and refresh using saved duplicate hashes. Includes companion 2.7.75."
+  "workbench_notes": "Bulk import individual images to Main, categories, Review or Purgatory with persistent queues and original-quality viewing. Search Sets or images manually across the library or saved folders. Separate Set Purgatory, with reversible restoration. Compare import duplicates side by side, use saved scan matches, and explicitly Keep, Replace source, or Import separately. Preserve media IDs, metadata, source history and resumable transfers. Includes companion 2.7.76."
 }

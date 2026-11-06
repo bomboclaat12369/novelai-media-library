@@ -121,6 +121,9 @@ class Checkpoints:
                 history=log.rows(dst)
                 identities=dst.execute('SELECT kind,alias,identity FROM tracking_identities').fetchall()
                 dst.commit();src.backup(dst)
+                # Older checkpoints predate the individual import queue. Restore
+                # an empty queue, then attach its normal durable journal triggers.
+                if name=='organizer.sqlite3':dst.execute('CREATE TABLE IF NOT EXISTS individual_imports(scope TEXT,sha TEXT,data TEXT,PRIMARY KEY(scope,sha))')
                 # Restoring application state does not erase later evidence.
                 log.install(dst,dict(zip(self.names,(tracking.ENGINE,tracking.BULK,tracking.ORGANIZER)))[name])
                 for e in history:log.event(dst,e['kind'],e['entity'],e['payload'],e['id'],e['at'],e['store'])

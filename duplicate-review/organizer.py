@@ -45,6 +45,7 @@ class Organizer:
                 CREATE TABLE IF NOT EXISTS discarded(hash TEXT PRIMARY KEY,batch TEXT,data TEXT);
                 CREATE TABLE IF NOT EXISTS parked(scope TEXT,post TEXT,hash TEXT,PRIMARY KEY(scope,post,hash));''')
             db.execute('CREATE TABLE IF NOT EXISTS video_references(scope TEXT,sha TEXT,data TEXT,PRIMARY KEY(scope,sha))')
+            db.execute('CREATE TABLE IF NOT EXISTS individual_imports(scope TEXT,sha TEXT,data TEXT,PRIMARY KEY(scope,sha))')
             tracking.journal().install(db,tracking.ORGANIZER)
             # Upgrade every saved collection's tags without touching membership,
             # timestamps, inventory, matching results, selections or progress.
@@ -154,7 +155,7 @@ class Organizer:
     def sets(self,include_discarded=False):
         current=self.bulk.current or {};result={}
         for sid,g in current.get('library_sets',{}).items():
-            result['library:'+sid]={'id':'library:'+sid,'name':g['name'],'colors':g.get('colors') or [],'categories':g.get('categories') or [],'favorite':bool(g.get('favorite')),'members':[], 'library_id':sid,'saved':False}
+            result['library:'+sid]={'id':'library:'+sid,'name':g['name'],'colors':g.get('colors') or [],'categories':g.get('categories') or [],'favorite':bool(g.get('favorite')),'in_purgatory':bool(g.get('in_purgatory')),'members':[], 'library_id':sid,'saved':False}
         for ident,item in self.catalog.items():
             if item.get('quarantine_only'):continue
             for sid in item.get('existing_sets',[]):
@@ -168,6 +169,7 @@ class Organizer:
                 g.setdefault('colors',result.get(sid,{}).get('colors',[]))
                 g.setdefault('categories',result.get(sid,{}).get('categories',[]))
                 g.setdefault('favorite',bool(result.get(sid,{}).get('favorite')))
+                g.setdefault('in_purgatory',bool(result.get(sid,{}).get('in_purgatory')))
                 # Existing library members remain visible alongside locally reviewed additions.
                 removed=set(g.get('removed_members',[]))
                 g['members']=list(dict.fromkeys(i for i in result.get(sid,{}).get('members',[])+g['members'] if i not in removed))
@@ -206,7 +208,7 @@ class Organizer:
         with self.db() as db:
             for source in sources:
                 if source==self.scope or db.execute('SELECT 1 FROM scope_merges WHERE target=? AND source=?',(self.scope,source)).fetchone():continue
-                for table,columns in [('sets','id,data'),('posts','id,status'),('rejected','context,id'),('parked','post,hash'),('video_references','sha,data')]:
+                for table,columns in [('sets','id,data'),('posts','id,status'),('rejected','context,id'),('parked','post,hash'),('video_references','sha,data'),('individual_imports','sha,data')]:
                     for row in db.execute('SELECT '+columns+' FROM '+table+' WHERE scope=?',(source,)).fetchall():
                         if table=='sets':
                             old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,row[0])).fetchone()
@@ -221,6 +223,7 @@ class Organizer:
                     if live:
                         state['pins']=union(state.get('pins',[]),old.get('pins',[]))
                         state['post_evidence']={**old.get('post_evidence',{}),**state.get('post_evidence',{})}
+                        state['duplicate_choices']={**old.get('duplicate_choices',{}),**state.get('duplicate_choices',{})}
                         # Keep independent unfinished drafts and resume states recoverable.
                         state.setdefault('previous_collections',{})[source]=old
                     self.put_state(db,state)
@@ -274,6 +277,37 @@ class Organizer:
             self.bulk.persist();self.bulk.sections.activate(row['id']);self.bound=None
             return self.summary()
 
+    def individual_imports(self,include_applied=False):
+        # Saved hashes survive rescans and verified duplicate-to-keeper changes.
+        by_hash={h:i for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded for h in self.hashes(i)}
+        with self.db() as db:rows=db.execute('SELECT sha,data FROM individual_imports WHERE scope=? ORDER BY rowid',(self.scope,)).fetchall()
+        result=[]
+        for digest,raw in rows:
+            row=json.loads(raw)
+            if row.get('applied_at') and not include_applied:continue
+            ident=next((by_hash[h] for h in [digest]+row.get('hashes',[]) if h in by_hash),None)
+            result.append(dict(row,key=digest,id=ident))
+        return result
+
+    def import_catalog(self,body):
+        with self.lock,self.bulk.lock:
+            self.bind();self.check_collection_idle(body)
+            owner=self.category_catalog().get('character_id') or str(body.get('character_id',''))
+            library=self.engine.library.request('/api/library');characters=library.get('characters',[])
+            if not owner and len(characters)==1:owner=characters[0]['id']
+            if not owner:return {'choose_character':[{'id':c['id'],'name':c['name']} for c in characters]}
+            character=next((c for c in characters if c['id']==owner),None)
+            if not character:raise ValueError('The saved character is not available in the connected library.')
+            return {'character_id':owner,'library_instance':self.engine.library.request('/api/tracking/status')['instance'],'name':character['name'],'categories':[c for c in character.get('categories',[]) if c.get('media_type','image')=='image']}
+
+    def create_import_category(self,body):
+        with self.lock,self.bulk.lock:
+            catalog=self.import_catalog(body)
+            if not catalog.get('character_id'):raise ValueError('Choose the destination girl first.')
+            name=str(body.get('name','')).strip()
+            if not name or len(name)>100:raise ValueError('Enter an image category name (up to 100 characters).')
+            return self.engine.library.request('/api/categories',{'character_id':catalog['character_id'],'name':name,'media_type':'image'})
+
     def summary(self):
         with self.lock,self.bulk.lock:
             self.bind();state=self.state();state['selection']=[i for i in state.get('selection',[]) if i in self.catalog and i not in self.discarded];sets=self.sets();assigned={i for g in sets.values() for i in g['members']}
@@ -287,7 +321,7 @@ class Organizer:
             posts.sort(key=lambda p:(p['status']!='pending',p['remaining']==0,natural(p['label'])))
             total=sum(not r.get('quarantine_only') and i not in self.discarded for i,r in self.catalog.items())
             return {'job':(self.bulk.current or {}).get('id'),'section_id':(self.bulk.current or {}).get('section_id'),'roots':(self.bulk.current or {}).get('config',{}).get('roots',[]),'inventory_running':bool((self.bulk.current or {}).get('running')),'scope':self.scope,'collections':self.bulk.collections(),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
-                'up_next':self.pinned_ids(state),'later_count':sum(p['status']=='deferred' for p in posts),
+                'individuals':self.individual_imports(),'up_next':self.pinned_ids(state),'later_count':sum(p['status']=='deferred' for p in posts),
                 'reference_image':self.image(reference)|{'analyzed':reference in self.vector_by_id} if reference else None,'category_catalog':self.category_catalog(),'state':state,'images':total,'unresolved':sum(bool(r.get('quarantine_only')) for i,r in self.catalog.items() if i not in self.discarded),'indexed':sum(i in self.vector_by_id for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded),
                 'unassigned_count':sum(not r.get('quarantine_only') and i not in self.discarded and i not in assigned for i,r in self.catalog.items()),'unsorted_count':len(self.unsorted_ids()),'discarded_count':sum(not self.catalog[i].get('quarantine_only') for i in self.discarded),
                 'progress':dict(self.job),'inventory_complete':bool((self.bulk.current or {}).get('inventory_complete') or (self.bulk.current or {}).get('complete'))}
@@ -369,6 +403,8 @@ class Organizer:
                 group=self.sets().get(ident);ids=group.get('members',[]) if group else []
             elif kind=='unsorted':group={'label':'Unsorted'};ids=self.unsorted_ids()
             elif kind=='up_next':group={'label':'★ Up next'};ids=self.pinned_ids()
+            elif kind=='imports':group={'label':'Individual import queue'};ids=list(dict.fromkeys(r['id'] for r in self.individual_imports() if r['id']))
+            elif kind=='all_images':group={'label':'All available images'};ids=[i for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded and r.get('media_type','image')=='image']
             elif kind=='discarded':group={'label':'Discarded · recoverable'};ids=[i for i in self.discarded if not self.catalog[i].get('quarantine_only')]
             else:raise ValueError('Invalid collection.')
             if not group:raise ValueError('Choose an available post or set.')
@@ -386,6 +422,117 @@ class Organizer:
                 for i in g['members']:labels.setdefault(i,[]).append(g['name'])
             return {'label':group.get('label',group.get('name')),'total':len(ids),'offset':offset,'ids':ids,'focus_id':focus_id,
                     'images':[self.image(i)|{'display_name':self.original_name(i,source),'sets':labels.get(i,[])} for i in ids[offset:offset+60]],'job':self.bound[0]}
+
+    def manual_search(self,body):
+        with self.lock,self.bulk.lock:
+            self.bind();self.check_collection_idle(body)
+            if body.get('source','library')=='library':
+                info=self.import_catalog(body)
+                if not info.get('character_id'):return info
+                catalog=self.engine.library.catalog(info['character_id'])
+                self.search_library_catalog={'owner':info['character_id'],'catalog':catalog,'files':{r['id']:r for r in catalog['files']},'at':time.monotonic()}
+                extra={}
+                if body.get('duplicate_source'):
+                    ident=self.valid_ids([body['duplicate_source']])[0];digest=self.catalog[ident]['sha'];candidates=set()
+                    live={r['sha']:r['id'] for r in catalog['files']}
+                    with self.engine.db() as db:
+                        for a,b in db.execute('SELECT a.sha,b.sha FROM pairs p JOIN files a ON a.id=p.a JOIN files b ON b.id=p.b WHERE p.decision IS NULL AND a.moved=0 AND b.moved=0 AND (a.sha=? OR b.sha=?)',(digest,digest)):
+                            other=b if a==digest else a
+                            if other in live:candidates.add(live[other])
+                    extra={'media_ids':sorted(candidates)}
+                result=self.engine.library.request('/api/sets/manual-search',{**body,**extra,'character_id':info['character_id']})
+                expected=(self.bulk.current or {}).get('config',{}).get('library_instance')
+                if expected and expected!=result['library_instance']:raise ValueError('A different library is connected.')
+                return result
+            kind=body.get('kind','sets');terms=str(body.get('query','')).casefold().split();category=body.get('category','');placement=body.get('placement','all');sets=self.sets();rows=[]
+            categories=self.category_catalog().get('categories',[]);names={c['id']:c['name'] for c in categories};labels={}
+            for g in sets.values():
+                for ident in g['members']:labels.setdefault(ident,[]).append(g)
+            source=sets.values() if kind=='sets' else (self.image(i) for i,v in self.catalog.items() if not v.get('quarantine_only') and i not in self.discarded and v.get('media_type','image')=='image')
+            for row in source:
+                groups=labels.get(row['id'],[]);cats=row.get('categories',[]) if kind=='sets' else list({c for g in groups for c in g.get('categories',[])})
+                held=bool(row.get('in_purgatory')) if kind=='sets' else any(g.get('in_purgatory') for g in groups)
+                if placement=='purgatory' and not held or placement=='main' and held or placement=='unassigned' and (kind=='sets' or groups):continue
+                if category and (bool(cats) if category=='__none' else category not in cats):continue
+                text=' '.join([row['name'],row.get('path',''),*row.get('colors',[]),*[names.get(c,'') for c in cats],*[g['name'] for g in groups]]).casefold()
+                if not all(t in text for t in terms):continue
+                rows.append({'id':row['id'],'name':row['name'],'count':len(row['members']) if kind=='sets' else 1,'cover':next(iter(row['members']),None) if kind=='sets' else row['id'],'sets':[{'id':g['id'],'name':g['name']} for g in groups],'in_purgatory':held,'placement':'Set Purgatory' if held else 'Saved inventory'})
+            rows.sort(key=lambda x:(x['name'].casefold(),x['id']));offset=max(0,int(body.get('offset',0)))
+            return {'rows':rows[offset:offset+60],'total':len(rows),'offset':offset,'categories':categories}
+
+    def attach_library(self,body):
+        with self.lock,self.bulk.lock:
+            self.bind();self.check_collection_idle(body);info=self.import_catalog(body);owner=info.get('character_id')
+            if not owner:raise ValueError('Choose a girl first.')
+            if body.get('library_instance')!=info['library_instance']:raise ValueError('Library changed. Search again.')
+            library=self.engine.library.request('/api/library');catalog=self.engine.library.catalog(owner)
+            groups={g['id']:g for g in library.get('sets',[]) if g.get('character_id')==owner and g.get('kind','set')=='set'}
+            target=groups.get(body.get('set_id'));ids=target.get('media_ids',[]) if target else body.get('media_ids',[])
+            if body.get('set_id') and not target:raise ValueError('Set changed. Search again.')
+            files={m['id']:m for m in catalog['files']};ids=[i for i in ids if i in files] if target else ids
+            if not isinstance(ids,list) or any(i not in files for i in ids):raise ValueError('Images changed. Search again.')
+            current=self.bulk.current;attached=[]
+            for mid in ids:
+                row=files[mid];path=Path(row['path'])
+                if linked(path) or not path.is_file() or sha256(path)!=row['sha']:raise ValueError('Library original changed or is missing.')
+                memberships=[sid for sid,g in groups.items() if mid in g.get('media_ids',[])]
+                for sid in memberships:current.setdefault('library_sets',{})[sid]={k:groups[sid].get(k) for k in ('id','name','categories','colors','favorite','in_purgatory')}
+                ident=next((i for i,v in self.catalog.items() if v.get('sha')==row['sha']),row['sha'])
+                old=copy.deepcopy(current.setdefault('source_catalog',{}).get(ident,{}));source={'key':'library:'+mid,'kind':'library','label':'Media library','path':str(path),'quarantine':False}
+                if not old:old={'id':ident,'path':str(path),'stamp':stat_key(path),'sha':row['sha'],'sources':{source['key']:source},'origins':[source],'copies':[],'reference':True}
+                old['existing_sets']=memberships;old.setdefault('sources',{})[source['key']]=source
+                current['source_catalog'][ident]=old;attached.append(ident)
+            if target:current.setdefault('library_sets',{})[target['id']]={k:target.get(k) for k in ('id','name','categories','colors','favorite','in_purgatory')}
+            current.setdefault('config',{})['library_instance']=info['library_instance']
+            current['config']['character_id']=owner
+            self.bulk.persist();self.bound=None;self.bind()
+            state=self.state();state['revision']=state.get('revision',0)+1
+            with self.db() as db:self.put_state(db,state)
+            return {'ids':attached,'target':next((g['id'] for g in self.sets().values() if target and g.get('library_id')==target['id']),None)}
+
+    def library_image_path(self,owner,ident,size=0):
+        cached=getattr(self,'search_library_catalog',{})
+        catalog=cached['catalog'] if size and cached.get('owner')==owner and time.monotonic()-cached['at']<120 else self.engine.library.catalog(owner)
+        row=cached['files'].get(ident) if size and catalog is cached.get('catalog') else next((r for r in catalog['files'] if r['id']==ident),None)
+        if not row:raise ValueError('Library image unavailable.')
+        path=Path(row['path'])
+        target=self.engine.state_dir/'search-thumbnails'/(row['sha']+'.jpg')
+        if size and target.is_file():return target
+        if linked(path) or not path.is_file() or sha256(path)!=row['sha']:raise ValueError('Library original changed or is unavailable.')
+        if size:
+            if not target.is_file():
+                target.parent.mkdir(exist_ok=True)
+                with runtime_helpers()['Image'].open(path) as image:
+                    image.thumbnail((600,600));buffer=io.BytesIO();image.convert('RGB').save(buffer,format='JPEG',quality=88)
+                temp=target.with_suffix('.'+uuid.uuid4().hex+'.tmp');temp.write_bytes(buffer.getvalue());temp.replace(target)
+            return target
+        return path
+
+    def comparison_source(self,body):
+        with self.lock,self.bulk.lock:
+            self.bind();self.check_collection_idle(body);ident=self.valid_ids([body.get('id')])[0];path=self.original_path(ident)
+            with runtime_helpers()['Image'].open(path) as image:width,height=image.size
+            return {'name':path.name,'width':width,'height':height,'bytes':path.stat().st_size,'sha':self.catalog[ident]['sha']}
+
+    def duplicate_choice(self,body):
+        with self.lock,self.bulk.lock:
+            self.bind();self.check_collection_idle(body);state=self.state()
+            if body.get('revision')!=state.get('revision',0):raise ValueError('Import choices changed. Refresh before saving.')
+            ident=self.valid_ids([body.get('id')])[0];source=self.catalog[ident]
+            if source.get('media_type','image')!='image':raise ValueError('Choose a still image.')
+            action=body.get('action');choices=state.setdefault('duplicate_choices',{})
+            if action=='separate':choice={'action':'separate','source_sha':source['sha'],'at':time.time()}
+            elif action in ('keep','replace'):
+                info=self.import_catalog(body);owner=info.get('character_id');catalog=self.engine.library.catalog(owner)
+                target=next((r for r in catalog['files'] if r['id']==body.get('target')),None)
+                if not target or target['character_id']!=owner or body.get('target_sha')!=target['sha'] or body.get('library_instance')!=info['library_instance']:raise ValueError('Comparison changed. Search and compare again.')
+                if target['sha']==source['sha']:raise ValueError('This is an exact match; the import automatically reuses it.')
+                self.original_path(ident);self.library_image_path(owner,target['id'])
+                choice={'action':action,'source_sha':source['sha'],'target':target['id'],'target_sha':target['sha'],'target_name':target['name'],'library_id':catalog['library_id'],'library_instance':info['library_instance'],'operation':uuid.uuid4().hex,'at':time.time()}
+            else:raise ValueError('Choose Keep, Replace or Import separately.')
+            choices[source['sha']]=choice;state['revision']=state.get('revision',0)+1
+            with self.db() as db:self.put_state(db,state)
+            return {'choice':choice}
 
     def related(self,body):
         with self.lock,self.bulk.lock:
@@ -415,7 +562,7 @@ class Organizer:
                 for i in members:labels.setdefault(i,[]).append(g['name'])
                 shared=len(sources & {s for i in members if i in self.catalog for s in self.catalog[i]['sources']})
                 v=max((visual.get(i,0) for i in members),default=0)
-                if overlap or shared or v>=.60:sets.append({'id':g['id'],'name':g['name'],'count':len(members),'overlap':overlap,'score':overlap*10+bool(shared)+v,'library':bool(g.get('library_id'))})
+                if overlap or shared or v>=.60:sets.append({'id':g['id'],'name':g['name'],'count':len(members),'overlap':overlap,'score':overlap*10+bool(shared)+v,'library':bool(g.get('library_id')),'in_purgatory':bool(g.get('in_purgatory'))})
             sets.sort(key=lambda g:(-g['score'],g['name']))
             posts=[{'id':s,'label':self.posts[s]['label'],'count':len(self.posts[s]['ids']),'shared':sum(s in self.catalog[i]['sources'] for i in evidence_ids),'anchor_id':next(i for i in reversed(evidence_ids) if s in self.catalog[i]['sources'])} for s in sources]
             posts.sort(key=lambda p:(-p['shared'],p['count'],p['label']))
@@ -490,7 +637,7 @@ class Organizer:
         choices={'tab':('posts','sets'),'sourceFilter':('all','instagram','forum'),
             'filter':('pending','all','remaining','large','ignored','deferred','reviewed'),
             'postSort':('default','nameAsc','nameDesc','most','fewest','remaining'),
-            'setFilter':('all','favorites','uncategorized','categorized'),
+            'setFilter':('all','favorites','uncategorized','categorized','purgatory'),
             'setSort':('default','nameAsc','nameDesc','createdAsc','createdDesc','updatedDesc'),
             'order':('similar','original','filename')}
         for key,options in choices.items():
@@ -503,7 +650,7 @@ class Organizer:
             n=value.get(key)
             if isinstance(n,(int,float)) and 0<=n<=maximum:result[key]=int(n)
         view=value.get('view')
-        if isinstance(view,dict) and view.get('kind') in ('post','set','unsorted','discarded','up_next') and isinstance(view.get('id'),str):
+        if isinstance(view,dict) and view.get('kind') in ('post','set','unsorted','discarded','up_next','imports','all_images') and isinstance(view.get('id'),str):
             n=view.get('offset',0)
             if isinstance(n,(int,float)) and 0<=n<=1000000:
                 result['view']={'kind':view['kind'],'id':view['id'][:500],'offset':int(n)}
@@ -542,6 +689,29 @@ class Organizer:
                     pins=[p for p in state.get('pins',[]) if not hashes.intersection(p['hashes'])]
                     if body['pinned']:pins.append({'hashes':sorted(hashes),'created':time.time()})
                     state['pins']=pins
+                elif action in ('queue_individuals','remove_individuals'):
+                    ids=self.valid_ids(body.get('ids',[]))
+                    keys=body.get('keys',[]) if action=='remove_individuals' else []
+                    if not isinstance(keys,list) or any(not isinstance(k,str) for k in keys):raise ValueError('Choose valid queued images.')
+                    if not ids and not keys:raise ValueError('Select at least one image.')
+                    if any(self.catalog[i].get('media_type','image')!='image' for i in ids):raise ValueError('Select images for individual import. Video matching remains separate.')
+                    existing=self.individual_imports(include_applied=True)
+                    if any(k not in {r['key'] for r in existing} for k in keys):raise ValueError('Import queue changed. Refresh it.')
+                    touched={self.catalog[i]['sha'] for i in ids}|{r['key'] for r in existing if r['id'] in ids or r['key'] in keys}
+                    previous={key:(db.execute('SELECT data FROM individual_imports WHERE scope=? AND sha=?',(self.scope,key)).fetchone() or [None])[0] for key in touched}
+                    if action=='queue_individuals':
+                        options=runtime_helpers()['LibraryStore'].organizer_options(body.get('options',{}))
+                        owner=self.category_catalog().get('character_id') or str(body.get('character_id',''))
+                        if not owner:raise ValueError('Choose the destination girl first.')
+                        if body.get('character_id') and body['character_id']!=owner:raise ValueError('The selected images belong to another girl.')
+                        if options['destination']=='categories' and not options['categories']:raise ValueError('Choose a category or use Main.')
+                    state['undo']={'action':'individuals','previous':previous,'selection':ids}
+                    for key in touched:db.execute('DELETE FROM individual_imports WHERE scope=? AND sha=?',(self.scope,key))
+                    if action=='queue_individuals':
+                        for ident in ids:
+                            item=self.catalog[ident];row={'hashes':sorted(self.hashes(ident)),'name':self.image(ident)['name'],'character_id':owner,'library_instance':body.get('library_instance') or (self.bulk.current or {}).get('config',{}).get('library_instance'),'options':options,'created':time.time()}
+                            db.execute('INSERT OR REPLACE INTO individual_imports VALUES (?,?,?)',(self.scope,item['sha'],json.dumps(row)))
+                    state['selection']=[]
                 elif action=='save':
                     ids=self.valid_ids(body.get('ids',[]))
                     if not ids:raise ValueError('Select at least one image.')
@@ -593,7 +763,8 @@ class Organizer:
                     old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
                     state['undo']={'action':'set','id':target,'previous':old[0] if old else None,'selection':state.get('selection',[])}
                     favorite=self.favorite(body.get('favorite',group.get('favorite',False)))
-                    group.update(colors=set_name_colors(group['name'],colors),categories=categories,favorite=favorite,updated=time.time())
+                    if 'in_purgatory' in body and self.favorite(body['in_purgatory'])!=bool(group.get('in_purgatory')):group['purgatory_edited']=True
+                    group.update(colors=set_name_colors(group['name'],colors),categories=categories,favorite=favorite,in_purgatory=self.favorite(body.get('in_purgatory',group.get('in_purgatory',False))),updated=time.time())
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)))
                 elif action=='remove':
                     target=str(body.get('target',''));old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
@@ -662,6 +833,11 @@ class Organizer:
                         for sid,raw in undo.get('moved',{}).items():
                             db.execute('DELETE FROM sets WHERE scope=? AND id=?',(self.scope,sid))
                             if raw:db.execute('INSERT INTO sets VALUES (?,?,?)',(self.scope,sid,raw))
+                        state['selection']=undo.get('selection',[])
+                    elif undo['action']=='individuals':
+                        for key,raw in undo['previous'].items():
+                            db.execute('DELETE FROM individual_imports WHERE scope=? AND sha=?',(self.scope,key))
+                            if raw:db.execute('INSERT INTO individual_imports VALUES (?,?,?)',(self.scope,key,raw))
                         state['selection']=undo.get('selection',[])
                     elif undo['action']=='disposition':
                         table=undo['table']
@@ -743,6 +919,14 @@ class Organizer:
         finally:
             with self.lock:self.load_vectors();self.job['running']=False
 
+    def original_path(self,ident):
+        with self.lock,self.bulk.lock:
+            self.bind();item=self.catalog.get(ident)
+            if not item or item.get('media_type','image')!='image':raise ValueError('Choose an image from the saved inventory.')
+            path=Path(item['path'])
+            if linked(path) or (stat_key(path)!=item['stamp'] and not self.engine.recovered_original(item)):raise ValueError('Image changed or moved since inventory.')
+            return path
+
     def preview(self,ident,size):
         with self.lock,self.bulk.lock:
             self.bind();item=self.catalog.get(ident)
@@ -764,9 +948,9 @@ class Organizer:
             self.bind();summary=self.summary()
             with self.db() as db:
                 dispositions={'discarded':[list(r) for r in db.execute('SELECT hash,batch,data FROM discarded')],'parked':[list(r) for r in db.execute('SELECT scope,post,hash FROM parked WHERE scope=?',(self.scope,))]}
-            return {'tracking':tracking.export_history(self.engine,self.bulk,self) if include_tracking else None,'format':'folder-organizer-2','collection_id':self.collection_id,'dispositions':dispositions,'source_job':self.bound[0],'config':(self.bulk.current or {}).get('config',{}),'sets':summary['sets'],'state':summary['state'],'category_catalog':summary['category_catalog'],
+            return {'tracking':tracking.export_history(self.engine,self.bulk,self) if include_tracking else None,'format':'folder-organizer-2','collection_id':self.collection_id,'dispositions':dispositions,'source_job':self.bound[0],'config':(self.bulk.current or {}).get('config',{}),'sets':summary['sets'],'individuals':self.individual_imports(include_applied=True),'state':summary['state'],'category_catalog':summary['category_catalog'],
                     'post_review':[{k:p[k] for k in ('id','status')} for p in summary['posts']],'source_catalog':self.catalog,
-                    'notice':'Locally saved set drafts; no images moved, restored or imported.'}
+                    'notice':'Local set drafts and individual import choices; source files stay in place.'}
 
     def transfer(self,action,body):
         with self.lock,self.bulk.lock:
@@ -777,14 +961,22 @@ class Organizer:
             if action=='preview':
                 library=self.engine.library.request('/api/library')
                 owner=str(body.get('character_id') or self.category_catalog().get('character_id') or (self.bulk.current or {}).get('config',{}).get('character_id') or '')
+                if not owner:
+                    owners={r['character_id'] for r in self.individual_imports()}
+                    if len(owners)==1:owner=owners.pop()
                 if not owner and len(library.get('characters',[]))==1:owner=library['characters'][0]['id']
                 if not owner:return {'choose_character':[{'id':c['id'],'name':c['name']} for c in library.get('characters',[])]}
                 draft=self.export(include_tracking=False);draft['scope']=self.scope
-                draft['sets']=[g for g in draft['sets'] if g.get('saved')]
-                wanted={i for g in draft['sets'] for i in g['members']+g.get('removed_members',[])}
+                draft['sets']=[g for g in draft['sets'] if g.get('saved')] if body.get('include_sets',True) else []
+                draft['individuals']=self.individual_imports() if body.get('include_individuals',True) else []
+                if any(not r['id'] for r in draft['individuals']):raise ValueError('A queued image is unavailable or discarded. Restore it or remove it from the import queue before applying.')
+                if len({r['id'] for r in draft['individuals']})!=len(draft['individuals']):raise ValueError('Queued copies now share a keeper. Select that image and save its import choices again to combine them.')
+                wanted={i for g in draft['sets'] for i in g['members']+g.get('removed_members',[])}|{r['id'] for r in draft['individuals']}
                 draft['source_catalog']={i:r for i,r in self.catalog.items() if i in wanted}
                 result=self.engine.library.request('/api/organizer/preview',{'character_id':owner,'draft':draft})
-                self.transfer_plan={'token':result['token'],'revision':self.state()['revision'],'scope':self.scope}
+                if draft['individuals'] and 'individuals' not in result:raise ValueError('Update the Media Library companion to use individual Workbench imports. Nothing has been imported.')
+                if (any(g.get('purgatory_edited') for g in draft['sets']) or draft['state'].get('duplicate_choices')) and 'duplicates' not in result:raise ValueError('Update and restart the companion to apply Set Purgatory and duplicate choices. Nothing has been imported.')
+                self.transfer_plan={'token':result['token'],'revision':self.state()['revision'],'scope':self.scope,'individuals':draft['individuals']}
                 return result
             plan=getattr(self,'transfer_plan',{})
             if plan.get('token')!=body.get('token') or plan.get('scope')!=self.scope or plan.get('revision')!=self.state()['revision']:
@@ -794,11 +986,17 @@ class Organizer:
             tracking.transfer(self.engine,self.bulk,self)
             result=self.engine.library.request('/api/organizer/apply',{'token':body['token'],'conflicts':body.get('conflicts','move')})
             with self.db() as db:
+                for row in plan.get('individuals',[]):
+                    outcome=result.get('individuals',{}).get(row['id'])
+                    if not outcome:continue
+                    saved={**row,'applied_at':time.time(),'library_id':outcome['id'],'outcome':outcome}
+                    db.execute('UPDATE individual_imports SET data=? WHERE scope=? AND sha=?',(json.dumps(saved),self.scope,row['key']))
                 for ident,sid in result['mapping'].items():
                     row=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,ident)).fetchone()
                     if not row:continue
-                    group=json.loads(row[0]);group['library_id']=sid;group['applied_at']=time.time();group['applied_partial']=bool(result.get('skipped'))
+                    group=json.loads(row[0]);group['library_id']=sid;group['applied_at']=time.time();group['purgatory_edited']=False;group['applied_partial']=bool(result.get('skipped'))
                     db.execute('UPDATE sets SET data=? WHERE scope=? AND id=?',(json.dumps(group),self.scope,ident))
+            result['library_url']=self.engine.library.base+'/library'
             return result
 
     def missing_file_records(self):

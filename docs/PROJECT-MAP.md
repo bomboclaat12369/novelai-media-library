@@ -12,13 +12,14 @@ Read selected source files, not generated HTML or encoded runtime chunks.
 | Library checkpoints | Same file / `create_checkpoint`, `checkpoint_preview`, `checkpoint_restore` | Verified ZIP; library + battles; optional originals; selected video frames always included when available |
 | Viewer, imports and metadata controls | `.part01.txt` selected in each release config | Standalone supports management; NovelAI overlay is viewer focused |
 | Persistent Rapid Review | `.review-core.txt` selected in standalone config | Chunked uploads into a durable pending queue; Close retains it; explicit actions promote/discard |
+| Manual matching search | `ui-src/manual-search.js`, runtime `manual_search` / `manual_group` | Metadata filters, paged results, membership validation; no model dependency |
 | Sets and matching | Selected `.sets.txt`, `.groups.txt`, `.outfit-matching.txt`, `.set-picker.txt` | One Set per item; categories and main-view placement are separate |
 | Production cards | Selected `.collection.txt`, `.editions.txt`, `.base-layout.txt`, `.card-debug.txt` | Catalogs/layouts under `assets/cards`; no independent Studio renderer |
 | Loop editor and video reference frame | `ui-src/video-workflow.js` | Source timestamps come from local FFmpeg; frame matching retains the video identity |
 | Card Studio and library project tools | `ui-src/project-tools.js` | Original-resolution photo; calls `naiCards.lightCard`; preview controls do not save cards |
 | Workbench server | `duplicate-review/app.py` | Loopback UI with per-launch token, serial operations |
 | Scan/duplicate decisions | `duplicate-review/engine.py`, `matching.py`, `bulk_sets.py` | Existing duplicate engine unchanged by the video workflow |
-| Organizer collections, drafts, Up next and Later | `duplicate-review/organizer.py`, `organizer.html`, `organizer-workflow.js` | SQLite state scoped to collection; star identity follows surviving copies |
+| Organizer collections, drafts, Up next and Later | `duplicate-review/organizer.py`, `organizer.html`, `organizer-workflow.js`, `organizer-search.js` | SQLite state scoped to collection; star identity follows surviving copies |
 | Coordinated restore | `duplicate-review/checkpoints.py` | Review, bulk and organizer DBs plus companion checkpoint and video frame sidecars |
 | Missing originals | `MissingFileFinder` in the runtime, `duplicate-review/missing-files.js` | Cancellable inventory/search, paged reports, checksum-verified copies to expected paths |
 | Publishing | `tools/PUBLISHING.md`, `publish-source-release.py`, `verify-published-release.py` | Source-only request; one authenticated Git push; verified receipt |
@@ -28,6 +29,9 @@ payload filenames. Run `python tools/sync-ui-sources.py` after editing them.
 `--check` detects drift. Both builders also synchronize the selected modules.
 Existing versioned modules without a stable mapping must be copied to a new
 filename before changing their published bytes.
+
+See `docs/WORKBENCH-BULK-IMPORT.md` for individual-image queues, import destinations,
+shared Rapid Review, and the comparison with the library uploader.
 
 ## Workflow invariants
 

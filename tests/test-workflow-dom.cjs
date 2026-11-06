@@ -74,3 +74,19 @@ test('Missing file finder is reachable from Project tools and Escape closes only
  f.w.document.dispatchEvent(new f.w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await waitFor(()=>!f.root.querySelector('.naiMissingPanel'),f.errors);assert.ok(f.root.querySelector('.naiWorkflowPanel'));assert.deepEqual(f.errors,[]);
  }finally{f.dom.window.close()}
 });
+
+test('manual search works independently of automatic matching and assigns a chosen Set',async()=>{
+ const calls=[];let chosen;
+ const f=await fixture({media:[{...image}],configure:w=>{const normal=w.GM_xmlhttpRequest;w.GM_xmlhttpRequest=o=>{if(o.url.endsWith('/api/sets/manual-search')){const b=JSON.parse(o.data);calls.push(b);queueMicrotask(()=>o.onload({status:200,responseText:JSON.stringify({rows:[{id:'held',name:'White Dress',in_purgatory:true,placement:'Set Purgatory',sets:[],count:1,cover:'photo'}],total:1,categories:[{id:'beach',name:'Beach'}]})}));return {abort(){}};}return normal(o)};}});
+ try{await f.root.naiManualSearch({query:image,onChoose:async(id,q)=>chosen={id,q}});const panel=f.root.querySelector('.naiManualSearchWrap');assert.ok(panel.textContent.includes('White Dress'));const cat=panel.querySelector('[aria-label="Search category"]');cat.value='beach';cat.dispatchEvent(new f.w.Event('change'));await waitFor(()=>calls.length===2,f.errors);assert.equal(calls.at(-1).category,'beach');assert.equal(calls.at(-1).character_id,'character');click(panel,'Use this Set');await waitFor(()=>chosen,f.errors);assert.equal(chosen.id,'held');assert.equal(chosen.q.id,'photo');await waitFor(()=>!f.root.querySelector('.naiManualSearchWrap'),f.errors);assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close()}
+});
+
+test('Set Purgatory is separate from normal sets and restores the same set',async()=>{
+ const f=await fixture({media:[{...image}]});try{
+  const held={id:'abc123',character_id:'character',name:'Held Set',kind:'set',media_ids:['photo'],cover_media_id:'photo',in_purgatory:true,categories:[]};const normal={...held,id:'def123',name:'Good Set',in_purgatory:false};f.library.sets.push(held,normal);f.root.naiSetsApplyLibrary216(f.library);
+  f.root.getElementById('naiSetsCat').click();await waitFor(()=>f.root.querySelector('.naiSetTile[data-set-id="def123"]'),f.errors);assert.equal(f.root.querySelector('.naiSetTile[data-set-id="abc123"]'),null);
+  f.root.getElementById('naiSetPurgatoryCat').click();await waitFor(()=>f.root.querySelector('.naiSetTile[data-set-id="abc123"]'),f.errors);assert.equal(f.root.querySelector('.naiSetTile[data-set-id="def123"]'),null);
+  f.root.getElementById('naiSelectSets').click();await delay(30);const tile=f.root.querySelector('.naiSetTile[data-set-id="abc123"]');tile.click();await delay(30);f.root.getElementById('naiBulkSetPurgatory').click();await waitFor(()=>held.in_purgatory===false,f.errors);assert.deepEqual(held.media_ids,['photo']);assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close()}
+});

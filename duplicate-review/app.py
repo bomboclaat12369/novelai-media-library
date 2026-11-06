@@ -53,7 +53,7 @@ def make_server(engine, port=0, token=None):
     html = html.replace('</body>',update_tag+'</body>')
     bulk_html = bulk_html.replace('</body>',update_tag+'</body>')
     organizer_html = organizer_html.replace('__UPDATER__',update_js)
-    organizer_html = organizer_html.replace('__ORGANIZER_WORKFLOW__',(Path(__file__).parent/'missing-files.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-workflow.js').read_text(encoding='utf-8'))
+    organizer_html = organizer_html.replace('__ORGANIZER_WORKFLOW__',(Path(__file__).parent/'missing-files.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-workflow.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-search.js').read_text(encoding='utf-8'))
     organizer_html = organizer_html.replace('__ORGANIZER_SESSION__',(Path(__file__).parent/'organizer-session.js').read_text(encoding='utf-8'))
 
     autofill_js=(Path(__file__).parent/'no-autofill.js').read_text(encoding='utf-8')
@@ -112,8 +112,10 @@ def make_server(engine, port=0, token=None):
                     return self.send(200,organizer.video_queue())
                 if url.path == '/api/organizer/missing-status':
                     return self.send(200,organizer.file_finder().status(params.get('id',[None])[0],params.get('offset',[0])[0],params.get('limit',[100])[0]))
-                if url.path == '/api/organizer/video-file':
-                    path=getattr(organizer,'video_files',{}).get(params.get('id',[''])[0])
+                if url.path in ('/api/organizer/video-file','/api/organizer/original','/api/organizer/library-image'):
+                    path=organizer.original_path(params.get('id',[''])[0]) if url.path.endswith('/original') else getattr(organizer,'video_files',{}).get(params.get('id',[''])[0])
+                    if url.path.endswith('/library-image'):
+                        with image_slots:path=organizer.library_image_path(params.get('owner',[''])[0],params.get('id',[''])[0],int(params.get('size',[0])[0]))
                     if not path or not path.is_file():raise ValueError('Refresh the video list.')
                     import re,mimetypes
                     size=path.stat().st_size;start=0;end=size-1;partial=False
@@ -126,6 +128,7 @@ def make_server(engine, port=0, token=None):
                         if start>end or start>=size:raise ValueError('Video range unavailable.')
                         partial=True
                     self.send_response(206 if partial else 200);self.send_header('Content-Type',mimetypes.guess_type(path.name)[0] or 'video/mp4')
+                    self.send_header('Content-Security-Policy',"sandbox; default-src 'none'");self.send_header('X-Content-Type-Options','nosniff')
                     self.send_header('Accept-Ranges','bytes');self.send_header('Content-Length',str(end-start+1))
                     if partial:self.send_header('Content-Range',f'bytes {start}-{end}/{size}')
                     self.end_headers()
@@ -243,6 +246,16 @@ def make_server(engine, port=0, token=None):
                     result=organizer.collection_folders(body)
                 elif path == '/api/organizer/assign-collection':
                     result=organizer.assign_collection(body)
+                elif path in ('/api/organizer/import-catalog','/api/organizer/import-category-create'):
+                    result=organizer.create_import_category(body) if path.endswith('-create') else organizer.import_catalog(body)
+                elif path == '/api/organizer/manual-search':
+                    result=organizer.manual_search(body)
+                elif path == '/api/organizer/attach-library':
+                    result=organizer.attach_library(body)
+                elif path == '/api/organizer/comparison-source':
+                    result=organizer.comparison_source(body)
+                elif path == '/api/organizer/duplicate-choice':
+                    result=organizer.duplicate_choice(body)
                 elif path == '/api/organizer/related':
                     result=organizer.related(body)
                 elif path == '/api/organizer/index':
@@ -395,15 +408,15 @@ def main():
             webbrowser.open(old_url)
         except OSError:
             pass
-        print('Local Duplicate Review is already running. Use its existing window.')
+        print('Media Workbench is already running. Use its existing window.')
         return
     engine = Engine(state)
     server = make_server(engine, args.port)
     # One background check on launch; no periodic network traffic while idle.
     server.updater.start()
-    url = f'http://127.0.0.1:{server.server_port}/'
+    url = f'http://127.0.0.1:{server.server_port}/organizer'
     (state/'running-url.txt').write_text(url)
-    print(f'Local Duplicate Review {VERSION}\n{url}\nKeep this window open. Use Quit in the app when finished.', flush=True)
+    print(f'Media Workbench {VERSION}\n{url}\nKeep this window open. Use Quit in the app when finished.', flush=True)
     if not args.no_browser:
         webbrowser.open(url)
     try:

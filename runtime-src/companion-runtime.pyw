@@ -432,7 +432,7 @@ class OutfitMatcher:
         for group in sets:
             ranked = sorted([(scores[mid], mid) for mid in set(group.get('media_ids', [])) if mid in scores], reverse=True)
             if ranked:
-                results.append({'set_id': group['id'], 'name': group['name'], 'score': ranked[0][0],
+                results.append({'set_id': group['id'], 'name': group['name'], 'in_purgatory':bool(group.get('in_purgatory')), 'score': ranked[0][0],
                                 'matches': [mid for score, mid in ranked[:3]], 'image_count': len(ranked)})
         results.sort(key=lambda r: (-r['score'], r['name'].casefold(), r['set_id']))
         return results
@@ -1012,6 +1012,7 @@ class BattleRankings:
                     for ident,m in media.items() if self.store._in_main(m)}
         entries = {}
         for group in groups:
+            if group.get('in_purgatory'):continue
             images = list(dict.fromkeys(i for i in group.get('media_ids',[]) if i in media))
             if not images:continue
             cover = group.get('cover_media_id')
@@ -1784,7 +1785,7 @@ class TrackingJournal:
             if table in ('sets', 'state', 'video_references', 'category_catalog'):
                 data = json.loads(value.pop('data', '{}'))
                 if table == 'state':
-                    data = {k: data[k] for k in ('pins', 'post_evidence') if k in data}
+                    data = {k: data[k] for k in ('pins', 'post_evidence', 'duplicate_choices') if k in data}
                 value.update(data)
             return cls.encode(value)
         def patch(before, after):
@@ -2558,6 +2559,22 @@ class LibraryStore:
             'media':[(m['id'],m['sha256'],m.get('in_review'),m.get('in_purgatory')) for m in self.data['media']
                      if m['character_id']==owner and not m.get('source',{}).get('organizer_pending')]},sort_keys=True).encode()).hexdigest()
 
+    @staticmethod
+    def organizer_options(value):
+        """Shared validation for individual-image drafts, independent of membership."""
+        if not isinstance(value,dict):raise ValueError('Invalid individual import options.')
+        destination=value.get('destination','main')
+        if destination not in ('main','categories','review','purgatory'):raise ValueError('Choose an import destination.')
+        categories=value.get('categories',[])
+        if not isinstance(categories,list) or len(categories)>100 or any(not isinstance(c,str) for c in categories):
+            raise ValueError('Choose valid image categories.')
+        result={'destination':destination,'categories':list(dict.fromkeys(categories))}
+        for key in ('favorite','featured','needs_replacement'):
+            flag=value.get(key,False)
+            if type(flag) is not bool:raise ValueError('Invalid import flag.')
+            result[key]=flag
+        return result
+
     def organizer_preview(self,body):
         draft=body.get('draft',{});owner=str(body.get('character_id',''))
         if draft.get('format')!='folder-organizer-2':raise ValueError('Unsupported organizer export.')
@@ -2569,16 +2586,58 @@ class LibraryStore:
             linked=self.data.get('organizer_links',{}).get(namespace,{})
             catalog=draft.get('source_catalog',{});known={m['sha256']:m for m in self.data['media'] if m['character_id']==owner}
             mapping={};imports=[];issues=[];conflicts=[];claims={};plan=[]
-            selected=set(i for g in groups for i in g['members'])
+            solo={}
+            individual_rows=draft.get('individuals',[])
+            if not isinstance(individual_rows,list) or len(individual_rows)>15000:raise ValueError('Choose up to 15,000 individual images per transfer.')
+            instance=self.tracking.diagnostics()['instance']
+            for row in individual_rows:
+                if not isinstance(row,dict):raise ValueError('Invalid individual import selection.')
+                if row.get('library_instance') and row['library_instance']!=instance:raise ValueError('Individual imports belong to another library. Reconnect the original library.')
+                ident=row.get('id')
+                if not isinstance(ident,str) or ident in solo:raise ValueError('Invalid individual import selection.')
+                options=self.organizer_options(row.get('options',{}))
+                if row.get('character_id') and row['character_id']!=owner:raise ValueError('Individual imports belong to another character.')
+                valid=self._validate_categories(owner,options['categories'],'image')
+                if valid!=options['categories']:raise ValueError('Image categories changed. Edit the queued import before applying.')
+                if options['destination']=='categories' and not valid:raise ValueError('Choose at least one category or use Main.')
+                if catalog.get(ident,{}).get('media_type','image')!='image':raise ValueError('Individual imports currently accept images. Use video matching for videos.')
+                solo[ident]=options
+            hashes=[catalog.get(i,{}).get('sha') for i in solo]
+            if len(set(hashes))!=len(hashes):raise ValueError('Select each image once for individual import; duplicate hashes have conflicting choices.')
+            set_members=set(i for g in groups for i in g['members'])
+            if any(solo[i]['destination'] in ('review','purgatory') for i in set_members.intersection(solo)):
+                issues.append('An image is queued for both a set and Review/Purgatory. Apply these separately or choose Main for that image.')
+            pending={m['sha256']:m for m in self.data.get('rapid_queue',[]) if m['character_id']==owner}
+            reused_pending=set();resolutions={}
+            choices=draft.get('state',{}).get('duplicate_choices',{})
+            if not isinstance(choices,dict):raise ValueError('Invalid duplicate decisions.')
+            library_id=hashlib.sha256(str(self.db_path.resolve()).encode()).hexdigest()
+            selected=set_members|set(solo)
             for ident in sorted(selected):
                 record=catalog.get(ident,{})
                 if record.get('quarantine_only') or not re.fullmatch('[0-9a-f]{64}',str(record.get('sha',''))):
                     issues.append('Unresolved or invalid source: '+str(ident));continue
+                choice=choices.get(record['sha'])
+                if choice and choice.get('action') in ('keep','replace'):
+                    target=self.media_item(choice.get('target',''))
+                    if choice.get('library_id')!=library_id or choice.get('library_instance')!=instance or not target or target['character_id']!=owner or target.get('media_type')!='image':
+                        issues.append('Duplicate target is unavailable or belongs to another library. Review it again.');continue
+                    expected=choice.get('target_sha')
+                    already=choice['action']=='replace' and target['sha256']==record['sha']
+                    if target['sha256']!=expected and not already:issues.append('Duplicate target changed. Review '+Path(record['path']).name+' again.');continue
+                    resolutions[ident]={**choice,'expected_sha':target['sha256']}
+                    if choice['action']=='keep' or already:mapping[ident]=target['id'];continue
+                    if not re.fullmatch('[0-9a-f]{32}',str(choice.get('operation',''))):raise ValueError('Invalid duplicate operation.')
                 existing=known.get(record['sha'])
                 if existing:mapping[ident]=existing['id'];continue
+                queued=pending.get(record['sha'])
+                if queued:
+                    if ident in set_members:issues.append('Finish Rapid Review for '+queued['original_name']+' before assigning it to a set.')
+                    mapping[ident]=queued['id'];reused_pending.add(ident);continue
                 path=Path(record.get('path',''))
                 if not path.is_file() or path.is_symlink():issues.append('Missing or linked source: '+str(path));continue
                 stamp=[path.stat().st_size,path.stat().st_mtime_ns]
+                if ident in resolutions and stamp[0]>256*1024*1024:issues.append('Replacement images must be smaller than 256 MB.');continue
                 imports.append({'id':ident,'name':path.name,'path':str(path),'sha':record['sha'],'stamp':stamp})
             for group in groups:
                 sid=group.get('library_id') or linked.get(group['id'])
@@ -2595,13 +2654,16 @@ class LibraryStore:
                     others=[g['name'] for g in self.data.get('sets',[]) if mid and g['id']!=sid and mid in g.get('media_ids',[])]
                     if others:conflicts.append({'id':ident,'name':Path(catalog[ident]['path']).name,'from':others,'to':name})
                 group['destination_id']=sid;plan.append(group)
+            resolved_targets=list(mapping.values())+[v['target'] for i,v in resolutions.items() if i not in mapping]
+            if len(set(resolved_targets))!=len(resolved_targets):issues.append('Multiple selected images resolve to the same library image. Keep only one of them in this import.')
             token=uuid.uuid4().hex
             sessions=getattr(self,'_organizer_sessions',{});self._organizer_sessions=sessions
             while len(sessions)>=8:sessions.pop(next(iter(sessions)))
             sessions[token]={'owner':owner,'namespace':namespace,'groups':plan,'mapping':mapping,'imports':imports,'issues':issues,'conflicts':conflicts,
-                'tracking':draft.get('tracking') or {},'fingerprint':self._organizer_fingerprint(owner),'catalog':copy.deepcopy(catalog),'categories':draft.get('category_catalog',{}).get('categories',[]),'created':time.monotonic()}
-            return {'token':token,'sets':[{'id':g['id'],'name':g['name'],'count':len(g['members']),'action':'update' if g['destination_id'] else 'create'} for g in plan],
-                    'imports':[{'id':i['id'],'name':i['name']} for i in imports],'existing_count':len(mapping),'conflicts':conflicts,'issues':list(dict.fromkeys(issues))}
+                'tracking':draft.get('tracking') or {},'fingerprint':self._organizer_fingerprint(owner),'catalog':copy.deepcopy(catalog),'categories':draft.get('category_catalog',{}).get('categories',[]),'individuals':solo,'reused_pending':reused_pending,'resolutions':resolutions,'created':time.monotonic()}
+            return {'token':token,'duplicates':resolutions,'character_id':owner,'sets':[{'id':g['id'],'name':g['name'],'count':len(g['members']),'action':'update' if g['destination_id'] else 'create'} for g in plan],
+                    'imports':[{'id':i['id'],'name':i['name']} for i in imports],'existing_count':len(mapping),'conflicts':conflicts,'issues':list(dict.fromkeys(issues)),
+                    'individuals':[{'id':i,'name':Path(catalog[i]['path']).name,'options':v,'status':'already_in_review' if i in reused_pending else 'existing' if i in mapping else 'new'} for i,v in solo.items()]}
 
     def _organizer_session(self,token):
         session=getattr(self,'_organizer_sessions',{}).get(str(token))
@@ -2614,10 +2676,11 @@ class LibraryStore:
             session=self._organizer_session(body.get('token'));ident=body.get('id')
             row=next((r for r in session['imports'] if r['id']==ident),None)
             if not row:raise ValueError('Image is not in this preview.')
-            existing=next((m for m in self.data['media'] if m['character_id']==session['owner'] and m['sha256']==row['sha']),None)
+            existing=next((m for m in self.data['media']+self.data.get('rapid_queue',[]) if m['character_id']==session['owner'] and m['sha256']==row['sha']),None)
             if existing:
                 self._source_observation(existing, {'kind':'organizer'}, row['name'], session['catalog'][ident])
-                self.save(media_ids=[existing['id']])
+                self.save()
+                if self.rapid_item(existing['id']):session['reused_pending'].add(ident)
                 session['mapping'][ident]=existing['id']
                 seconds=session['catalog'][ident].get('frame_seconds')
                 if existing.get('media_type')=='video' and seconds is not None:
@@ -2630,6 +2693,15 @@ class LibraryStore:
             if self._hash_file(temp)!=row['sha']:raise ValueError('Source bytes changed. Preview again: '+row['name'])
             content_type=mimetypes.guess_type(row['name'])[0] or ''
             if not content_type.startswith(('image/','video/')):raise ValueError('Unsupported media file.')
+            resolution=session.get('resolutions',{}).get(ident)
+            if resolution and resolution['action']=='replace':
+                with self.lock:
+                    if self._organizer_fingerprint(session['owner'])!=session['fingerprint']:raise ValueError('Library changed. Preview again before replacing.')
+                    self.create_checkpoint({'label':'Before import duplicate replacement'})
+                    result=self.duplicate_replace(temp.read_bytes(),row['name'],resolution['target'],resolution['target_sha'],resolution['operation'],resolution['library_id'])
+                    session['mapping'][ident]=result['item']['id'];resolution['expected_sha']=row['sha']
+                    session['fingerprint']=self._organizer_fingerprint(session['owner'])
+                    return {'id':result['item']['id'],'reused':True,'replaced':True}
             item,reused=self._register_file(temp,row['name'],session['owner'],[],
                 {'kind':'organizer','organizer_pending':True,'original_path':str(path),'origins':session['catalog'][ident].get('origins',[])},content_type)
             with self.lock:session['mapping'][ident]=item['id']
@@ -2650,9 +2722,11 @@ class LibraryStore:
             if mode not in ('move','skip'):raise ValueError('Choose Move or Skip.')
             if self._organizer_fingerprint(session['owner'])!=session['fingerprint']:raise ValueError('Library membership changed. Preview again before applying.')
             mapping=session['mapping'];groups=session['groups'];catalog=session['catalog'];owner=session['owner']
-            for ident in {i for g in groups for i in g['members']}:
-                media=self.media_item(mapping.get(ident,''))
-                if not media or media['character_id']!=owner or media['sha256']!=catalog[ident]['sha']:raise ValueError('Imports are incomplete or changed. Preview again to resume.')
+            solo=session.get('individuals',{});pending_by_id={m['id']:m for m in self.data.get('rapid_queue',[])}
+            for ident in {i for g in groups for i in g['members']}|set(solo):
+                media=self.media_item(mapping.get(ident,'')) or pending_by_id.get(mapping.get(ident,''))
+                if not media or media['character_id']!=owner or media['sha256']!=session.get('resolutions',{}).get(ident,{}).get('expected_sha',catalog[ident]['sha']):raise ValueError('Imports are incomplete or changed. Preview again to resume.')
+                if media['id'] in pending_by_id and ident not in session.get('reused_pending',set()):raise ValueError('Review queue changed. Preview again.')
             self.tracking.ingest(TrackingJournal.decode('\n'.join(TrackingJournal.encode(e) for e in session.get('tracking',{}).get('events',[])).encode()))
             checkpoint=self.create_checkpoint({'label':'Before organizer transfer'})
             before=copy.deepcopy(self.data)
@@ -2674,8 +2748,9 @@ class LibraryStore:
                     target.parent.mkdir(exist_ok=True);target.write_bytes(frame['image'])
                     item['video_match_frame']={'seconds':frame['seconds'],'sha256':digest,'video_sha256':item['sha256'],'stored_rel':target.relative_to(self.root).as_posix()}
                 for ident, mid in mapping.items():
+                    if ident in session.get('resolutions',{}):self._tracking_queue.append(self._tracking_event('decision.import_duplicate',mid,{'source':catalog[ident],'choice':session['resolutions'][ident],'actor':'manual'}))
                     if ident in catalog:
-                        self._source_observation(self.media_item(mid), {'kind':'organizer'}, record=catalog[ident])
+                        self._source_observation(self.media_item(mid) or pending_by_id.get(mid), {'kind':'organizer'}, record=catalog[ident])
                 links=self.data.setdefault('organizer_links',{}).setdefault(session['namespace'],{})
                 for group in groups:
                     sid=group['destination_id'] or uuid.uuid4().hex;target=self.set_item(sid)
@@ -2689,18 +2764,54 @@ class LibraryStore:
                     members=list(dict.fromkeys([mid for mid in old if mid not in removed]+members))
                     self._detach_set_members(owner,members,except_set_id=sid)
                     target.update(name=title_case_label(group['name']),media_ids=members,colors=self._set_details(colors=group.get('colors',[])).get('colors',[]),
-                        favorite=bool(group.get('favorite')),categories=[category_map.get(c,c) for c in group.get('categories',[])],updated_at=now_iso())
+                        in_purgatory=bool(group.get('in_purgatory',False) if not group.get('destination_id') or group.get('purgatory_edited') else target.get('in_purgatory',False)),favorite=bool(group.get('favorite')),categories=[category_map.get(c,c) for c in group.get('categories',[])],updated_at=now_iso())
                     self._validate_set_categories(owner,target['categories'])
                     for mid in members:
                         item=self.media_item(mid)
-                        item['in_review']=False;item['in_purgatory']=False;item['set_added_at']=now_iso()
+                        if mid not in old:
+                            item['in_review']=False;item['in_purgatory']=False;item['set_added_at']=now_iso()
                         if item.get('source',{}).get('organizer_pending'):item['source'].pop('organizer_pending',None)
                     links[group['id']]=sid
+                individual_results={};review_moves=[]
+                for ident,options in solo.items():
+                    mid=mapping[ident];item=self.media_item(mid) or pending_by_id.get(mid)
+                    # An existing queue item has its own reviewed choices. Never
+                    # promote it, overwrite them or create a second pending copy.
+                    if mid in pending_by_id:
+                        individual_results[ident]={'id':mid,'destination':'review','reused':True};continue
+                    new=bool(item.get('source',{}).get('organizer_pending'))
+                    destination=options['destination'];was_main=self._in_main(item)
+                    dates=item.setdefault('category_added_at',{})
+                    merged=list(dict.fromkeys(item.get('categories',[])+options['categories']))
+                    for category in set(merged)-set(item.get('categories',[])):dates[category]=now_iso()
+                    item['categories']=merged
+                    for flag,label in [('favorite','favorites'),('featured','featured'),('needs_replacement','needs_replacement')]:
+                        if options[flag] and not item.get(flag):item[flag]=True;dates[label]=now_iso()
+                    if destination=='main':
+                        item.update(in_all=True,main_explicit=True,in_review=False,in_purgatory=False)
+                    elif new:
+                        item.update(in_all=False,in_review=False,in_purgatory=destination=='purgatory',main_explicit=False)
+                        if destination=='categories':item['in_all']=bool(self._main_categories(item))
+                        if destination=='purgatory':dates['purgatory']=now_iso()
+                        if destination=='review':
+                            item['rapid_main']=True
+                            review_moves.append(item)
+                    elif destination=='categories' and self._main_categories(item) and not item.get('in_review') and not item.get('in_purgatory'):
+                        item['in_all']=True
+                    # Review/Purgatory only stage new imports; an existing library
+                    # image keeps its placement, membership, crop and ratings.
+                    item.get('source',{}).pop('organizer_pending',None)
+                    self._stamp_main_entry(item,was_main)
+                    individual_results[ident]={'id':mid,'destination':destination if new or destination in ('main','categories') else 'existing','reused':not new}
+                if review_moves:
+                    review_ids={m['id'] for m in review_moves}
+                    self.data['media']=[m for m in self.data['media'] if m['id'] not in review_ids]
+                    self.data.setdefault('rapid_queue',[]).extend(review_moves)
                 self.save()
             except Exception:
                 self.data=before
                 raise
-            result={'sets':len(groups),'mapping':dict(links),'skipped':sorted(skipped),'checkpoint':checkpoint['id']}
+            result={'sets':len(groups),'mapping':dict(links),'individuals':individual_results,'skipped':sorted(skipped),'checkpoint':checkpoint['id']}
             session['result']=result
             return copy.deepcopy(result)
 
@@ -3295,6 +3406,55 @@ class LibraryStore:
 
     def character(self, character_id: str) -> dict[str, Any] | None:
         return next((c for c in self.data["characters"] if c["id"] == character_id), None)
+
+    def manual_search(self,body):
+        with self.lock:
+            owner=str(body.get('character_id',''));character=self.character(owner)
+            if not character:raise ValueError('Choose an existing girl.')
+            kind=body.get('kind','sets');placement=body.get('placement','all')
+            if kind not in ('sets','images') or placement not in ('all','main','purgatory','review','unassigned'):raise ValueError('Invalid search filter.')
+            terms=str(body.get('query',''))[:500].casefold().split();category=str(body.get('category',''))
+            offset=max(0,int(body.get('offset',0)));groups=[g for g in self.data.get('sets',[]) if g.get('character_id')==owner and g.get('kind','set')=='set']
+            memberships={}
+            for g in groups:
+                for mid in g.get('media_ids',[]):memberships.setdefault(mid,[]).append({'id':g['id'],'name':g['name'],'in_purgatory':bool(g.get('in_purgatory'))})
+            media={m['id']:m for m in self.data['media'] if m['character_id']==owner}
+            categories=character.get('set_categories' if kind=='sets' else 'categories',[])
+            if kind=='images':categories=[c for c in categories if c.get('media_type','image')=='image']
+            names={c['id']:c['name'] for c in categories};rows=[]
+            allowed=set(body['media_ids']) if isinstance(body.get('media_ids'),list) else None
+            for item in groups if kind=='sets' else media.values():
+                if allowed is not None and item['id'] not in allowed:continue
+                if kind=='images' and item.get('media_type')!='image':continue
+                hold=bool(item.get('in_purgatory'))
+                if placement=='purgatory' and not hold:continue
+                if placement=='main' and (hold or (kind=='images' and not self._in_main(item))):continue
+                if placement=='review' and (kind=='sets' or not item.get('in_review')):continue
+                if placement=='unassigned' and (kind=='sets' or memberships.get(item['id'])):continue
+                cats=item.get('categories',[])
+                if category and (bool(cats) if category=='__none' else category not in cats):continue
+                title=item.get('name',item.get('original_name',''))
+                labels=memberships.get(item['id'],[]) if kind=='images' else []
+                text=' '.join([title,*item.get('aliases',[]),*item.get('colors',[]),item.get('notes',''),*[names.get(c,'') for c in cats],*[g['name'] for g in labels]]).casefold()
+                if not all(t in text for t in terms):continue
+                ids=[mid for mid in item.get('media_ids',[]) if mid in media]
+                cover=item.get('cover_media_id');cover=cover if cover in ids and media[cover].get('media_type')=='image' else next((mid for mid in ids if media[mid].get('media_type')=='image'),None)
+                rows.append({'id':item['id'],'name':title,'categories':cats,'in_purgatory':hold,'sets':labels,
+                    'count':len(ids) if kind=='sets' else 1,'cover':cover if kind=='sets' else item['id'],
+                    'sha':item.get('sha256'),'width':item.get('width'),'height':item.get('height'),'bytes':item.get('file_bytes'),
+                    'placement':'Set Purgatory' if kind=='sets' and hold else 'Purgatory' if hold else 'Review' if item.get('in_review') else 'Main' if kind=='images' and self._in_main(item) else 'Set' if kind=='sets' else 'Library'})
+            rows.sort(key=lambda r:(r['name'].casefold(),r['id']))
+            return {'rows':rows[offset:offset+60],'total':len(rows),'offset':offset,'categories':copy.deepcopy(categories),'character_id':owner,'library_instance':self.tracking.diagnostics()['instance']}
+
+    @TrackingJournal.action("manual")
+    def manual_group(self,body):
+        with self.lock:
+            owner=str(body.get('character_id',''));ids=body.get('media_ids',[])
+            if not isinstance(ids,list) or not ids or len(ids)>15000:raise ValueError('Choose images first.')
+            ids=self._validate_set_media(owner,ids)
+            if any(mid in g.get('media_ids',[]) for g in self.data.get('sets',[]) for mid in ids):raise ValueError('An image now belongs to a Set. Search again; nothing was moved.')
+            if any(self.media_item(mid).get('media_type')!='image' for mid in ids):raise ValueError('Choose still images.')
+            return self.create_set(owner,str(body.get('name','')),ids,preserve_placement=True)
 
     def matching_preferences(self, character_id, mode=None):
         with self.lock:
@@ -4042,7 +4202,7 @@ class LibraryStore:
                 item["main_added_at"] = item["created_at"]
             item['category_added_at'] = {key:item['created_at'] for key in categories}
             if source.get("organizer_pending"):
-                item["in_all"]=False;item["in_videos"]=False
+                item["in_all"]=False;item["in_videos"]=False;item.pop("main_added_at",None)
             self._apply_resolution_flag(item)
             self.data.setdefault("rapid_queue" if pending else "media", []).append(item)
             self.save()
@@ -4491,7 +4651,8 @@ class LibraryStore:
             return item
 
     @TrackingJournal.action("manual")
-    def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None, cover_source: Any = None, favorite: Any = None, categories: Any = None, remove_media_ids: Any = None, aliases: Any = None, colors: Any = None, notes: Any = None) -> dict[str, Any]:
+    def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None, cover_source: Any = None, favorite: Any = None, categories: Any = None, remove_media_ids: Any = None, aliases: Any = None, colors: Any = None, notes: Any = None, in_purgatory: Any = None) -> dict[str, Any]:
+        if in_purgatory is not None and not isinstance(in_purgatory,bool):raise ValueError("Invalid Set Purgatory status")
         details = self._set_details(aliases, colors, notes)
         with self.lock:
             item = self.set_item(set_id)
@@ -4550,6 +4711,7 @@ class LibraryStore:
             elif cover_media_id is not None and (cover != item.get("cover_media_id") or media_ids is None):
                 source = "manual"
             item.update(details)
+            if in_purgatory is not None:item["in_purgatory"] = in_purgatory
             item["categories"] = next_categories
             item["cover_source"] = source
             if favorite is not None:
@@ -4562,6 +4724,17 @@ class LibraryStore:
             self._release_set_members(previous_member_ids - set(members))
             self.save()
             return item
+
+    @TrackingJournal.action("manual")
+    def bulk_set_purgatory(self,body):
+        with self.lock:
+            ids=body.get('set_ids',[]);owner=body.get('character_id');held=body.get('in_purgatory')
+            if not isinstance(ids,list) or not ids or len(ids)>10000 or any(not isinstance(i,str) for i in ids) or not isinstance(held,bool):raise ValueError('Choose Sets and their Purgatory status.')
+            targets=[self.set_item(i) for i in dict.fromkeys(ids)]
+            if any(not g or g.get('character_id')!=owner for g in targets):raise ValueError('Sets changed or belong to another girl. Refresh before saving.')
+            for group in targets:group.update(in_purgatory=held,updated_at=now_iso())
+            self.save()
+            return {'updated':len(targets),'in_purgatory':held}
 
     @TrackingJournal.action("manual")
     def bulk_set_categories(self, character_id: str, set_ids: Any, categories: Any, action: str) -> dict[str, Any]:
@@ -5498,7 +5671,7 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/checkpoints":
                 self._send_json(200,self.store.checkpoint_list());return
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "character_profiles": True, "image_set_battles": True, "outfit_matching": True, "outfit_library_scan": True, "photoshoot_matching": True, "persistent_rapid_review": True, "set_examples": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "character_profiles": True, "image_set_battles": True, "outfit_matching": True, "outfit_library_scan": True, "photoshoot_matching": True, "persistent_rapid_review": True, "organizer_individual_imports": True, "set_examples": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/duplicate-review/catalog":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -5706,11 +5879,18 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/sets/scan-assign":
                 self._send_json(200, self.store.outfit_matcher.assign_scan(self._read_json()))
                 return
+            if path in ("/api/sets/manual-search","/api/sets/manual-group"):
+                body=self._read_json()
+                self._send_json(200,self.store.manual_search(body) if path.endswith("manual-search") else self.store.manual_group(body))
+                return
             if path == "/api/sets/matching-create":
                 self._send_json(200, self.store.outfit_matcher.create_from_matches(self._read_json()))
                 return
             if path == "/api/sets/find-matches":
                 self._send_json(200, self.store.outfit_matcher.start(self._read_json()))
+                return
+            if path == "/api/sets/purgatory-bulk":
+                self._send_json(200,self.store.bulk_set_purgatory(self._read_json()))
                 return
             if path == "/api/sets/categories-bulk":
                 body = self._read_json()
@@ -5745,7 +5925,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     body.get("favorite"),
                     body.get("categories"),
                     body.get("remove_media_ids"),
-                    body.get("aliases"), body.get("colors"), body.get("notes"),
+                    body.get("aliases"), body.get("colors"), body.get("notes"), body.get("in_purgatory"),
                 )
                 self._send_json(200, item)
                 return
