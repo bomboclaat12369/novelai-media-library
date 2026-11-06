@@ -1,11 +1,10 @@
 {
   "schema": 1,
-  "id": "2026-11-06-performance-missing-originals-2.9.24",
+  "id": "2026-11-06-durable-background-tracking-2.7.75",
   "components": [
-    "standalone",
     "runtime",
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Missing-original finder with cancellable scans, paged reports and checksum-verified recovery into the original locations. Faster library edits and duplicate catalog preparation; bounded-memory large battle calculations. Preserves sets, stars, duplicate history and ranking rules. Includes companion 2.7.74."
+  "workbench_notes": "Durable background source, folder, duplicate-decision, set-membership, replacement and analysis history. Preserves known legacy evidence, separates rejections from deferred work, includes history in checkpoints/exports and resumable transfers. No new normal interface controls. Includes companion 2.7.75."
 }

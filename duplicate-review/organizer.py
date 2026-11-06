@@ -6,6 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
+import tracking
 from engine import load_image, sha256, stat_key, linked
 
 
@@ -43,6 +44,7 @@ class Organizer:
                 CREATE TABLE IF NOT EXISTS discarded(hash TEXT PRIMARY KEY,batch TEXT,data TEXT);
                 CREATE TABLE IF NOT EXISTS parked(scope TEXT,post TEXT,hash TEXT,PRIMARY KEY(scope,post,hash));''')
             db.execute('CREATE TABLE IF NOT EXISTS video_references(scope TEXT,sha TEXT,data TEXT,PRIMARY KEY(scope,sha))')
+            tracking.journal().install(db,tracking.ORGANIZER)
             # Upgrade every saved collection's tags without touching membership,
             # timestamps, inventory, matching results, selections or progress.
             for scope,ident,raw in db.execute('SELECT scope,id,data FROM sets').fetchall():
@@ -53,6 +55,7 @@ class Organizer:
     @contextmanager
     def db(self):
         db=sqlite3.connect(self.path,timeout=30)
+        tracking.configure(db)
         try:
             with db:yield db
         finally:db.close()
@@ -63,7 +66,12 @@ class Organizer:
         if self.bound==key:return
         if self.job['running']:return
         self.bound=key;self.catalog=dict(cat);self.posts={};self.order_cache={}
-        self.scope=hashlib.sha256(json.dumps(current.get('config',{}).get('roots',[]),sort_keys=True).encode()).hexdigest()
+        alias=hashlib.sha256(json.dumps(current.get('config',{}).get('roots',[]),sort_keys=True).encode()).hexdigest()
+        with self.db() as db:
+            collection=tracking.journal().identity(db,'collection',alias,current.get('collection_id') if current.get('collection_roots')==current.get('config',{}).get('roots',[]) else None)
+            # Keep existing scope keys and explicitly bind their stable identity.
+            self.scope=tracking.journal().identity(db,'organizer_scope',collection,alias)
+        self.collection_id=collection
         with self.db() as db:
             for digest,raw in db.execute('SELECT sha,data FROM video_references WHERE scope=?',(self.scope,)):
                 record=json.loads(raw);self.catalog[record['id']]=record
@@ -425,6 +433,7 @@ class Organizer:
                 result['view']={'kind':view['kind'],'id':view['id'][:500],'offset':int(n)}
         return result
 
+    @tracking.journal().action("manual")
     def mutate(self,action,body):
         with self.lock,self.bulk.lock:
             self.bind()
@@ -674,12 +683,12 @@ class Organizer:
         temp=target.with_name(key+'.'+uuid.uuid4().hex+'.tmp');temp.write_bytes(data);temp.replace(target)
         return data
 
-    def export(self):
+    def export(self,include_tracking=True):
         with self.lock,self.bulk.lock:
             self.bind();summary=self.summary()
             with self.db() as db:
                 dispositions={'discarded':[list(r) for r in db.execute('SELECT hash,batch,data FROM discarded')],'parked':[list(r) for r in db.execute('SELECT scope,post,hash FROM parked WHERE scope=?',(self.scope,))]}
-            return {'format':'folder-organizer-2','dispositions':dispositions,'source_job':self.bound[0],'config':(self.bulk.current or {}).get('config',{}),'sets':summary['sets'],'state':summary['state'],'category_catalog':summary['category_catalog'],
+            return {'tracking':tracking.export_history(self.engine,self.bulk,self) if include_tracking else None,'format':'folder-organizer-2','collection_id':self.collection_id,'dispositions':dispositions,'source_job':self.bound[0],'config':(self.bulk.current or {}).get('config',{}),'sets':summary['sets'],'state':summary['state'],'category_catalog':summary['category_catalog'],
                     'post_review':[{k:p[k] for k in ('id','status')} for p in summary['posts']],'source_catalog':self.catalog,
                     'notice':'Locally saved set drafts; no images moved, restored or imported.'}
 
@@ -694,7 +703,7 @@ class Organizer:
                 owner=str(body.get('character_id') or self.category_catalog().get('character_id') or (self.bulk.current or {}).get('config',{}).get('character_id') or '')
                 if not owner and len(library.get('characters',[]))==1:owner=library['characters'][0]['id']
                 if not owner:return {'choose_character':[{'id':c['id'],'name':c['name']} for c in library.get('characters',[])]}
-                draft=self.export();draft['scope']=self.scope
+                draft=self.export(include_tracking=False);draft['scope']=self.scope
                 draft['sets']=[g for g in draft['sets'] if g.get('saved')]
                 wanted={i for g in draft['sets'] for i in g['members']+g.get('removed_members',[])}
                 draft['source_catalog']={i:r for i,r in self.catalog.items() if i in wanted}
@@ -706,6 +715,7 @@ class Organizer:
                 raise ValueError('Drafts changed. Preview again to resume safely.')
             if action=='import':return self.engine.library.request('/api/organizer/import',{'token':body['token'],'id':body.get('id')})
             if action!='apply':raise ValueError('Unknown transfer action.')
+            tracking.transfer(self.engine,self.bulk,self)
             result=self.engine.library.request('/api/organizer/apply',{'token':body['token'],'conflicts':body.get('conflicts','move')})
             with self.db() as db:
                 for ident,sid in result['mapping'].items():

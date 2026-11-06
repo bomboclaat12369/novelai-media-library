@@ -19,6 +19,7 @@ from types import SimpleNamespace
 import uuid
 from functools import lru_cache
 import same_photo
+import tracking
 
 import numpy as np
 from engine import linked, sha256, stat_key, pixel_digest, QUARANTINE, BKTree, MODES
@@ -63,9 +64,13 @@ class Workbench:
                 CREATE TABLE IF NOT EXISTS origin_cursor(scope TEXT PRIMARY KEY, sha TEXT);
                 CREATE TABLE IF NOT EXISTS confirmed_origins(target TEXT PRIMARY KEY, keeper TEXT, created REAL);
                 CREATE TABLE IF NOT EXISTS aliases(target TEXT, keeper TEXT, recipe TEXT, accepted INTEGER, PRIMARY KEY(target,keeper,recipe));''')
+            tracking.journal().install(db,tracking.BULK)
+            migrate=not db.execute("SELECT 1 FROM tracking_meta WHERE key='inventory_backfill'").fetchone()
             for ident,raw in db.execute('SELECT id,data FROM jobs').fetchall():
                 job=json.loads(raw)
+                if migrate:tracking.inventory(db,job,legacy=True)
                 if add_set_colors(job):db.execute('UPDATE jobs SET data=? WHERE id=?',(json.dumps(job),ident))
+            if migrate:db.execute("INSERT INTO tracking_meta VALUES ('inventory_backfill','1')")
             row=db.execute("SELECT data FROM jobs WHERE id=(SELECT value FROM preferences WHERE key='active_job')").fetchone()
             if not row:row=db.execute('SELECT data FROM jobs ORDER BY updated DESC LIMIT 1').fetchone()
         if row:
@@ -81,17 +86,22 @@ class Workbench:
     def db(self):
         db=sqlite3.connect(self.path,timeout=30)
         db.execute('PRAGMA journal_mode=WAL')
+        tracking.configure(db)
         try:
             with db:yield db
         finally:db.close()
 
     def persist(self):
-        with self.lock,self.db() as db:
-            if self.current:
+        with self.lock:
+            with self.db() as db:
+                if not self.current:return
                 add_set_colors(self.current)
+                cache=tracking.inventory(db,self.current,previous=getattr(self,'_tracking_cache',None))
                 db.execute('INSERT OR REPLACE INTO jobs VALUES (?,?,?)',(self.current['id'],time.time(),json.dumps(self.current)))
                 db.execute("INSERT OR REPLACE INTO preferences VALUES ('active_job',?)",(self.current['id'],))
-                self._collections_cache=None
+            # Publish the cache only after the database commit succeeds.
+            self._tracking_cache=cache
+            self._collections_cache=None
 
     def update(self,**fields):
         with self.lock:
@@ -364,6 +374,7 @@ class Workbench:
             'repeated_live_copies':sum(max(0,sum(not c['quarantine'] for c in i['copies'])-1) for i in active)}
         return active
 
+    @tracking.journal().action("automatic")
     def recover_visual_aliases(self,active,unmatched,resolved,uri):
         remaining=[sha for sha in unmatched if sha not in resolved]
         if not remaining or not active:return 0
@@ -463,7 +474,8 @@ class Workbench:
                     if linked(path) or stat_key(path)!=item['stamp']:raise ValueError('File changed after inventory; scan again')
                     row=db.execute('SELECT data FROM vectors WHERE sha=? AND recipe=?',(item['sha'],recipe)).fetchone()
                     value=np.frombuffer(row[0],dtype=np.float32).copy() if row else np.array([])
-                    if value.size==2304 and np.isfinite(value).all():hits+=1
+                    cache_valid=value.size==2304 and np.isfinite(value).all()
+                    if cache_valid:hits+=1
                     else:
                         if not models_ready:
                             try:enc._prepare('bulk');enc._prepare_scene('bulk')
@@ -474,11 +486,14 @@ class Workbench:
                         if value.size!=2304 or not np.isfinite(value).all():raise ValueError('Invalid matching features')
                         if stat_key(path)!=item['stamp']:raise ValueError('File changed during analysis')
                         db.execute('INSERT OR REPLACE INTO vectors VALUES (?,?,?)',(item['sha'],recipe,value.tobytes()));db.commit()
+                    tracking.journal().observe(db,'analysis.coverage',item['sha']+':'+recipe,{'sha':item['sha'],'path':str(path),'stamp':item['stamp'],'recipe':recipe,'status':'completed','retrieval':'cached' if cache_valid else 'computed'})
                     kept.append(item);outfits.append(value[:768]);scenes.append(value[768:].reshape(2,768))
                 except InterruptedError:raise
                 except PreparationError:raise
                 except Exception as e:
+                    tracking.journal().observe(db,'analysis.coverage',item['sha']+':'+recipe,{'sha':item['sha'],'path':str(path),'stamp':item['stamp'],'recipe':recipe,'status':'failed','error':str(e)})
                     self.issue(item['path'],e)
+                    if strict:db.commit()
                     if strict:raise ValueError('The saved image cohort changed or could not be read. The original evaluation is preserved. '+str(e)) from e
                 self.update(phase='Indexing outfits and photoshoot details',done=at+1,total=len(items),cached_features=hits)
         if not kept:return [],np.zeros((0,768)),np.zeros((0,2,768))
@@ -591,6 +606,7 @@ class Workbench:
             if linked(path) or stat_key(path)!=item['stamp']:raise ValueError('Image changed or moved. Run a fresh evaluation.')
             return path
 
+    @tracking.journal().action("manual")
     def review(self,body):
         with self.lock:
             if not self.current or self.current['running'] or body.get('job')!=self.current['id']:raise ValueError('Evaluation changed. Refresh before saving.')
@@ -709,6 +725,7 @@ class Workbench:
         from .history_verify import start
         return start(self,body)
 
+    @tracking.journal().action("manual")
     def mark_origin(self,body):
         with self.lock:
             if not self.current or self.current['running'] or body.get('job')!=self.current['id']:raise ValueError('Evaluation changed.')
@@ -719,6 +736,7 @@ class Workbench:
             # A review label never removes an image or fabricates a keeper link.
             return self.status()
 
+    @tracking.journal().action("manual")
     def confirm_origin(self,body):
         with self.engine.lock,self.lock:
             if not self.current or self.current['running'] or self.engine.status['running'] or body.get('job')!=self.current['id']:raise ValueError('Evaluation changed or file operation running.')
@@ -743,6 +761,7 @@ class Workbench:
             self.current['inventory']['unlinked_quarantine']-=len(matching)
             self.persist();return self.status()
 
+    @tracking.journal().action("manual")
     def undo_origin(self,body):
         with self.lock:
             if not self.current or self.current['running'] or body.get('job')!=self.current['id']:raise ValueError('Evaluation changed.')
@@ -818,7 +837,8 @@ class Workbench:
     def export(self):
         with self.lock:
             if not self.current:raise ValueError('No evaluation to export.')
-            out=copy.deepcopy(self.current);out['evaluation']=self.status().get('evaluation',{})
+            out=copy.deepcopy(self.current)
+            out['tracking']=tracking.export_history(self.engine,self);out['evaluation']=self.status().get('evaluation',{})
             unresolved={i['sha'] for i in self.current.get('source_catalog',{}).values() if i.get('quarantine_only')}
             with self.db() as db:out['origin_review']={r[0]:{'status':r[1],'updated':r[2]} for r in db.execute('SELECT sha,status,updated FROM origin_review') if r[0] in unresolved}
             out['notice']='Evaluation drafts only. No files were moved or imported. Scores are not calibrated probabilities. Contains local paths; no image bytes.'

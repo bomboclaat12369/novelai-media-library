@@ -6,6 +6,7 @@ its journal rolls back both applications after interrupted/failed installation.
 import hashlib,json,shutil,sqlite3,time,uuid
 from pathlib import Path
 from engine import linked,sha256
+import tracking
 
 class Checkpoints:
     names=('review.sqlite3','bulk-preparation.sqlite3','organizer.sqlite3')
@@ -115,11 +116,20 @@ class Checkpoints:
     def install_databases(self,directory):
         for name in self.names:
             if not (directory/name).exists():continue
-            with sqlite3.connect(directory/name) as src,sqlite3.connect(self.engine.state_dir/name) as dst:src.backup(dst)
+            with sqlite3.connect(directory/name) as src,sqlite3.connect(self.engine.state_dir/name) as dst:
+                log=tracking.journal();log.schema(dst)
+                history=log.rows(dst)
+                identities=dst.execute('SELECT kind,alias,identity FROM tracking_identities').fetchall()
+                dst.commit();src.backup(dst)
+                # Restoring application state does not erase later evidence.
+                log.install(dst,dict(zip(self.names,(tracking.ENGINE,tracking.BULK,tracking.ORGANIZER)))[name])
+                for e in history:log.event(dst,e['kind'],e['entity'],e['payload'],e['id'],e['at'],e['store'])
+                dst.executemany('INSERT OR IGNORE INTO tracking_identities VALUES (?,?,?)',identities)
+                log.event(dst,'checkpoint.restore',directory.name,{'actor':'manual','checkpoint':directory.name})
         frames=directory/'video-frames'
         if frames.exists():shutil.copytree(frames,self.engine.state_dir/'video-frames',dirs_exist_ok=True)
         from bulk.workbench import Workbench
-        fresh=Workbench(self.engine);self.bulk.current=fresh.current;self.bulk._collections_cache=None
+        fresh=Workbench(self.engine);self.bulk.current=fresh.current;self.bulk._collections_cache=None;self.bulk._tracking_cache=None
         self.engine.groups_cache=None;self.engine.verified_plan=None;self.engine.exact_plan=None;self.engine.revision+=1
         self.organizer.bound=None;self.organizer.bind()
 

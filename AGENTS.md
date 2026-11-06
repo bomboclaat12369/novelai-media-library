@@ -15,3 +15,8 @@
 - Announce an update ready only after the published manifest and downloadable
   payload have been verified. Keep failed publication distinct from failed
   verification after a successful push, and preserve the release receipt.
+- Preserve useful source, identity, relationship, decision, membership and analysis
+  evidence when adding workflows. Use the durable tracking journal and existing
+  transaction/outbox helpers; Undo and rebuildable caches are not history stores.
+  Keep unknown facts unknown, version derivations, and carry evidence through
+  export/transfer/restore. Do not add routine UI clutter or click telemetry.

@@ -1,5 +1,6 @@
 """Local Duplicate Review — scanning and reversible, explicitly approved moves."""
 from __future__ import annotations
+import tracking
 import hashlib
 from contextlib import contextmanager
 import json
@@ -25,7 +26,7 @@ import crop_match
 import same_photo
 from search_index import SearchIndexes
 
-VERSION = '2.0.20'
+VERSION = '2.0.21'
 ALGORITHM = 1
 QUARANTINE = '_Duplicate_Review_Quarantine'
 EXTENSIONS = {'.jpg', '.jpeg', '.jpe', '.jfif', '.png', '.webp', '.bmp', '.tif', '.tiff', '.avif', '.gif'}
@@ -257,12 +258,14 @@ class Engine:
                     db.execute(f'ALTER TABLE {table} ADD COLUMN pixel TEXT')
             if 'library' not in {r[1] for r in db.execute('PRAGMA table_info(files)')}:
                 db.execute('ALTER TABLE files ADD COLUMN library TEXT')
+            tracking.journal().install(db,tracking.ENGINE)
         self.recover_moves()
 
     @contextmanager
     def db(self):
         db = sqlite3.connect(self.database, timeout=30)
         db.row_factory = sqlite3.Row
+        tracking.configure(db)
         try:
             with db:
                 yield db
@@ -472,7 +475,7 @@ class Engine:
                 meta = library_items.get(str(path))
                 if meta and meta['sha'] != r['sha']:
                     raise ValueError('Library source changed during the scan. Scan again.')
-                r.update(reference=reference, root=str(root), library=json.dumps({**meta, 'library_id':catalog['library_id']}) if meta else None)
+                r.update(reference=reference, root=str(root), library=json.dumps({**meta, 'library_id':catalog['library_id'],'stable_library_id':catalog.get('stable_library_id')}) if meta else None)
                 cursor = db.execute('INSERT INTO files(path,stamp,sha,w,h,size,reference,root,pixel,library) VALUES (:path,:stamp,:sha,:w,:h,:size,:reference,:root,:pixel,:library)', r)
                 r['id'] = cursor.lastrowid
                 records.append(r)
@@ -1062,6 +1065,7 @@ class Engine:
         self.invalidate_groups()
         return {'message':'Library cleanup undone. Original records and Set memberships restored.'}
 
+    @tracking.journal().action("manual")
     def undo(self):
         with self.lock:
             if self.status['running']:
@@ -1236,6 +1240,7 @@ class Engine:
         # directly against that keeper, not inferred from group membership.
         return moves
 
+    @tracking.journal().action("automatic")
     def _run_verified(self, groups, ignored, separated, scope, workers, preview=False):
         started = time.monotonic()
         moves = []
@@ -1287,6 +1292,7 @@ class Engine:
                 {'target':details(m['target']), 'keeper':details(m['keeper']), 'proof':m['proof']}
                 for m in plan['moves']]}
 
+    @tracking.journal().action("manual")
     def apply_verified_preview(self, token, targets):
         with self.lock:
             plan = self.verified_plan
@@ -1307,6 +1313,7 @@ class Engine:
             self.thread.start()
             return {'message':f'Moving {len(moves)} approved copies. Undo restores this batch.'}
 
+    @tracking.journal().action("manual")
     def start_exact(self, token):
         with self.lock:
             if self.status['running']:
@@ -1323,6 +1330,7 @@ class Engine:
             self.thread.start()
             return {'message':f'Moving {len(moves)} selected copies to quarantine…'}
 
+    @tracking.journal().action("automatic")
     def _run_exact(self, moves, batch, keep_records=None, finish=True):
         moved, failed = 0, 0
         try:
@@ -1357,6 +1365,7 @@ class Engine:
             if finish:
                 self.set_status(running=False)
 
+    @tracking.journal().action("manual")
     def reset_dismissed(self):
         with self.lock:
             if self.status['running']:
@@ -1432,6 +1441,7 @@ class Engine:
             return {'groups':[{k:v for k,v in g.items() if k!='files'} for g in groups],
                     'files':chosen['files'] if chosen else [], 'revision':self.revision, 'running':False}
 
+    @tracking.journal().action("manual")
     def dismiss_group(self, group_id, revision):
         with self.lock:
             if self.status['running'] or revision != self.revision:
@@ -1449,6 +1459,7 @@ class Engine:
             self.invalidate_groups()
             return {'message':'Group kept. No files moved.'}
 
+    @tracking.journal().action("manual")
     def move_selection(self, selection, revision):
         if self.config().get('scan_kind') == 'library':
             return self.remove_library_selection(selection, revision)
@@ -1497,6 +1508,7 @@ class Engine:
                 db.execute('INSERT OR IGNORE INTO ignored VALUES (?)', (key,))
                 db.execute("UPDATE pairs SET decision='keep' WHERE key=?", (key,))
 
+    @tracking.journal().action("manual")
     def mark_keep(self, group_id, ident, keep, revision):
         with self.lock:
             files = self._group_for_change(group_id, revision)
@@ -1512,6 +1524,7 @@ class Engine:
             self.invalidate_groups()
             return {'message':'Keep choice saved. No files moved.'}
 
+    @tracking.journal().action("manual")
     def quarantine_group(self, group_id, revision):
         """Explicitly discard every incoming copy in this group, with batch Undo."""
         with self.lock:
@@ -1551,6 +1564,7 @@ class Engine:
         finally:
             self.set_status(running=False)
 
+    @tracking.journal().action("manual")
     def finish_group(self, group_id, revision):
         with self.lock:
             files = self._group_for_change(group_id, revision)
@@ -1569,6 +1583,7 @@ class Engine:
             self.thread.start()
             return {'message':'Keeping your choices and moving other incoming copies to quarantine.'}
 
+    @tracking.journal().action("manual")
     def split_group(self, group_id, selected_ids, revision):
         with self.lock:
             files = self._group_for_change(group_id, revision)
@@ -1601,6 +1616,7 @@ class Engine:
             self.invalidate_groups()
             return {'message':'Split saved. Each image and its copies can be reviewed separately. No files moved.'}
 
+    @tracking.journal().action("manual")
     def replace_library(self, group_id, source_id, target_id, revision):
         with self.lock:
             files = self._group_for_change(group_id, revision)

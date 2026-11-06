@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 try:
@@ -459,6 +459,7 @@ class OutfitMatcher:
         import sqlite3
         started = time.monotonic()
         self.cache_hits = self.encoded_images = 0
+        coverage=[]
         photoshoot = self.jobs[ident]['matching_mode'] == 'photoshoot'
         grouped = {mid for group in sets for mid in group.get('media_ids', [])}
         ungrouped = [mid for mid in candidates if mid not in grouped]
@@ -478,6 +479,7 @@ class OutfitMatcher:
                 self.update(ident, phase='Checking scene cache; indexing new Photoshoot images' if photoshoot else 'Checking image cache; indexing new library images', done=0, total=len(candidates))
                 for index, (mid, media) in enumerate(candidates.items()):
                     self._check_cancel(ident)
+                    before=None;encoded_before=self.encoded_images
                     try:
                         before = self._stamp(media)
                         vector = self._vector(db, media, count=not photoshoot)
@@ -488,12 +490,18 @@ class OutfitMatcher:
                         if photoshoot:
                             scenes[mid] = scene
                         self.contexts[ident]['stamps'][mid] = before
+                        coverage.append({'media_id':mid,'sha256':media.get('sha256'),'stamp':before,'recipes':[self.MODEL_SHA]+([self.SCENE_RECIPE] if photoshoot else []),'status':'completed','retrieval':'computed' if self.encoded_images>encoded_before else 'cached','implementation':'outfit-matcher-v1'})
                     except Exception as exc:
                         issues.append({'media_id': mid, 'message': str(exc)})
+                        coverage.append({'media_id':mid,'sha256':media.get('sha256'),'stamp':before,'recipes':[self.MODEL_SHA]+([self.SCENE_RECIPE] if photoshoot else []),'status':'failed','error':str(exc),'implementation':'outfit-matcher-v1'})
                     if (index + 1) % 32 == 0:
                         db.commit()
+                        if hasattr(self.store,'tracking'):self.store.tracking.coverage(coverage)
+                        coverage=[]
                     self.update(ident, done=index+1, cached_images=self.cache_hits, new_images=self.encoded_images)
                 db.commit()
+                if hasattr(self.store,'tracking'):self.store.tracking.coverage(coverage)
+                coverage=[]
                 target_ids = [mid for mid in vectors if not scan or mid in grouped]
                 matrix = self.np.stack([vectors[mid] for mid in target_ids]) if target_ids else None
                 scene_matrix = self.np.stack([scenes[mid] for mid in target_ids]) if photoshoot and target_ids else None
@@ -573,6 +581,10 @@ class OutfitMatcher:
         except Exception as exc:
             self.update(ident, error=str(exc), phase='Set search could not finish')
         finally:
+            try:
+                if coverage and hasattr(self.store,'tracking'):self.store.tracking.coverage(coverage)
+            except Exception as exc:
+                self.update(ident,error='Could not persist analysis coverage: '+str(exc))
             self.update(ident, running=False, elapsed_seconds=round(time.monotonic()-started, 2))
 
     def _completed(self, ident):
@@ -1705,6 +1717,238 @@ class MissingFileFinder:
             return {'id':issue['id'],'recovered':True,'path':str(target)}
 
 
+class TrackingJournal:
+    """Versioned, local metadata history. Never stores image bytes or UI telemetry.
+
+    SQLite owners use transactional triggers. The JSON library uses an atomic
+    outbox: committed events are replayed idempotently before the next write.
+    Historical observations have an observation date, not an invented action date.
+    """
+    SCHEMA = 1
+    _local = threading.local()
+
+    @classmethod
+    def context(cls):
+        return getattr(cls._local, 'context', {'actor': 'unknown', 'operation': 'application', 'provenance': 'application_record'})
+
+    @classmethod
+    def action(cls, actor):
+        import functools
+        def decorate(fn):
+            @functools.wraps(fn)
+            def wrapped(*args, **kwargs):
+                previous = cls.context()
+                cls._local.context = {'actor': actor, 'operation': (previous['operation']+'/' if previous.get('operation') not in (None,'application') else '')+fn.__name__, 'provenance': 'application_record', 'implementation':'background-tracking-v1','operation_id':previous.get('operation_id') or uuid.uuid4().hex}
+                try:
+                    return fn(*args, **kwargs)
+                finally:
+                    cls._local.context = previous
+            return wrapped
+        return decorate
+
+    @staticmethod
+    def encode(value):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+    @staticmethod
+    def delta(before, after):
+        if before == after:
+            return None
+        if before is None or after is None:
+            return {'before': before, 'after': after}
+        changes = {}
+        for key in sorted(before.keys() | after.keys()):
+            a, b = before.get(key), after.get(key)
+            if a == b and (key in before) == (key in after):
+                continue
+            if key in ('media_ids', 'members', 'removed_members') and isinstance(a, list) and isinstance(b, list):
+                aa, bb = set(a), set(b)
+                changes[key] = {'added': [[i, v] for i, v in enumerate(b) if v not in aa],
+                                'removed': [[i, v] for i, v in enumerate(a) if v not in bb]}
+                if [v for v in a if v in bb] != [v for v in b if v in aa]:
+                    changes[key]['order'] = b
+            else:
+                changes[key] = {'before': a, 'after': b, 'removed': key not in after}
+        return {'changes': changes}
+
+    @classmethod
+    def configure(cls, db):
+        # Register on EVERY writer, including connections opened after restore.
+        def project(table, raw):
+            if raw is None:
+                return 'null'
+            value = json.loads(raw)
+            if table in ('cache','features','vectors'):value['status']='completed'
+            if table=='errors':value['status']='failed'
+            if table=='settings' and value.get('key')!='config':return 'null'
+            if table in ('sets', 'state', 'video_references', 'category_catalog'):
+                data = json.loads(value.pop('data', '{}'))
+                if table == 'state':
+                    data = {k: data[k] for k in ('pins', 'post_evidence') if k in data}
+                value.update(data)
+            return cls.encode(value)
+        def patch(before, after):
+            change = cls.delta(json.loads(before or 'null'), json.loads(after or 'null'))
+            return cls.encode({'schema': cls.SCHEMA, **cls.context(), 'change': change}) if change else None
+        db.create_function('tracking_project', 2, project)
+        db.create_function('tracking_patch', 2, patch)
+
+    @classmethod
+    def schema(cls, db, store=None):
+        # Do not executescript here: it implicitly commits the caller's transaction.
+        for sql in (
+            'CREATE TABLE IF NOT EXISTS tracking_meta(key TEXT PRIMARY KEY,value TEXT)',
+            'CREATE TABLE IF NOT EXISTS tracking_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,store TEXT NOT NULL,at TEXT NOT NULL,kind TEXT NOT NULL,entity TEXT NOT NULL,payload TEXT NOT NULL)',
+            'CREATE INDEX IF NOT EXISTS tracking_entity ON tracking_events(kind,entity,seq)',
+            'CREATE TABLE IF NOT EXISTS tracking_heads(kind TEXT,entity TEXT,value TEXT,PRIMARY KEY(kind,entity))',
+            'CREATE TABLE IF NOT EXISTS tracking_identities(kind TEXT,alias TEXT,identity TEXT,PRIMARY KEY(kind,alias))',
+        ):
+            db.execute(sql)
+        db.execute("INSERT OR IGNORE INTO tracking_meta VALUES ('store',?)", (store or uuid.uuid4().hex,))
+        db.execute("INSERT OR IGNORE INTO tracking_meta VALUES ('schema','1')")
+        db.execute("INSERT OR IGNORE INTO tracking_meta VALUES ('instance',?)",(uuid.uuid4().hex,))
+        cls.configure(db)
+
+    @classmethod
+    def event(cls, db, kind, entity, payload, ident=None, at=None, store=None):
+        store = store or db.execute("SELECT value FROM tracking_meta WHERE key='store'").fetchone()[0]
+        db.execute('INSERT OR IGNORE INTO tracking_events(id,store,at,kind,entity,payload) VALUES (?,?,?,?,?,?)',
+                   (ident or uuid.uuid4().hex, store, at or now_iso(), kind, str(entity), cls.encode(payload)))
+
+    @classmethod
+    def observe(cls, db, kind, entity, value, legacy=False):
+        entity = str(entity)
+        raw = cls.encode(value)
+        row = db.execute('SELECT value FROM tracking_heads WHERE kind=? AND entity=?', (kind, entity)).fetchone()
+        if row and row[0] == raw:
+            return
+        before = json.loads(row[0]) if row else None
+        cls.event(db, kind, entity, {'schema': 1, 'actor': 'unknown',
+                  'provenance': 'legacy_observation' if legacy else 'application_record',
+                  'occurred_at': None if legacy else now_iso(), 'change': cls.delta(before, value)})
+        db.execute('INSERT OR REPLACE INTO tracking_heads VALUES (?,?,?)', (kind, entity, raw))
+
+    @classmethod
+    def identity(cls, db, kind, alias, identity=None):
+        row = db.execute('SELECT identity FROM tracking_identities WHERE kind=? AND alias=?', (kind, alias)).fetchone()
+        if row:
+            return row[0]
+        ident = identity or uuid.uuid4().hex
+        db.execute('INSERT INTO tracking_identities VALUES (?,?,?)', (kind, alias, ident))
+        cls.event(db, 'identity', ident, {'kind': kind, 'alias': alias, 'identity': ident, 'provenance': 'observed_alias'})
+        return ident
+
+    @classmethod
+    def install(cls, db, tables):
+        """Track durable columns, including REPLACE and revocations, atomically.
+
+        A head per logical key handles SQLite's INSERT OR REPLACE without relying
+        on recursive deletion triggers. Transient rows/BLOBs never enter history.
+        """
+        cls.schema(db)
+        for table, spec in tables.items():
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                continue
+            keys, columns = spec[:2]
+            kind = spec[2] if len(spec) > 2 else table
+            def entity(prefix):
+                return 'json_array(' + ','.join(prefix + '.' + k for k in keys) + ')'
+            def projection(prefix):
+                parts = ["'%s',%s.%s" % (c, prefix, c) for c in columns]
+                if table=='features':
+                    parts.append("'sha',(SELECT sha FROM cache WHERE path=%s.path AND stamp=%s.stamp)" % (prefix,prefix))
+                if table=='errors':
+                    parts.append("'last_known_sha',(SELECT sha FROM cache WHERE path=%s.path)" % prefix)
+                if table == 'pairs':
+                    for side in ('a', 'b'):
+                        for col in ('sha', 'path', 'stamp'):
+                            parts.append("'%s_%s',(SELECT %s FROM files WHERE id=%s.%s)" % (side, col, col, prefix, side))
+                return "tracking_project('%s',json_object(%s))" % (table, ','.join(parts))
+            for action in ('INSERT', 'UPDATE', 'DELETE'):
+                prefix = 'OLD' if action == 'DELETE' else 'NEW'
+                ident = entity(prefix)
+                after = "'null'" if action == 'DELETE' else projection(prefix)
+                before = "(SELECT value FROM tracking_heads WHERE kind='%s' AND entity=%s)" % (kind, ident)
+                payload = 'tracking_patch(%s,%s)' % (before, after)
+                # Undecided pair creation/scan resets are not review decisions.
+                condition = " AND (%s.decision IS NOT NULL OR OLD.decision IS NOT NULL)" % prefix if table == 'pairs' and action=='UPDATE' else " AND %s.decision IS NOT NULL" % prefix if table=='pairs' else ''
+                if table in ('pairs','files','cache','features','vectors','hashes','errors','aligned_tasks') and action == 'DELETE':
+                    continue  # pairs are transient; durable ignored/separation tables cover revocation.
+                db.execute("""CREATE TRIGGER IF NOT EXISTS tracking_%s_%s AFTER %s ON %s BEGIN
+                    INSERT INTO tracking_events(id,store,at,kind,entity,payload)
+                    SELECT lower(hex(randomblob(16))),(SELECT value FROM tracking_meta WHERE key='store'),
+                    strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ','now'),'%s',%s,%s WHERE %s IS NOT NULL%s;
+                    INSERT OR REPLACE INTO tracking_heads(kind,entity,value)
+                    SELECT '%s',%s,%s WHERE 1%s;
+                    END""" % (table, action.lower(), action, table, kind, ident, payload, payload, condition, kind, ident, after, condition))
+            marker = 'backfill:' + table
+            if not db.execute('SELECT 1 FROM tracking_meta WHERE key=?', (marker,)).fetchone():
+                where = " WHERE decision IS NOT NULL AND decision != ''" if table == 'pairs' else ''
+                for entity_key, raw in db.execute('SELECT %s,%s FROM %s AS row%s' % (entity('row'), projection('row'), table, where)).fetchall():
+                    cls.observe(db, kind, entity_key, json.loads(raw), legacy=True)
+                db.execute('INSERT INTO tracking_meta VALUES (?,?)', (marker, now_iso()))
+
+    def __init__(self, path, store=None):
+        import sqlite3
+        self.path = Path(path)
+        with sqlite3.connect(self.path) as db:
+            self.schema(db, store)
+
+    def ingest(self, events):
+        import sqlite3
+        if not events:
+            return
+        with sqlite3.connect(self.path, timeout=30) as db:
+            for e in events:
+                self.event(db, e['kind'], e['entity'], e['payload'], e['id'], e['at'], e['store'])
+                if e['kind']=='source.appearance':
+                    payload=e['payload'];source=payload.get('source');record=payload.get('catalog_record')
+                    origins=[v for v in (source,record) if isinstance(v,dict)]
+                    origins += [o for v in list(origins) for o in (v.get('origins') if isinstance(v.get('origins'),list) else []) if isinstance(o,dict)]
+                    for origin in origins:
+                        for key in ('path','original_path','quarantine_path'):
+                            path=origin.get(key)
+                            if isinstance(path,str) and path:
+                                parent=str((PureWindowsPath(path) if '\\' in path else Path(path)).parent)
+                                self.identity(db,'folder',parent)
+
+    @classmethod
+    def rows(cls, db, after=0, limit=None):
+        query = 'SELECT seq,id,store,at,kind,entity,payload FROM tracking_events WHERE seq>? ORDER BY seq'
+        args = [after]
+        if limit is not None:
+            query += ' LIMIT ?'; args.append(limit)
+        return [{'seq': r[0], 'id': r[1], 'store': r[2], 'at': r[3], 'kind': r[4], 'entity': r[5],
+                 'payload': json.loads(r[6])} for r in db.execute(query, args)]
+
+    def export(self):
+        import sqlite3
+        with sqlite3.connect(self.path) as db:
+            return ('\n'.join(self.encode(e) for e in self.rows(db)) + '\n').encode()
+
+    @staticmethod
+    def decode(content):
+        events = [json.loads(line) for line in content.splitlines() if line.strip()]
+        for e in events:
+            if not all(isinstance(e.get(k), str) for k in ('id', 'store', 'at', 'kind', 'entity')) or not isinstance(e.get('payload'), dict):
+                raise ValueError('Invalid tracking archive.')
+        return events
+
+    def coverage(self, records):
+        import sqlite3
+        if not records:return
+        with sqlite3.connect(self.path, timeout=30) as db:
+            for record in records:
+                key = hashlib.sha256(self.encode([record.get('media_id'),record.get('sha256'),record.get('stamp'),record.get('recipes')]).encode()).hexdigest()
+                self.observe(db,'analysis.library',key,record)
+
+    def diagnostics(self):
+        import sqlite3
+        with sqlite3.connect(self.path) as db:
+            return {'schema': self.SCHEMA, 'instance':db.execute("SELECT value FROM tracking_meta WHERE key='instance'").fetchone()[0], 'events': db.execute('SELECT count(*) FROM tracking_events').fetchone()[0],
+                    'bytes': self.path.stat().st_size}
+
+
 class LibraryStore:
     def __init__(self, root: Path):
         self.root = root
@@ -1733,6 +1977,7 @@ class LibraryStore:
         self._saved_positions={m["id"]:i for i,m in enumerate(self.data["media"])}
         self.timings={}
         self.recent_errors=[]
+        self._tracking_start()
         matching_deps=self.root/'.outfit-search'/('python-'+str(sys.version_info.major)+'.'+str(sys.version_info.minor))
         if matching_deps.is_dir() and str(matching_deps) not in sys.path:sys.path.insert(0,str(matching_deps))
         if self._refresh_auto_set_covers():
@@ -1743,6 +1988,108 @@ class LibraryStore:
         self.battles = BattleRankings(self)
         self.outfit_matcher = OutfitMatcher(self)
         self.missing_files = MissingFileFinder(self.missing_file_records, self.lock)
+
+    def _tracking_start(self):
+        import sqlite3
+        self._tracking_queue = []
+        ident = self.data.setdefault('_tracking_store', uuid.uuid4().hex)
+        self.tracking = TrackingJournal(self.root / 'tracking.sqlite3', ident)
+        self._tracking_flush()
+        with sqlite3.connect(self.tracking.path) as db:
+            TrackingJournal.identity(db,'library.root',str(self.root.resolve()),ident)
+            if not db.execute("SELECT 1 FROM tracking_meta WHERE key='library_backfill'").fetchone():
+                for table in ('media', 'rapid_queue', 'sets', 'characters'):
+                    for item in self.data.get(table, []):
+                        TrackingJournal.observe(db, 'library.' + table, item['id'], item, legacy=True)
+                for entry in self.data.get('undo_history', []):
+                    TrackingJournal.observe(db, 'legacy.undo', entry.get('id', TrackingJournal.encode(entry)), entry, legacy=True)
+                for table in ('duplicate_replacements', 'duplicate_cleanups', 'organizer_links'):
+                    for key, value in self.data.get(table, {}).items():
+                        TrackingJournal.observe(db, 'legacy.' + table, key, value, legacy=True)
+                db.execute("INSERT INTO tracking_meta VALUES ('library_backfill',?)", (now_iso(),))
+        if self._saved_data.get('_tracking_store') != ident:
+            self._write_atomic(self.data)
+            self._saved_data = copy.deepcopy(self.data)
+
+    def _tracking_event(self, kind, entity, payload, deterministic=False):
+        store = self.data['_tracking_store']
+        ident = uuid.uuid5(uuid.NAMESPACE_URL, store + kind + str(entity) + TrackingJournal.encode(payload)).hex if deterministic else uuid.uuid4().hex
+        return {'id': ident, 'store': store, 'at': now_iso(), 'kind': kind, 'entity': str(entity), 'payload': payload}
+
+    def _source_observation(self, item, source, original_name=None, record=None):
+        payload = {'sha256': item.get('sha256'), 'original_name': original_name or item.get('original_name'),
+                   'source': copy.deepcopy(source), 'provenance': 'observed_source', 'actor': 'unknown'}
+        if record is not None:
+            payload['catalog_record'] = copy.deepcopy(record)
+        self._tracking_queue.append(self._tracking_event('source.appearance', item['id'], payload, deterministic=True))
+
+    def _tracking_changes(self, media_ids=None):
+        events = list(self._tracking_queue)
+        context={**TrackingJournal.context()};context.setdefault('operation_id',uuid.uuid4().hex)
+        for table in ('media', 'rapid_queue', 'sets', 'characters'):
+            if table == 'media' and media_ids is not None:
+                before = {i: self._saved_data['media'][self._saved_positions[i]] for i in media_ids}
+                after = {i: self.data['media'][self._saved_positions[i]] for i in media_ids}
+            else:
+                before = {i['id']: i for i in self._saved_data.get(table, [])}
+                after = {i['id']: i for i in self.data.get(table, [])}
+            for ident in before.keys() | after.keys():
+                old, new = before.get(ident), after.get(ident)
+                change = TrackingJournal.delta(old, new)
+                if change:
+                    events.append(self._tracking_event('library.' + table, ident,
+                        {'schema': 1, 'change': change, 'field_rules':{'colors':'manual_tags_and_literal_name_colors_v1','width':'file_metadata','height':'file_metadata','cover_media_id':(new or old or {}).get('cover_source','unknown')}, **context}))
+                    if table in ('media', 'rapid_queue') and new and (not old or any(old.get(k) != new.get(k) for k in ('source', 'sha256', 'original_name'))):
+                        payload = {'sha256': new.get('sha256'), 'original_name': new.get('original_name'),
+                                   'source': copy.deepcopy(new.get('source', {})), 'provenance': 'observed_source', 'actor': 'unknown'}
+                        events.append(self._tracking_event('source.appearance', ident, payload, deterministic=True))
+                    if table == 'media' and old and new and old.get('sha256') != new.get('sha256'):
+                        events.append(self._tracking_event('relationship.replacement', ident,
+                            {'before_sha256': old.get('sha256'), 'after_sha256': new.get('sha256'),
+                             'relationship': 'replacement', 'same_photo_verified': False, **context}))
+        for table in ('duplicate_replacements','duplicate_cleanups','organizer_links'):
+            before=self._saved_data.get(table,{})
+            after=self.data.get(table,{})
+            for key in before.keys() | after.keys():
+                delta=TrackingJournal.delta(before.get(key),after.get(key))
+                if delta:events.append(self._tracking_event('library.'+table,key,{'schema':1,'change':delta,**context}))
+        if self._saved_data.get('quality_settings')!=self.data.get('quality_settings'):
+            events.append(self._tracking_event('configuration.quality','library',{'before':self._saved_data.get('quality_settings'),'after':self.data.get('quality_settings'),**context}))
+        return events
+
+    def _tracking_flush(self):
+        batch=self.data.get('_tracking_batch')
+        if getattr(self,'_tracking_applied_batch','not-loaded')!=batch:
+            self.tracking.ingest(self.data.get('_tracking_pending', []))
+            self._tracking_applied_batch=batch
+
+    def tracking_import(self, body):
+        fragment=body.get('fragment')
+        if fragment is not None:
+            digest=fragment.get('digest');index=fragment.get('index');total=fragment.get('total');content=fragment.get('text')
+            if (not isinstance(digest,str) or not re.fullmatch('[0-9a-f]{64}',digest) or type(index) is not int
+                    or type(total) is not int or not 0<=index<total<=2048 or not isinstance(content,str) or len(content)>64000):
+                raise ValueError('Invalid tracking fragment.')
+            with self.lock:
+                directory=self.root/'.incoming'/'tracking'/digest;directory.mkdir(parents=True,exist_ok=True)
+                target=directory/str(index);temp=directory/(str(index)+'.tmp')
+                with temp.open('w',encoding='utf-8') as handle:
+                    handle.write(content);handle.flush();os.fsync(handle.fileno())
+                os.replace(temp,target)
+                if all((directory/str(i)).is_file() for i in range(total)):
+                    raw=''.join((directory/str(i)).read_text('utf-8') for i in range(total)).encode()
+                    if hashlib.sha256(raw).hexdigest()!=digest:raise ValueError('Tracking transfer checksum mismatch.')
+                    self.tracking.ingest(TrackingJournal.decode(raw));shutil.rmtree(directory)
+                    return {'received':1,'complete':True}
+                return {'received':0,'complete':False}
+        events = body.get('events', [])
+        if not isinstance(events, list) or len(events) > 250:
+            raise ValueError('Tracking transfers require pages of at most 250 events.')
+        events = TrackingJournal.decode(
+            '\n'.join(TrackingJournal.encode(e) for e in events).encode())
+        with self.lock:
+            self.tracking.ingest(events)
+        return {'received': len(events)}
 
     def _empty(self) -> dict[str, Any]:
         return {
@@ -1880,6 +2227,8 @@ class LibraryStore:
                 shutil.copy2(self.db_path, self.backup_dir / "library-before-last-change.json")
                 daily = self.backup_dir / f"library-{datetime.now().strftime('%Y-%m-%d')}.json"
                 if not daily.exists():
+                    if hasattr(self,'tracking'):
+                        daily.with_suffix('.tracking.jsonl').write_bytes(self.tracking.export())
                     shutil.copy2(self.db_path, daily)
             except Exception:
                 pass
@@ -1931,13 +2280,17 @@ class LibraryStore:
                          and all(i in positions and self.data['media'][positions[i]]['id']==i for i in media_ids))
             self._save_media_ids=set(media_ids) if incremental else None
             try:
+                self._tracking_flush()
                 self._refresh_auto_set_covers()
+                self.data['_tracking_pending'] = self._tracking_changes(self._save_media_ids)
+                self.data['_tracking_batch']=uuid.uuid4().hex
                 self.data["updated_at"] = now_iso()
                 self._write_atomic(self.data)
             except Exception as error:
                 self.data=copy.deepcopy(self._saved_data)
                 self._encoded_media=None
                 self._media_lookup=None
+                self._tracking_queue=[]
                 self.recent_errors=(self.recent_errors+[{'operation':'metadata_save','error':str(error),'at':now_iso()}])[-20:]
                 raise
             finally:
@@ -1955,6 +2308,13 @@ class LibraryStore:
                 self._saved_positions={m['id']:i for i,m in enumerate(self.data['media'])}
             self._media_lookup=None
             self.revision = uuid.uuid4().hex
+            self._tracking_queue=[]
+            try:
+                self._tracking_flush()
+            except Exception as error:
+                # JSON already committed. Keep its outbox for restart/next-save replay;
+                # do not tell callers the application mutation rolled back.
+                self.recent_errors=(self.recent_errors+[{'operation':'tracking_replay','error':str(error),'at':now_iso()}])[-20:]
             self.record_timing('metadata_save',time.perf_counter()-started)
 
     def record_timing(self,name,seconds):
@@ -1971,7 +2331,7 @@ class LibraryStore:
                     'p95_ms':ranked[min(len(ranked)-1,int(len(ranked)*.95))],'max_ms':max(values)}
             return {'schema':1,'api_version':API_VERSION,'revision':self.revision,'python':sys.version.split()[0],
                 'counts':{name:len(self.data.get(name,[])) for name in ('media','sets','characters')},
-                'timings':timings,'recent_errors':copy.deepcopy(self.recent_errors),
+                'tracking':self.tracking.diagnostics(),'timings':timings,'recent_errors':copy.deepcopy(self.recent_errors),
                 'note':'Session measurements, no media contents or original filenames.'}
 
     def undo_history(self) -> dict[str, Any]:
@@ -2018,6 +2378,7 @@ class LibraryStore:
                 except OSError:
                     pass  # Windows may still have the file open.
 
+    @TrackingJournal.action("manual")
     def _save_undo(self, entry: dict[str, Any]) -> None:
         previous = self.data.get("undo_history", [])
         entry.update(id=uuid.uuid4().hex, recorded_at=now_iso())
@@ -2238,7 +2599,7 @@ class LibraryStore:
             sessions=getattr(self,'_organizer_sessions',{});self._organizer_sessions=sessions
             while len(sessions)>=8:sessions.pop(next(iter(sessions)))
             sessions[token]={'owner':owner,'namespace':namespace,'groups':plan,'mapping':mapping,'imports':imports,'issues':issues,'conflicts':conflicts,
-                'fingerprint':self._organizer_fingerprint(owner),'catalog':copy.deepcopy(catalog),'categories':draft.get('category_catalog',{}).get('categories',[]),'created':time.monotonic()}
+                'tracking':draft.get('tracking') or {},'fingerprint':self._organizer_fingerprint(owner),'catalog':copy.deepcopy(catalog),'categories':draft.get('category_catalog',{}).get('categories',[]),'created':time.monotonic()}
             return {'token':token,'sets':[{'id':g['id'],'name':g['name'],'count':len(g['members']),'action':'update' if g['destination_id'] else 'create'} for g in plan],
                     'imports':[{'id':i['id'],'name':i['name']} for i in imports],'existing_count':len(mapping),'conflicts':conflicts,'issues':list(dict.fromkeys(issues))}
 
@@ -2255,6 +2616,8 @@ class LibraryStore:
             if not row:raise ValueError('Image is not in this preview.')
             existing=next((m for m in self.data['media'] if m['character_id']==session['owner'] and m['sha256']==row['sha']),None)
             if existing:
+                self._source_observation(existing, {'kind':'organizer'}, row['name'], session['catalog'][ident])
+                self.save(media_ids=[existing['id']])
                 session['mapping'][ident]=existing['id']
                 seconds=session['catalog'][ident].get('frame_seconds')
                 if existing.get('media_type')=='video' and seconds is not None:
@@ -2278,6 +2641,7 @@ class LibraryStore:
             return {'id':item['id'],'reused':reused}
         finally:temp.unlink(missing_ok=True)
 
+    @TrackingJournal.action("manual")
     def organizer_apply(self,body):
         with self.lock:
             session=self._organizer_session(body.get('token'))
@@ -2289,6 +2653,7 @@ class LibraryStore:
             for ident in {i for g in groups for i in g['members']}:
                 media=self.media_item(mapping.get(ident,''))
                 if not media or media['character_id']!=owner or media['sha256']!=catalog[ident]['sha']:raise ValueError('Imports are incomplete or changed. Preview again to resume.')
+            self.tracking.ingest(TrackingJournal.decode('\n'.join(TrackingJournal.encode(e) for e in session.get('tracking',{}).get('events',[])).encode()))
             checkpoint=self.create_checkpoint({'label':'Before organizer transfer'})
             before=copy.deepcopy(self.data)
             try:
@@ -2308,6 +2673,9 @@ class LibraryStore:
                     digest=hashlib.sha256(frame['image']).hexdigest();target=self.thumb_dir/(item['id']+'-match-'+digest[:16]+'.jpg')
                     target.parent.mkdir(exist_ok=True);target.write_bytes(frame['image'])
                     item['video_match_frame']={'seconds':frame['seconds'],'sha256':digest,'video_sha256':item['sha256'],'stored_rel':target.relative_to(self.root).as_posix()}
+                for ident, mid in mapping.items():
+                    if ident in catalog:
+                        self._source_observation(self.media_item(mid), {'kind':'organizer'}, record=catalog[ident])
                 links=self.data.setdefault('organizer_links',{}).setdefault(session['namespace'],{})
                 for group in groups:
                     sid=group['destination_id'] or uuid.uuid4().hex;target=self.set_item(sid)
@@ -2340,7 +2708,8 @@ class LibraryStore:
         import zipfile
         with self.lock:
             ident=datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:8]
-            path=self.backup_dir/('checkpoint-'+ident+'.zip');files={'library.json':json.dumps(self.data,ensure_ascii=False).encode()}
+            self._tracking_flush()
+            path=self.backup_dir/('checkpoint-'+ident+'.zip');files={'library.json':json.dumps(self.data,ensure_ascii=False).encode(), 'tracking.jsonl':self.tracking.export()}
             if self.battles.path.exists():files['battles.json']=self.battles.path.read_bytes()
             media=bool(body.get('include_media'));manifest={'schema':1,'id':ident,'at':now_iso(),'label':str(body.get('label','Manual checkpoint'))[:200],
                 'include_media':media,'files':{k:hashlib.sha256(v).hexdigest() for k,v in files.items()}}
@@ -2385,11 +2754,12 @@ class LibraryStore:
             manifest=json.loads(z.read('checkpoint.json'))
             if manifest.get('schema')!=1 or manifest.get('id')!=ident:raise ValueError('Invalid checkpoint manifest.')
             for name,digest in manifest['files'].items():
-                if name not in ('library.json','battles.json') and (Path(name).is_absolute() or '..' in Path(name).parts or Path(name).parts[0] not in ('media','thumbnails')):raise ValueError('Unsafe checkpoint path.')
-                if name in ('library.json','battles.json'):
+                if name not in ('library.json','battles.json','tracking.jsonl') and (Path(name).is_absolute() or '..' in Path(name).parts or Path(name).parts[0] not in ('media','thumbnails')):raise ValueError('Unsafe checkpoint path.')
+                if name in ('library.json','battles.json','tracking.jsonl'):
                     content=z.read(name)
                     if hashlib.sha256(content).hexdigest()!=digest:raise ValueError('Checkpoint verification failed.')
                     files[name]=content
+            if 'tracking.jsonl' in files:TrackingJournal.decode(files['tracking.jsonl'])
             library=json.loads(files['library.json'])
             if not isinstance(library.get('media'),list) or not isinstance(library.get('characters'),list):raise ValueError('Invalid library snapshot.')
             if 'battles.json' in files:
@@ -2425,7 +2795,7 @@ class LibraryStore:
             try:
                 with zipfile.ZipFile(path) as z:
                     for name,digest in manifest['files'].items():
-                        if name in ('library.json','battles.json'):continue
+                        if name in ('library.json','battles.json','tracking.jsonl'):continue
                         target=self.root/name
                         if target.is_file() and self._hash_file(target)==digest:continue
                         # Stored media names are unique. Do not overwrite changed originals.
@@ -2436,6 +2806,13 @@ class LibraryStore:
                             if self._hash_file(temporary)!=digest:raise ValueError('Media checkpoint verification failed.')
                             os.replace(temporary,target)
                         finally:temporary.unlink(missing_ok=True)
+                self._tracking_flush()
+                if 'tracking.jsonl' in files:self.tracking.ingest(TrackingJournal.decode(files['tracking.jsonl']))
+                library['_tracking_store']=self.data['_tracking_store']
+                self.data=library
+                library['_tracking_pending']=self._tracking_changes()
+                library['_tracking_batch']=uuid.uuid4().hex
+                library['_tracking_pending'].append(self._tracking_event('checkpoint.restore',body['id'],{'actor':'manual','checkpoint':body['id']}))
                 self._write_atomic(library)
                 if 'battles.json' in files:
                     temp=self.battles.path.with_suffix('.restore');temp.write_bytes(files['battles.json']);os.replace(temp,self.battles.path)
@@ -2445,6 +2822,11 @@ class LibraryStore:
             except Exception:
                 self._recover_restore();self.data=self._load();self._saved_data=copy.deepcopy(self.data);self.battles.data=None
                 raise
+            self._tracking_queue=[]
+            self._saved_positions={m['id']:i for i,m in enumerate(self.data['media'])}
+            # Replay happens only after both application files committed.
+            try:self._tracking_flush()
+            except Exception as error:self.recent_errors.append({'operation':'tracking_replay','error':str(error),'at':now_iso()})
             return {'restored':body['id'],'rollback':rollback['id']}
 
     def _recover_restore(self):
@@ -2462,6 +2844,8 @@ class LibraryStore:
         with self.lock:
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             dst = self.backup_dir / f"library-manual-{stamp}.json"
+            self._tracking_flush()
+            dst.with_suffix('.tracking.jsonl').write_bytes(self.tracking.export())
             shutil.copy2(self.db_path, dst)
             return dst
 
@@ -2644,7 +3028,7 @@ class LibraryStore:
 
     def public_library(self) -> dict[str, Any]:
         with self.lock:
-            return json.loads(json.dumps({**{k: v for k, v in self.data.items() if k not in ("undo_history", "duplicate_replacements", "duplicate_cleanups", "rapid_queue", "rapid_states")}, "revision": self.revision}))
+            return json.loads(json.dumps({**{k: v for k, v in self.data.items() if k not in ("undo_history", "duplicate_replacements", "duplicate_cleanups", "rapid_queue", "rapid_states", "_tracking_store", "_tracking_pending", "_tracking_batch")}, "revision": self.revision}))
 
     def duplicate_catalog(self, character_id: str = "") -> dict[str, Any]:
         """Only live image records; filesystem leftovers are never reference images."""
@@ -2672,7 +3056,7 @@ class LibraryStore:
                                   "character_id": item["character_id"],
                                   "character_name": characters.get(item['character_id'],{}).get('name','Unknown'),
                                   "sets": memberships.get(item['id'],[])})
-            return {"library_id": library_id, "root": str(self.root.resolve()), "revision": self.revision,
+            return {"library_id": library_id, "stable_library_id":self.data["_tracking_store"], "root": str(self.root.resolve()), "revision": self.revision,
                     "characters": [{"id": c["id"], "name": c["name"]} for c in self.data["characters"]],
                     "coverage_version": 2, "library_cleanup": True, "files": files}
 
@@ -2683,6 +3067,7 @@ class LibraryStore:
             entry = self.data.get("duplicate_cleanups", {}).get(operation)
             return {"operation": operation, "state": entry["state"] if entry else "missing"}
 
+    @TrackingJournal.action("manual")
     def duplicate_cleanup(self, operation: str, library_id: str, selection: Any) -> dict[str, Any]:
         """Atomic metadata removal. Retain originals and snapshots for durable Undo."""
         if not re.fullmatch(r"[0-9a-f]{32}", operation):
@@ -2800,6 +3185,7 @@ class LibraryStore:
     _replacement_fields = ("original_name", "stored_rel", "content_type", "sha256", "source", "width", "height",
                            "file_bytes", "needs_replacement", "replacement_auto", "replacement_override_sha")
 
+    @TrackingJournal.action("manual")
     def duplicate_replace(self, payload: bytes, name: str, media_id: str, expected_sha: str,
                           operation: str, library_id: str) -> dict[str, Any]:
         if not re.fullmatch(r"[0-9a-f]{32}", operation):
@@ -3203,6 +3589,7 @@ class LibraryStore:
     def set_item(self, set_id: str) -> dict[str, Any] | None:
         return next((s for s in self.data.get("sets", []) if s.get("id") == set_id), None)
 
+    @TrackingJournal.action("manual")
     def add_character(self, name: str) -> dict[str, Any]:
         name = name.strip()
         if not name:
@@ -3216,6 +3603,7 @@ class LibraryStore:
             self.save()
             return c
 
+    @TrackingJournal.action("manual")
     def delete_character(self, character_id: str) -> dict[str, Any]:
         # Removing an accidental empty character must never delete media files.
         # Check under the import lock too, so a concurrent import cannot be orphaned.
@@ -3233,6 +3621,7 @@ class LibraryStore:
             self.save()
             return {"ok": True, "character_id": character_id}
 
+    @TrackingJournal.action("manual")
     def add_set_category(self, character_id: str, name: str) -> dict[str, Any]:
         name = name.strip()
         if not name:
@@ -3250,6 +3639,7 @@ class LibraryStore:
             self.save()
             return category
 
+    @TrackingJournal.action("manual")
     def edit_set_category(self, category_id: str, name: str | None = None) -> dict[str, Any]:
         with self.lock:
             for owner in self.data["characters"]:
@@ -3307,6 +3697,7 @@ class LibraryStore:
             self.save()
             return owner
 
+    @TrackingJournal.action("manual")
     def add_category(self, character_id: str, name: str, media_type: str = "image") -> dict[str, Any]:
         name = name.strip()
         if not name:
@@ -3328,6 +3719,7 @@ class LibraryStore:
             self.save()
             return cat
 
+    @TrackingJournal.action("manual")
     def rename_category(self, category_id: str, name: str) -> dict[str, Any]:
         name = name.strip()
         if not name:
@@ -3355,6 +3747,7 @@ class LibraryStore:
             self.save()
             return category
 
+    @TrackingJournal.action("manual")
     def delete_category(self, category_id: str) -> dict[str, Any]:
         with self.lock:
             owner = None
@@ -3457,6 +3850,7 @@ class LibraryStore:
                 )
                 self._thumbnail_worker.start()
 
+    @TrackingJournal.action("automatic")
     def _run_thumbnail_queue(self) -> None:
         while True:
             job = self._thumbnail_queue.get()
@@ -3530,6 +3924,7 @@ class LibraryStore:
                 pass
         return None
 
+    @TrackingJournal.action("import")
     def _register_file(
         self,
         temp_path: Path,
@@ -3564,7 +3959,8 @@ class LibraryStore:
             categories = self._validate_categories(character_id, categories, media_type)
             for existing in (self.data.get("rapid_queue", []) if pending else self.data["media"]):
                 if existing.get("character_id") == character_id and existing.get("sha256") == sha:
-                    changed = False
+                    self._source_observation(existing, source, original_name)
+                    changed = True
                     if existing.get("media_type") == "video":
                         merged = list(dict.fromkeys(existing.get("categories", []) + categories))
                         if merged != existing.get("categories", []):
@@ -3899,6 +4295,7 @@ class LibraryStore:
         finally:
             temp.unlink(missing_ok=True)
 
+    @TrackingJournal.action("manual")
     def replace_media_bytes(
         self,
         payload: bytes,
@@ -4041,6 +4438,7 @@ class LibraryStore:
         suffix = max((int(m.group(1)) for n in names if (m := pattern.fullmatch(n))), default=0) + 1
         return f"{name} {suffix}"
 
+    @TrackingJournal.action("manual")
     def create_set(self, character_id: str, name: str, media_ids: list[Any], cover_media_id: Any = None, kind: str = "set", preserve_placement: bool = False, cover_source: Any = None, categories: Any = None, aliases: Any = None, colors: Any = None, notes: Any = None) -> dict[str, Any]:
         if kind != "set":
             raise ValueError("Only Sets are supported")
@@ -4092,6 +4490,7 @@ class LibraryStore:
             self.save()
             return item
 
+    @TrackingJournal.action("manual")
     def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None, cover_source: Any = None, favorite: Any = None, categories: Any = None, remove_media_ids: Any = None, aliases: Any = None, colors: Any = None, notes: Any = None) -> dict[str, Any]:
         details = self._set_details(aliases, colors, notes)
         with self.lock:
@@ -4164,6 +4563,7 @@ class LibraryStore:
             self.save()
             return item
 
+    @TrackingJournal.action("manual")
     def bulk_set_categories(self, character_id: str, set_ids: Any, categories: Any, action: str) -> dict[str, Any]:
         with self.lock:
             if action not in ("add", "remove") or not isinstance(set_ids, list) or not set_ids or any(not isinstance(i, str) for i in set_ids):
@@ -4195,6 +4595,7 @@ class LibraryStore:
                 media["in_videos" if media.get("media_type") == "video" else "in_all"] = True
                 self._stamp_main_entry(media, was_in_main)
 
+    @TrackingJournal.action("manual")
     def delete_set(self, set_id: str) -> dict[str, Any]:
         with self.lock:
             item = self.set_item(set_id)
@@ -4205,6 +4606,7 @@ class LibraryStore:
             self.save()
             return {"ok": True, "set_id": set_id}
 
+    @TrackingJournal.action("manual")
     def set_categories(self, media_id: str, categories: list[str], in_all: Any = None, in_videos: Any = None) -> dict[str, Any]:
         with self.lock:
             m = self.media_item(media_id)
@@ -4230,6 +4632,7 @@ class LibraryStore:
                 changes.update({"in_purgatory": False, "in_review": False, flag: main})
             return self._change_media(m, changes, "Change video categories / All" if video else "Change categories / All")
 
+    @TrackingJournal.action("manual")
     def set_favorite(self, media_id: str, favorite: bool) -> dict[str, Any]:
         with self.lock:
             m = self.media_item(media_id)
@@ -4246,6 +4649,7 @@ class LibraryStore:
             # Explicitly leave both holding areas without promoting or changing sets.
             return self._change_media(m, {'in_review':False,'in_purgatory':False,'in_all':False,'in_videos':False,'main_explicit':False}, 'Remove from holding area')
 
+    @TrackingJournal.action("manual")
     def set_review(self, media_id: str, in_review: bool) -> dict[str, Any]:
         with self.lock:
             m = self.media_item(media_id)
@@ -4258,6 +4662,7 @@ class LibraryStore:
             # Keep the original import date; _change_media records entry into Main.
             return self._change_media(m, {"in_review": False, "in_purgatory": False, "in_all": m.get("media_type") != "video", "in_videos": m.get("media_type") == "video", "main_explicit": True}, "Promote from Review")
 
+    @TrackingJournal.action("manual")
     def set_purgatory(self, media_id: str, in_purgatory: bool) -> dict[str, Any]:
         with self.lock:
             m = self.media_item(media_id)
@@ -4271,6 +4676,7 @@ class LibraryStore:
                 return m
             return self._change_media(m, changes, "Send to Purgatory" if target else "Restore from Purgatory")
 
+    @TrackingJournal.action("manual")
     def set_crop(self, media_id: str, top: Any = 0.0, bottom: Any = 0.0) -> dict[str, Any]:
         with self.lock:
             m = self.media_item(media_id)
@@ -4298,6 +4704,7 @@ class LibraryStore:
             self.save()
             return m
 
+    @TrackingJournal.action("manual")
     def set_video_meta(self, media_id: str, thumb_seconds: float | None = None, markers: list[Any] | None = None) -> dict[str, Any]:
         with self.lock:
             m = self.media_item(media_id)
@@ -4330,6 +4737,7 @@ class LibraryStore:
                 self.save()
             return m
 
+    @TrackingJournal.action("manual")
     def video_workflow(self,media_id,action,body):
         with self.lock:
             media=self.media_item(media_id)
@@ -4392,6 +4800,7 @@ class LibraryStore:
             self.save()
             return m
 
+    @TrackingJournal.action("manual")
     def delete_media(self, media_id: str) -> None:
         with self.lock:
             m = self.media_item(media_id)
@@ -4543,6 +4952,7 @@ class LibraryStore:
             self._metadata_index_worker.start()
             return dict(self._metadata_index)
 
+    @TrackingJournal.action("automatic")
     def _run_metadata_index(self, jobs: list[tuple[str, str, str]]) -> None:
         dirty = False
         try:
@@ -4586,6 +4996,7 @@ class LibraryStore:
         with self.lock:
             return {"enabled": True, "min_pixels": 500000, **self.data.get("quality_settings", {})}
 
+    @TrackingJournal.action("manual")
     def set_quality_settings(self, body: dict[str, Any]) -> dict[str, Any]:
         threshold = body.get("min_pixels", 500000)
         if isinstance(threshold, bool) or not isinstance(threshold, int) or not 10000 <= threshold <= 100000000:
@@ -5111,6 +5522,8 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/undo":
                 self._send_json(200, self.store.undo_history())
                 return
+            if path == "/api/tracking/status":
+                self._send_json(200,self.store.tracking.diagnostics());return
             if path == "/api/library":
                 self._send_json(200, self.store.public_library())
                 return
@@ -5147,6 +5560,8 @@ class MediaHandler(BaseHTTPRequestHandler):
                 body=self._read_json();finder=self.store.missing_files
                 result=finder.start(body) if path.endswith('/start') else finder.stop(body.get('job_id')) if path.endswith('/stop') else finder.recover(body)
                 self._send_json(200,result);return
+            if path == '/api/tracking/import':
+                self._send_json(200,self.store.tracking_import(self._read_json()));return
             if path in ('/api/organizer/preview','/api/organizer/import','/api/organizer/apply','/api/checkpoints/create','/api/checkpoints/preview','/api/checkpoints/restore'):
                 methods={'/api/organizer/preview':self.store.organizer_preview,'/api/organizer/import':self.store.organizer_import,
                     '/api/organizer/apply':self.store.organizer_apply,'/api/checkpoints/create':self.store.create_checkpoint,

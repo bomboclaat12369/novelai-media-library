@@ -1,0 +1,51 @@
+{
+  "companion": {
+    "fixture": "synthetic metadata; no user media or model execution",
+    "baseline_commit": "0559380bfe330d31db3ad2498b682b15f0a5be57",
+    "before": {
+      "media": 30000,
+      "sets": 750,
+      "initial_save_ms": 669.66,
+      "favorite_median_ms": 59.61,
+      "favorite_p95_ms": 67.34,
+      "restart_ms": 1122.83,
+      "journal_bytes": 0,
+      "journal_growth_20_edits_bytes": 0,
+      "metadata_preserved": true
+    },
+    "after": {
+      "media": 30000,
+      "sets": 750,
+      "initial_save_ms": 3825.82,
+      "favorite_median_ms": 66.73,
+      "favorite_p95_ms": 78.75,
+      "restart_ms": 1466.18,
+      "journal_bytes": 55586816,
+      "journal_growth_20_edits_bytes": 12288,
+      "metadata_preserved": true
+    }
+  },
+  "workbench": [
+    {
+      "images": 1000,
+      "first_persist_ms": 81.0,
+      "unchanged_persist_median_ms": 4.39,
+      "unchanged_history_growth_events": 0,
+      "database_bytes": 3719168
+    },
+    {
+      "images": 10000,
+      "first_persist_ms": 977.99,
+      "unchanged_persist_median_ms": 61.5,
+      "unchanged_history_growth_events": 0,
+      "database_bytes": 37171200
+    },
+    {
+      "images": 30000,
+      "first_persist_ms": 3179.41,
+      "unchanged_persist_median_ms": 183.77,
+      "unchanged_history_growth_events": 0,
+      "database_bytes": 111738880
+    }
+  ]
+}

@@ -107,3 +107,9 @@ not a guarantee for the user's Windows machine or actual collection.
 DOM and native rendering tests do not establish browser layout, video playback
 precision in a particular browser, or Windows installer behavior. Browser-access
 troubleshooting and automatic clothing-color detection remain paused.
+
+Background history is implemented by `TrackingJournal` in the companion runtime
+and the shared `duplicate-review/tracking.py` adapter. The runtime source ships
+inside Workbench, so there is one journal implementation. See
+`docs/BACKGROUND-TRACKING.md` for typed evidence, persistence/backup contracts,
+legacy migration, performance measurements and limitations.
