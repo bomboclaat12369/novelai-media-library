@@ -1,0 +1,59 @@
+{
+  "status": "published_verified",
+  "source_commit": "5a87d01bff7b70916eb909114f09e2dc3a0fa647",
+  "tested_local_commit": "68f62a573b70e93b139828308344b0e3d4cc78fc",
+  "tested_source_tree": "b3aaa74a8152b14a36fdcbaecbdfd45adafc53b1",
+  "workflow_run": "https://github.com/bomboclaat12369/novelai-media-library/actions/runs/42242623915",
+  "local_validation": {
+    "runtime_tests": 215,
+    "workbench_tests": 175,
+    "javascript_dom_checks": 72,
+    "native_card_renders": 364,
+    "publishing_tests": 13,
+    "status": "passed"
+  },
+  "ui_limits": "No live Windows desktop/browser smoke test. Browser-access troubleshooting remains paused.",
+  "benchmark": "docs/benchmarks/2026-11-06-manual-search.json",
+  "workflow_attempt": 2,
+  "previous_attempt": {
+    "conclusion": "cancelled",
+    "reason": "Runner stalled for over ten minutes downloading an Ubuntu FFmpeg dependency; no release was published. Retried the same source on a fresh runner."
+  },
+  "remote_validation_runs": [
+    42242623912,
+    42242623942
+  ],
+  "payload_commit": "dbe57f96d1dcdc53bbe7b2f75f3e2bdfff5eb5b1",
+  "release_commit": "a30ccea1aa7367418598a73018624d57d73c0293",
+  "artifacts": {
+    "runtime": {
+      "version": "2.7.76",
+      "sha256": "6eb05464294243b191afa6d2002d2fc03340bdc8d24401310531147a1651c8ef",
+      "bytes": 369200
+    },
+    "standalone": {
+      "version": "2.9.26",
+      "sha256": "34388a2c56c870df5fd090c75bdb702f8b0d00a32d6b122d3a506a98ef7b2ada",
+      "bytes": 17239900
+    },
+    "userscript": {
+      "version": "2.8.102",
+      "sha256": "318183793d803aa860ba5de97633ab3577fda07bc7194bc9dd83e09174a87208",
+      "bytes": 482794
+    },
+    "workbench": {
+      "version": "2.0.23",
+      "sha256": "3ebbf5f1d88abb328339947eb47d911f8d577b112cd6081362872cc5a326a522",
+      "bytes": 341474
+    }
+  },
+  "verified_routes": [
+    "GitHub raw manifest",
+    "jsDelivr manifest",
+    "all selected downloadable artifact bytes"
+  ],
+  "receipt_artifact": {
+    "id": 13519140108,
+    "sha256": "fe7aa8656a5c742d1a3f5c97e87c456938099e59f14da3299c5b9f36dc2c5c8e"
+  }
+}
