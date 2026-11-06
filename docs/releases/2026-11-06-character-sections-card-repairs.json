@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "status": "published_verified",
+  "source_commit": "12be9e9d8d4ebf33eefdc3f65d8cde6f827b3542",
+  "source_tree": "94e1c7894d461165636bff8aa732bba21e06c73d",
+  "payload_commit": "ef4bf6dbe74e3c5aff3142fa5799e9b700b99b85",
+  "release_commit": "ab505417854141ffd0d34a4dca3c3679b69836e4",
+  "workflow_url": "https://github.com/bomboclaat12369/novelai-media-library/actions/runs/42223749859",
+  "artifact_id": 13503794529,
+  "artifacts": {
+    "standalone": {
+      "version": "2.9.25",
+      "sha256": "33959aad7dd62dfefdc11c8e748bdcdc94a447fd614174845f104ef4b048d5bc",
+      "bytes": 17233359
+    },
+    "workbench": {
+      "version": "2.0.22",
+      "sha256": "0820525ce9e0400243694b3447758b9da1eb0e80948af7c234c2243db12bab15",
+      "bytes": 326333
+    }
+  },
+  "validation": {
+    "runtime_tests": 194,
+    "workbench_tests": 163,
+    "javascript_checks": 64,
+    "production_card_renders": 364,
+    "release_pipeline_tests": 13,
+    "download_verification": "Both manifest routes and downloaded component bytes verified by the release workflow. Artifact versions, sizes and checksums match the local source packaging dry run.",
+    "visual_review": "Six production renderer composites inspected. No live Windows integration test or browser-access troubleshooting."
+  },
+  "artwork_manifest": "assets/cards/editions/repairs/2026-11-04/manifest.json",
+  "scope_notes": [
+    "One Folder Organizer section for every library girl, including Nikki; multiple folders per girl, offline registry, explicit legacy collection assignment, cached duplicate hashes and recovery after interrupted refresh.",
+    "Preserves existing sets, stars, drafts, source evidence, analysis and collection history.",
+    "Integrates the six original approved card repairs without image resampling or regeneration. Preserves the approved originals in the repository.",
+    "Runtime 2.7.75 and userscript 2.8.101 unchanged. Clothing-color detection, Yoga and browser-access troubleshooting remain paused."
+  ]
+}
