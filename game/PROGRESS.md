@@ -206,6 +206,34 @@ All fixtures and saves were isolated; the user's play save and media were
 not opened. Actual browser tab suspension was not reproduced in the in-app
 browser; hidden-tab control behavior and delayed ticks have automated coverage.
 
+Dropdown and event follow-up, 9 November 2026: timer replies no longer replace
+an open native select. The server clock continues; the page paints the latest
+accepted state after the menu is dismissed, including cancellation without
+changing a value or a night paused at an event. The same guard covers other
+selects, and the deferred view refresh is retried even without a new revision.
+
+Added six event types: anal and creampie paid add-ons, extended bookings,
+extra lounge rounds, team meals and perks for regulars. There are now nine
+types and 48 saved text variants. The two existing event times remain 1:40
+and 3:20; different nights rotate through eligible scenarios. Offers enforce
+their host role, available energy, payout and expense; declining is free.
+The meal restores working staff only and caps energy at 100; the regulars'
+perk caps repeat business at 100. Current nights retain their saved events.
+
+Following Walker's request, verification was limited to nine relevant Python
+checks, four browser-control cases, JavaScript syntax and diff checks, plus
+a focused in-app browser run on an isolated demo save. Seven Python checks
+passed immediately; two persistence fixtures initially hit sandbox temporary
+directory permissions and passed from the writable test directory. The new
+JavaScript fixture needed its existing management-screen stub completed,
+then all four cases passed. The native menu remained open beyond 17 seconds
+while the server advanced and accepted 8× afterward. Escape dismissed it
+without changing the value. Accepting the new $65 event increased revenue
+from $79 to $144 and resumed the night at 8×. The demo screenshot is
+`screenshots/speed-picker-events-demo.png`. No existing play save or
+real-library media was used. Broad suites were not repeated; the testing
+preference is recorded in `game/AGENTS.md`.
+
 Launch `C:\Codex\After-Hours-Codex\PLAY-AFTER-HOURS.bat` or
 `project\game\Start-After-Hours.bat`. See `README.md` for play, data locations,
 restore and developer commands. `screenshots/after-hours-demo.jpg` contains

@@ -8,8 +8,10 @@ const source = fs.readFileSync(path.join(__dirname, '../game/web/app.js'), 'utf8
 
 function fixture() {
   const documentEvents = {};
-  const element = {addEventListener() {}, classList: {add() {}, remove() {}}};
-  const root = {querySelector: () => element, addEventListener() {}};
+  const element = {innerHTML: 'original screen', addEventListener() {}, classList: {add() {}, remove() {}}};
+  const root = {selectOpen: false,
+    querySelector: selector => selector === 'select:open' ? (root.selectOpen ? {} : null) : element,
+    addEventListener() {}};
   const calls = [];
   const context = vm.createContext({
     document: {hidden: true, documentElement: {dataset: {}},
@@ -17,14 +19,15 @@ function fixture() {
       addEventListener: (event, callback) => { documentEvents[event] = callback; }},
     crypto: {randomUUID: () => 'fixture-request'},
     setTimeout: callback => { callback(); return 1; }, clearTimeout() {},
-    calls,
+    calls, studio() {}, resort() {}, saves() {}, expansion() {},
   });
   vm.runInContext(source, context);
-  vm.runInContext(`save={phase:'night',night:{paused:false,decisions:[]}};
+  vm.runInContext(`const actualRender=render;
+    save={phase:'night',night:{paused:false,decisions:[],elapsed:0}};
     boot={token:'fixture-token'}; render=()=>{}; notify=()=>{};
     accept=result=>{save=result.state;};
     act=(action,body)=>{calls.push({action,body});return Promise.resolve();};`, context);
-  return {context, documentEvents, calls};
+  return {context, documentEvents, calls, root, element};
 }
 
 (async () => {
@@ -40,5 +43,26 @@ function fixture() {
     json: async () => ({state: {phase: 'night', night: {paused: false, decisions: []}}})});
   await vm.runInContext("performAct('tick',{},true)", inFlight.context);
   assert.equal(inFlight.calls.length, 0, 'Finishing a request while hidden must not enqueue a pause.');
-  console.log('2 background-tab regression cases passed.');
+  const picker = fixture();
+  vm.runInContext(`render=actualRender; layout=content=>content;
+    club=()=>String(save.night.elapsed); hydrateCards=()=>{};`, picker.context);
+  picker.root.selectOpen = true;
+  for (const elapsed of [1,2,3]) {
+    picker.context.fetch = async () => ({ok: true,
+      json: async () => ({state: {phase: 'night', night: {paused: false, decisions: [], elapsed}}})});
+    await vm.runInContext("performAct('tick',{},true)", picker.context);
+    assert.equal(picker.element.innerHTML, 'original screen', 'Clock replies must not replace an open picker.');
+    assert.equal(vm.runInContext('save.night.elapsed', picker.context), elapsed, 'The clock still advances.');
+  }
+  assert.equal(vm.runInContext('renderDeferred', picker.context), true);
+
+  // Dismissing without a change must flush, even if an event paused the clock.
+  picker.root.selectOpen = false;
+  vm.runInContext('save.night.paused=true;', picker.context);
+  picker.context.fetch = async () => ({ok: true, json: async () => ({revision: 0})});
+  vm.runInContext('pollGame()', picker.context);
+  await vm.runInContext('actionQueue', picker.context);
+  assert.equal(picker.element.innerHTML, '3');
+  assert.equal(vm.runInContext('renderDeferred', picker.context), false);
+  console.log('4 browser-control regression cases passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

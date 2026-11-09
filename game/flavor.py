@@ -13,6 +13,42 @@ EVENTS = {
         ('A customer wants to get laid', "They keep complimenting her ass and want a $55 sex booking. It'll take 10 energy from a working host."),
         ('Squeeze in another paid hookup?', "A customer's got $55 ready for sex. One working host needs another 10 energy to cover the booking."),
     ),
+    'anal_extra': (
+        ('Extra pay for anal', 'A customer wants the anal add-on. It pays an extra $65 and costs one working room host 12 energy.'),
+        ('An anal request at the desk', "There's $65 extra on offer for anal. One working room host needs 12 energy. Take it or pass."),
+        ('Add anal to the booking?', 'The customer asked about anal: an extra $65, with 12 energy needed from one working room host.'),
+        ('A paid anal add-on', "Someone's asking for anal. The extra fee is $65 and the energy cost is 12 for one working room host."),
+    ),
+    'creampie_extra': (
+        ('Extra pay for a creampie', 'A customer wants the creampie add-on. It pays an extra $70 and costs one working room host 14 energy.'),
+        ('A creampie request at the desk', "There's $70 extra on offer for a creampie. One working room host needs 14 energy. Take it or pass."),
+        ('Add a creampie to the booking?', 'The customer asked about a creampie: an extra $70, with 14 energy needed from one working room host.'),
+        ('A paid creampie add-on', "Someone's asking for a creampie. The extra fee is $70 and the energy cost is 14 for one working room host."),
+    ),
+    'extension': (
+        ('They want a longer booking', "The customer's in no hurry. An extension pays $85 and takes 18 energy from one working club host."),
+        ('Keep the booking going?', 'A customer wants more time. Another $85 comes in if a working club host can spare 18 energy.'),
+        ('A regular asks for extra time', 'They want to extend their booking for $85. One working club host spends 18 energy if you agree.'),
+        ('One more slot for the same customer?', "They're asking to stay longer: $85 extra, 18 energy from one working club host. Your call."),
+    ),
+    'lounge_round': (
+        ('Another round for the table?', 'A lounge group wants an extra round. Take $40 and spend 6 energy from one working lounge host, or pass.'),
+        ('The lounge wants to keep going', 'Another round pays $40. One working lounge host needs 6 energy to cover it.'),
+        ('A table asks for one more', "They're staying for another round if you can fit it in: $40 extra and 6 energy from one working lounge host."),
+        ('A little extra from the lounge', "There's a $40 extra round waiting. It takes 6 energy from one working lounge host. Worth fitting in?"),
+    ),
+    'team_meal': (
+        ('Get some food into the crew?', 'A $40 meal run gives everyone working 20 energy back. Or keep the cash for tomorrow.'),
+        ('Order a proper meal?', "The crew's been working their asses off. Spend $40 on food and everyone working gets 20 energy back."),
+        ('Dinner for the working team', 'Food costs $40 total and restores 20 energy to everyone working. Order it or pass.'),
+        ('Feed the crew before the next round', 'Put $40 toward a meal for 20 energy back per working person. Keeping the cash is an option too.'),
+    ),
+    'regular_perk': (
+        ('Give the regulars a little something?', 'A $20 customer perk adds 4 repeat-business points, up to 100. Or keep the money in the till.'),
+        ('Look after the regulars', 'Spend $20 on a small perk for 4 repeat-business points, up to 100. Your call.'),
+        ('A small thank-you for coming back', 'Put $20 into a customer perk and gain 4 repeat-business points, up to 100. Or pass tonight.'),
+        ('Give them another reason to come back', 'A $20 perk adds 4 repeat-business points, up to 100. Take it or hang on to the cash.'),
+    ),
     'hospitality': (
         ('Time for a quick break?', 'Put $25 toward refreshments and everyone working gets 12 energy back. Or keep the money handy.'),
         ('Get everyone a drink?', "The crew's been busting their asses. A $25 refreshment run gives everyone working 12 energy. Or hang on to the cash."),
@@ -81,9 +117,10 @@ ACTIVITY = {
 }
 
 
-def event(kind, state):
+def event(kind, state, occurrence=None):
     choices = EVENTS[kind]
-    occurrence = (state['day'] - 1) // 2 if kind in ('booking', 'promotion') else state['day'] - 1
+    if occurrence is None:
+        occurrence = (state['day'] - 1) // 2 if kind in ('booking', 'promotion') else state['day'] - 1
     title, detail = choices[(stable((state['seed'], 'event-copy', kind)) + occurrence) % len(choices)]
     return {'title': title, 'detail': detail}
 

@@ -1,5 +1,15 @@
 # Game writing style
 
+## Verification scope
+
+Walker requested focused testing on 9 November 2026. Run checks needed for
+the actual change and a short browser check for interaction fixes. Do not
+rerun unrelated suites, balance simulations, renderer matrices or release
+packaging for every source update. Expand checks only for a concrete risk,
+failure or change to those components.
+
+## Player-facing copy
+
 Use casual, blunt language for player-facing flavor text. Prefer contractions
 and natural phrasing over formal euphemisms. Non-graphic references to sex may
 use words such as `fuck`, `pussy`, and `ass` where they fit the sentence; these

@@ -8,7 +8,7 @@ const money=n=>'$'+Math.round(n).toLocaleString();
 const rarities=['Common','Uncommon','Rare','Epic','Legendary'];
 const specialties={tips:'Tips',service:'Booking quality',efficiency:'Energy efficiency',loyalty:'Repeat business'};
 let boot,save,revision=0,derived={},screen='club',selected=new Set(),busy=false,page=0,filter={owner:'',rarity:'',owned:'owned',text:''},shownPack=null,revealed=new Set();
-let toastTimer,interval,actionQueue=Promise.resolve(),restarting=false;
+let toastTimer,interval,actionQueue=Promise.resolve(),restarting=false,renderDeferred=false;
 const announcedDecisions=new Set();
 const modal=$('#modal');
 root.addEventListener('error',e=>{
@@ -40,6 +40,7 @@ async function performAct(action,body={},quiet=false){
 }
 function pollGame(){
  if(busy||restarting)return;
+ if(renderDeferred&&!hasOpenSelect())render();
  if(save?.phase==='night'&&!save.night.paused){act('tick',{},true);return;}
  actionQueue=actionQueue.then(async()=>{
   busy=true;
@@ -116,7 +117,15 @@ function collection(){
 const upgradeText={rooms:['◇','A new private room adds one simultaneous assignment. More rooms need more staff to earn their keep.'],lounge:['♧','Add a lounge position for another working girl. Good for a varied evening and a broader team.'],recovery:['☾','Add 2 energy recovery after working, or 6 after resting and training, per level. A busy team still benefits from rest rotations.'],reception:['⌘','Improve booking acceptance by 1.8 percentage points per level. Useful when demand is quieter.']};
 function legacyExpansion(){return `<div class="pagehead"><div><div class="eyebrow">Room to become something more</div><h1>Build beyond the beginning.</h1><p>Grow the club from two founders into a team with real variety, capacity, and a rest rotation.</p></div></div><div class="upgrade-grid">${Object.entries(boot.upgrades).map(([id,u])=>{const l=save.facilities[id],max=l>=u.max;return `<article class="upgrade"><span class="level">${id==='rooms'||id==='lounge'?'POSITIONS':'LEVEL'} ${l} / ${u.max}</span><span class="symbol">${upgradeText[id][0]}</span><h2>${escapeHTML(u.name)}</h2><p>${upgradeText[id][1]}</p><div class="panel-line"><span>Added upkeep</span><strong>${money(id==='rooms'||id==='lounge'?8:6)} / night</strong></div><div class="actions"><button class="primary" data-action="upgrade" data-kind="${id}" ${max||save.phase!=='prepare'||save.cash<derived.upgrade_costs[id]?'disabled':''}>${max?'Prototype maximum':`Upgrade · ${money(derived.upgrade_costs[id])}`}</button></div></article>`;}).join('')}</div><div class="panel" style="margin-top:22px"><h3>A shared future</h3><p class="note">The resort and studio are planned later departments sharing this same roster and calendar. This prototype focuses on making the growing club and card loop work first.</p></div>`;}
 function reports(){return `<div class="pagehead"><div><div class="eyebrow">Learn from every evening</div><h1>The story behind the earnings.</h1><p>Recurring expenses include wages even when someone rests, plus facilities and any training.</p></div><a href="/game/api/export">Export save & history ↗</a></div><div class="stats"><div class="stat"><span>TOTAL REVENUE</span><strong>${money(save.totals.revenue)}</strong></div><div class="stat"><span>OPERATING EXPENSES</span><strong>${money(save.totals.expenses)}</strong></div><div class="stat"><span>COMPLETED BOOKINGS</span><strong>${save.totals.services}</strong></div><div class="stat"><span>PACKS OPENED</span><strong>${save.totals.packs}</strong></div></div><div class="panel table-wrap"><table><thead><tr><th>NIGHT</th><th>DEMAND</th><th>REVENUE</th><th>EXPENSES</th><th>PROFIT</th><th>BOOKINGS</th></tr></thead><tbody>${save.reports.slice().reverse().map(r=>`<tr><td>Day ${r.day}</td><td>${escapeHTML(r.demand)}</td><td>${money(r.revenue)}</td><td>${money(r.expenses)}</td><td class="${r.profit>=0?'positive':'negative'}">${money(r.profit)}</td><td>${r.served} completed · ${r.missed} missed</td></tr>`).join('')||'<tr><td colspan="6">Your first report appears after opening for a night.</td></tr>'}</tbody></table></div><p class="source-detail">The latest 40 nights are shown here. Full transaction and progression history is retained in your save export. Financial history includes every department.</p>`;}
+function hasOpenSelect(){
+ try{return !!root.querySelector('select:open');}
+ catch{return root.activeElement?.tagName==='SELECT';}
+}
 function render(){
+ // Replacing a native select closes its picker, even if focus is restored.
+ // Keep accepting clock updates; paint the latest state once it is dismissed.
+ if(hasOpenSelect()){renderDeferred=true;return;}
+ renderDeferred=false;
  const focusId=root.activeElement?.id,selection=root.activeElement?.selectionStart;
  $('#app').innerHTML=save?layout(({club,team,packs,collection,expansion,reports,studio,resort,saves})[screen]()):setup();
  if(focusId){const el=root.getElementById(focusId);if(el){el.focus({preventScroll:true});if(typeof el.setSelectionRange==='function'&&selection!==null)el.setSelectionRange(selection,selection);}}

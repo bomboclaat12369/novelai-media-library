@@ -30,12 +30,32 @@ DEPARTMENTS = {
 }
 DECISIONS = {
     'booking': {'title': 'A last-minute sex booking', 'detail': "A customer's here for pussy and has $55 ready. Taking the booking costs one working club host 10 energy.",
+                'revenue': 55, 'energy': 10, 'roles': ('room', 'lounge'),
                 'options': [{'id': 'accept', 'label': 'Accept · +$55, −10 energy'}, {'id': 'decline', 'label': 'Keep the prepared schedule'}], 'default': 'decline'},
     'hospitality': {'title': 'Put something back into the team', 'detail': 'A $25 refreshment break restores 12 energy to everyone working. Or keep cash available for tomorrow.',
+                    'cost': 25, 'restore_energy': 12,
                     'options': [{'id': 'refresh', 'label': 'Host a break · −$25, +12 energy'}, {'id': 'decline', 'label': 'Keep the cash reserve'}], 'default': 'decline'},
     'promotion': {'title': 'A local showcase invitation', 'detail': 'Spend $35 on a feature to add two reputation and improve demand for the next three nights.',
+                  'cost': 35,
                   'options': [{'id': 'promote', 'label': 'Book the feature · −$35'}, {'id': 'decline', 'label': 'Grow by word of mouth'}], 'default': 'decline'},
 }
+for _kind, _pay, _energy, _roles in (
+    ('anal_extra', 65, 12, ('room',)),
+    ('creampie_extra', 70, 14, ('room',)),
+    ('extension', 85, 18, ('room', 'lounge')),
+    ('lounge_round', 40, 6, ('lounge',)),
+):
+    _title, _detail = flavor.EVENTS[_kind][0]
+    DECISIONS[_kind] = {'title': _title, 'detail': _detail, 'revenue': _pay, 'energy': _energy, 'roles': _roles,
+        'options': [{'id': 'accept', 'label': f'Accept · +${_pay}, −{_energy} energy'}, {'id': 'decline', 'label': 'Pass on the extra'}], 'default': 'decline'}
+for _kind, _cost, _energy, _loyalty in (('team_meal', 40, 20, 0), ('regular_perk', 20, 0, 4)):
+    _title, _detail = flavor.EVENTS[_kind][0]
+    DECISIONS[_kind] = {'title': _title, 'detail': _detail, 'cost': _cost, 'restore_energy': _energy, 'loyalty': _loyalty,
+        'options': [{'id': 'refresh' if _energy else 'perk', 'label': f'Order food · −${_cost}, +{_energy} energy' if _energy else f'Offer perk · −${_cost}, +{_loyalty} repeat business'},
+                    {'id': 'decline', 'label': 'Keep the cash reserve'}], 'default': 'decline'}
+
+OPPORTUNITIES = ('booking', 'promotion', 'anal_extra', 'extension', 'creampie_extra', 'lounge_round')
+TEAM_CHOICES = ('hospitality', 'regular_perk', 'team_meal')
 
 
 def ensure(state):
@@ -197,9 +217,16 @@ def command(state, catalog, action, body):
 def prepare_night(state):
     ensure(state)
     n = state['night']
-    first = 'booking' if state['day'] % 2 else 'promotion'
-    n['decisions'] = [{'id': f"{state['day']}-{i}", 'kind': kind, 'at': at, 'until': at + 50, 'choice': None, 'copy': flavor.event(kind, state)}
-                      for i, (kind, at) in enumerate(((first, 100), ('hospitality', 200)))]
+    # Cycle eligible scenarios without consuming any simulation random draws.
+    # The first night retains the familiar booking and refreshment choices.
+    opportunities = tuple(kind for kind in OPPORTUNITIES if 'roles' not in DECISIONS[kind] or
+        any(assignment(state, p) in DECISIONS[kind]['roles'] and w['energy'] >= DECISIONS[kind]['energy'] for p, w in state['people'].items()))
+    n['decisions'] = []
+    for i, (pool, at) in enumerate(((opportunities, 100), (TEAM_CHOICES, 200))):
+        occurrence, index = divmod(state['day'] - 1, len(pool))
+        kind = pool[index]
+        n['decisions'].append({'id': f"{state['day']}-{i}", 'kind': kind, 'at': at, 'until': at + 50,
+                              'choice': None, 'copy': flavor.event(kind, state, occurrence)})
     n['department_revenue'] = 0; n['decision_costs'] = 0; n['activities'] = {}
     n['assignments'] = {p: assignment(state, p) for p in state['people']}
     for c in reservations(state):
@@ -212,19 +239,21 @@ def resolve_decision(state, decision, choice, automatic=False):
     if choice not in [o['id'] for o in spec['options']]: raise RuleError('Choose one of the offered options.')
     n = state['night']
     if choice == 'accept':
-        team = [w for p, w in state['people'].items() if assignment(state, p) in ('room', 'lounge') and w['energy'] >= 10]
+        team = [w for p, w in state['people'].items() if assignment(state, p) in spec['roles'] and w['energy'] >= spec['energy']]
         if not team: raise RuleError('No club host has the energy for this booking.')
-        max(team, key=lambda w: w['energy'])['energy'] -= 10
-        n['revenue'] += 55
-    if choice in ('refresh', 'promote'):
-        cost = 25 if choice == 'refresh' else 35
+        max(team, key=lambda w: w['energy'])['energy'] -= spec['energy']
+        n['revenue'] += spec['revenue']
+    if choice in ('refresh', 'promote', 'perk'):
+        cost = spec['cost']
         if state['cash'] + n['revenue'] - n['decision_costs'] < cost: raise RuleError('Keep enough cash for this decision.')
         n['decision_costs'] += cost
         if choice == 'refresh':
             for p, w in state['people'].items():
-                if assignment(state, p) not in ('rest', 'train'): w['energy'] = min(100, w['energy'] + 12)
-        else:
+                if assignment(state, p) not in ('rest', 'train'): w['energy'] = min(100, w['energy'] + spec['restore_energy'])
+        elif choice == 'promote':
             state['reputation'] += 2; state['promotion_until'] = max(state['promotion_until'], state['day'] + 3)
+        else:
+            state['loyalty'] = min(100, state['loyalty'] + spec['loyalty'])
     decision['choice'] = choice; decision['automatic'] = automatic
     title = decision.get('copy', {}).get('title', spec['title'])
     n['log'].append(title + ': ' + next(o['label'] for o in spec['options'] if o['id'] == choice))

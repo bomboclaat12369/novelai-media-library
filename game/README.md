@@ -55,8 +55,13 @@ companion was not replaced or updated.
   the night. If the browser delays clock updates, the next update catches up
   only as far as the next unanswered event. Click a room to follow its activity
   and large owned photograph. Rotating photographs never changes equipment.
-- **Decide:** a booking/promotion opportunity and a refreshment choice occur
-  each night. The server stops the clock when an opportunity appears, including
+- **Decide:** two events occur each night, drawn from nine rotating scenarios:
+  extra bookings, promotion, anal and creampie add-ons, booking extensions,
+  extra lounge rounds, refreshments, team meals and perks for regulars.
+  Paid offers require an appropriately assigned host; each choice states its
+  money and energy or repeat-business effects. New types have four descriptions
+  each, alongside the eight variants for each original type (48 total).
+  The server stops the clock when an opportunity appears, including
   at 8×; picking an option automatically continues at the selected speed.
   Manual pause remains available between events. Finish night resolves
   unanswered choices conservatively. Event and room descriptions rotate
@@ -147,7 +152,11 @@ separately from nightly recurring profit.
 
 ## Verification — Windows, 9 November 2026
 
-- 54 game rule, persistence, companion HTTP, restart and recovery checks;
+- Latest dropdown/event update: nine focused Python checks and four browser
+  control cases passed. The in-app browser held the native speed menu open
+  for over 17 seconds while the server clock advanced, then selected 8×.
+  Full renderer, balance and release suites were not rerun for this update.
+- Previous full run: 54 game rule, persistence, companion HTTP, restart and recovery checks;
   two JavaScript background-tab regression cases; 12 existing runtime card
   checks; 13 release-pipeline checks. Pipeline tests use temporary local
   repositories only. No release was published.
