@@ -38,7 +38,25 @@ function calendarUI(){return `<section class="panel table-wrap"><h2>Shared avail
 function expansion(){return legacyExpansion().replace(/<div class="panel" style="margin-top:22px"><h3>A shared future[\s\S]*$/,'')+`<div class="upgrade-grid">${Object.entries(boot.departments).map(([id,d])=>`<article class="upgrade"><span class="level">${save.departments[id]} / 6 POSITIONS</span><h2>${d.name}</h2><p>${id==='studio'?'Milestone: night 4 and 18 club bookings.':'Milestone: complete two Studio projects.'}</p><p>${derived.unlocks[id]?'✓ Milestone met':'Still in progress'} · ${money(d.upkeep)} added upkeep/night</p><button data-action="department" data-kind="${id}" ${dis(save.phase!=='prepare'||!derived.unlocks[id]||save.departments[id]>=6||save.cash<derived.department_costs[id])}>${save.departments[id]?'Expand':'Open'} · ${money(derived.department_costs[id])}</button></article>`).join('')}</div><section class="panel"><h2>Keep the evening fresh</h2><p>Promotion costs $150: +3 reputation and +3.5 percentage points of club booking acceptance for four nights. Most useful with a larger staffed venue.</p><p>${save.promotion_until>=save.day?`Active through night ${save.promotion_until}.`:'No active campaign.'}</p><button data-action="marketing" ${dis(save.phase!=='prepare'||save.cash<150||save.promotion_until>=save.day+3)}>Book campaign · $150</button><p class="note">Earn one voucher at your first 30 bookings, first Studio delivery and first Resort checkout. Every further 250 club bookings earns two. No mandatory reset.</p></section>`;}
 async function loadBackups(){const r=await fetch('/game/api/backups');if(r.ok){const d=await r.json();backupRows=d.backups;saveFilename=d.save_name;}}
 function saves(){return head('A continuing business','Keep what you have built.','Every action is committed to a separate disk save. Restore creates a new save and preserves the current file.')+`<div class="department-layout"><section class="panel"><h2>Save & recover</h2><p>Active: <strong>${esc(saveFilename)}</strong></p><div class="actions"><a href="/game/api/export">Export save & history ↗</a><button data-action="backup-now">Create backup</button></div><label>Restore a JSON export<input id="restore-file" type="file" accept=".json,application/json"></label><p class="note">Use this library's export. Version-1 prototype saves migrate without resetting money, cards or progress. Unfinished nights resume paused.</p><h3>Recent backups</h3>${backupRows.map(b=>`<p class="backup-row"><span>Revision ${Number(b.id.split('.')[0])} · ${Math.round(b.bytes/1024)} KB</span><button data-action="restore-backup" data-backup="${esc(b.id)}">Restore as new save</button></p>`).join('')||'<p>No backups yet.</p>'}</section><section class="panel"><h2>Catalog additions</h2><p>${Object.keys(boot.catalog.people).length} retained identities · ${Object.keys(boot.catalog.cards).length} cards</p><p>Refresh after adding eligible main-library images or girls. New arrivals enter hiring and packs without starting payroll.</p><button data-action="refresh-catalog" ${dis(save.phase!=='prepare')}>Refresh catalog read-only</button><p class="note">Rarity, mastery and discovery history stay fixed. Missing files retain their cards. Imported save paths cannot choose source media.</p><h3>Optional stories</h3><p class="note">Narrative history is reserved separately. Story import, relationships and generation remain deferred and never block business progression.</p></section></div>`;}
-async function managementRequest(path,data={}){busy=true;try{const response=await fetch('/game/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Game-Token':boot.token},body:JSON.stringify({revision,...data})});const r=await response.json();if(!response.ok)throw Error(r.error||'The operation could not be saved.');accept(r);if(path==='restore'){const response=await fetch('/game/api/bootstrap');boot=await response.json();accept(boot);modal.close();shownPack=null;notify('Restored to a new save. The previous file is preserved.');}await loadBackups();render();}catch(e){notify(e.message);}finally{busy=false;}}
+function managementRequest(path,data={}){
+ actionQueue=actionQueue.then(async()=>{
+  busy=true;
+  try{
+   const response=await fetch('/game/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Game-Token':boot.token},body:JSON.stringify({revision,...data})});
+   const r=await response.json();accept(r);
+   if(!response.ok)throw Error(r.error||'The operation could not be saved.');
+   if(path==='restore'){
+    const response=await fetch('/game/api/bootstrap');boot=await response.json();accept(boot);modal.close();shownPack=null;
+    notify('Restored to a new save. The previous file is preserved.');
+   }
+   await loadBackups();render();
+  }catch(e){
+   notify(e.message);
+   const response=await fetch('/game/api/bootstrap');if(response.ok){boot=await response.json();accept(boot);render();}
+  }finally{busy=false;}
+ }).catch(e=>notify(e.message));
+ return actionQueue;
+}
 async function managementClick(b,a){
  if(a==='select-room'){selectedRoom=b.dataset.room;render();return true;}
  if(a==='voucher'){await act('pack',{pack:'standard',voucher:true});return true;}

@@ -68,18 +68,20 @@ class Handler(BaseHTTPRequestHandler):
         path=urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
         if path.startswith('/game/'): path=path[5:]
         if path=='/api/bootstrap':
+            current=self.state_payload()
             return self.send(200,{'token':self.server.token,'catalog':public_catalog(self.server.store.catalog),
                                   'packs':PACKS,'upgrades':UPGRADES,'projects':management.PROJECTS,
                                   'stays':management.STAYS,'departments':management.DEPARTMENTS,
-                                  'decisions':management.DECISIONS,'profiles':management.PROFILES,**self.state_payload()})
+                                  'decisions':management.DECISIONS,'profiles':management.PROFILES,**current})
         if path=='/api/state': return self.send(200,self.state_payload())
         if path=='/api/backups': return self.send(200,{'backups':self.server.store.backups(),'save_name':self.server.store.path.name})
         if path=='/api/renderer': return self.send(200,renderer_assets())
         if path=='/api/export':
             return self.send(200,self.server.store.export(),extra={'Content-Disposition':'attachment; filename="club-game-save.json"'})
         if path.startswith('/api/image/'):
-            ident=path.removeprefix('/api/image/');card=self.server.store.catalog['cards'].get(ident)
+            ident=path.removeprefix('/api/image/')
             state=self.server.store.read()['state']
+            card=self.server.store.catalog['cards'].get(ident)
             if not state or ident not in state['owned']: return self.send(403,{'error':'Collect this card in the game before viewing its artwork.'})
             if not card or not card.get('available') or not card.get('image'):
                 return self.send(404,{'error':'Artwork unavailable.'})
@@ -118,24 +120,27 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get('Content-Type','').split(';')[0]!='application/json': raise RuleError('Expected JSON.')
             request=json.loads(self.rfile.read(length))
             if not isinstance(request,dict) or not isinstance(request.get('body',{}),dict): raise RuleError('Invalid request.')
-            if path=='/api/restore':
-                with self.server.operation_lock:
+            with self.server.operation_lock:
+                # A restore can change the active file while this request is waiting.
+                # Recheck the session inside the same lock as every mutation.
+                if not secrets.compare_digest(self.headers.get('X-Game-Token',''),self.server.token):
+                    return self.send(403,{'error':'Refresh this game tab to reconnect.'})
+                if path=='/api/restore':
                     if self.server.store.read()['revision']!=request.get('revision'): raise Conflict('The game changed before restore. Refresh and try again.')
                     restored=self.server.store.restore(request.get('export'),request.get('backup'))
-                    self.server.store=restored;self.server.token=secrets.token_urlsafe(32)
                     pointer=self.server.save_origin.with_suffix('.active.json')
                     temp=pointer.with_suffix('.tmp');temp.write_text(json.dumps({'file':restored.path.name}),encoding='utf-8');os.replace(temp,pointer)
-                return self.send(200,{'restored':True,'token':self.server.token,**self.state_payload()})
-            if path=='/api/backup':
-                self.server.store.backup()
-                return self.send(200,{'backups':self.server.store.backups()})
-            if path=='/api/refresh':
-                cat=read_library(self.server.library_root) if self.server.library_root else demo_catalog()
-                self.server.store.refresh_catalog(cat,request.get('revision'))
-                return self.send(200,{'catalog':public_catalog(self.server.store.catalog),**self.state_payload()})
-            with self.server.operation_lock:
+                    self.server.store=restored;self.server.token=secrets.token_urlsafe(32)
+                    return self.send(200,{'restored':True,'token':self.server.token,**self.state_payload()})
+                if path=='/api/backup':
+                    self.server.store.backup()
+                    return self.send(200,{'backups':self.server.store.backups()})
+                if path=='/api/refresh':
+                    cat=read_library(self.server.library_root) if self.server.library_root else demo_catalog()
+                    self.server.store.refresh_catalog(cat,request.get('revision'))
+                    return self.send(200,{'catalog':public_catalog(self.server.store.catalog),**self.state_payload()})
                 result=self.server.store.apply(request.get('action'),request.get('body',{}),request.get('id'),request.get('revision'))
-            self.send(200,self.state_payload(result))
+                self.send(200,self.state_payload(result))
         except Conflict as exc:
             self.send(409,{'error':str(exc),**self.state_payload()})
         except (RuleError,ValueError,TypeError,KeyError) as exc:

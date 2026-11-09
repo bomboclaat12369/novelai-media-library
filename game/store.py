@@ -51,8 +51,12 @@ class GameStore:
                 catalog=saved
             self.catalog=catalog
             db.execute("INSERT OR REPLACE INTO meta VALUES ('catalog',?)",(encode(catalog),))
+            self.catalog_stamp=uuid.uuid4().hex
+            db.execute("INSERT OR REPLACE INTO meta VALUES ('catalog_stamp',?)",(self.catalog_stamp,))
             if row:
                 migrations.validate(state,catalog)
+                events=state.pop('journal',[]);state['journal']=[]
+                db.executemany('INSERT INTO events(at,body) VALUES (?,?)',[(time.time(),encode(e)) for e in events])
                 if state['phase']=='night':
                     state['night']['paused']=True
                 if encode(state)!=row[1]:
@@ -71,8 +75,15 @@ class GameStore:
 
     def read(self):
         with self.lock,self.connect() as db:
+            self.sync_catalog(db)
             row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
             return {'revision':row[0],'state':json.loads(row[1])} if row else {'revision':0,'state':None}
+
+    def sync_catalog(self,db):
+        stamp=db.execute("SELECT value FROM meta WHERE key='catalog_stamp'").fetchone()
+        if stamp and stamp[0]!=self.catalog_stamp:
+            self.catalog=json.loads(db.execute("SELECT value FROM meta WHERE key='catalog'").fetchone()[0])
+            self.catalog_stamp=stamp[0]
 
     def apply(self,action,body,request_id,expected_revision):
         if not isinstance(request_id,str) or not 8<=len(request_id)<=100:
@@ -81,6 +92,7 @@ class GameStore:
         digest=hashlib.sha256(encode([action,body]).encode()).hexdigest()
         with self.lock,self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            self.sync_catalog(db)
             duplicate=db.execute('SELECT digest FROM requests WHERE id=?',(request_id,)).fetchone()
             row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
             revision,state=(row[0],json.loads(row[1])) if row else (0,None)
@@ -135,6 +147,7 @@ class GameStore:
     def refresh_catalog(self,catalog,expected_revision):
         with self.lock,self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            self.sync_catalog(db)
             row=db.execute('SELECT revision FROM save WHERE id=1').fetchone()
             revision=row[0] if row else 0
             if revision!=expected_revision: raise Conflict('The game changed. Refresh before importing catalog additions.')
@@ -153,7 +166,10 @@ class GameStore:
             db.execute("UPDATE meta SET value=? WHERE key='catalog'",(encode(merged),))
             if row: db.execute('UPDATE save SET revision=? WHERE id=1',(revision+1,))
             db.execute('INSERT INTO events(at,body) VALUES (?,?)',(time.time(),encode({'kind':'catalog_refreshed','added':added})))
-            self.catalog=merged
+            stamp=uuid.uuid4().hex
+            db.execute("INSERT OR REPLACE INTO meta VALUES ('catalog_stamp',?)",(stamp,))
+            db.commit()
+            self.catalog=merged;self.catalog_stamp=stamp
         return added
 
     def restore(self,payload=None,backup=None):
@@ -183,6 +199,7 @@ class GameStore:
             if state.get('night'): state['night']['paused']=True
             history=payload.get('history',[])
             if not isinstance(history,list) or len(history)>2000000 or any(not isinstance(e,dict) for e in history): raise ValueError()
+            history=history+state.pop('journal',[]);state['journal']=[]
         except (KeyError,TypeError,ValueError) as exc:
             if isinstance(exc,engine.RuleError): raise
             raise engine.RuleError('Invalid recovery export. The current save is unchanged.') from None
@@ -197,9 +214,12 @@ class GameStore:
         return restored
 
     def export(self):
-        result=self.read()
-        public=copy.deepcopy(self.catalog)
-        for c in public['cards'].values(): c.pop('image',None);c.pop('original',None)
-        with self.connect() as db:
+        with self.lock,self.connect() as db:
+            db.execute('BEGIN')
+            self.sync_catalog(db)
+            row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
+            result={'revision':row[0],'state':json.loads(row[1])} if row else {'revision':0,'state':None}
+            public=copy.deepcopy(self.catalog)
+            for c in public['cards'].values(): c.pop('image',None);c.pop('original',None)
             events=[json.loads(r[0]) for r in db.execute('SELECT body FROM events ORDER BY id')]
         return {'format':'after-hours-game','schema':migrations.SCHEMA,'catalog':public,'save':result,'history':events}

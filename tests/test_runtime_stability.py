@@ -1,5 +1,6 @@
 """Run with python -m unittest discover -s tests -p 'test_runtime_*.py'."""
 import io
+import gc
 import json
 import runpy
 import tempfile
@@ -29,6 +30,9 @@ class RuntimeStabilityTests(unittest.TestCase):
             self.store._thumbnail_queue.put(None)
             worker.join(timeout=5)
             self.assertFalse(worker.is_alive(), 'background worker did not finish')
+        # SQLite context managers commit but do not close; collect detached
+        # fixture connections before Windows tries to unlink their database.
+        gc.collect()
         self.temp.cleanup()
 
     def import_image(self, index):

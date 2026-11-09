@@ -174,7 +174,7 @@ def command(state, catalog, action, body):
             state['pricing'] = plan['pricing']
             for p, values in plan['people'].items():
                 if p in state['people']:
-                    state['people'][p].update({k: v for k, v in values.items() if k != 'card' or v in state['owned']})
+                    state['people'][p].update({k: v for k, v in values.items() if k in ('role','card','training') and (k != 'card' or v in state['owned'])})
         record(state, action, name=name)
     elif action in ('profile', 'training'):
         worker = state['people'].get(body.get('owner'))
@@ -186,7 +186,7 @@ def command(state, catalog, action, body):
     elif action == 'marketing':
         if state['promotion_until'] >= state['day'] + 3: raise RuleError('Your current campaign is still running.')
         budget_check(state, 150)
-        state['cash'] -= 150; state['promotion_until'] = state['day'] + 4
+        state['cash'] -= 150; state['promotion_until'] = state['day'] + 3
         state['reputation'] += 3
         record(state, 'marketing_campaign', cost=150, through=state['promotion_until'])
     return True
@@ -277,7 +277,7 @@ def advance_wave(state, catalog, wave):
             bonus = round(spec['rate'] * .3) if c['satisfaction'] >= spec['expectation'] else 0
             n['revenue'] += bonus; n['department_revenue'] += bonus; c['revenue'] += bonus
             n['earnings'][c['owner']] += bonus
-            state['loyalty'] = min(100, state['loyalty'] + (3 if bonus else -1))
+            state['loyalty'] = max(0, min(100, state['loyalty'] + (3 if bonus else -1)))
             n['log'].append(spec['name'] + f": checkout · satisfaction {c['satisfaction']}/100 · bonus ${bonus}")
         state['totals'][department + '_completed'] += 1
         record(state, 'contract_completed', contract=c['id'], department=department, revenue=c['revenue'], satisfaction=c['satisfaction'], special_card=c.get('special_card'))

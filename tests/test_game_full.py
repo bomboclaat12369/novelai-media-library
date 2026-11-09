@@ -128,6 +128,19 @@ class IntegratedRules(unittest.TestCase):
         s=g.command(s,self.cat,'cancel_contract',{'contract':s['contracts'][0]['id']})
         self.assertEqual(s['cash'],cash);self.assertFalse(m.reservations(s,'demo-2'))
 
+    def test_failed_stay_keeps_loyalty_and_save_valid(self):
+        s=self.expanded();s['loyalty']=0
+        for w in s['people'].values():w['role']='rest'
+        s=self.book(s,'resort','demo-2','retreat')
+        for _ in range(2):
+            s['people']['demo-2']['energy']=0
+            s=g.command(s,self.cat,'start')
+            s=g.command(s,self.cat,'finish')
+        self.assertEqual(s['contracts'][0]['satisfaction'],0)
+        self.assertEqual(s['loyalty'],0)
+        from game.migrations import validate
+        validate(s,self.cat)
+
     def test_earned_voucher_reveals_and_preserves_money(self):
         s=copy.deepcopy(self.s);s['pack_vouchers']=1;cash=s['cash']
         s=g.command(s,self.cat,'pack',{'pack':'standard','voucher':True})
@@ -151,6 +164,9 @@ class Recovery(unittest.TestCase):
         loaded=GameStore(self.path,self.cat);s=loaded.read()['state']
         for k in ('cash','owned','pending_pack','people'):self.assertEqual(s[k],r['state'][k])
         self.assertEqual(s['schema'],2);self.assertTrue(Path(str(self.path)+'.before-schema-2').exists())
+        self.assertEqual(sum(e['kind']=='save_migrated' for e in loaded.export()['history']),1)
+        again=GameStore(self.path,self.cat)
+        self.assertEqual(sum(e['kind']=='save_migrated' for e in again.export()['history']),1)
 
     def test_export_restore_new_file_and_reveals(self):
         r=self.store.apply('pack',{'pack':'standard'},'buy-standard',1)
@@ -199,6 +215,36 @@ class Recovery(unittest.TestCase):
         with patch('game.store.time.monotonic',return_value=105):
             a=self.store.apply('tick',{},'window-one',2);b=second.apply('tick',{},'window-two',3)
         self.assertEqual(a['state']['night']['elapsed'],5);self.assertEqual(b['state']['night']['elapsed'],5)
+
+    def test_catalog_refresh_reaches_another_store(self):
+        second=GameStore(self.path,self.cat)
+        changed=copy.deepcopy(self.cat)
+        changed['people']['arrival']={'id':'arrival','name':'Arrival','color':0}
+        changed['cards']['arrival']={**next(iter(changed['cards'].values())),'id':'arrival','owner':'arrival'}
+        self.store.refresh_catalog(changed,1)
+        result=second.apply('hire',{'owner':'arrival'},'hire-new-arrival',2)
+        self.assertIn('arrival',result['state']['people'])
+
+    def test_recovery_from_actual_overspending_keeps_purchases(self):
+        r=self.store.read()
+        for i in range(6):
+            r=self.store.apply('pack',{'pack':'standard'},f'spend-pack-{i}',r['revision'])
+            r=self.store.apply('reveal_done',{},f'ack-pack-{i}',r['revision'])
+        self.assertEqual(r['state']['cash'],0);owned=copy.deepcopy(r['state']['owned'])
+        r=self.store.apply('recovery',{},'recover-budget',r['revision'])
+        self.assertEqual(r['state']['day'],3);self.assertEqual(r['state']['owned'],owned)
+        r=self.store.apply('start',{},'reopen-recovered',r['revision'])
+        r=self.store.apply('finish',{},'settle-recovered',r['revision'])
+        self.assertEqual(r['state']['day'],4)
+
+    def test_restore_rejects_corrupt_plan_and_contract(self):
+        r=self.store.apply('save_plan',{'name':'Rotation'},'save-rotation',1)
+        data=self.store.export();owner=next(iter(data['save']['state']['people']))
+        data['save']['state']['saved_plans']['Rotation']['people'][owner]['role']='invalid'
+        with self.assertRaises(g.RuleError):self.store.restore(data)
+        data=self.store.export();data['save']['state']['contracts']=[{'department':'studio','owner':owner,'status':'active','start':1,'end':2,'kind':'editorial','id':1}]
+        with self.assertRaises(g.RuleError):self.store.restore(data)
+        self.assertEqual(self.store.read(),r)
 
 
 if __name__=='__main__':unittest.main()

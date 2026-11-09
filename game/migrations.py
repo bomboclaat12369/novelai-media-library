@@ -56,18 +56,41 @@ def validate(state, catalog):
         for key in ('pack_vouchers','contract_counter','reputation'):
             if not integer(state[key]): raise ValueError()
         if not isinstance(state['narrative'], dict) or not isinstance(state['saved_plans'], dict): raise ValueError()
+        if len(state['saved_plans'])>12: raise ValueError()
+        for plan in state['saved_plans'].values():
+            if plan['pricing'] not in engine.PRICES: raise ValueError()
+            for owner, values in plan['people'].items():
+                if owner not in state['people'] or values['role'] not in engine.ROLES or values['training'] not in ('club','studio','resort'): raise ValueError()
+                if values['card'] not in state['owned'] or catalog['cards'][values['card']]['owner']!=owner: raise ValueError()
+        for name in ('revenue','expenses','packs','services','recovery_grants','studio_completed','resort_completed','contract_revenue'):
+            if not finite(state['totals'][name]): raise ValueError()
+        if not finite(state['loyalty'],0,100) or not integer(state['promotion_until']): raise ValueError()
+        contract_ids=set()
         for c in state['contracts']:
             if c['department'] not in management.DEPARTMENTS or c['owner'] not in state['people']: raise ValueError()
             if c['status'] not in ('active', 'completed', 'cancelled') or not integer(c['start'], 1) or not integer(c['end'], c['start']): raise ValueError()
             if c['kind'] not in (management.PROJECTS if c['department']=='studio' else management.STAYS): raise ValueError()
+            if not integer(c['id'],1) or c['id'] in contract_ids or c['id']>state['contract_counter']: raise ValueError()
+            contract_ids.add(c['id'])
+            if not integer(c['nights'],0,4) or not finite(c['quality']) or not finite(c['revenue']) or not finite(c['satisfaction'],0,100): raise ValueError()
+            spec=c['spec']
+            if not integer(spec['days'],1,4) or c['end']-c['start']+1!=spec['days']: raise ValueError()
+            for name in ('fee','energy','estimated_pay','success_chance'):
+                if not finite(spec[name]): raise ValueError()
+            if c['department']=='studio':
+                if not finite(spec['pay']) or not integer(spec['packs']): raise ValueError()
+            elif not finite(spec['rate']) or not finite(spec['expectation'],0,100): raise ValueError()
         if state['phase']=='night':
             n=state['night']
             if not finite(n['elapsed'],0,300) or not integer(n['wave'],0,6) or n['speed'] not in (1,2,4): raise ValueError()
             if not finite(n['revenue']) or not isinstance(n['decisions'],list): raise ValueError()
+            if not finite(n['department_revenue']) or not finite(n['decision_costs']): raise ValueError()
+            if any(role not in (*engine.ROLES,'studio','resort') for role in n['assignments'].values()): raise ValueError()
         if state['pending_pack']:
             pack=state['pending_pack']
             if pack['type'] not in engine.PACKS or len(pack['results'])!=5: raise ValueError()
             if any(c['id'] not in state['owned'] for c in pack['results']): raise ValueError()
+            if any(not integer(i,0,4) for i in pack.get('revealed',[])): raise ValueError()
     except (KeyError, TypeError, ValueError, AttributeError):
         raise engine.RuleError('The recovery file contains invalid or incomplete game data.') from None
     return state

@@ -6166,7 +6166,7 @@ def run_gui(server: MediaHTTPServer, store: LibraryStore) -> None:
 
     root = tk.Tk()
     root.title(APP_NAME)
-    root.geometry("520x290")
+    root.geometry("520x340")
     root.resizable(False, False)
 
     frame = tk.Frame(root, padx=18, pady=18)

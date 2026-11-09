@@ -1,1 +1,1 @@
-{"name":"novelai-club-prototype","private":true,"scripts":{"dev":"python3 server.py --preview"}}
+{"name":"after-hours-local","private":true,"scripts":{"dev":"python server.py --preview","dev:windows":"powershell -NoProfile -ExecutionPolicy Bypass -File Launch.ps1 -Demo -NoBrowser"}}

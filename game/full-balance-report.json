@@ -1,0 +1,854 @@
+{
+  "scope": "Synthetic policy comparisons using shipped rules; not human playtesting or guaranteed outcomes.",
+  "seeds": 6,
+  "nights_per_campaign": 120,
+  "campaigns": {
+    "4_balanced": {
+      "all_reached_resort": true,
+      "studio_day_range": [
+        11,
+        16
+      ],
+      "resort_day_range": [
+        15,
+        24
+      ],
+      "mean_early_net": 216.1,
+      "mean_late_net": 673.08,
+      "mean_packs": 151.7,
+      "mean_final_cash": 27525.83,
+      "recovery_breaks": 0,
+      "sample": {
+        "roster": 4,
+        "cash": 26201,
+        "packs": 153,
+        "purchased_pack_nights": 90,
+        "milestone_days": {
+          "studio": 13,
+          "resort": 17
+        },
+        "first_growth": 1,
+        "early_mean_net": 221.64,
+        "late_mean_net": 641.85,
+        "studio_completed": 53,
+        "resort_completed": 40,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 382
+      }
+    },
+    "4_conservative": {
+      "all_reached_resort": true,
+      "studio_day_range": [
+        14,
+        28
+      ],
+      "resort_day_range": [
+        23,
+        35
+      ],
+      "mean_early_net": 116.49,
+      "mean_late_net": 327.5,
+      "mean_packs": 120.2,
+      "mean_final_cash": 5003.83,
+      "recovery_breaks": 0,
+      "sample": {
+        "roster": 4,
+        "cash": 3683,
+        "packs": 120,
+        "purchased_pack_nights": 91,
+        "milestone_days": {
+          "studio": 14,
+          "resort": 25
+        },
+        "first_growth": 1,
+        "early_mean_net": 184.86,
+        "late_mean_net": 290.8,
+        "studio_completed": 16,
+        "resort_completed": 7,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 342
+      }
+    },
+    "4_aggressive": {
+      "all_reached_resort": true,
+      "studio_day_range": [
+        11,
+        19
+      ],
+      "resort_day_range": [
+        15,
+        25
+      ],
+      "mean_early_net": 161.3,
+      "mean_late_net": 663.82,
+      "mean_packs": 146.7,
+      "mean_final_cash": 26439.33,
+      "recovery_breaks": 0,
+      "sample": {
+        "roster": 4,
+        "cash": 27392,
+        "packs": 152,
+        "purchased_pack_nights": 92,
+        "milestone_days": {
+          "studio": 11,
+          "resort": 15
+        },
+        "first_growth": 1,
+        "early_mean_net": 274.36,
+        "late_mean_net": 658.6,
+        "studio_completed": 56,
+        "resort_completed": 52,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 381
+      }
+    },
+    "5_balanced": {
+      "all_reached_resort": true,
+      "studio_day_range": [
+        11,
+        16
+      ],
+      "resort_day_range": [
+        15,
+        24
+      ],
+      "mean_early_net": 216.1,
+      "mean_late_net": 822.36,
+      "mean_packs": 156.5,
+      "mean_final_cash": 41460.17,
+      "recovery_breaks": 0,
+      "sample": {
+        "roster": 5,
+        "cash": 38503,
+        "packs": 158,
+        "purchased_pack_nights": 91,
+        "milestone_days": {
+          "studio": 13,
+          "resort": 17
+        },
+        "first_growth": 1,
+        "early_mean_net": 221.64,
+        "late_mean_net": 736.5,
+        "studio_completed": 53,
+        "resort_completed": 41,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 362
+      }
+    },
+    "5_conservative": {
+      "all_reached_resort": true,
+      "studio_day_range": [
+        14,
+        28
+      ],
+      "resort_day_range": [
+        23,
+        37
+      ],
+      "mean_early_net": 116.61,
+      "mean_late_net": 569.66,
+      "mean_packs": 147.7,
+      "mean_final_cash": 20402.17,
+      "recovery_breaks": 0,
+      "sample": {
+        "roster": 5,
+        "cash": 20763,
+        "packs": 151,
+        "purchased_pack_nights": 91,
+        "milestone_days": {
+          "studio": 14,
+          "resort": 25
+        },
+        "first_growth": 1,
+        "early_mean_net": 184.86,
+        "late_mean_net": 546.85,
+        "studio_completed": 47,
+        "resort_completed": 8,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 358
+      }
+    },
+    "5_aggressive": {
+      "all_reached_resort": true,
+      "studio_day_range": [
+        11,
+        19
+      ],
+      "resort_day_range": [
+        15,
+        25
+      ],
+      "mean_early_net": 161.3,
+      "mean_late_net": 806.73,
+      "mean_packs": 151.7,
+      "mean_final_cash": 38106.33,
+      "recovery_breaks": 0,
+      "sample": {
+        "roster": 5,
+        "cash": 40694,
+        "packs": 157,
+        "purchased_pack_nights": 93,
+        "milestone_days": {
+          "studio": 11,
+          "resort": 15
+        },
+        "first_growth": 1,
+        "early_mean_net": 274.36,
+        "late_mean_net": 812,
+        "studio_completed": 56,
+        "resort_completed": 52,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 370
+      }
+    },
+    "12_balanced": {
+      "all_reached_resort": true,
+      "studio_day_range": [
+        11,
+        16
+      ],
+      "resort_day_range": [
+        15,
+        24
+      ],
+      "mean_early_net": 215.24,
+      "mean_late_net": 2065.93,
+      "mean_packs": 191.7,
+      "mean_final_cash": 115028,
+      "recovery_breaks": 0,
+      "sample": {
+        "roster": 12,
+        "cash": 112954,
+        "packs": 192,
+        "purchased_pack_nights": 91,
+        "milestone_days": {
+          "studio": 13,
+          "resort": 17
+        },
+        "first_growth": 1,
+        "early_mean_net": 221.64,
+        "late_mean_net": 2038.65,
+        "studio_completed": 136,
+        "resort_completed": 130,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 3,
+          "resort": 3
+        },
+        "unique_cards": 305
+      }
+    },
+    "12_conservative": {
+      "all_reached_resort": true,
+      "studio_day_range": [
+        18,
+        28
+      ],
+      "resort_day_range": [
+        25,
+        35
+      ],
+      "mean_early_net": 84.39,
+      "mean_late_net": 1490.17,
+      "mean_packs": 178.5,
+      "mean_final_cash": 65577.5,
+      "recovery_breaks": 0,
+      "sample": {
+        "roster": 12,
+        "cash": 65083,
+        "packs": 179,
+        "purchased_pack_nights": 86,
+        "milestone_days": {
+          "studio": 18,
+          "resort": 27
+        },
+        "first_growth": 1,
+        "early_mean_net": 97.71,
+        "late_mean_net": 1432.2,
+        "studio_completed": 122,
+        "resort_completed": 21,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 3,
+          "resort": 3
+        },
+        "unique_cards": 306
+      }
+    },
+    "12_aggressive": {
+      "all_reached_resort": true,
+      "studio_day_range": [
+        13,
+        19
+      ],
+      "resort_day_range": [
+        17,
+        25
+      ],
+      "mean_early_net": 131.97,
+      "mean_late_net": 1976.65,
+      "mean_packs": 185.8,
+      "mean_final_cash": 101148.83,
+      "recovery_breaks": 0,
+      "sample": {
+        "roster": 12,
+        "cash": 105774,
+        "packs": 190,
+        "purchased_pack_nights": 90,
+        "milestone_days": {
+          "studio": 13,
+          "resort": 17
+        },
+        "first_growth": 1,
+        "early_mean_net": 210.21,
+        "late_mean_net": 1956.4,
+        "studio_completed": 138,
+        "resort_completed": 131,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 3,
+          "resort": 3
+        },
+        "unique_cards": 310
+      }
+    },
+    "20_balanced": {
+      "all_reached_resort": true,
+      "studio_day_range": [
+        13,
+        17
+      ],
+      "resort_day_range": [
+        17,
+        24
+      ],
+      "mean_early_net": 178.7,
+      "mean_late_net": 3410.76,
+      "mean_packs": 185.7,
+      "mean_final_cash": 124695.17,
+      "recovery_breaks": 0,
+      "sample": {
+        "roster": 20,
+        "cash": 118745,
+        "packs": 188,
+        "purchased_pack_nights": 91,
+        "milestone_days": {
+          "studio": 13,
+          "resort": 17
+        },
+        "first_growth": 1,
+        "early_mean_net": 221.64,
+        "late_mean_net": 3355.05,
+        "studio_completed": 205,
+        "resort_completed": 192,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 6,
+          "resort": 6
+        },
+        "unique_cards": 281
+      }
+    },
+    "20_conservative": {
+      "all_reached_resort": true,
+      "studio_day_range": [
+        14,
+        28
+      ],
+      "resort_day_range": [
+        23,
+        35
+      ],
+      "mean_early_net": 113.4,
+      "mean_late_net": 3036.33,
+      "mean_packs": 175.7,
+      "mean_final_cash": 90549.5,
+      "recovery_breaks": 0,
+      "sample": {
+        "roster": 20,
+        "cash": 91776,
+        "packs": 184,
+        "purchased_pack_nights": 91,
+        "milestone_days": {
+          "studio": 14,
+          "resort": 25
+        },
+        "first_growth": 1,
+        "early_mean_net": 184.86,
+        "late_mean_net": 3028.6,
+        "studio_completed": 188,
+        "resort_completed": 163,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 6,
+          "resort": 6
+        },
+        "unique_cards": 287
+      }
+    },
+    "20_aggressive": {
+      "all_reached_resort": true,
+      "studio_day_range": [
+        11,
+        19
+      ],
+      "resort_day_range": [
+        15,
+        25
+      ],
+      "mean_early_net": 145.96,
+      "mean_late_net": 3301.26,
+      "mean_packs": 179.7,
+      "mean_final_cash": 111626.83,
+      "recovery_breaks": 0,
+      "sample": {
+        "roster": 20,
+        "cash": 121711,
+        "packs": 184,
+        "purchased_pack_nights": 87,
+        "milestone_days": {
+          "studio": 11,
+          "resort": 15
+        },
+        "first_growth": 1,
+        "early_mean_net": 274.36,
+        "late_mean_net": 3254.15,
+        "studio_completed": 217,
+        "resort_completed": 202,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 6,
+          "resort": 6
+        },
+        "unique_cards": 282
+      }
+    }
+  },
+  "opening": {
+    "nights": 84,
+    "mean_net": 94.08,
+    "median_net": 116.0,
+    "negative_nights": 8,
+    "standard_price": 100
+  },
+  "continued_collecting": {
+    "4": [
+      {
+        "roster": 4,
+        "cash": 601,
+        "packs": 193,
+        "purchased_pack_nights": 130,
+        "milestone_days": {
+          "studio": 13,
+          "resort": 17
+        },
+        "first_growth": 1,
+        "early_mean_net": 221.64,
+        "late_mean_net": 641.85,
+        "studio_completed": 53,
+        "resort_completed": 40,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 429
+      },
+      {
+        "roster": 4,
+        "cash": 1075,
+        "packs": 204,
+        "purchased_pack_nights": 139,
+        "milestone_days": {
+          "studio": 11,
+          "resort": 15
+        },
+        "first_growth": 1,
+        "early_mean_net": 280.86,
+        "late_mean_net": 675.9,
+        "studio_completed": 56,
+        "resort_completed": 47,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 452
+      },
+      {
+        "roster": 4,
+        "cash": 940,
+        "packs": 193,
+        "purchased_pack_nights": 133,
+        "milestone_days": {
+          "studio": 14,
+          "resort": 20
+        },
+        "first_growth": 1,
+        "early_mean_net": 185,
+        "late_mean_net": 665.45,
+        "studio_completed": 53,
+        "resort_completed": 49,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 438
+      },
+      {
+        "roster": 4,
+        "cash": 756,
+        "packs": 187,
+        "purchased_pack_nights": 131,
+        "milestone_days": {
+          "studio": 16,
+          "resort": 24
+        },
+        "first_growth": 1,
+        "early_mean_net": 129.29,
+        "late_mean_net": 689.65,
+        "studio_completed": 51,
+        "resort_completed": 32,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 440
+      },
+      {
+        "roster": 4,
+        "cash": 891,
+        "packs": 195,
+        "purchased_pack_nights": 133,
+        "milestone_days": {
+          "studio": 11,
+          "resort": 17
+        },
+        "first_growth": 1,
+        "early_mean_net": 263.5,
+        "late_mean_net": 669.85,
+        "studio_completed": 56,
+        "resort_completed": 51,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 445
+      },
+      {
+        "roster": 4,
+        "cash": 1146,
+        "packs": 195,
+        "purchased_pack_nights": 133,
+        "milestone_days": {
+          "studio": 13,
+          "resort": 19
+        },
+        "first_growth": 1,
+        "early_mean_net": 216.29,
+        "late_mean_net": 677.45,
+        "studio_completed": 55,
+        "resort_completed": 48,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 443
+      }
+    ],
+    "20": [
+      {
+        "roster": 16,
+        "cash": 975,
+        "packs": 253,
+        "purchased_pack_nights": 171,
+        "milestone_days": {
+          "studio": 13,
+          "resort": 17
+        },
+        "first_growth": 1,
+        "early_mean_net": 221.64,
+        "late_mean_net": 1065.85,
+        "studio_completed": 53,
+        "resort_completed": 50,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 377
+      },
+      {
+        "roster": 15,
+        "cash": 1332,
+        "packs": 248,
+        "purchased_pack_nights": 173,
+        "milestone_days": {
+          "studio": 15,
+          "resort": 19
+        },
+        "first_growth": 1,
+        "early_mean_net": 199.21,
+        "late_mean_net": 1039,
+        "studio_completed": 52,
+        "resort_completed": 49,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 369
+      },
+      {
+        "roster": 14,
+        "cash": 855,
+        "packs": 242,
+        "purchased_pack_nights": 165,
+        "milestone_days": {
+          "studio": 14,
+          "resort": 20
+        },
+        "first_growth": 1,
+        "early_mean_net": 185,
+        "late_mean_net": 969.05,
+        "studio_completed": 53,
+        "resort_completed": 50,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 343
+      },
+      {
+        "roster": 16,
+        "cash": 1635,
+        "packs": 252,
+        "purchased_pack_nights": 174,
+        "milestone_days": {
+          "studio": 16,
+          "resort": 24
+        },
+        "first_growth": 1,
+        "early_mean_net": 129.29,
+        "late_mean_net": 1119.35,
+        "studio_completed": 52,
+        "resort_completed": 47,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 385
+      },
+      {
+        "roster": 16,
+        "cash": 1434,
+        "packs": 249,
+        "purchased_pack_nights": 170,
+        "milestone_days": {
+          "studio": 17,
+          "resort": 23
+        },
+        "first_growth": 1,
+        "early_mean_net": 120.79,
+        "late_mean_net": 1103.45,
+        "studio_completed": 53,
+        "resort_completed": 48,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 367
+      },
+      {
+        "roster": 16,
+        "cash": 1635,
+        "packs": 245,
+        "purchased_pack_nights": 165,
+        "milestone_days": {
+          "studio": 13,
+          "resort": 19
+        },
+        "first_growth": 1,
+        "early_mean_net": 216.29,
+        "late_mean_net": 943.55,
+        "studio_completed": 55,
+        "resort_completed": 50,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 375
+      }
+    ]
+  },
+  "real_catalog": {
+    "characters": 4,
+    "cards": 270,
+    "gallery_sizes": [
+      2,
+      19,
+      33,
+      216
+    ],
+    "campaigns": [
+      {
+        "roster": 4,
+        "cash": 1075,
+        "packs": 197,
+        "purchased_pack_nights": 133,
+        "milestone_days": {
+          "studio": 13,
+          "resort": 19
+        },
+        "first_growth": 1,
+        "early_mean_net": 209.79,
+        "late_mean_net": 647.3,
+        "studio_completed": 53,
+        "resort_completed": 34,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 245
+      },
+      {
+        "roster": 4,
+        "cash": 918,
+        "packs": 194,
+        "purchased_pack_nights": 132,
+        "milestone_days": {
+          "studio": 11,
+          "resort": 15
+        },
+        "first_growth": 1,
+        "early_mean_net": 276.43,
+        "late_mean_net": 652.85,
+        "studio_completed": 56,
+        "resort_completed": 52,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 240
+      },
+      {
+        "roster": 4,
+        "cash": 645,
+        "packs": 191,
+        "purchased_pack_nights": 131,
+        "milestone_days": {
+          "studio": 17,
+          "resort": 23
+        },
+        "first_growth": 1,
+        "early_mean_net": 176.86,
+        "late_mean_net": 671,
+        "studio_completed": 51,
+        "resort_completed": 37,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 244
+      },
+      {
+        "roster": 4,
+        "cash": 724,
+        "packs": 195,
+        "purchased_pack_nights": 133,
+        "milestone_days": {
+          "studio": 14,
+          "resort": 19
+        },
+        "first_growth": 1,
+        "early_mean_net": 173.43,
+        "late_mean_net": 677.3,
+        "studio_completed": 53,
+        "resort_completed": 39,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 244
+      },
+      {
+        "roster": 4,
+        "cash": 1277,
+        "packs": 187,
+        "purchased_pack_nights": 128,
+        "milestone_days": {
+          "studio": 19,
+          "resort": 23
+        },
+        "first_growth": 1,
+        "early_mean_net": 140.43,
+        "late_mean_net": 676.65,
+        "studio_completed": 49,
+        "resort_completed": 34,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 240
+      },
+      {
+        "roster": 4,
+        "cash": 937,
+        "packs": 197,
+        "purchased_pack_nights": 132,
+        "milestone_days": {
+          "studio": 13,
+          "resort": 19
+        },
+        "first_growth": 1,
+        "early_mean_net": 225.07,
+        "late_mean_net": 660.45,
+        "studio_completed": 55,
+        "resort_completed": 43,
+        "recovery_breaks": 0,
+        "departments": {
+          "studio": 1,
+          "resort": 1
+        },
+        "unique_cards": 241
+      }
+    ]
+  }
+}

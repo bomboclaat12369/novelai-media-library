@@ -95,5 +95,6 @@ def read_library(root):
 
 def public_catalog(catalog):
     return {**catalog, 'cards': {key: {**{k:v for k,v in card.items() if k not in ('image','original')},
-                                      'image': '/api/image/' + key if card.get('image') else None}
+                                      'image': '/api/image/' + key if card.get('image') else None,
+                                      'original_available': bool(card.get('original'))}
                                 for key, card in catalog['cards'].items()}}

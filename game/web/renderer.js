@@ -155,7 +155,7 @@
     const owner = catalog.people[card.owner];
     const name = owner?.name || 'Collection';
     const owned = options.owned === true;
-    const url = owned && !catalog.demo && card.available !== false ? originalURL(card) : null;
+    const url = owned && !catalog.demo && card.available !== false && card.original_available !== false ? originalURL(card) : null;
     const label = !owned ? 'Not collected' : catalog.demo ? 'Demo portrait' : 'Artwork unavailable';
     let photo = placeholder(label, name);
     let node;

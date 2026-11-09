@@ -1,19 +1,30 @@
 {
-  "scope": "Synthetic Python/SQLite server timings on this Linux workspace; small owned inventory, no photos or browser timing.",
+  "scope": "Synthetic Python/SQLite timings on Windows; no browser or photo decoding timings.",
   "cases": [
     {
       "cards": 10000,
-      "catalog_open_ms": 28.46,
-      "catalog_serialize_ms": 23.27,
-      "catalog_json_bytes": 2316903,
-      "pack_transaction_mean_ms": 11.74
+      "catalog_open_ms": 65.07,
+      "catalog_serialize_ms": 24.81,
+      "catalog_json_bytes": 2606903,
+      "pack_transaction_mean_ms": 59.06
     },
     {
       "cards": 50000,
-      "catalog_open_ms": 153.99,
-      "catalog_serialize_ms": 153.95,
-      "catalog_json_bytes": 11668675,
-      "pack_transaction_mean_ms": 49.98
+      "catalog_open_ms": 239.91,
+      "catalog_serialize_ms": 137.31,
+      "catalog_json_bytes": 13118675,
+      "pack_transaction_mean_ms": 241.51
     }
-  ]
+  ],
+  "growing_save": {
+    "catalog_cards": 12000,
+    "owned_cards": 10001,
+    "history_events": 20001,
+    "export_ms": 126.16,
+    "pack_transaction_ms": 168.55,
+    "restore_ms": 509.87,
+    "reload_ms": 171.35,
+    "export_bytes": 4029223,
+    "restored_owned_equal": true
+  }
 }

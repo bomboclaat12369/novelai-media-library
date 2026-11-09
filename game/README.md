@@ -1,102 +1,197 @@
-# After Hours — playable prototype 0.1.0
+# After Hours — Club, Studio & Resort
 
-A local prototype of the club, staffing and collectible-card loop for NovelAI Media Library. This is an isolated prototype, not a published Media Library update. The working title, presentation and balance are provisional.
+A complete local main-game build for the Media Library companion. Choose two
+founders, grow the club, collect cards, schedule Studio projects and manage
+multi-night Resort stays on one calendar. This checkout is unpublished.
 
-## Try it on Windows
+## Play on this Windows computer
 
-1. Extract the whole ZIP; keep the folder named `game` intact.
-2. Open `game` and double-click **Start-Demo.bat**. It needs an installed Python 3.10 or newer; Python 3.12 was tested here. No third-party Python packages are needed.
-3. Choose two founders and open the club. Use Pause, 1×/2×/4× or Finish night. A normal night lasts five simulated minutes.
-4. Spend earnings in the Pack shop. Tap cards individually or reveal all five. Recruitment and Expansion give new hires working positions.
-5. Leave the launcher window open while playing. Close it to stop. Reopen the same launcher to resume; an unfinished night resumes paused.
+1. Double-click **`C:\Codex\After-Hours-Codex\PLAY-AFTER-HOURS.bat`**.
+   The equivalent launcher is `project\game\Start-After-Hours.bat`.
+2. Leave the launcher window open. The browser opens
+   **http://127.0.0.1:8877/game/**, accessible only on this computer.
+3. Choose your own two founders. The actual play save is fresh; the build's
+   walkthrough used separate QA saves.
+4. Close the launcher with Ctrl+C when finished. Reopen it to resume.
+   A server restart pauses an unfinished night.
 
-To try existing images, **Start-With-Library.bat** asks for the companion's `library.json`. It reads that file, `battles.json`, existing thumbnails and originals. It does not edit them. This is optional and has been tested with synthetic library fixtures, not Walker's actual collection. The launcher uses Python's standard Tk file picker; the Windows launcher itself has not been run on Windows in this workspace.
+The ignored `game/local.json` is configured for the supplied library folder
+and working Python runtime on this computer. The launcher checks that
+configuration, Python on PATH, then the bundled Codex runtime. Python 3.10+
+is required. The game needs only the standard library; Node, npm, Pillow,
+an AI model and a story file are not required to play. Pillow is used only
+by optional media-verification tools/tests.
 
-The default address is `http://127.0.0.1:8877/`. It listens only on this computer. If that port is already occupied, run `python game/server.py --port 8878 --open` from the extracted parent folder. For a selected library, add `--library "C:\path\to\library-folder"`.
+`Start-Demo.bat` uses a separate synthetic catalog with placeholder portraits.
+`Start-With-Library.bat` accepts the same options as the main launcher:
 
-## What works
+- `-Library "C:\path\to\Media Library"` selects another folder or library.json.
+- `-Port 8878` selects another local port if 8877 is in use.
+- `-NoBrowser` leaves browser opening to you.
+- `-Check` checks Python and SQLite without opening a save.
+- `-Save "C:\path\new.sqlite3"` selects a separate save file.
 
-- Two founders, shared character energy/career progress, one equipped card per person, and $600 starting cash.
-- Planning, prices, room/lounge assignments, rest, training, automatic assignment and six service rounds per night.
-- Hiring directly with a starter card; pulling a girl's first card waives her hiring fee. Accepting recruitment starts her nightly wages.
-- Private rooms and lounge growth up to nine simultaneous positions, recovery facilities and reception. The roster can grow beyond those positions to support rest and training.
-- Standard ($100), Girl spotlight ($200), Themed ($200), Premium ($400) and Collector ($600) packs, each containing five cards.
-- Premium guarantees an Epic or Legendary; Collector guarantees an unowned card while one remains. Offers are disabled when their guarantee cannot be met.
-- Cards revealed individually or together; owned/missing, girl and rarity filters; text search includes categories and specialties; equipment and duplicate mastery.
-- Nightly reports, disk saves, automatic SQLite backups, full save/history export, and recovery from interrupted reveals.
-- A read-only library adapter with separate game ownership. Eligible main-library images remain in the catalog even when unranked. Review, purgatory, videos, set-only images and removal-flagged images are excluded.
+The launcher runs the restored companion's **game-only** entry before its
+normal library store or updater initializes. It reads metadata, rankings,
+thumbnails and originals, and writes separate game data. The source companion
+also exposes `/game/` and an Open After Hours button. The installed production
+companion was not replaced or updated.
 
-The demo contains 20 names and 576 abstract placeholder cards: 120 each for Nikki, Mikayla, Alice and Genesis, and six each for 16 guest placeholders. These are sample game records, not copied media, and game specialties are assigned by deterministic game rules rather than inferred from a person or photograph.
+## The operating loop
 
-## Images, rarity and pack odds
+- **Prepare:** choose prices, assignments, rest/training and equipment. Save
+  up to twelve named plans. Auto assign respects reservations and tired
+  workers. Every employed person receives $30/night, including at rest.
+- **Watch:** nights last five simulated minutes, with six service rounds.
+  Use 1×/2×/4×, pause/resume or Finish night. Click a room to follow its activity
+  and large owned photograph. Rotating photographs never changes equipment.
+- **Decide:** a booking/promotion opportunity and a refreshment choice occur
+  each night. The browser pauses when a new opportunity appears. Resume when
+  ready. Finish night resolves unanswered choices conservatively.
+- **Collect and grow:** settle once, open earned/purchased packs, equip cards,
+  use extra copies for mastery, optionally recruit and expand. A first pull
+  waives that person's hiring fee; it never starts payroll automatically.
+- **Studio:** available from night 4 after 18 club bookings. Opening costs
+  $650 plus $14 upkeep per position. One-, two- and three-night projects have
+  deposits, delivery risk and money rewards. Longer successful projects award
+  Standard vouchers and sometimes an extra card marked as a Studio award.
+- **Resort:** available after two Studio deliveries. Opening costs $1,250 plus
+  $24 upkeep per suite. Two-, three- and four-night packages reserve a host,
+  earn nightly revenue and track satisfaction for checkout bonuses.
 
-Every card points to one image and one character. Owning several images of a character does not create multiple staff members. Energy and career progress stay with the character; copies, usage and mastery stay with the card.
+One person cannot occupy two departments on the same date. Projects, stays
+and club work advance together with shared money, energy and career skills.
+Reservations override a retained club plan. Cancellation frees the dates;
+the deposit is not refunded. Equipment is locked for each shift. Starting
+strengths and training focus are configurable game rules, not personal traits
+inferred from photographs.
 
-Mixed standard slots choose uniformly among girls in the eligible pool, then use relative rarity weights 55 / 27 / 12 / 5 / 1 among that girl's existing tiers. Missing tiers are removed and weights renormalized. Consequently those weights are not universal displayed drop percentages. Themed and spotlight pools restrict eligibility; guaranteed slots choose from their qualifying pool. A girl with six images is not overwhelmed by a girl with 120.
+Club expansion supports six private rooms and three lounge positions, plus
+reception and recovery improvements. Studio and Resort each support six
+positions. The roster has no twenty-person cap; larger teams can rotate
+through work, rest and training. Keep a payroll reserve when buying capacity
+or paying deposits. If the next night is unaffordable, a recovery break
+restores an operating reserve and energy, shifts reservations by two dates,
+and retains your collection and facilities. There is no mandatory reset.
 
-Initial library rarity uses per-girl ranked-image percentiles, with a minimum of five voted images and distinct ratings before allocating higher tiers. Unranked images begin as Common. The snapshot remains stable when later votes change; newly eligible images are added on server restart. Removed images retain owned-card records and progress, with unavailable artwork. This first adapter uses raw ratings with `played > 0`, not the library's complete placement-confidence policy. Rarity reassessment and migration rules still need final design.
+## Cards and source preservation
 
-Existing thumbnails are used where available, otherwise originals are loaded on demand. View active card / View opens the original. Existing special-edition frames and saved positioning have not yet been connected: the prototype uses temporary 3:4 layouts with fit rather than changing approved artwork.
+Packs contain five cards: Standard $100, Spotlight $200, Themed $200, Premium
+$400 and Collector $600. Premium guarantees an Epic/Legendary when eligible;
+Collector guarantees an unowned card while one remains. Impossible guarantees
+are disabled. Earned vouchers open a Standard pack without spending cash.
 
-## Saves and recovery
+Ordinary slots choose a character uniformly, then weight their available
+rarities 55/27/12/5/1. Missing tiers are removed and weights renormalized.
+Spotlight/category and guarantee pools restrict eligibility first. Gallery
+size alone does not dominate character odds. Multiple image cards of one
+character share that character's energy and career.
 
-Game saves are independent of Media Library data:
+The confidence-aware library ranking snapshot sets initial rarity. Unplaced
+cards remain Common. Existing rarity and specialty are frozen as votes or
+metadata change; newly eligible cards enter after refresh/restart. Main-library
+images qualify; videos, review/purgatory, removal-flagged and set-only images
+do not. Missing sources retain ownership and progress with an unavailable-art
+message. Refresh never starts payroll or resets the business.
 
-- Windows: `%LOCALAPPDATA%\NovelAIMediaGamePrototype\`.
-- Other systems: `$XDG_DATA_HOME/NovelAIMediaGamePrototype/`, or `~/.local/share/NovelAIMediaGamePrototype/`.
-- Each source catalog has its own hashed `.sqlite3` filename. Demo progress and library-backed progress are separate. The catalog's stable library identity keeps the save associated with it when available.
+Cards use the existing production renderer, fonts, artwork and saved Fit/Fill
+positioning. Approved artwork has a **7:10 outer frame and 3:4 photo aperture**;
+it is preserved rather than stretched. Card and activity photos request
+originals. Backend image routes enforce game ownership. The Media Library's
+independent viewing and ownership rules remain separate.
 
-Purchases commit money, cards and reveal results in one SQLite transaction before any reveal. Request IDs and revision checks protect retries and concurrent windows. Restarting pauses an unfinished night. Meaningful game events are retained; the reports screen shows the latest 40 nights.
+## Saves, backups and recovery
 
-A `.sqlite3.backup` is refreshed after major purchases and night settlement. To recover it, close the launcher, preserve the entire save directory, and copy the backup to a **new** filename ending `.sqlite3`; launch with `--save "full-path-to-the-new-file.sqlite3"` and the same library selection if applicable. This avoids overwriting a live database or reusing its WAL files. Export produces JSON with inventory, catalog metadata and history; a JSON import interface is not implemented yet.
+Default new saves are in **`project\game\data`**, with distinct hashed filenames
+for demo and real libraries. `AFTER_HOURS_DATA` or `-Save` can override this.
+Old `%LOCALAPPDATA%\NovelAIMediaGamePrototype` saves are not opened automatically.
+QA files are isolated under ignored `game/test-data`. Back up the whole
+`game/data` directory periodically.
 
-This is a prototype save schema. Future schema migrations and restore UI must be tested before production integration. No compulsory restart or prestige system is planned.
+Each action uses SQLite transactions, a request ID and a revision check.
+Purchases, inventory and pending reveals commit together; reloading cannot
+reroll a paid pack. Settlement applies once. Conflicting windows refresh
+instead of charging twice. If another tab restores a different save, reload
+older tabs before using them again.
 
-## Verification on 2026-11-09
+**Saves & catalog** provides JSON export/import, an explicit backup button,
+the twelve latest rotating backups and read-only catalog refresh. A latest
+`.sqlite3.backup` is also maintained. **Restore creates a new sibling save**
+and retains the previous file. An `.active.json` pointer selects that restored
+file on the next launch; keep the pointer and database together. Restore
+requires the same source identity and rebinds source paths to the selected
+library. Imported paths are never served directly.
 
-- 17 automated game checks pass: clock consistency across speeds, paused time, energy sharing, capacity, recruitment, guarantees, unequal image counts, duplicate handling, recovery, transaction rollback, retries, concurrent windows, restart, catalog changes, source-file integrity and HTTP boundaries.
-- 13 existing release-pipeline checks pass. No release request or production files were changed.
-- Browser walkthrough passed: choose founders → start/speed/pause/finish night → open a pack → reveal one card → reload during reveal → finish opening → filter collection → equip → recruit with fee waived → upgrade → auto-assign → inspect active card → report and export.
-- Browser checking used demo placeholders at the available desktop viewport. Windows, mobile layout, real-library image decoding and production card rendering remain unverified.
-- JavaScript syntax validation passed.
+Schema-1 prototype saves migrate to schema 2 without discarding cards, money,
+career progress or pending reveals. Opening an old SQLite save creates a
+`.before-schema-2` snapshot; use a *copy* with `-Save` when migrating an existing
+campaign. Prototype JSON exports can be restored in the UI. Unsupported
+future or malformed saves are rejected. Full business history is exported;
+reports show the latest 40 nights. Deposits and capital purchases are recorded
+separately from nightly recurring profit.
 
-Seeded simulations used the same rules as the playable prototype: 40 seeds × 120 nights × five staffing scenarios, plus 40 growing campaigns (28,800 modeled nights total). Mean net nightly income after the first 14 nights:
+## Verification — Windows, 9 November 2026
 
-| Scenario | Working positions | Mean net per night |
-| --- | ---: | ---: |
-| Opening two-person club | 2 | $107.98 |
-| Established four-person club | 4 | $290.00 |
-| Expanded eight-person roster | 9 | $488.18 |
-| Expanded twelve-person roster | 9 | $687.80 |
-| Only two people in the expanded club | 9 | $63.48 |
+- 44 game rule, persistence, companion HTTP and recovery checks; 12 existing
+  runtime card checks; 13 release-pipeline checks. Pipeline tests use temporary
+  local repositories only. No release was published.
+- Native production renderer: 364 renders covering 13 frames, seven ranks,
+  transparency and bounds; saved Fit/Fill geometry checks pass.
+- Actual library: four eligible characters and 270 cards, with galleries of
+  2/19/33/216 images. All originals fully decoded. Before/after hashes of both
+  metadata files and all eligible originals match.
+- Actual Windows `.bat` launch and browser walkthrough: founders, timed choice,
+  settlement, interrupted reveal/reload, equip, optional hire, expansion,
+  retained plan, Studio projects, shared Club/Studio/Resort operation, checkout,
+  mid-night restart, backup restore and relaunch into the restored file.
+- Real cards loaded originals; an actual saved 1.07 zoom matched its source
+  framing. Desktop and 390-pixel layouts, mobile voucher reveal, missing-source
+  placeholders and optional catalog arrivals were checked in the Windows
+  in-app browser. Missing/addition cases used disposable fixtures.
+- Approved assets/modules: 143 source-manifest entries checked. 77 match exact
+  bytes; 66 text files differ only by Windows checkout newlines. No approved
+  artwork or renderer source was edited.
 
-These are synthetic scenario results with specific facilities and an automatic staffing policy, not guaranteed payouts. Rest rotations matter; additional payroll is useful when staffing matches capacity. The sample growth policy bought a pack every other night, expanded first on days 4–9, and reached 12 staff in every 120-night run without using recovery grants. It accumulated excess late-game money because it kept buying only inexpensive packs: long-term sinks and further departments are still needed.
+`full-balance-report.json` records **10,884 modeled nights**: six seeds across
+four/five/twelve/twenty-character policies, continued-collecting policies and
+the actual eligible catalog. The two-founder opening averages $94 net
+(median $116), against a $100 Standard pack. All campaigns reached Resort.
+Real-catalog collecting runs reached it on days 15–23, opened about 194 packs
+over 120 nights and retained $645–$1,277. Buying packs competes with expansion;
+players who stop spending can accumulate substantial cash. These are explicit
+automated strategies, not guaranteed payouts or human playtesting.
 
-Across 40,000 standard card draws, each of 20 girls received 4.73%–5.34% of draws despite the 120-versus-six image imbalance. Full outputs are in `balance-report.json`.
-
-Synthetic server benchmarks with a small owned inventory:
-
-| Catalog size | Initial catalog/save open | Catalog JSON encoding | Mean pack transaction |
-| --- | ---: | ---: | ---: |
-| 10,000 cards | 28 ms | 23 ms | 12 ms |
-| 50,000 cards | 154 ms | 154 ms | 50 ms |
-
-These are Linux workspace timings, not a Windows or browser frame-rate measurement. The 50,000-card metadata response is approximately 11.7 MB; it loads once and the collection renders 24 cards at a time. Very large owned inventories and long histories still need endurance profiling. See `performance-report.json`.
-
-## Next development milestone
-
-Try several nights and pack openings, then use that feedback to tune pacing. Next implementation work should connect the approved card renderer/positioning and companion launch route, validate real-library data and Windows saves, and add meaningful night events plus long-term club goals. The integrated resort and studio remain planned later departments sharing this roster, money and calendar. Night events, persistent customer relationships, distinct staff personalities and the long-term goals are not implemented in this first loop. Booking quality and repeat-business specialties currently share a small acceptance bonus; their distinct systems need development. Evolution and set-linked evolution remain deferred. Automatic clothing-color detection and browser-access troubleshooting remain paused.
+`performance-report.json` records Windows server timings: about 242 ms for a
+pack transaction with 50,000 catalog cards. A save with 10,001 owned cards and
+20,001 history events restored in about 510 ms and reloaded in 171 ms with
+ownership intact. These are server measurements, not browser frame rates.
+Large metadata catalogs load in full; collection pages show 24 at a time.
+Other operating systems and the installed production GUI were not visually
+tested. Optional video, story import/generation, narrative relationships,
+evolution and clothing-color detection remain deferred.
 
 ## Developer commands
 
-Run from the repository or extracted parent directory:
+Run from `project` with a working Python 3.10+ executable:
 
-```sh
-python3 -m unittest discover -s tests -p test_game_prototype.py -v
+```text
+python -m unittest discover -s tests -p "test_game*.py"
+python -m unittest discover -s tests -p "test_runtime_card*.py"
+python -m unittest discover -s tests -p "test_release_pipeline.py"
 node --check game/web/app.js
-python3 -m game.simulate --seeds 40 --nights 120
-python3 -m game.benchmark
-python3 -m game.server --open
+node --check game/web/management-ui.js
+node --check game/web/renderer.js
+python -m game.simulate_full --seeds 6 --nights 120
+python -m game.benchmark
+python -m game.server --open
 ```
 
-The simulation is pure rules code, shared by the server. Generated reports contain no source photographs. `--preview` is for isolated managed demo QA only and cannot be combined with a real library.
+On this host, use the Python path in ignored `game/local.json`. Set TEMP/TMP
+to a writable test folder. Release fixtures need byte-stable Git checkouts
+(`core.autocrlf=false` scoped to that test process). Optional
+`game.verify_library` requires Pillow and accepts `--library`, `--output` and
+`--compare`; keep its per-file hash reports private and untracked.
+
+Source lives on local `game-build-20261109`. The handoff bundle and plan remain
+intact. Narrative state has a separate versioned namespace for a future
+optional interface; no writing service or story upload is part of this build.
