@@ -33,7 +33,7 @@ async function performAct(action,body={},quiet=false){
   render();if(!quiet&&action==='upgrade')notify('Facility upgraded. Your new capacity is ready.');
   if(action==='tick'&&save?.phase==='night'&&!save.night.paused){
    const decision=save.night.decisions.find(d=>!d.choice&&save.night.elapsed>=d.at&&save.night.elapsed<d.until&&!announcedDecisions.has(d.id));
-   if(decision){announcedDecisions.add(decision.id);act('pause',{paused:true},true);notify('A business opportunity has arrived. The evening is paused for your decision.');}
+   if(decision){announcedDecisions.add(decision.id);act('pause',{paused:true},true);notify('An opportunity is up. Pick an option and the night keeps rolling.');}
   }
  }catch(e){notify(e.message);const r=await fetch('/game/api/state');if(r.ok){accept(await r.json());render();}}
  finally{busy=false;if(document.hidden&&save?.phase==='night'&&!save.night.paused)setTimeout(()=>act('pause',{paused:true},true),0);}

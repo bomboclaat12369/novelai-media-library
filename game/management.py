@@ -7,6 +7,7 @@ from __future__ import annotations
 import copy
 import random
 from .catalog import stable
+from . import flavor
 
 PROFILES = {
     'host': {'name': 'Welcoming', 'focus': 'club', 'bonus': .04},
@@ -140,6 +141,7 @@ def command(state, catalog, action, body):
         if not decision or decision.get('choice') or not decision['at'] <= state['night']['elapsed'] < decision['until']:
             raise RuleError('This opportunity has already resolved or is not yet available.')
         resolve_decision(state, decision, body.get('choice'), False)
+        state['night']['paused'] = False
         return True
     handled = {'schedule', 'cancel_contract', 'department', 'save_plan', 'load_plan', 'delete_plan', 'profile', 'training', 'marketing'}
     if action not in handled: return False
@@ -196,7 +198,7 @@ def prepare_night(state):
     ensure(state)
     n = state['night']
     first = 'booking' if state['day'] % 2 else 'promotion'
-    n['decisions'] = [{'id': f"{state['day']}-{i}", 'kind': kind, 'at': at, 'until': at + 50, 'choice': None}
+    n['decisions'] = [{'id': f"{state['day']}-{i}", 'kind': kind, 'at': at, 'until': at + 50, 'choice': None, 'copy': flavor.event(kind, state)}
                       for i, (kind, at) in enumerate(((first, 100), ('hospitality', 200)))]
     n['department_revenue'] = 0; n['decision_costs'] = 0; n['activities'] = {}
     n['assignments'] = {p: assignment(state, p) for p in state['people']}
@@ -224,8 +226,9 @@ def resolve_decision(state, decision, choice, automatic=False):
         else:
             state['reputation'] += 2; state['promotion_until'] = max(state['promotion_until'], state['day'] + 3)
     decision['choice'] = choice; decision['automatic'] = automatic
-    n['log'].append(spec['title'] + ': ' + next(o['label'] for o in spec['options'] if o['id'] == choice))
-    record(state, 'business_decision', decision=decision['id'], opportunity=decision['kind'], choice=choice, automatic=automatic)
+    title = decision.get('copy', {}).get('title', spec['title'])
+    n['log'].append(title + ': ' + next(o['label'] for o in spec['options'] if o['id'] == choice))
+    record(state, 'business_decision', decision=decision['id'], opportunity=decision['kind'], choice=choice, automatic=automatic, title=title)
 
 
 def advance_wave(state, catalog, wave):
@@ -249,7 +252,8 @@ def advance_wave(state, catalog, wave):
         quality = (1 + skill_bonus(worker, department) + (.05 if card['specialty'] in ('service', 'loyalty') else 0)) if worked else .3
         c['quality'] += quality
         n['energy_spent'][c['owner']] += energy if worked else 0
-        n['activities'][c['owner']] = {'department': department, 'label': spec['name'], 'status': 'In progress' if worked else 'Tired · reduced quality', 'round': wave}
+        n['activities'][c['owner']] = {'department': department, 'label': spec['name'],
+            'status': flavor.activity(department if worked else 'tired', state, c['owner'], wave), 'round': wave}
         if department == 'resort':
             value = round(spec['rate'] / 6 * quality)
             c['revenue'] += value; n['revenue'] += value; n['department_revenue'] += value; n['earnings'][c['owner']] += value

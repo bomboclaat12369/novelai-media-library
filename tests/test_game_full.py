@@ -91,6 +91,27 @@ class IntegratedRules(unittest.TestCase):
         d=s['night']['decisions'][1]
         s=g.command(s,self.cat,'decision',{'decision':d['id'],'choice':'refresh'})
         self.assertEqual(s['night']['decision_costs'],25)
+        self.assertFalse(s['night']['paused'])
+        s=g.command(s,self.cat,'advance',{'seconds':1})
+        self.assertEqual(s['night']['elapsed'],201)
+
+    def test_event_wording_varies_and_does_not_reroll_during_night(self):
+        titles=[]
+        for day in range(1,17,2):
+            s=copy.deepcopy(self.s);s['day']=day
+            s=g.command(s,self.cat,'start')
+            presentation=copy.deepcopy(s['night']['decisions'][0]['copy'])
+            titles.append(presentation['title'])
+            s=g.command(s,self.cat,'advance',{'seconds':100})
+            self.assertEqual(s['night']['decisions'][0]['copy'],presentation)
+        self.assertEqual(len(set(titles)),8)
+
+    def test_tired_round_replaces_previous_activity(self):
+        s=g.command(self.s,self.cat,'start');s=g.command(s,self.cat,'advance',{'seconds':50})
+        owner=next(iter(s['people']));s['people'][owner]['energy']=0
+        s=g.command(s,self.cat,'advance',{'seconds':50})
+        self.assertEqual(s['night']['activities'][owner]['round'],2)
+        self.assertNotIn('+$',s['night']['activities'][owner]['status'])
 
     def test_departments_are_tick_size_independent(self):
         original=self.book(self.book(self.expanded(),'studio','demo-2','editorial'),'resort','demo-3','retreat')
@@ -215,6 +236,33 @@ class Recovery(unittest.TestCase):
         with patch('game.store.time.monotonic',return_value=105):
             a=self.store.apply('tick',{},'window-one',2);b=second.apply('tick',{},'window-two',3)
         self.assertEqual(a['state']['night']['elapsed'],5);self.assertEqual(b['state']['night']['elapsed'],5)
+
+    def test_answering_paused_event_resumes_without_counting_pause_time(self):
+        with patch('game.store.time.monotonic',return_value=100):
+            r=self.store.apply('start',{},'event-start',1)
+            r=self.store.apply('speed',{'speed':4},'event-speed',r['revision'])
+        for i in range(1,4):
+            with patch('game.store.time.monotonic',return_value=100+i*10):
+                r=self.store.apply('tick',{},f'event-tick-{i}',r['revision'])
+        r=self.store.apply('pause',{'paused':True},'event-pause',r['revision'])
+        decision=r['state']['night']['decisions'][0]
+        reopened=GameStore(self.path,self.cat)
+        r=reopened.read()
+        self.assertEqual(r['state']['night']['decisions'][0]['copy'],decision['copy'])
+        with self.assertRaises(g.RuleError):
+            reopened.apply('decision',{'decision':decision['id'],'choice':'invalid'},'invalid-answer',r['revision'])
+        self.assertEqual(reopened.read(),r)
+        body={'decision':decision['id'],'choice':'accept'}
+        with patch('game.store.time.monotonic',return_value=1000):
+            r=reopened.apply('decision',body,'answer-event',r['revision'])
+        self.assertFalse(r['state']['night']['paused']);self.assertEqual(r['state']['night']['speed'],4)
+        self.assertEqual(r['state']['night']['elapsed'],120)
+        cash=r['state']['night']['revenue']
+        replay=reopened.apply('decision',body,'answer-event',r['revision'])
+        self.assertTrue(replay['replayed']);self.assertEqual(replay['state']['night']['revenue'],cash)
+        with patch('game.store.time.monotonic',return_value=1001):
+            r=reopened.apply('tick',{},'tick-after-event',r['revision'])
+        self.assertEqual(r['state']['night']['elapsed'],124)
 
     def test_catalog_refresh_reaches_another_store(self):
         second=GameStore(self.path,self.cat)

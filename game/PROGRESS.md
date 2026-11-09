@@ -122,6 +122,21 @@ user's first launch creates a fresh campaign with founder selection.
 
 ## Delivery and limits
 
+Follow-up, 9 November 2026: successful event choices now resume the night in
+the same transaction, retaining its selected speed. The persisted clock resets
+at the choice so time spent deciding cannot jump the simulation forward.
+Invalid choices remain paused and retries cannot duplicate rewards. Added 24
+casual, non-graphic event variants and 56 activity/round descriptions, chosen
+without consuming gameplay random draws. Event wording stays fixed through
+the night and reload; quiet/tired rounds replace stale activity text.
+
+Follow-up checks: 47 game tests passed in 4.727 s; 13 release-pipeline checks
+passed in 29.392 s; JavaScript syntax and diff checks passed. Windows browser
+verification accepted the first event at 1:42, then reached the next event at
+3:22 without Resume. Declining that event also continued automatically; the
+timer reached 4:36 at 4×. Console checks showed no script errors. A new demo
+QA save was used, and `screenshots/event-continues-demo.jpg` records the result.
+
 Launch `C:\Codex\After-Hours-Codex\PLAY-AFTER-HOURS.bat` or
 `project\game\Start-After-Hours.bat`. See `README.md` for play, data locations,
 restore and developer commands. `screenshots/after-hours-demo.jpg` contains

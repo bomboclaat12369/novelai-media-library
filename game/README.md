@@ -46,8 +46,10 @@ companion was not replaced or updated.
   Use 1×/2×/4×, pause/resume or Finish night. Click a room to follow its activity
   and large owned photograph. Rotating photographs never changes equipment.
 - **Decide:** a booking/promotion opportunity and a refreshment choice occur
-  each night. The browser pauses when a new opportunity appears. Resume when
-  ready. Finish night resolves unanswered choices conservatively.
+  each night. The browser pauses when an opportunity appears; picking an
+  option automatically continues at the selected speed. Finish night resolves
+  unanswered choices conservatively. Event and room descriptions rotate
+  through varied, casual wording.
 - **Collect and grow:** settle once, open earned/purchased packs, equip cards,
   use extra copies for mastery, optionally recruit and expand. A first pull
   waives that person's hiring fee; it never starts payroll automatically.
@@ -132,7 +134,7 @@ separately from nightly recurring profit.
 
 ## Verification — Windows, 9 November 2026
 
-- 44 game rule, persistence, companion HTTP and recovery checks; 12 existing
+- 47 game rule, persistence, companion HTTP and recovery checks; 12 existing
   runtime card checks; 13 release-pipeline checks. Pipeline tests use temporary
   local repositories only. No release was published.
 - Native production renderer: 364 renders covering 13 frames, seven ranks,

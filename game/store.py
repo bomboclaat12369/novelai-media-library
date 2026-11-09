@@ -119,10 +119,10 @@ class GameStore:
             db.execute('INSERT OR REPLACE INTO save VALUES (1,?,?)',(revision+1,encode(state)))
             db.execute('INSERT INTO requests VALUES (?,?)',(request_id,digest))
             db.executemany('INSERT INTO events(at,body) VALUES (?,?)',[(time.time(),encode(e)) for e in events])
-            if action in ('new','start','tick','pause','speed','finish'):
+            if action in ('new','start','tick','pause','speed','finish','decision'):
                 db.execute("INSERT OR REPLACE INTO meta VALUES ('clock_tick',?)",(str(time.monotonic()),))
             db.commit()
-            if action in ('new','start','tick','pause','speed','finish'):
+            if action in ('new','start','tick','pause','speed','finish','decision'):
                 self.last_tick=time.monotonic()
             result={'revision':revision+1,'state':state}
         if action in ('new','pack','upgrade','hire','finish','schedule','department') or any(e['kind']=='night_settled' for e in events):
