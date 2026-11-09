@@ -11,3 +11,24 @@ deterministic copy selection and automatic continuation after event choices.
 
 If any requested wording cannot be included, tell the user exactly what is
 blocked and confirm the alternative before implementing or pushing it.
+
+## Deferred dialogue generation
+
+Walker chose offline batch-generated message packs on 9 November 2026.
+Revisit implementation near the final game revisions, once the dialogue
+scenarios are settled. This is a development constraint to remember, not a
+request to install a model or build the generator now.
+
+- Generate many alternatives beforehand and import validated message packs.
+  Gameplay should work with the model shut down and use no live generation.
+- Walker writes and edits the model's generation instructions directly,
+  including tone, style and wording. Provide that control when implementing;
+  do not impose hidden writing instructions. The writing guidance above is
+  for assistant-authored game text, not a mandatory generator prompt.
+- The integration supplies scenario facts, supported conditions, fixed
+  placeholders and the required output format. Keep writing separate from
+  game rules, outcomes, money, energy, cards, saves and source code.
+- Preserve compatibility with reusable message pools, recent-message
+  tracking, existing fallback text and saved wording across reloads.
+- Model selection, generation, message-pack import and story integration
+  remain deferred. Keep these optional and independent of the main game.

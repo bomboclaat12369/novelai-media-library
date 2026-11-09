@@ -166,6 +166,15 @@ were checked for eight unique variants. No layout or renderer changed, and
 this wording-only follow-up did not open a desktop computer-control session
 or repeat visual QA. Existing game saves and library media were not edited.
 
+Planning decision, 9 November 2026: Walker prefers generating large message
+pools offline and importing the results, with the model shut down during
+play. Implementation is deferred until near the final game revisions, when
+the scenario inventory is clearer. Walker will write and edit generation
+instructions directly; tone and wording remain under his control. The future
+integration handles scenario facts, output structure, validation and message
+selection. This decision is recorded in `game/AGENTS.md` for ongoing work.
+No model was installed or selected, and no generator or importer was built.
+
 Launch `C:\Codex\After-Hours-Codex\PLAY-AFTER-HOURS.bat` or
 `project\game\Start-After-Hours.bat`. See `README.md` for play, data locations,
 restore and developer commands. `screenshots/after-hours-demo.jpg` contains
