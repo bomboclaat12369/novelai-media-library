@@ -175,7 +175,7 @@ class ReadOnlyCatalog(unittest.TestCase):
             (root/'image.jpg').write_bytes(b'fixture-image')
             media[0].update(stored_rel='image.jpg',thumb_rel='missing-thumbnail.jpg')
             (root/'library.json').write_text(json.dumps({'characters':people,'media':media,'_tracking_store':'fixture'}))
-            (root/'battles.json').write_text(json.dumps({'boards':{'b:images':{'ratings':{f'b{i}':{'rating':2000-i*10,'played':10} for i in range(10)}}}}))
+            (root/'battles.json').write_text(json.dumps({'boards':{'b:images':{'ratings':{f'b{i}':{'rating':2000-i*10,'played':10,'rd':100,'opponents':{'one':1,'two':1,'three':1}} for i in range(10)}}}}))
             before={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in root.iterdir()}
             cat=read_library(root)
             self.assertEqual(len(cat['cards']),15)

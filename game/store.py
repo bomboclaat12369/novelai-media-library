@@ -7,8 +7,9 @@ import json
 import sqlite3
 import threading
 import time
+import uuid
 from pathlib import Path
-from . import engine
+from . import engine, migrations
 
 
 class Conflict(engine.RuleError):
@@ -28,6 +29,12 @@ class GameStore:
                 CREATE TABLE IF NOT EXISTS save(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL,body TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,digest TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY,at REAL NOT NULL,body TEXT NOT NULL);''')
+            row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
+            state=migrations.migrate(json.loads(row[1])) if row else None
+            if row and json.loads(row[1]).get('schema') != migrations.SCHEMA:
+                before=self.path.with_name(self.path.name+'.before-schema-2')
+                if not before.exists():
+                    with closing(sqlite3.connect(before)) as target: db.backup(target)
             old=db.execute("SELECT value FROM meta WHERE key='catalog'").fetchone()
             if old:
                 saved=json.loads(old[0])
@@ -37,20 +44,20 @@ class GameStore:
                     card['available']=False;card['image']=None;card['original']=None
                     if ident in catalog['cards']:
                         current=catalog['cards'][ident]
-                        card.update({k:current[k] for k in ('available','image','original','name','categories')})
+                        card.update({k:v for k,v in current.items() if k not in ('rarity','specialty','rarity_schema')})
                         card['source_categories']=current.get('source_categories',[])
                 for ident,card in catalog['cards'].items(): saved['cards'].setdefault(ident,card)
                 saved['people'].update(catalog['people'])
                 catalog=saved
             self.catalog=catalog
             db.execute("INSERT OR REPLACE INTO meta VALUES ('catalog',?)",(encode(catalog),))
-            row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
             if row:
-                state=json.loads(row[1])
-                if state.get('schema')!=1: raise engine.RuleError('This save needs a supported migration; it was not replaced.')
+                migrations.validate(state,catalog)
                 if state['phase']=='night':
                     state['night']['paused']=True
+                if encode(state)!=row[1]:
                     db.execute('UPDATE save SET revision=?,body=? WHERE id=1',(row[0]+1,encode(state)))
+            db.execute("INSERT OR REPLACE INTO meta VALUES ('clock_tick',?)",(str(time.monotonic()),))
 
     @contextmanager
     def connect(self):
@@ -89,7 +96,8 @@ class GameStore:
                 raise engine.RuleError('Choose your starting team first.')
             elif action=='tick':
                 now=time.monotonic()
-                delta=0 if self.last_tick is None else min(10,max(0,now-self.last_tick))
+                clock=db.execute("SELECT value FROM meta WHERE key='clock_tick'").fetchone()
+                delta=0 if not clock else min(10,max(0,now-float(clock[0])))
                 speed=state['night']['speed'] if state['phase']=='night' else 1
                 state=engine.command(state,self.catalog,'advance',{'seconds':delta*speed})
             else:
@@ -99,17 +107,94 @@ class GameStore:
             db.execute('INSERT OR REPLACE INTO save VALUES (1,?,?)',(revision+1,encode(state)))
             db.execute('INSERT INTO requests VALUES (?,?)',(request_id,digest))
             db.executemany('INSERT INTO events(at,body) VALUES (?,?)',[(time.time(),encode(e)) for e in events])
+            if action in ('new','start','tick','pause','speed','finish'):
+                db.execute("INSERT OR REPLACE INTO meta VALUES ('clock_tick',?)",(str(time.monotonic()),))
             db.commit()
             if action in ('new','start','tick','pause','speed','finish'):
                 self.last_tick=time.monotonic()
             result={'revision':revision+1,'state':state}
-        if action in ('new','pack','upgrade','hire','finish') or any(e['kind']=='night_settled' for e in events):
+        if action in ('new','pack','upgrade','hire','finish','schedule','department') or any(e['kind']=='night_settled' for e in events):
             self.backup()
         return result
 
     def backup(self):
         with self.lock,self.connect() as source,closing(sqlite3.connect(str(self.path)+'.backup')) as target:
             source.backup(target)
+        folder=self.path.parent/(self.path.name+'.backups');folder.mkdir(exist_ok=True)
+        revision=self.read()['revision']
+        snapshot=folder/f'{revision:010d}.sqlite3'
+        if not snapshot.exists():
+            with self.lock,self.connect() as source,closing(sqlite3.connect(snapshot)) as target: source.backup(target)
+        snapshots=sorted(folder.glob('*.sqlite3'))
+        for old in snapshots[:-12]: old.unlink()
+
+    def backups(self):
+        folder=self.path.parent/(self.path.name+'.backups')
+        return [{'id':p.name,'bytes':p.stat().st_size} for p in sorted(folder.glob('*.sqlite3'),reverse=True)]
+
+    def refresh_catalog(self,catalog,expected_revision):
+        with self.lock,self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT revision FROM save WHERE id=1').fetchone()
+            revision=row[0] if row else 0
+            if revision!=expected_revision: raise Conflict('The game changed. Refresh before importing catalog additions.')
+            if catalog['source_id']!=self.catalog['source_id']: raise engine.RuleError('The library identity changed; existing progress was preserved.')
+            merged=copy.deepcopy(self.catalog)
+            added=0
+            for ident,card in merged['cards'].items():
+                current=catalog['cards'].get(ident)
+                card.update(available=False,image=None,original=None)
+                if current:
+                    # Freeze rarity and specialty. Refresh presentation and verified paths only.
+                    card.update({k:v for k,v in current.items() if k not in ('rarity','specialty','rarity_schema')})
+            for ident,card in catalog['cards'].items():
+                if ident not in merged['cards']: merged['cards'][ident]=card;added+=1
+            merged['people'].update(catalog['people'])
+            db.execute("UPDATE meta SET value=? WHERE key='catalog'",(encode(merged),))
+            if row: db.execute('UPDATE save SET revision=? WHERE id=1',(revision+1,))
+            db.execute('INSERT INTO events(at,body) VALUES (?,?)',(time.time(),encode({'kind':'catalog_refreshed','added':added})))
+            self.catalog=merged
+        return added
+
+    def restore(self,payload=None,backup=None):
+        """Restore to a new sibling save. The current save is never overwritten."""
+        if backup is not None:
+            allowed={b['id'] for b in self.backups()}
+            if backup not in allowed: raise engine.RuleError('Choose one of the listed backups.')
+            path=self.path.parent/(self.path.name+'.backups')/backup
+            with closing(sqlite3.connect(f'{path.as_uri()}?mode=ro',uri=True)) as db:
+                row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
+                cat=json.loads(db.execute("SELECT value FROM meta WHERE key='catalog'").fetchone()[0])
+                events=[json.loads(r[0]) for r in db.execute('SELECT body FROM events ORDER BY id')]
+            payload={'format':'after-hours-game','schema':2,'catalog':cat,'save':{'revision':row[0],'state':json.loads(row[1])},'history':events}
+        if not isinstance(payload,dict) or payload.get('format') not in ('novelai-game-prototype','after-hours-game'):
+            raise engine.RuleError('Select an After Hours JSON save export.')
+        try:
+            if payload['catalog']['source_id']!=self.catalog['source_id']: raise engine.RuleError('This export belongs to another library.')
+            cat=copy.deepcopy(self.catalog)
+            for ident,old in payload['catalog']['cards'].items():
+                # Imported paths are never trusted or served.
+                current=cat['cards'].get(ident)
+                old=copy.deepcopy(old);old.update(image=None,original=None,available=False)
+                if current: old.update({k:v for k,v in current.items() if k not in ('rarity','specialty','rarity_schema')})
+                cat['cards'][ident]=old
+            cat['people'].update(payload['catalog']['people'])
+            state=migrations.validate(migrations.migrate(payload['save']['state']),cat)
+            if state.get('night'): state['night']['paused']=True
+            history=payload.get('history',[])
+            if not isinstance(history,list) or len(history)>2000000 or any(not isinstance(e,dict) for e in history): raise ValueError()
+        except (KeyError,TypeError,ValueError) as exc:
+            if isinstance(exc,engine.RuleError): raise
+            raise engine.RuleError('Invalid recovery export. The current save is unchanged.') from None
+        self.backup()
+        path=self.path.with_name(f'{self.path.stem}-restored-{uuid.uuid4().hex[:10]}.sqlite3')
+        restored=GameStore(path,cat)
+        with restored.connect() as db:
+            db.execute('INSERT INTO save VALUES (1,1,?)',(encode(state),))
+            db.executemany('INSERT INTO events(at,body) VALUES (?,?)',[(time.time(),encode(e)) for e in history])
+            db.execute('INSERT INTO events(at,body) VALUES (?,?)',(time.time(),encode({'kind':'save_restored','to_new_file':True})))
+        restored.backup()
+        return restored
 
     def export(self):
         result=self.read()
@@ -117,4 +202,4 @@ class GameStore:
         for c in public['cards'].values(): c.pop('image',None);c.pop('original',None)
         with self.connect() as db:
             events=[json.loads(r[0]) for r in db.execute('SELECT body FROM events ORDER BY id')]
-        return {'format':'novelai-game-prototype','schema':1,'catalog':public,'save':result,'history':events}
+        return {'format':'after-hours-game','schema':migrations.SCHEMA,'catalog':public,'save':result,'history':events}

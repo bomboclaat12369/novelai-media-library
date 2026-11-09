@@ -5401,6 +5401,17 @@ class UIUpdates:
 class MediaHandler(BaseHTTPRequestHandler):
     server_version = "NovelAIMedia/1.0"
 
+    def _game_route(self) -> bool:
+        if not (self.path.split('?',1)[0] == '/game' or self.path.startswith('/game/')):
+            return False
+        project = Path(__file__).resolve().parent.parent
+        if not (project / 'game' / 'companion.py').is_file():
+            self._send_json(404, {'error': 'After Hours is available in the local game checkout.'})
+            return True
+        if str(project) not in sys.path: sys.path.insert(0, str(project))
+        from game.companion import dispatch
+        return dispatch(self)
+
     @property
     def store(self) -> LibraryStore:
         return self.server.store  # type: ignore[attr-defined]
@@ -5594,6 +5605,7 @@ class MediaHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         try:
+            if self._game_route(): return
             path = urllib.parse.urlparse(self.path).path
             if path in {"/", "/library", "/library/"}:
                 # Bind the UI to loopback, including its browser Origin. Never serve
@@ -5728,6 +5740,7 @@ class MediaHandler(BaseHTTPRequestHandler):
             self._send_json(403, {"error": "Origin not allowed"})
             return
         try:
+            if self._game_route(): return
             path = urllib.parse.urlparse(self.path).path
             if path in ('/api/missing-files/start','/api/missing-files/stop','/api/missing-files/recover'):
                 body=self._read_json();finder=self.store.missing_files
@@ -6186,6 +6199,8 @@ def run_gui(server: MediaHTTPServer, store: LibraryStore) -> None:
             root.destroy()
 
     tk.Button(frame, text="Open Library Tab", width=20, command=lambda: webbrowser.open_new_tab(f"http://{HOST}:{PORT}/library/")).pack(anchor="w", pady=(12, 0))
+    if (Path(__file__).resolve().parent.parent / 'game' / 'companion.py').is_file():
+        tk.Button(frame, text="Open After Hours", width=20, command=lambda: webbrowser.open_new_tab(f"http://{HOST}:{PORT}/game/")).pack(anchor="w", pady=(6, 0))
 
     tk.Button(frame, text="Stop & Exit", width=18, command=close).pack(anchor="e", pady=(22, 0))
     root.protocol("WM_DELETE_WINDOW", close)
@@ -6196,7 +6211,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=APP_NAME)
     parser.add_argument("--headless", action="store_true", help="Run without the small control window")
     parser.add_argument("--root", type=Path, default=default_library_root(), help="Override the media library folder")
+    parser.add_argument("--game-only", action="store_true", help="Run After Hours with a read-only library snapshot; no updater or library writes")
+    parser.add_argument("--game-port", type=int, default=8877)
+    parser.add_argument("--game-save", type=Path)
+    parser.add_argument("--open-game", action="store_true")
     args = parser.parse_args()
+
+    if args.game_only:
+        project=Path(__file__).resolve().parent.parent
+        sys.path.insert(0,str(project))
+        from game.server import build_server
+        server=build_server(args.game_port,args.game_save,args.root)
+        url=f'http://{HOST}:{server.server_port}/game/'
+        print(f'After Hours through Media Library companion: {url}',flush=True)
+        print('Read-only library access. Separate game save. No updater is started.',flush=True)
+        if args.open_game:webbrowser.open_new_tab(url)
+        try:server.serve_forever()
+        except KeyboardInterrupt:pass
+        finally:server.server_close()
+        return
 
     store = LibraryStore(args.root.expanduser().resolve())
     try:

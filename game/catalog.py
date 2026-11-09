@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+from .library_snapshot import rows as snapshot_rows
 
 RARITIES = ('Common', 'Uncommon', 'Rare', 'Epic', 'Legendary')
 SPECIALTIES = ('tips', 'service', 'efficiency', 'loyalty')
@@ -39,7 +40,10 @@ def read_library(root):
     battles = json.loads(battle_file.read_text(encoding='utf-8')) if battle_file.exists() else {'boards': {}}
     if not isinstance(data.get('media'), list) or not isinstance(data.get('characters'), list):
         raise ValueError('Select a media-library folder containing library.json.')
-    people = {str(p['id']): {'id': str(p['id']), 'name': p['name'], 'color': i % 8}
+    presentation=snapshot_rows(data,battles)
+    people = {str(p['id']): {'id': str(p['id']), 'name': p['name'], 'color': i % 8,
+                            'collection': {'finish':p.get('collection',{}).get('finish','obsidian'),
+                                           'frames':p.get('collection',{}).get('frames',{})}}
               for i, p in enumerate(data['characters'])}
     category_names = {str(p['id']): {str(c['id']): c.get('name', str(c['id']))
                       for c in p.get('categories', [])} for p in data['characters']}
@@ -50,7 +54,7 @@ def read_library(root):
     for owner in people:
         images = [m for m in eligible if m['character_id'] == owner]
         scores = battles.get('boards', {}).get(owner + ':images', {}).get('ratings', {})
-        placed = sorted([m for m in images if scores.get(m['id'], {}).get('played', 0) > 0],
+        placed = sorted([m for m in images if not presentation[m['id']]['provisional']],
                         key=lambda m: -float(scores[m['id']].get('rating', 1200)))
         ranks = {}
         for i, item in enumerate(placed, 1):
@@ -59,7 +63,7 @@ def read_library(root):
         for m in images:
             ident = str(m['id'])
             score = scores.get(ident, {})
-            ranked = score.get('played', 0) > 0
+            ranked = not presentation[ident]['provisional']
             rating = round(float(score.get('rating', 1200)), 8)
             rarity = 0
             if ranked and len(placed) >= 5 and len(ranks) > 1:
@@ -79,7 +83,8 @@ def read_library(root):
                             'name': m.get('original_name') or m.get('filename') or ident,
                             'rarity': rarity, 'specialty': SPECIALTIES[stable(ident) % 4],
                             'categories': [category_names[owner].get(str(c), str(c)) for c in m.get('categories', [])],
-                            'source_categories': list(m.get('categories', [])), 'rarity_schema': 1, 'available': True,
+                            'source_categories': list(m.get('categories', [])), 'rarity_schema': 2, 'available': True,
+                            'presentation':presentation[ident], 'media_sha256':m.get('sha256'),
                             'ranked': ranked, 'rating': rating, 'source': 'library', **paths}
     people = {p: v for p, v in people.items() if any(c['owner'] == p for c in cards.values())}
     if len(people) < 2:

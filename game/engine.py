@@ -4,8 +4,9 @@ import copy
 import math
 import random
 from .catalog import stable
+from . import management as m
 
-VERSION = '0.1.0'
+VERSION = '1.0.0-local'
 PACKS = {'standard': {'name':'Standard','price':100,'count':5},
          'spotlight': {'name':'Girl spotlight','price':200,'count':5},
          'themed': {'name':'Themed','price':200,'count':5},
@@ -44,12 +45,12 @@ def new_game(catalog, selected, seed=1):
         card = starter(catalog, owner)
         owned[card] = {'copies':1, 'mastery':0, 'xp':0, 'uses':0, 'acquired_day':1}
         people[owner] = {'energy':100, 'xp':0, 'card':card, 'role':'room' if i == 0 else 'lounge', 'hired_day':1}
-    return {'schema':1, 'version':VERSION, 'seed':int(seed), 'day':1, 'cash':600,
+    return m.ensure({'schema':2, 'version':VERSION, 'seed':int(seed), 'day':1, 'cash':600,
             'phase':'prepare', 'people':people, 'owned':owned,
             'facilities':{'rooms':1,'lounge':1,'recovery':0,'reception':0},
             'pricing':'standard', 'pending_pack':None, 'pack_counter':0, 'night':None,
             'reports':[], 'totals':{'revenue':0,'expenses':0,'packs':0,'services':0,'recovery_grants':0},
-            'journal':[]}
+            'journal':[]})
 
 
 def record(state, kind, **details):
@@ -72,7 +73,7 @@ def upkeep(state):
 
 
 def recurring_cost(state):
-    return len(state['people'])*30 + upkeep(state)
+    return len(state['people'])*30 + upkeep(state) + m.department_upkeep(state)
 
 
 def budget_check(state, cost):
@@ -96,6 +97,8 @@ def auto_assign(state):
     room_left, lounge_left = state['facilities']['rooms'],state['facilities']['lounge']
     for owner in ranked:
         worker = state['people'][owner]
+        if m.reservations(state, owner):
+            continue
         if worker['energy'] < 34:
             worker['role'] = 'rest'
         elif room_left:
@@ -109,7 +112,7 @@ def auto_assign(state):
 def start_night(state):
     prep_only(state)
     for role, key in [('room','rooms'),('lounge','lounge')]:
-        if sum(p['role']==role for p in state['people'].values()) > state['facilities'][key]:
+        if sum(m.assignment(state, p)==role for p in state['people']) > state['facilities'][key]:
             raise RuleError('More girls are assigned than available positions. Use Auto assign or adjust the plan.')
     if state['pending_pack']:
         raise RuleError('Finish opening your pack first.')
@@ -118,6 +121,7 @@ def start_night(state):
     state['night'] = {'elapsed':0,'wave':0,'paused':False,'speed':1,'demand':demand,
                       'demand_factor':factor,'revenue':0,'served':0,'missed':0,'log':[],
                       'earnings':{p:0 for p in state['people']}, 'energy_spent':{p:0 for p in state['people']}}
+    m.prepare_night(state)
     record(state,'night_started',pricing=state['pricing'],assignments=copy.deepcopy(state['people']))
 
 
@@ -133,7 +137,8 @@ def advance(state, catalog, seconds):
         rng = random.Random(stable((state['seed'],state['day'],night['wave'])))
         multiplier, acceptance = PRICES[state['pricing']]
         for owner, worker in state['people'].items():
-            if worker['role'] not in ('room','lounge'):
+            role = night['assignments'][owner]
+            if role not in ('room','lounge'):
                 continue
             card = catalog['cards'][worker['card']]
             own = state['owned'][worker['card']]
@@ -143,21 +148,28 @@ def advance(state, catalog, seconds):
                 night['missed'] += 1
                 continue
             accept = min(.995, acceptance*night['demand_factor'] + .018*state['facilities']['reception']
-                         + (strength*.5 if card['specialty'] in ('service','loyalty') else 0))
+                         + (strength*.5 if card['specialty']=='service' else 0)
+                         + (min(.035,state['loyalty']/2000) if card['specialty']=='loyalty' else 0)
+                         + (.035 if state['promotion_until'] >= state['day'] else 0))
             if rng.random() > accept:
                 night['missed'] += 1
                 continue
-            value = (24 if worker['role']=='room' else 14) * multiplier * rng.uniform(.92,1.08)
+            value = (24 if role=='room' else 14) * multiplier * rng.uniform(.92,1.08)
             value *= 1 + min(.20,worker['xp']//100*.01)
+            value *= 1 + m.skill_bonus(worker, 'club')
             value *= 1 + (strength if card['specialty']=='tips' else strength*.35)
             value = round(value)
             worker['energy'] = round(worker['energy']-energy_cost,2)
             worker['xp'] += 4
+            worker['skills']['club'] += 2
+            if card['specialty']=='loyalty': state['loyalty']=min(100,state['loyalty']+.15)
             own['xp'] += 3; own['uses'] += 1
             own['mastery'] = min(5,own['xp']//90)
             night['energy_spent'][owner] += energy_cost
             night['earnings'][owner] += value
             night['revenue'] += value; night['served'] += 1
+            night['activities'][owner] = {'department':'club', 'label':'Private booking' if role=='room' else 'Lounge hosting', 'status':f'Completed · ${value}', 'round':night['wave']}
+        m.advance_wave(state,catalog,night['wave'])
         message = f"Service round {night['wave']}: ${night['revenue']} earned so far."
         night['log'].append(message)
         record(state,'service_round',wave=night['wave'],revenue=night['revenue'],served=night['served'])
@@ -170,20 +182,27 @@ def settle(state):
         raise RuleError('This night is not ready to settle.')
     night = state['night']
     expense = recurring_cost(state)
-    training_cost = sum(p['role']=='train' for p in state['people'].values())*15
-    expense += training_cost
-    for worker in state['people'].values():
-        recovery = (70 + state['facilities']['recovery']*6) if worker['role'] in ('rest','train') else (28 + state['facilities']['recovery']*2)
+    training_cost = sum(night['assignments'][p]=='train' for p in state['people'])*15
+    expense += training_cost + night['decision_costs']
+    for owner, worker in state['people'].items():
+        role=night['assignments'][owner]
+        recovery = (70 + state['facilities']['recovery']*6) if role in ('rest','train') else (28 + state['facilities']['recovery']*2)
         worker['energy'] = min(100,round(worker['energy'] + recovery,2))
-        if worker['role']=='train': worker['xp'] += 22
+        if role=='train':
+            worker['xp'] += 22
+            worker['skills'][worker['training']] += 35
     state['cash'] += night['revenue']-expense
     report = {'day':state['day'],'revenue':night['revenue'],'expenses':expense,
               'profit':night['revenue']-expense,'served':night['served'],'missed':night['missed'],
-              'earnings':night['earnings'],'demand':night['demand']}
+              'earnings':night['earnings'],'demand':night['demand'],
+              'department_revenue':night['department_revenue'], 'training_cost':training_cost,
+              'decision_costs':night['decision_costs'], 'decisions':copy.deepcopy(night['decisions']),
+              'activity':night['log'][-12:], 'assignments':night['assignments']}
     state['reports'] = (state['reports']+[report])[-40:]
     for key, value in [('revenue',night['revenue']),('expenses',expense),('services',night['served'])]:
         state['totals'][key] += value
     record(state,'night_settled',**{k:v for k,v in report.items() if k!='day'})
+    m.after_settle(state,report)
     state['phase']='prepare';state['day']+=1
     state['night']=None
 
@@ -207,12 +226,16 @@ def draw(pool, rng, minimum=0):
     return rng.choice([c for c in owner_pool if c['rarity']==tier])
 
 
-def buy_pack(state,catalog,pack,target=None):
+def buy_pack(state,catalog,pack,target=None,voucher=False):
     prep_only(state)
     if state['pending_pack']: raise RuleError('Finish opening your previous pack first.')
     if pack not in PACKS: raise RuleError('Unknown pack.')
     spec = PACKS[pack]
-    budget_check(state,spec['price'])
+    price=spec['price']
+    if voucher:
+        if pack!='standard' or state['pack_vouchers']<1: raise RuleError('A Standard pack voucher is required.')
+        price=0
+    budget_check(state,price)
     pool = pool_for(catalog,pack,target)
     special = None
     if pack=='collector':
@@ -230,19 +253,23 @@ def buy_pack(state,catalog,pack,target=None):
         if is_new: state['owned'][ident]={'copies':0,'mastery':0,'xp':0,'uses':0,'acquired_day':state['day']}
         state['owned'][ident]['copies']+=1
         results.append({'id':ident,'new':is_new})
-    state['cash']-=spec['price'];state['totals']['packs']+=1
+    state['cash']-=price;state['totals']['packs']+=1
+    if voucher: state['pack_vouchers']-=1
     state['pending_pack']={'id':state['pack_counter'],'type':pack,'results':results}
-    record(state,'pack_bought',pack=pack,target=target,price=spec['price'],results=results)
+    record(state,'pack_bought',pack=pack,target=target,price=price,voucher=voucher,results=results)
 
 
 def command(original,catalog,action,body=None):
     state=copy.deepcopy(original);body=body or {}
+    m.ensure(state)
     state['journal']=[]
-    if action=='auto': auto_assign(state)
+    if m.command(state,catalog,action,body): pass
+    elif action=='auto': auto_assign(state)
     elif action=='plan':
         prep_only(state)
         owner=body.get('owner');role=body.get('role')
         if owner not in state['people'] or role not in ROLES: raise RuleError('Invalid assignment.')
+        if m.reservations(state,owner): raise RuleError('This worker is reserved by a department tonight. Cancel that reservation to reassign her.')
         state['people'][owner]['role']=role
         record(state,'assignment_changed',owner=owner,role=role)
     elif action=='equip':
@@ -267,17 +294,25 @@ def command(original,catalog,action,body=None):
         state['cash']-=cost;record(state,'hired',owner=owner,cost=cost,card=card)
     elif action=='upgrade':
         prep_only(state);kind=body.get('kind')
-        if kind not in UPGRADES or state['facilities'][kind]>=UPGRADES[kind]['max']: raise RuleError('This facility is at its prototype maximum.')
+        if kind not in UPGRADES or state['facilities'][kind]>=UPGRADES[kind]['max']: raise RuleError('This facility is fully upgraded.')
         cost=upgrade_cost(state,kind);budget_check(state,cost)
         state['cash']-=cost;state['facilities'][kind]+=1
         record(state,'facility_upgraded',facility=kind,cost=cost,level=state['facilities'][kind])
     elif action=='mastery':
         prep_only(state);ident=body.get('card');item=state['owned'].get(ident)
         if not item or item['copies']<2: raise RuleError('Keep the first copy; an extra copy is needed.')
-        if item['mastery']>=5: raise RuleError('This card has reached the prototype mastery limit.')
+        if item['mastery']>=5: raise RuleError('This card has reached its mastery limit.')
         item['copies']-=1;item['xp']+=30;item['mastery']=min(5,item['xp']//90)
         record(state,'duplicate_used',card=ident,xp=30)
-    elif action=='pack': buy_pack(state,catalog,body.get('pack'),body.get('target'))
+    elif action=='pack': buy_pack(state,catalog,body.get('pack'),body.get('target'),body.get('voucher') is True)
+    elif action=='reveal':
+        if not state['pending_pack']: raise RuleError('No pack is waiting to be revealed.')
+        pack=state['pending_pack']
+        if body.get('all') is True: pack['revealed']=list(range(len(pack['results'])))
+        else:
+            index=body.get('index')
+            if type(index) is not int or not 0<=index<len(pack['results']): raise RuleError('Choose a card in this pack.')
+            pack['revealed']=sorted(set(pack.get('revealed',[])+[index]))
     elif action=='reveal_done':
         if state['pending_pack']:
             record(state,'pack_reveal_completed',pack_id=state['pending_pack']['id'])
@@ -300,7 +335,11 @@ def command(original,catalog,action,body=None):
         # A deliberately visible, recoverable setback; no deletion or mandatory reset.
         state['cash']=recurring_cost(state)+100
         for worker in state['people'].values(): worker['energy']=100
+        # A recovery break must not strand reservations on dates that were skipped.
+        for contract in state['contracts']:
+            if contract['status']=='active':
+                contract['start']+=2;contract['end']+=2
         state['day']+=2;state['totals']['recovery_grants']+=1
         record(state,'recovery_break',days=2,cash=state['cash'])
     else: raise RuleError('Unknown game action.')
-    return state
+    return m.ensure(state)

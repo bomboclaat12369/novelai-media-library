@@ -1,0 +1,204 @@
+"""Expanded-game acceptance invariants, not renderer or visual assertions."""
+import copy
+import json
+from pathlib import Path
+import sqlite3
+import tempfile
+import unittest
+from unittest.mock import patch
+from game import engine as g, management as m
+from game.catalog import demo_catalog, read_library
+from game.store import GameStore, Conflict, encode
+
+
+class IntegratedRules(unittest.TestCase):
+    def setUp(self):
+        self.cat=demo_catalog()
+        self.s=g.new_game(self.cat,['demo-0','demo-1'],123)
+
+    def expanded(self):
+        s=copy.deepcopy(self.s);s['cash']=10000;s['day']=5;s['totals']['services']=30
+        s=g.command(s,self.cat,'department',{'kind':'studio'})
+        s['totals']['studio_completed']=2
+        s=g.command(s,self.cat,'department',{'kind':'resort'})
+        for owner in ('demo-2','demo-3'):s=g.command(s,self.cat,'hire',{'owner':owner})
+        return s
+
+    def book(self,s,department,owner,kind,start=None):
+        return g.command(s,self.cat,'schedule',{'department':department,'owner':owner,'kind':kind,'start':s['day'] if start is None else start})
+
+    def night(self,s):
+        s=g.command(s,self.cat,'auto');s=g.command(s,self.cat,'start')
+        return g.command(s,self.cat,'finish')
+
+    def test_department_order_and_small_roster_unlocks(self):
+        with self.assertRaises(g.RuleError):g.command(self.s,self.cat,'department',{'kind':'studio'})
+        s=copy.deepcopy(self.s);s.update(day=4,cash=3000);s['totals']['services']=18
+        with self.assertRaises(g.RuleError):g.command(s,self.cat,'department',{'kind':'resort'})
+        s=g.command(s,self.cat,'department',{'kind':'studio'})
+        for _ in range(2):s=self.night(self.book(s,'studio','demo-0','portrait'))
+        s=g.command(s,self.cat,'department',{'kind':'resort'})
+        self.assertEqual(s['departments'],{'studio':1,'resort':1})
+
+    def test_three_departments_advance_one_clock_and_settle_once(self):
+        s=self.expanded();day=s['day']
+        s=self.book(s,'studio','demo-2','editorial');s=self.book(s,'resort','demo-3','retreat')
+        s=self.night(s)
+        self.assertEqual(s['day'],day+1)
+        self.assertEqual([c['nights'] for c in s['contracts']],[1,1])
+        self.assertTrue(all(c['status']=='active' for c in s['contracts']))
+        self.assertEqual(s['reports'][-1]['assignments']['demo-2'],'studio')
+        s=self.night(s)
+        self.assertTrue(all(c['status']=='completed' for c in s['contracts']))
+        self.assertEqual(s['totals']['resort_completed'],1)
+        self.assertGreater(s['reports'][-1]['department_revenue'],200)
+        self.assertGreater(s['pack_vouchers'],0)
+        before=s['totals']['contract_revenue'];s=self.night(s)
+        self.assertEqual(s['totals']['contract_revenue'],before)
+        with self.assertRaises(g.RuleError):g.command(s,self.cat,'finish')
+
+    def test_reservations_reject_cross_department_overlap_and_capacity(self):
+        s=self.book(self.expanded(),'studio','demo-2','campaign',7)
+        with self.assertRaises(g.RuleError):self.book(s,'resort','demo-2','retreat',8)
+        with self.assertRaises(g.RuleError):self.book(s,'studio','demo-3','portrait',9)
+        s=self.book(s,'resort','demo-2','retreat',10)
+        self.assertEqual(len(s['contracts']),2)
+
+    def test_reserved_worker_cannot_be_assigned_twice(self):
+        s=self.book(self.expanded(),'studio','demo-0','editorial')
+        with self.assertRaises(g.RuleError):g.command(s,self.cat,'plan',{'owner':'demo-0','role':'room'})
+        s=g.command(s,self.cat,'auto');s=g.command(s,self.cat,'start')
+        self.assertEqual(s['night']['assignments']['demo-0'],'studio')
+        s=g.command(s,self.cat,'finish')
+        self.assertEqual(s['people']['demo-0']['skills']['club'],0)
+        self.assertEqual(s['people']['demo-0']['skills']['studio'],18)
+
+    def test_night_equipment_locked_department_card_shared_energy(self):
+        s=self.book(self.expanded(),'resort','demo-2','retreat');s=g.command(s,self.cat,'start')
+        with self.assertRaises(g.RuleError):g.command(s,self.cat,'equip',{'owner':'demo-2','card':s['people']['demo-2']['card']})
+        s=g.command(s,self.cat,'advance',{'seconds':50})
+        self.assertLess(s['people']['demo-2']['energy'],100)
+        self.assertEqual(s['contracts'][0]['card'],s['people']['demo-2']['card'])
+
+    def test_decisions_have_consequences_and_cannot_repeat(self):
+        s=g.command(self.s,self.cat,'start');s=g.command(s,self.cat,'advance',{'seconds':100})
+        d=s['night']['decisions'][0];old=s['night']['revenue']
+        s=g.command(s,self.cat,'decision',{'decision':d['id'],'choice':'accept'})
+        self.assertEqual(s['night']['revenue'],old+55)
+        with self.assertRaises(g.RuleError):g.command(s,self.cat,'decision',{'decision':d['id'],'choice':'accept'})
+        s=g.command(s,self.cat,'advance',{'seconds':100})
+        s=g.command(s,self.cat,'pause')
+        d=s['night']['decisions'][1]
+        s=g.command(s,self.cat,'decision',{'decision':d['id'],'choice':'refresh'})
+        self.assertEqual(s['night']['decision_costs'],25)
+
+    def test_departments_are_tick_size_independent(self):
+        original=self.book(self.book(self.expanded(),'studio','demo-2','editorial'),'resort','demo-3','retreat')
+        outcomes=[]
+        for step in (1,4,37,50,300):
+            s=g.command(original,self.cat,'start')
+            while s['phase']=='night':s=g.command(s,self.cat,'advance',{'seconds':step})
+            s['journal']=[];outcomes.append(s)
+        self.assertTrue(all(s==outcomes[0] for s in outcomes))
+
+    def test_saved_plan_retains_equipment_and_does_not_reset_career(self):
+        s=g.command(self.s,self.cat,'save_plan',{'name':'Regular'})
+        s=g.command(s,self.cat,'plan',{'owner':'demo-0','role':'train'})
+        s=self.night(s);energy=s['people']['demo-0']['energy'];xp=s['people']['demo-0']['xp']
+        s=g.command(s,self.cat,'load_plan',{'name':'Regular'})
+        self.assertEqual(s['people']['demo-0']['role'],'room')
+        self.assertEqual((s['people']['demo-0']['energy'],s['people']['demo-0']['xp']),(energy,xp))
+
+    def test_training_changes_department_skill_not_ownership(self):
+        s=g.command(self.s,self.cat,'training',{'owner':'demo-0','value':'studio'})
+        s=g.command(s,self.cat,'plan',{'owner':'demo-0','role':'train'})
+        owned=copy.deepcopy(s['owned']);s=g.command(s,self.cat,'start');s=g.command(s,self.cat,'finish')
+        self.assertEqual(s['people']['demo-0']['skills']['studio'],35)
+        self.assertEqual(s['owned'][s['people']['demo-0']['card']],owned[s['people']['demo-0']['card']])
+
+    def test_recovery_moves_active_and_future_reservations(self):
+        s=self.book(self.expanded(),'studio','demo-2','campaign');s=self.night(s)
+        original=copy.deepcopy(s['contracts'][0]);s['cash']=-100
+        s=g.command(s,self.cat,'recovery')
+        c=s['contracts'][0];self.assertEqual(c['end'],original['end']+2);self.assertEqual(c['nights'],1)
+        s=self.night(self.night(s));self.assertEqual(s['contracts'][0]['status'],'completed')
+
+    def test_cancel_frees_worker_and_preserves_sunk_cost(self):
+        s=self.book(self.expanded(),'resort','demo-2','weekend');cash=s['cash']
+        s=g.command(s,self.cat,'cancel_contract',{'contract':s['contracts'][0]['id']})
+        self.assertEqual(s['cash'],cash);self.assertFalse(m.reservations(s,'demo-2'))
+
+    def test_earned_voucher_reveals_and_preserves_money(self):
+        s=copy.deepcopy(self.s);s['pack_vouchers']=1;cash=s['cash']
+        s=g.command(s,self.cat,'pack',{'pack':'standard','voucher':True})
+        self.assertEqual(s['cash'],cash);self.assertEqual(s['pack_vouchers'],0)
+        s=g.command(s,self.cat,'reveal',{'index':2});self.assertEqual(s['pending_pack']['revealed'],[2])
+        s=g.command(s,self.cat,'reveal',{'all':True});self.assertEqual(s['pending_pack']['revealed'],[0,1,2,3,4])
+
+
+class Recovery(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.path=Path(self.tmp.name)/'save.sqlite3';self.cat=demo_catalog()
+        self.store=GameStore(self.path,self.cat)
+        self.store.apply('new',{'selected':['demo-0','demo-1']},'create-new',0)
+    def tearDown(self):self.tmp.cleanup()
+
+    def test_schema_one_migration_preserves_pending_pack(self):
+        r=self.store.apply('pack',{'pack':'standard'},'buy-standard',1);old=copy.deepcopy(r['state'])
+        old['schema']=1;old['version']='0.1.0'
+        for k in ('departments','contracts','narrative','saved_plans','pack_vouchers','reputation','loyalty'):old.pop(k,None)
+        with self.store.connect() as db:db.execute('UPDATE save SET body=?',(encode(old),))
+        loaded=GameStore(self.path,self.cat);s=loaded.read()['state']
+        for k in ('cash','owned','pending_pack','people'):self.assertEqual(s[k],r['state'][k])
+        self.assertEqual(s['schema'],2);self.assertTrue(Path(str(self.path)+'.before-schema-2').exists())
+
+    def test_export_restore_new_file_and_reveals(self):
+        r=self.store.apply('pack',{'pack':'standard'},'buy-standard',1)
+        self.store.apply('reveal',{'index':1},'reveal-card',r['revision'])
+        old=self.store.read();restored=self.store.restore(self.store.export())
+        self.assertNotEqual(restored.path,self.path);self.assertEqual(self.store.read(),old)
+        self.assertEqual(restored.read()['state'],old['state'])
+
+    def test_restore_rebinds_paths_and_keeps_source_identity(self):
+        data=self.store.export();ident=next(iter(data['catalog']['cards']))
+        data['catalog']['cards'][ident]['image']='C:/Windows/secret.txt'
+        restored=self.store.restore(data)
+        self.assertIsNone(restored.catalog['cards'][ident]['image'])
+        before=self.store.read();data['catalog']['source_id']='different-library'
+        with self.assertRaises(g.RuleError):self.store.restore(data)
+        self.assertEqual(self.store.read(),before)
+
+    def test_invalid_and_future_restore_leave_active_save_intact(self):
+        before=self.store.read()
+        for field,value in [('schema',99),('cash',float('nan')),('owned',{})]:
+            data=self.store.export();data['save']['state'][field]=value
+            with self.assertRaises(g.RuleError):self.store.restore(data)
+            self.assertEqual(self.store.read(),before)
+
+    def test_backup_restore_keeps_intervening_save(self):
+        backup=self.store.backups()[0]['id'];before=self.store.read()
+        self.store.apply('pack',{'pack':'standard'},'buy-standard',1)
+        current=self.store.read();restored=self.store.restore(backup=backup)
+        self.assertEqual(restored.read()['state'],before['state']);self.assertEqual(self.store.read(),current)
+        with self.assertRaises(g.RuleError):self.store.restore(backup='../save.sqlite3')
+
+    def test_refresh_preserves_rarity_and_adds_optional_recruit(self):
+        changed=copy.deepcopy(self.cat);ident=next(iter(self.store.read()['state']['owned']))
+        old=changed['cards'][ident]['rarity'];changed['cards'][ident]['rarity']=4
+        new=copy.deepcopy(changed['cards'][ident]);new.update(id='arrival',owner='new-person')
+        changed['cards']['arrival']=new;changed['people']['new-person']={'id':'new-person','name':'New person','color':0}
+        self.store.refresh_catalog(changed,1)
+        self.assertEqual(self.store.catalog['cards'][ident]['rarity'],old)
+        self.assertNotIn('new-person',self.store.read()['state']['people'])
+        self.assertIn('arrival',self.store.catalog['cards'])
+        with self.assertRaises(Conflict):self.store.apply('pack',{'pack':'standard'},'stale-window',1)
+
+    def test_two_stores_share_persisted_clock(self):
+        second=GameStore(self.path,self.cat)
+        with patch('game.store.time.monotonic',return_value=100):self.store.apply('start',{},'start-night',1)
+        with patch('game.store.time.monotonic',return_value=105):
+            a=self.store.apply('tick',{},'window-one',2);b=second.apply('tick',{},'window-two',3)
+        self.assertEqual(a['state']['night']['elapsed'],5);self.assertEqual(b['state']['night']['elapsed'],5)
+
+
+if __name__=='__main__':unittest.main()
