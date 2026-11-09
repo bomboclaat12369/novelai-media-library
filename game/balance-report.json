@@ -1,0 +1,196 @@
+{
+  "scope": "Synthetic prototype model, not real-library or human playtesting.",
+  "seeds": 40,
+  "nights_per_scenario": 120,
+  "scenarios": {
+    "opening_two": {
+      "mean_net_per_night": 107.98,
+      "p10_net": 31,
+      "p90_net": 174,
+      "negative_nights": 204,
+      "nights": 4800
+    },
+    "established_four": {
+      "mean_net_per_night": 290.0,
+      "p10_net": 145,
+      "p90_net": 410,
+      "negative_nights": 93,
+      "nights": 4800
+    },
+    "expanded_eight": {
+      "mean_net_per_night": 488.18,
+      "p10_net": 408,
+      "p90_net": 566,
+      "negative_nights": 0,
+      "nights": 4800
+    },
+    "expanded_twelve": {
+      "mean_net_per_night": 687.8,
+      "p10_net": 502,
+      "p90_net": 845,
+      "negative_nights": 0,
+      "nights": 4800
+    },
+    "expanded_two": {
+      "mean_net_per_night": 63.48,
+      "p10_net": 42,
+      "p90_net": 82,
+      "negative_nights": 52,
+      "nights": 4800
+    }
+  },
+  "campaign": {
+    "mean_girls": 12,
+    "mean_packs": 60,
+    "recovery_breaks": 0,
+    "mean_final_cash": 51566.6,
+    "first_growth_days": [
+      5,
+      5,
+      5,
+      5,
+      9,
+      4,
+      5,
+      6,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      6,
+      5,
+      5,
+      7,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      7,
+      5,
+      7,
+      5,
+      4,
+      5,
+      5,
+      5,
+      5,
+      6,
+      7,
+      5
+    ],
+    "sample": {
+      "girls": 12,
+      "cash": 49483,
+      "packs": 60,
+      "growth": [
+        {
+          "day": 5,
+          "action": "lounge"
+        },
+        {
+          "day": 6,
+          "action": "hire"
+        },
+        {
+          "day": 16,
+          "action": "room"
+        },
+        {
+          "day": 17,
+          "action": "hire"
+        },
+        {
+          "day": 22,
+          "action": "room"
+        },
+        {
+          "day": 23,
+          "action": "hire"
+        },
+        {
+          "day": 29,
+          "action": "room"
+        },
+        {
+          "day": 30,
+          "action": "hire"
+        },
+        {
+          "day": 35,
+          "action": "lounge"
+        },
+        {
+          "day": 36,
+          "action": "hire"
+        },
+        {
+          "day": 39,
+          "action": "room"
+        },
+        {
+          "day": 40,
+          "action": "hire"
+        },
+        {
+          "day": 41,
+          "action": "room"
+        },
+        {
+          "day": 42,
+          "action": "hire"
+        },
+        {
+          "day": 43,
+          "action": "hire"
+        },
+        {
+          "day": 44,
+          "action": "hire"
+        },
+        {
+          "day": 45,
+          "action": "hire"
+        }
+      ],
+      "recovery_breaks": 0,
+      "last_20_profit": 710.85
+    }
+  },
+  "pack_sampling": {
+    "draws": 40000,
+    "catalog_images": 576,
+    "characters": 20,
+    "images_per_main_girl": 120,
+    "images_per_supporting_girl": 6,
+    "character_shares": {
+      "Guest 05": 0.0493,
+      "Guest 15": 0.05,
+      "Guest 03": 0.051,
+      "Guest 04": 0.0495,
+      "Genesis": 0.0493,
+      "Guest 11": 0.0487,
+      "Guest 01": 0.0493,
+      "Guest 09": 0.0534,
+      "Nikki": 0.0497,
+      "Guest 02": 0.0508,
+      "Guest 13": 0.0509,
+      "Guest 07": 0.0512,
+      "Guest 12": 0.0492,
+      "Guest 06": 0.0495,
+      "Alice": 0.0473,
+      "Guest 14": 0.0503,
+      "Guest 10": 0.05,
+      "Mikayla": 0.0498,
+      "Guest 08": 0.0507,
+      "Guest 16": 0.0502
+    }
+  }
+}

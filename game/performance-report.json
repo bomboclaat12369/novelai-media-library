@@ -1,0 +1,19 @@
+{
+  "scope": "Synthetic Python/SQLite server timings on this Linux workspace; small owned inventory, no photos or browser timing.",
+  "cases": [
+    {
+      "cards": 10000,
+      "catalog_open_ms": 28.46,
+      "catalog_serialize_ms": 23.27,
+      "catalog_json_bytes": 2316903,
+      "pack_transaction_mean_ms": 11.74
+    },
+    {
+      "cards": 50000,
+      "catalog_open_ms": 153.99,
+      "catalog_serialize_ms": 153.95,
+      "catalog_json_bytes": 11668675,
+      "pack_transaction_mean_ms": 49.98
+    }
+  ]
+}
