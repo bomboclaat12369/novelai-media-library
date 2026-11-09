@@ -147,7 +147,7 @@ def advance(state, catalog, seconds):
             energy_cost = 8*(1-strength if card['specialty']=='efficiency' else 1)
             if worker['energy'] < energy_cost:
                 night['missed'] += 1
-                night['activities'][owner] = {'department':'club', 'label':'Private booking' if role=='room' else 'Lounge hosting',
+                night['activities'][owner] = {'department':'club', 'label':'Paid sex' if role=='room' else 'Lounge hosting',
                     'status':flavor.activity('tired',state,owner,night['wave']), 'round':night['wave']}
                 continue
             accept = min(.995, acceptance*night['demand_factor'] + .018*state['facilities']['reception']
@@ -156,7 +156,7 @@ def advance(state, catalog, seconds):
                          + (.035 if state['promotion_until'] >= state['day'] else 0))
             if rng.random() > accept:
                 night['missed'] += 1
-                night['activities'][owner] = {'department':'club', 'label':'Private booking' if role=='room' else 'Lounge hosting',
+                night['activities'][owner] = {'department':'club', 'label':'Paid sex' if role=='room' else 'Lounge hosting',
                     'status':flavor.activity('quiet',state,owner,night['wave']), 'round':night['wave']}
                 continue
             value = (24 if role=='room' else 14) * multiplier * rng.uniform(.92,1.08)
@@ -173,7 +173,7 @@ def advance(state, catalog, seconds):
             night['energy_spent'][owner] += energy_cost
             night['earnings'][owner] += value
             night['revenue'] += value; night['served'] += 1
-            night['activities'][owner] = {'department':'club', 'label':'Private booking' if role=='room' else 'Lounge hosting',
+            night['activities'][owner] = {'department':'club', 'label':'Paid sex' if role=='room' else 'Lounge hosting',
                 'status':flavor.activity(role,state,owner,night['wave'])+f' +${value}', 'round':night['wave']}
         m.advance_wave(state,catalog,night['wave'])
         message = flavor.activity('round',state,'venue',night['wave'])+f" Round {night['wave']}: ${night['revenue']} earned so far."

@@ -49,7 +49,7 @@ companion was not replaced or updated.
   each night. The browser pauses when an opportunity appears; picking an
   option automatically continues at the selected speed. Finish night resolves
   unanswered choices conservatively. Event and room descriptions rotate
-  through varied, casual wording.
+  through varied, casual wording, including non-graphic references to paid sex.
 - **Collect and grow:** settle once, open earned/purchased packs, equip cards,
   use extra copies for mastery, optionally recruit and expand. A first pull
   waives that person's hiring fee; it never starts payroll automatically.

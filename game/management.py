@@ -29,7 +29,7 @@ DEPARTMENTS = {
     'resort': {'name': 'Resort', 'price': 1250, 'upkeep': 24, 'capacity': 1},
 }
 DECISIONS = {
-    'booking': {'title': 'A last-minute private booking', 'detail': 'A regular offers $55 for extra attention. A working club host spends 10 energy.',
+    'booking': {'title': 'A last-minute sex booking', 'detail': 'A customer is offering $55 for sex. Taking the booking costs one working club host 10 energy.',
                 'options': [{'id': 'accept', 'label': 'Accept · +$55, −10 energy'}, {'id': 'decline', 'label': 'Keep the prepared schedule'}], 'default': 'decline'},
     'hospitality': {'title': 'Put something back into the team', 'detail': 'A $25 refreshment break restores 12 energy to everyone working. Or keep cash available for tomorrow.',
                     'options': [{'id': 'refresh', 'label': 'Host a break · −$25, +12 energy'}, {'id': 'decline', 'label': 'Keep the cash reserve'}], 'default': 'decline'},

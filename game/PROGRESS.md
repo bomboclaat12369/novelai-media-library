@@ -137,6 +137,22 @@ verification accepted the first event at 1:42, then reached the next event at
 timer reached 4:36 at 4×. Console checks showed no script errors. A new demo
 QA save was used, and `screenshots/event-continues-demo.jpg` records the result.
 
+Language follow-up, 9 November 2026: private-room activities and all eight
+booking-event variants now refer directly to paid sex, hookups or getting
+laid, without describing sexual acts. The eight successful room-activity
+variants use the same tone, and the activity label is now `Paid sex`.
+Economics, energy costs, deterministic variation and automatic continuation
+are unchanged. The user approved this non-graphic wording and a source push
+to the existing isolated build branch; the Media Library release workflow
+does not currently package the game.
+
+Language checks: 47 game tests passed in 4.730 s and 13 release-pipeline tests
+passed in 30.189 s. Browser verification showed the new booking text and
+activity caption, accepted the booking, and returned to an active night with
+a Pause control without pressing Resume. No console warnings or errors were
+reported. `screenshots/non-graphic-language-demo.jpg` uses synthetic demo
+portraits and a separate QA save. No existing play save or library was edited.
+
 Launch `C:\Codex\After-Hours-Codex\PLAY-AFTER-HOURS.bat` or
 `project\game\Start-After-Hours.bat`. See `README.md` for play, data locations,
 restore and developer commands. `screenshots/after-hours-demo.jpg` contains

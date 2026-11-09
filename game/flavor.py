@@ -4,14 +4,14 @@ from .catalog import stable
 
 EVENTS = {
     'booking': (
-        ('One more booking?', "A regular's offering $55 for another private booking. Taking it costs one working host 10 energy."),
-        ('A last-minute customer', "Someone's ready to spend $55 on a late slot. One working host will need to put in 10 energy."),
-        ('An extra $55 on the table', "A customer wants an extra appointment tonight. Take the $55 and spend 10 energy from a working host, or stick with the plan."),
-        ('Can we fit one more in?', "The front desk has a $55 booking ready to go. A working host can take it for 10 energy."),
-        ('A regular wants another slot', "There's another $55 up for grabs if a working host can spare 10 energy. Your call."),
-        ('A late booking lands', "A customer just asked for a private slot. They'll pay $55; one working host spends 10 energy."),
-        ('Someone is ready to pay', "An extra booking would bring in $55 tonight. It'll take 10 energy from a working host."),
-        ('Squeeze in another appointment?', "A customer has $55 ready for a private booking. One working host would need another 10 energy to cover it."),
+        ('One more sex booking?', "A customer is offering $55 for sex. Taking the booking costs one working host 10 energy."),
+        ('A last-minute paid hookup', "Someone wants to get laid and has $55 ready. One working host spends 10 energy if you take the booking."),
+        ('An extra $55 for sex', "A customer wants another paid sex appointment tonight. Take the $55 and spend 10 energy from a working host, or stick with the plan."),
+        ('Can we fit in another sex booking?', "There is a $55 sex booking waiting at the front desk. A working host can take it for 10 energy."),
+        ('A regular wants a paid hookup', "A regular is asking for sex and offering $55. One working host would need to put in another 10 energy. Your call."),
+        ('A late sex booking lands', "A customer just asked about paying for sex tonight. The booking brings in $55 and costs one working host 10 energy."),
+        ('A customer wants to get laid', "They are ready to pay $55 for a private sex appointment. It will take 10 energy from a working host."),
+        ('Squeeze in another paid hookup?', "A customer has $55 ready for sex. One working host would need another 10 energy to cover the booking."),
     ),
     'hospitality': (
         ('Time for a quick break?', 'Put $25 toward refreshments and everyone working gets 12 energy back. Or keep the money handy.'),
@@ -37,10 +37,10 @@ EVENTS = {
 
 ACTIVITY = {
     'room': (
-        'Another private booking wrapped up.', 'That appointment is done and paid for.',
-        'One more booking in the bag.', 'The private room finishes its next appointment.',
-        'Another customer settled up.', 'That slot worked out. On to the next one.',
-        'The latest booking is finished.', 'Another appointment off the list and money in the till.',
+        'Another paid hookup wrapped up.', 'The sex booking is done and paid for.',
+        'The customer got laid and settled the bill.', 'Another private sex appointment is over.',
+        'They hooked up, and the customer paid.', 'One more paid hookup finished. On to the next booking.',
+        'The latest sex booking is complete.', 'Another sex appointment finished and money in the till.',
     ),
     'lounge': (
         'Another lounge booking wrapped up.', 'The lounge brings in another payment.',
