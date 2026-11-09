@@ -256,13 +256,67 @@ class Recovery(unittest.TestCase):
         with patch('game.store.time.monotonic',return_value=1000):
             r=reopened.apply('decision',body,'answer-event',r['revision'])
         self.assertFalse(r['state']['night']['paused']);self.assertEqual(r['state']['night']['speed'],4)
-        self.assertEqual(r['state']['night']['elapsed'],120)
+        self.assertEqual(r['state']['night']['elapsed'],100)
         cash=r['state']['night']['revenue']
         replay=reopened.apply('decision',body,'answer-event',r['revision'])
         self.assertTrue(replay['replayed']);self.assertEqual(replay['state']['night']['revenue'],cash)
         with patch('game.store.time.monotonic',return_value=1001):
             r=reopened.apply('tick',{},'tick-after-event',r['revision'])
-        self.assertEqual(r['state']['night']['elapsed'],124)
+        self.assertEqual(r['state']['night']['elapsed'],104)
+
+    def test_eight_times_speed_and_delayed_ticks_stop_at_each_event(self):
+        with patch('game.store.time.monotonic',return_value=100):
+            r=self.store.apply('start',{},'fast-start',1)
+            r=self.store.apply('speed',{'speed':8},'fast-speed',r['revision'])
+        with patch('game.store.time.monotonic',return_value=105):
+            r=self.store.apply('tick',{},'fast-first-tick',r['revision'])
+        self.assertEqual(r['state']['night']['elapsed'],40)
+        self.assertFalse(r['state']['night']['paused'])
+        # A throttled background tab must neither discard elapsed time nor skip a choice.
+        with patch('game.store.time.monotonic',return_value=150):
+            r=self.store.apply('tick',{},'delayed-first-event',r['revision'])
+        self.assertEqual(r['state']['night']['elapsed'],100)
+        self.assertTrue(r['state']['night']['paused'])
+        self.assertIsNone(r['state']['night']['decisions'][0]['choice'])
+        with self.assertRaises(g.RuleError):
+            self.store.apply('pause',{'paused':False},'bypass-event',r['revision'])
+        with patch('game.store.time.monotonic',return_value=500):
+            r=self.store.apply('decision',{'decision':r['state']['night']['decisions'][0]['id'],'choice':'decline'},'fast-answer-one',r['revision'])
+        self.assertFalse(r['state']['night']['paused'])
+        with patch('game.store.time.monotonic',return_value=501):
+            r=self.store.apply('tick',{},'fast-after-choice',r['revision'])
+        self.assertEqual(r['state']['night']['elapsed'],108)
+        with patch('game.store.time.monotonic',return_value=550):
+            r=self.store.apply('tick',{},'delayed-second-event',r['revision'])
+        self.assertEqual(r['state']['night']['elapsed'],200)
+        self.assertTrue(r['state']['night']['paused'])
+        with patch('game.store.time.monotonic',return_value=700):
+            r=self.store.apply('decision',{'decision':r['state']['night']['decisions'][1]['id'],'choice':'decline'},'fast-answer-two',r['revision'])
+        with patch('game.store.time.monotonic',return_value=750):
+            r=self.store.apply('tick',{},'fast-settlement',r['revision'])
+        self.assertEqual(r['state']['phase'],'prepare')
+        self.assertEqual(r['state']['day'],2)
+        self.assertEqual(len(r['state']['reports']),1)
+
+    def test_restart_reanchors_clock_and_preserves_speed_and_manual_pause(self):
+        with patch('game.store.time.monotonic',return_value=100):
+            r=self.store.apply('start',{},'restart-start',1)
+            r=self.store.apply('speed',{'speed':8},'restart-speed',r['revision'])
+        with patch('game.store.time.monotonic',return_value=103):
+            r=self.store.apply('tick',{},'before-restart',r['revision'])
+        with patch('game.store.time.monotonic',return_value=1000):
+            reopened=GameStore(self.path,self.cat)
+        self.assertEqual(reopened.read(),r)
+        with patch('game.store.time.monotonic',return_value=1001):
+            r=reopened.apply('tick',{},'after-restart',r['revision'])
+        self.assertEqual(r['state']['night']['elapsed'],32)
+        self.assertEqual(r['state']['night']['speed'],8)
+        self.assertFalse(r['state']['night']['paused'])
+        r=reopened.apply('pause',{'paused':True},'manual-before-restart',r['revision'])
+        self.assertEqual(GameStore(self.path,self.cat).read(),r)
+        restored=reopened.restore(reopened.export())
+        self.assertEqual(restored.read()['state']['night']['speed'],8)
+        self.assertTrue(restored.read()['state']['night']['paused'])
 
     def test_catalog_refresh_reaches_another_store(self):
         second=GameStore(self.path,self.cat)

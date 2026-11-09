@@ -57,8 +57,6 @@ class GameStore:
                 migrations.validate(state,catalog)
                 events=state.pop('journal',[]);state['journal']=[]
                 db.executemany('INSERT INTO events(at,body) VALUES (?,?)',[(time.time(),encode(e)) for e in events])
-                if state['phase']=='night':
-                    state['night']['paused']=True
                 if encode(state)!=row[1]:
                     db.execute('UPDATE save SET revision=?,body=? WHERE id=1',(row[0]+1,encode(state)))
             db.execute("INSERT OR REPLACE INTO meta VALUES ('clock_tick',?)",(str(time.monotonic()),))
@@ -109,9 +107,9 @@ class GameStore:
             elif action=='tick':
                 now=time.monotonic()
                 clock=db.execute("SELECT value FROM meta WHERE key='clock_tick'").fetchone()
-                delta=0 if not clock else min(10,max(0,now-float(clock[0])))
+                delta=0 if not clock else max(0,now-float(clock[0]))
                 speed=state['night']['speed'] if state['phase']=='night' else 1
-                state=engine.command(state,self.catalog,'advance',{'seconds':delta*speed})
+                state=engine.command(state,self.catalog,'advance',{'seconds':delta*speed,'stop_at_decision':True})
             else:
                 if action=='advance': raise engine.RuleError('The server owns the game clock.')
                 state=engine.command(state,self.catalog,action,body)

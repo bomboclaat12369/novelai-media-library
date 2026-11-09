@@ -11,10 +11,17 @@ multi-night Resort stays on one calendar. Source is shared on the
    The equivalent launcher is `project\game\Start-After-Hours.bat`.
 2. Leave the launcher window open. The browser opens
    **http://127.0.0.1:8877/game/**, accessible only on this computer.
-3. Choose your own two founders. The actual play save is fresh; the build's
-   walkthrough used separate QA saves.
+3. Choose your own two founders when starting a new save. Later launches load
+   your existing game; verification uses separate QA saves.
 4. Close the launcher with Ctrl+C when finished. Reopen it to resume.
-   A server restart pauses an unfinished night.
+   An unfinished night keeps its speed and running or paused state. Time spent
+   with the server shut down does not advance the night.
+
+To apply local code updates, click **Restart game** at the top right. It makes
+a backup, restarts the local server and reconnects the page automatically.
+Keep the launcher window open. If the game was already running before this
+button was added, close and reopen the launcher once to enable it. The button
+loads code already updated on this computer; it does not download updates.
 
 The ignored `game/local.json` is configured for the supplied library folder
 and working Python runtime on this computer. The launcher checks that
@@ -44,11 +51,14 @@ companion was not replaced or updated.
   up to twelve named plans. Auto assign respects reservations and tired
   workers. Every employed person receives $30/night, including at rest.
 - **Watch:** nights last five simulated minutes, with six service rounds.
-  Use 1×/2×/4×, pause/resume or Finish night. Click a room to follow its activity
+  Use 1×/2×/4×/8×, pause/resume or Finish night. Switching tabs does not pause
+  the night. If the browser delays clock updates, the next update catches up
+  only as far as the next unanswered event. Click a room to follow its activity
   and large owned photograph. Rotating photographs never changes equipment.
 - **Decide:** a booking/promotion opportunity and a refreshment choice occur
-  each night. The browser pauses when an opportunity appears; picking an
-  option automatically continues at the selected speed. Finish night resolves
+  each night. The server stops the clock when an opportunity appears, including
+  at 8×; picking an option automatically continues at the selected speed.
+  Manual pause remains available between events. Finish night resolves
   unanswered choices conservatively. Event and room descriptions rotate
   through varied, blunt wording, including non-graphic references to paid sex
   and casual words such as fuck, pussy and ass. Event wording is saved when a
@@ -137,9 +147,17 @@ separately from nightly recurring profit.
 
 ## Verification — Windows, 9 November 2026
 
-- 47 game rule, persistence, companion HTTP and recovery checks; 12 existing
-  runtime card checks; 13 release-pipeline checks. Pipeline tests use temporary
-  local repositories only. No release was published.
+- 54 game rule, persistence, companion HTTP, restart and recovery checks;
+  two JavaScript background-tab regression cases; 12 existing runtime card
+  checks; 13 release-pipeline checks. Pipeline tests use temporary local
+  repositories only. No release was published.
+- Latest controls check: three restarts through the actual demo launcher in
+  the in-app browser preserved running, manually paused and event-paused
+  nights at 8×. Both choices stopped at their exact scheduled times and
+  continued automatically after selection through settlement. The regular
+  companion launcher also passed restart/reconnect against a synthetic
+  library, with unchanged source hashes. `screenshots/speed-restart-demo.jpg`
+  shows the controls using demo placeholders.
 - Native production renderer: 364 renders covering 13 frames, seven ranks,
   transparency and bounds; saved Fit/Fill geometry checks pass.
 - Actual library: four eligible characters and 270 cards, with galleries of
@@ -186,6 +204,7 @@ python -m unittest discover -s tests -p "test_release_pipeline.py"
 node --check game/web/app.js
 node --check game/web/management-ui.js
 node --check game/web/renderer.js
+node tests/test_game_browser_controls.cjs
 python -m game.simulate_full --seeds 6 --nights 120
 python -m game.benchmark
 python -m game.server --open

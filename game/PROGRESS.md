@@ -175,6 +175,37 @@ integration handles scenario facts, output structure, validation and message
 selection. This decision is recorded in `game/AGENTS.md` for ongoing work.
 No model was installed or selected, and no generator or importer was built.
 
+Clock and restart follow-up, 9 November 2026: removed automatic pausing on
+tab changes and added 8× speed. Live ticks now stop at the first unanswered
+event on the server, even after a delayed browser update; events cannot be
+skipped by a long tick or Resume. Selecting an option continues at the chosen
+speed. Manual Pause remains available between events. Closing/restarting the
+server retains running or paused state and speed while excluding shutdown
+time, replacing the earlier behavior of pausing every restarted night.
+Restoring a historical backup still opens that copy paused.
+
+Added **Restart game** to the top-right header. It waits for pending actions,
+backs up the save, restarts the Python process through the Windows launcher,
+then reconnects and reloads the page. No extra browser tab opens. This reloads
+local code without pulling or publishing source. The running launcher needs
+one final manual close/reopen to load its new restart loop. Unmanaged servers
+and the full Media Library host cannot be stopped with this endpoint.
+
+Follow-up verification: 54 game tests passed in 8.507 s, 12 runtime card tests
+in 5.494 s and 13 release-pipeline tests in 29.038 s. Two Node VM regression
+cases exercise the actual browser controls while hidden, including completion
+of an in-flight request. JavaScript syntax, PowerShell parsing and diff checks
+passed. The in-app browser completed a night at 8×: events stopped at 1:40
+and 3:20, and both choices automatically continued. Three button restarts
+preserved running, manual-pause and pending-event states; the console reported
+no warnings or errors. The regular companion launcher separately restarted
+and reconnected through HTTP with exact saved state, 8× and manual pause
+preserved. Its synthetic library metadata and image hashes stayed unchanged.
+`screenshots/speed-restart-demo.jpg` records the header and speed selector.
+All fixtures and saves were isolated; the user's play save and media were
+not opened. Actual browser tab suspension was not reproduced in the in-app
+browser; hidden-tab control behavior and delayed ticks have automated coverage.
+
 Launch `C:\Codex\After-Hours-Codex\PLAY-AFTER-HOURS.bat` or
 `project\game\Start-After-Hours.bat`. See `README.md` for play, data locations,
 restore and developer commands. `screenshots/after-hours-demo.jpg` contains

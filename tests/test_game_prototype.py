@@ -132,10 +132,10 @@ class Persistence(unittest.TestCase):
         after=self.store.apply('pack',{'pack':'standard'},'will-rollback',1)
         self.assertEqual(after['state']['cash'],500)
 
-    def test_restart_pauses_midnight_and_catalog_changes_preserve_owned(self):
+    def test_restart_preserves_running_night_and_catalog_changes_preserve_owned(self):
         r=self.store.apply('start',{},'begin-night',1)
         loaded=GameStore(self.path,self.cat)
-        self.assertTrue(loaded.read()['state']['night']['paused'])
+        self.assertFalse(loaded.read()['state']['night']['paused'])
         old=next(iter(r['state']['owned']));old_rarity=self.cat['cards'][old]['rarity']
         changed=copy.deepcopy(self.cat);changed['cards'][old]['rarity']=4
         loaded=GameStore(self.path,changed)
@@ -150,7 +150,7 @@ class Persistence(unittest.TestCase):
         with self.assertRaises(g.RuleError):GameStore(self.path,cat)
         self.assertIsNotNone(self.store.read()['state'])
 
-    def test_multiple_windows_share_one_clock_and_background_pause_is_idempotent(self):
+    def test_multiple_windows_share_one_clock_and_manual_pause_is_idempotent(self):
         with patch('game.store.time.monotonic',return_value=100):
             self.store.apply('start',{},'clock-start',1)
         with patch('game.store.time.monotonic',return_value=103):

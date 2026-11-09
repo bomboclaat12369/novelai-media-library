@@ -6215,21 +6215,19 @@ def main() -> None:
     parser.add_argument("--game-port", type=int, default=8877)
     parser.add_argument("--game-save", type=Path)
     parser.add_argument("--open-game", action="store_true")
+    parser.add_argument("--game-restartable", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     if args.game_only:
         project=Path(__file__).resolve().parent.parent
         sys.path.insert(0,str(project))
-        from game.server import build_server
-        server=build_server(args.game_port,args.game_save,args.root)
+        from game.server import build_server,serve
+        server=build_server(args.game_port,args.game_save,args.root,restartable=args.game_restartable)
         url=f'http://{HOST}:{server.server_port}/game/'
         print(f'After Hours through Media Library companion: {url}',flush=True)
         print('Read-only library access. Separate game save. No updater is started.',flush=True)
         if args.open_game:webbrowser.open_new_tab(url)
-        try:server.serve_forever()
-        except KeyboardInterrupt:pass
-        finally:server.server_close()
-        return
+        return serve(server)
 
     store = LibraryStore(args.root.expanduser().resolve())
     try:
@@ -6261,4 +6259,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

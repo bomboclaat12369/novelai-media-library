@@ -82,7 +82,7 @@ def validate(state, catalog):
             elif not finite(spec['rate']) or not finite(spec['expectation'],0,100): raise ValueError()
         if state['phase']=='night':
             n=state['night']
-            if not finite(n['elapsed'],0,300) or not integer(n['wave'],0,6) or n['speed'] not in (1,2,4): raise ValueError()
+            if not finite(n['elapsed'],0,300) or not integer(n['wave'],0,6) or type(n['speed']) is not int or n['speed'] not in engine.NIGHT_SPEEDS: raise ValueError()
             if not finite(n['revenue']) or not isinstance(n['decisions'],list): raise ValueError()
             if not finite(n['department_revenue']) or not finite(n['decision_costs']): raise ValueError()
             if any(role not in (*engine.ROLES,'studio','resort') for role in n['assignments'].values()): raise ValueError()

@@ -36,14 +36,22 @@ if ($Library -and [IO.Path]::GetFileName($Library) -eq 'library.json') { $Librar
 if (!$Demo -and !(Test-Path -LiteralPath (Join-Path $Library 'library.json'))) { throw 'The selected folder does not contain library.json.' }
 if (!$Save -and $config.save) { $Save=$config.save }
 if ($Demo) {
-    $launchArgs=@('server.py','--port',"$Port")
+    $launchArgs=@('server.py','--port',"$Port",'--restartable')
     if ($Save) { $launchArgs+=@('--save',$Save) }
     if (!$NoBrowser) { $launchArgs+='--open' }
 } else {
-    $launchArgs=@('../runtime-src/companion-runtime.pyw','--game-only','--game-port',"$Port",'--root',$Library)
+    $launchArgs=@('../runtime-src/companion-runtime.pyw','--game-only','--game-port',"$Port",'--root',$Library,'--game-restartable')
     if ($Save) { $launchArgs+=@('--game-save',$Save) }
     if (!$NoBrowser) { $launchArgs+='--open-game' }
 }
-Write-Output 'Keep this window open while playing. Press Ctrl+C to stop safely.'
-& $pythonExe @launchArgs
-exit $LASTEXITCODE
+Write-Output 'Keep this window open while playing. Use Restart game in the page to load local updates.'
+Write-Output 'Press Ctrl+C to stop playing.'
+do {
+    & $pythonExe @launchArgs
+    $gameExitCode=$LASTEXITCODE
+    if ($gameExitCode -eq 75) {
+        Write-Output 'Restarting After Hours. Your game is saved.'
+        $launchArgs=@($launchArgs | Where-Object { $_ -notin @('--open','--open-game') })
+    }
+} while ($gameExitCode -eq 75)
+exit $gameExitCode

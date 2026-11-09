@@ -8,6 +8,7 @@ from . import management as m
 from . import flavor
 
 VERSION = '1.0.0-local'
+NIGHT_SPEEDS = (1, 2, 4, 8)
 PACKS = {'standard': {'name':'Standard','price':100,'count':5},
          'spotlight': {'name':'Girl spotlight','price':200,'count':5},
          'themed': {'name':'Themed','price':200,'count':5},
@@ -126,13 +127,17 @@ def start_night(state):
     record(state,'night_started',pricing=state['pricing'],assignments=copy.deepcopy(state['people']))
 
 
-def advance(state, catalog, seconds):
+def advance(state, catalog, seconds, stop_at_decision=False):
     if state['phase'] != 'night' or state['night']['paused']:
         return
     if not isinstance(seconds, (float,int)) or not math.isfinite(seconds) or seconds < 0:
         raise RuleError('Invalid time step.')
     night = state['night']
-    night['elapsed'] = min(300, night['elapsed'] + seconds)
+    target = min(300, night['elapsed'] + seconds)
+    decision = next((d for d in sorted(night['decisions'],key=lambda d:d['at'])
+                     if not d['choice'] and night['elapsed'] < d['until'] and target >= d['at']),None) if stop_at_decision else None
+    night['elapsed'] = max(night['elapsed'],decision['at']) if decision else target
+    if decision: night['paused']=True
     while night['wave'] < min(6, int(night['elapsed']//50)):
         night['wave'] += 1
         rng = random.Random(stable((state['seed'],state['day'],night['wave'])))
@@ -324,16 +329,21 @@ def command(original,catalog,action,body=None):
             record(state,'pack_reveal_completed',pack_id=state['pending_pack']['id'])
             state['pending_pack']=None
     elif action=='start': start_night(state)
-    elif action=='advance': advance(state,catalog,body.get('seconds',0))
+    elif action=='advance':
+        advance(state,catalog,body.get('seconds',0),stop_at_decision=body.get('stop_at_decision',False))
     elif action=='finish':
         if state['phase']!='night': raise RuleError('No night is in progress.')
         state['night']['paused']=False;advance(state,catalog,300)
     elif action in ('pause','speed'):
         if state['phase']!='night': raise RuleError('No night is in progress.')
-        if action=='pause': state['night']['paused']=body['paused'] if type(body.get('paused')) is bool else not state['night']['paused']
+        if action=='pause':
+            paused=body['paused'] if type(body.get('paused')) is bool else not state['night']['paused']
+            if not paused and any(not d['choice'] and d['at']<=state['night']['elapsed']<d['until'] for d in state['night']['decisions']):
+                raise RuleError('Choose an event option to keep the night going.')
+            state['night']['paused']=paused
         else:
             speed=body.get('speed')
-            if speed not in (1,2,4): raise RuleError('Choose 1x, 2x or 4x speed.')
+            if type(speed) is not int or speed not in NIGHT_SPEEDS: raise RuleError('Choose 1x, 2x, 4x or 8x speed.')
             state['night']['speed']=speed
     elif action=='recovery':
         prep_only(state)
