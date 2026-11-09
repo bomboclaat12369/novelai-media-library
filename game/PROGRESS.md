@@ -153,6 +153,19 @@ a Pause control without pressing Resume. No console warnings or errors were
 reported. `screenshots/non-graphic-language-demo.jpg` uses synthetic demo
 portraits and a separate QA save. No existing play save or library was edited.
 
+Casual-language follow-up, 9 November 2026: booking and room descriptions now
+include the requested words `pussy` and `ass`, plus casual references to sex
+using `fuck`. Other activity and break descriptions use matching informal
+wording. Each category retains eight distinct variants, and the writing
+preference is recorded in `game/AGENTS.md` for future edits. Costs, outcomes,
+saved event wording and automatic continuation are unchanged.
+
+Casual-language checks: 47 game tests passed in 5.169 s; 13 release-pipeline
+tests passed in 31.610 s; diff checks passed. All event and activity categories
+were checked for eight unique variants. No layout or renderer changed, and
+this wording-only follow-up did not open a desktop computer-control session
+or repeat visual QA. Existing game saves and library media were not edited.
+
 Launch `C:\Codex\After-Hours-Codex\PLAY-AFTER-HOURS.bat` or
 `project\game\Start-After-Hours.bat`. See `README.md` for play, data locations,
 restore and developer commands. `screenshots/after-hours-demo.jpg` contains

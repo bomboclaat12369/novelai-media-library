@@ -2,7 +2,8 @@
 
 A complete local main-game build for the Media Library companion. Choose two
 founders, grow the club, collect cards, schedule Studio projects and manage
-multi-night Resort stays on one calendar. This checkout is unpublished.
+multi-night Resort stays on one calendar. Source is shared on the
+`game-build-20261109` branch.
 
 ## Play on this Windows computer
 
@@ -49,7 +50,9 @@ companion was not replaced or updated.
   each night. The browser pauses when an opportunity appears; picking an
   option automatically continues at the selected speed. Finish night resolves
   unanswered choices conservatively. Event and room descriptions rotate
-  through varied, casual wording, including non-graphic references to paid sex.
+  through varied, blunt wording, including non-graphic references to paid sex
+  and casual words such as fuck, pussy and ass. Event wording is saved when a
+  night starts, so an in-progress night keeps its wording until the next night.
 - **Collect and grow:** settle once, open earned/purchased packs, equip cards,
   use extra copies for mastery, optionally recruit and expand. A first pull
   waives that person's hiring fee; it never starts payroll automatically.
