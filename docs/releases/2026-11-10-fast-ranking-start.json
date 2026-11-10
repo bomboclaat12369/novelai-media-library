@@ -1,0 +1,39 @@
+{
+  "status": "published_verified",
+  "source_commit": "063e99f3639a3f782ea6174f2a0eeac6cd22276c",
+  "components": [
+    "runtime",
+    "workbench"
+  ],
+  "publish": true,
+  "artifacts": {
+    "runtime": {
+      "version": "2.7.77",
+      "sha256": "b402ff49f3a6babe877ac29008f8d07ef24a36fcadaf1423ff335745992b3713",
+      "bytes": 375974
+    },
+    "workbench": {
+      "version": "2.0.29",
+      "sha256": "53c7112de12f1e3c9ba25ba19e07da01918d88b56fad6e44f33c8ffc81650b57",
+      "bytes": 349475
+    }
+  },
+  "payload_commit": "74ad3cc10bc1afaf20910c2eab30f2cf19e9f084",
+  "release_commit": "0bae54f2747f11ed080cddd24da60e1bb4870e40",
+  "generated_files": 60,
+  "push_attempted": true,
+  "workflow_run": "https://github.com/bomboclaat12369/novelai-media-library/actions/runs/42867835351",
+  "validation": {
+    "runtime_tests": 226,
+    "workbench_tests": 187,
+    "dom_tests": 82,
+    "native_card_renders": 364,
+    "release_pipeline_tests": 13,
+    "status": "passed"
+  },
+  "ui_limits": "Current runtime, Workbench, DOM and native-renderer suites passed locally and in CI; no live Windows desktop check.",
+  "receipt_artifact": {
+    "id": 13788890981,
+    "sha256": "6456c6d38638a37e3d0a859410c55e60b92a0289cbc36c0381e91fcbfbed5e06"
+  }
+}
