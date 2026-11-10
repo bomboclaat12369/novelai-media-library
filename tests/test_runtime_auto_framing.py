@@ -41,11 +41,53 @@ class AutomaticFramingTests(unittest.TestCase):
         self.assertAlmostEqual(1000*min(840/800,1120/1000)*frame['zoom'],1120)
         self.assertEqual(frame['reference'],{'left':.1,'top':.13,'width':.8,'height':1120/1500})
         meta=state['collection']['frame_meta'][key]
-        self.assertEqual((meta['algorithm'],meta['checked']),('center-height-v1',False))
+        self.assertEqual((meta['algorithm'],meta['checked']),('centered-edge-fit-v2',False))
         self.assertAlmostEqual(meta['side_crop_percent'],3.125)
         self.assertEqual(original,(self.store.root/eligible['stored_rel']).read_bytes())
         self.assertEqual(ratings,self.store.battles._load())
         self.assertTrue(all('image:'+m['id'] not in state['collection']['frames'] for m in others))
+
+    def test_near_matches_and_small_side_bars(self):
+        # The reported 1537 × 2049 photo leaves less than one reference pixel unused.
+        skipped=[self.photo(w,h) for w,h in [(1537,2049),(1535,2048),(719,1000)]]
+        narrow=self.photo(730,1000);limit=self.photo(720,1000)
+        collection=self.call()['collection']
+        for item in skipped:
+            self.assertNotIn('image:'+item['id'],collection['frames'])
+            self.assertNotIn('image:'+item['id'],collection['frame_meta'])
+        for item in [narrow,limit]:
+            width,height=item['width'],item['height']
+            meta=collection['frame_meta']['image:'+item['id']]
+            scale=min(840/width,1120/height)*meta['frame']['zoom']
+            self.assertAlmostEqual(scale*width,840)
+            self.assertAlmostEqual((1-1120/(scale*height))*50,meta['vertical_crop_percent'])
+            self.assertEqual(meta['side_crop_percent'],0)
+            self.assertLessEqual(meta['vertical_crop_percent'],2.000001)
+
+    def test_previous_auto_frames_migrate_without_losing_real_reviews_or_manual_edits(self):
+        near,checked,overridden=self.photo(1537,2049),self.photo(),self.photo(1537,2049)
+        data={'frames':{},'frame_meta':{}}
+        for item in [near,checked,overridden]:
+            key='image:'+item['id']
+            zoom=(item['width']/item['height'])/.75
+            frame={'x':0.,'y':0.,'fit':'contain','zoom':zoom,
+                   'reference':{'left':.1,'top':.13,'width':.8,'height':1120/1500}}
+            data['frames'][key]=copy.deepcopy(frame)
+            data['frame_meta'][key]={'mode':'auto','algorithm':'center-height-v1','checked':True,
+                'checked_at':'earlier','token':item['id'],'source':self.store._frame_source(item),
+                'frame':frame,'side_crop_percent':(1-1/zoom)*50,'dimensions':[item['width'],item['height']]}
+        manual_key='image:'+overridden['id']
+        data['frames'][manual_key]['zoom']=1.24
+        self.character['collection']=data
+        collection=self.call()['collection']
+        self.assertNotIn('image:'+near['id'],collection['frames'])
+        self.assertNotIn('image:'+near['id'],collection['frame_meta'])
+        self.assertEqual(collection['frames'][manual_key]['zoom'],1.24)
+        self.assertNotIn(manual_key,collection['frame_meta'])
+        meta=collection['frame_meta']['image:'+checked['id']]
+        self.assertEqual((meta['checked'],meta['checked_at'],meta['token']),(True,'earlier',checked['id']))
+        self.assertEqual(meta['algorithm'],'centered-edge-fit-v2')
+        self.assertEqual(collection,self.call()['collection'])
 
     def test_source_header_and_exif_are_verified(self):
         rotated=self.photo(1000,800,6)
@@ -121,7 +163,7 @@ class AutomaticFramingTests(unittest.TestCase):
         self.assertEqual(restored['collection']['frame_meta'][key]['token'],token)
         with sqlite3.connect(self.store.tracking.path) as db:events=R['TrackingJournal'].rows(db)
         evidence=json.dumps(events)
-        self.assertIn('center-height-v1',evidence);self.assertIn('checked_at',evidence)
+        self.assertIn('centered-edge-fit-v2',evidence);self.assertIn('checked_at',evidence)
 
     def test_failed_automatic_save_has_no_partial_state_or_history(self):
         item=self.photo();before=self.store.db_path.read_bytes()

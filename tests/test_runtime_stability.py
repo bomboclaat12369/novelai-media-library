@@ -69,6 +69,25 @@ class RuntimeStabilityTests(unittest.TestCase):
         self.assertEqual(len(responses), 1)
         return responses[0]
 
+    def test_open_original_returns_source_bytes_even_with_a_saved_crop_and_thumbnail(self):
+        item = self.import_image(11)
+        item.update(crop_top=.2, thumb_rel='thumb-fixture.webp')
+        (self.store.root / item['thumb_rel']).write_bytes(b'thumbnail')
+        handler = object.__new__(RUNTIME['MediaHandler'])
+        handler.server = SimpleNamespace(store=self.store)
+        handler.path = '/api/media/'+item['id']+'/original?source='+item['sha256']
+        handler.command = 'GET'
+        handler.headers = {}
+        handler.wfile = io.BytesIO()
+        headers = {}
+        handler.send_response = lambda status: self.assertEqual(status,200)
+        handler.send_header = headers.__setitem__
+        handler.end_headers = lambda: None
+        handler.do_GET()
+        self.assertEqual(handler.wfile.getvalue(),b'fixture-11')
+        self.assertEqual(headers['Content-Type'],'image/png')
+        self.assertEqual(headers['Content-Security-Policy'],'sandbox')
+
     def post_multipart(self, path, filename, payload, content_type='image/png'):
         handler = object.__new__(RUNTIME['MediaHandler'])
         handler.server = SimpleNamespace(store=self.store)

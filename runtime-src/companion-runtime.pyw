@@ -39,6 +39,7 @@ HOST = "127.0.0.1"
 PORT = 8765
 APP_NAME = "NovelAI Media Library"
 API_VERSION = 9
+AUTO_FRAME_ALGORITHM = 'centered-edge-fit-v2'
 
 # Finished studio designs only. Automatic mode uses battle provenance; every finished frame is also selectable.
 MANUAL_CARD_EDITIONS = ('cosplay', 'pregnant-orchid', 'hall-of-fame', 'valentines',
@@ -3604,22 +3605,31 @@ class LibraryStore:
     def _frame_source(item):
         return {k:item.get(k) for k in ('sha256','width','height','crop_top','crop_bottom')}
 
-    def _automatic_card_frame(self, item):
-        """A small centered side crop only; preserve the full displayed height.
+    @staticmethod
+    def _automatic_card_zoom(width, height):
+        """Close a visible gap in the 840 × 1120 opening with a small centered crop."""
+        if any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in (width, height)):
+            return None
+        ratio = width / height
+        opening = 840 / 1120
+        if ratio > opening:
+            # Fit leaves space above and below. Allow up to 4% off each side.
+            if 1120 - 840 / ratio >= 1 and ratio <= opening / .92:
+                return ratio / opening
+        elif ratio < opening:
+            # Fit leaves space on either side. Limit the top and bottom trim to 2% each.
+            if 840 - 1120 * ratio >= 1 and ratio >= opening * .96:
+                return opening / ratio
+        return None
 
-        Stored dimensions cheaply select candidates. Verify the source header and
-        EXIF orientation before deriving a frame; never decode/resave the image.
-        The shared opening is 840 x 1120 in a 1050 x 1500 card.
-        """
+    def _automatic_card_frame(self, item):
+        """Use stored dimensions to shortlist files, then verify the displayed orientation."""
         if (Image is None or item.get('media_type') != 'image' or not self._in_main(item) or
                 item.get('flagged_for_removal') or item.get('crop_top') or item.get('crop_bottom') or
                 not item.get('sha256')):
             return None
         width,height=item.get('width'),item.get('height')
-        if any(type(v) not in (int,float) or not math.isfinite(v) or v<=0 for v in (width,height)):
-            return None
-        def suitable(ratio):return .750001 < ratio <= .75/.92
-        if not (suitable(width/height) or suitable(height/width)):
+        if self._automatic_card_zoom(width, height) is None and self._automatic_card_zoom(height, width) is None:
             return None
         try:
             with Image.open(self.root / item['stored_rel']) as image:
@@ -3630,11 +3640,16 @@ class LibraryStore:
                 if orientation in (5,6,7,8):width,height=height,width
         except (OSError,ValueError,KeyError,TypeError,SyntaxError,Image.DecompressionBombError):
             return None
-        if not suitable(width/height):return None
-        frame={'x':0.,'y':0.,'zoom':(width/height)/.75,'fit':'contain',
+        zoom = self._automatic_card_zoom(width, height)
+        if zoom is None:
+            return None
+        trim = (1 - 1 / zoom) * 50
+        crop_sides = width * 4 > height * 3
+        frame={'x':0.,'y':0.,'zoom':zoom,'fit':'contain',
                'reference':{'left':.1,'top':.13,'width':.8,'height':1120/1500}}
         return {'frame':frame,'dimensions':[width,height],
-                'side_crop_percent':(1-.75/(width/height))*50}
+                'side_crop_percent':trim if crop_sides else 0,
+                'vertical_crop_percent':0 if crop_sides else trim}
 
     def _sync_automatic_card_frames(self, data, media):
         """Apply once per source; explicit saved/reset frames always take priority.
@@ -3652,14 +3667,23 @@ class LibraryStore:
                     # to know who made it. The saved frame now blocks automation.
                     metadata.pop(key,None)
                     if key in frames:continue
-                elif record.get('source')==self._frame_source(item) and record.get('algorithm')=='center-height-v1':
-                    continue
                 else:
+                    if record.get('source') == self._frame_source(item):
+                        if record.get('algorithm') == AUTO_FRAME_ALGORITHM:
+                            continue
+                        # v1 verified these dimensions against the original. If its exact
+                        # frame still qualifies, retain its token and any existing review.
+                        dimensions = record.get('dimensions')
+                        if record.get('algorithm') == 'center-height-v1' and isinstance(dimensions, list) and len(dimensions) == 2:
+                            zoom = self._automatic_card_zoom(*dimensions)
+                            if zoom is not None and zoom == record['frame']['zoom']:
+                                record.update(algorithm=AUTO_FRAME_ALGORITHM, vertical_crop_percent=0)
+                                continue
                     frames.pop(key,None);metadata.pop(key,None)
             candidate=self._automatic_card_frame(item)
             if candidate:
                 frames[key]=candidate['frame']
-                metadata[key]={'mode':'auto','algorithm':'center-height-v1','token':uuid.uuid4().hex,
+                metadata[key]={'mode':'auto','algorithm':AUTO_FRAME_ALGORITHM,'token':uuid.uuid4().hex,
                                'at':now_iso(),'checked':False,'source':self._frame_source(item),
                                **copy.deepcopy(candidate)}
 
@@ -5738,6 +5762,9 @@ class MediaHandler(BaseHTTPRequestHandler):
         self._cors()
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(length))
+        # An original may now be opened as a document on the companion origin.
+        self.send_header("Content-Security-Policy", "sandbox")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Accept-Ranges", "bytes")
         if partial:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")

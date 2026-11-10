@@ -100,7 +100,7 @@ test('viewer delete button sits with navigation controls and deletes the active 
 test('viewer edit button assigns categories and replaces an image without changing its set membership', async () => {
   const f = await fixture();
   try {
-    const item = {id:'saved-edit',character_id:'character',original_name:'old.png',media_type:'image',categories:[],in_review:false,in_all:true,thumb_rel:'fixture/thumb.webp'};
+    const item = {id:'saved-edit',character_id:'character',original_name:'old.png',media_type:'image',categories:[],in_review:false,in_all:true,thumb_rel:'fixture/thumb.webp',sha256:'first-source'};
     f.library.media.push(item);
     f.root.getElementById('refreshBtn').click();
     await delay(160);
@@ -116,6 +116,13 @@ test('viewer edit button assigns categories and replaces an image without changi
     assert.ok(category);
     assert.equal(f.root.getElementById('editAllMedia').checked, true);
     category.click();
+    const original=f.root.querySelector('.naiEditMediaHead a'),url=new URL(original.href);
+    assert.equal(original.textContent,'Open original');assert.equal(original.target,'_blank');
+    assert.ok(original.relList.contains('noopener'));assert.equal(url.pathname,'/api/media/saved-edit/original');
+    assert.equal(url.searchParams.get('source'),'first-source');
+    // Skip native tab navigation in the DOM fixture and exercise the editor's click handling.
+    original.addEventListener('click',ev=>ev.preventDefault(),{once:true});original.click();
+    assert.ok(original.isConnected);assert.ok(category.checked);
     f.root.getElementById('saveMediaCats').click();
     await delay(170);
     assert.deepEqual(item.categories, ['dress']);

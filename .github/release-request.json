@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "id": "2026-11-10-automatic-card-positioning",
+  "id": "2026-11-10-card-positioning-review-and-original",
   "components": [
     "standalone",
     "runtime",
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Includes companion 2.7.78: conservative automatic card positioning for untouched images, preserving full height with at most 4% cropped from each side. Media Library 2.9.28 adds debug review filters, Mark checked and Restore default. Manual framing, original files and rankings are preserved."
+  "workbench_notes": "Includes companion 2.7.79 with corrected automatic framing for small edge gaps. Media Library 2.9.29 marks viewed automatic positions checked and adds Open original to the image editor."
 }

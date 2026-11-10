@@ -1,19 +1,21 @@
-## Automatic card positioning (Media Library 2.9.28 / companion 2.7.78)
+## Card positioning and Open original (Media Library 2.9.29 / companion 2.7.79)
 
-Open or refresh Battles to automatically position eligible untouched Main
-images. The first version preserves full height and applies only a small centered
-side crop, capped at 4% per side. For a 4:5 image this is 6.7% extra zoom and
-3.125% hidden per side. Original files, aspect ratio and saved manual positions
-are preserved. Tall images, larger crops and uncertain sources stay at default.
+Open or refresh Battles to position eligible Main images. Nearly exact 3:4
+images stay at Default. For wider photos, framing can trim up to 4% from each
+side. For slightly taller photos, it can close narrow side gaps by trimming up
+to 2% from the top and bottom. The editor displays the actual zoom percentage.
 
-In the leaderboard, enable **Debug mode**, then choose **Crop filter →
-Auto-positioned · Unchecked**. Each automatic crop offers **Mark checked**,
-**Position / crop** and **Restore default**. Explicit resets and manual edits
-block future automatic positioning. A changed image source invalidates its old
-check mark. See [automatic framing behavior](docs/AUTOMATIC-CARD-POSITIONING.md).
+In **Leaderboard → Debug mode → Crop filter → Auto-positioned · Unchecked**,
+opening **Position / crop** marks that crop checked once its original appears.
+Close the editor to continue reviewing. **Restore default** or a saved manual
+adjustment overrides future auto-positioning. Existing saves and checks on
+qualifying crops carry forward. See [automatic framing](docs/AUTOMATIC-CARD-POSITIONING.md).
 
-Update the standalone page and restart the companion. Workbench 2.0.30 includes
-the same companion source. Existing images need no reimport, rescan or rank reset.
+The pencil editor's **Selected media** tab has **Open original** beside the
+image details. It opens the full-resolution source in a new browser tab.
+
+Update the standalone page and restart the companion. Workbench 2.0.31 bundles
+the same runtime. Existing cards are processed when Battles loads.
 
 ## Faster initial rankings (companion 2.7.77 / Workbench 2.0.29)
 

@@ -26,7 +26,16 @@
   panel.setAttribute('aria-label','Debug tools for '+entry.name);
   const filename=el('strong','naiDebugFilename',entry.name);filename.title=entry.name;
   const metadata=metaFor(owner,mid),automaticFrame=metadata?.mode==='auto',positioning=cards.framingStatus(owner,mid);
-  const crop=el('span','naiDebugCrop',automaticFrame?'Auto-positioned · '+(metadata.checked?'Checked':'Unchecked'):custom(frame)?'Custom crop':'Default crop');crop.dataset.custom=String(custom(frame));crop.dataset.positioning=positioning;crop.title=automaticFrame?`Full height preserved · ${Number(metadata.side_crop_percent).toFixed(2)}% hidden on each side · ${metadata.checked?'Checked by you':'Composition has not been checked'}`:custom(frame)?`X ${frame.x||0} · Y ${frame.y||0} · Zoom ${frame.zoom??1} · ${frame.fit||'contain'}${frame.reference?' · Saved reference':''}`:'Centered · 1× zoom · Fit whole photo';
+  const crop=el('span','naiDebugCrop',automaticFrame?'Auto-positioned · '+(metadata.checked?'Checked':'Unchecked'):custom(frame)?'Custom crop':'Default crop');
+  crop.dataset.custom=String(custom(frame));crop.dataset.positioning=positioning;
+  if(automaticFrame){
+   const trim=metadata.vertical_crop_percent>0
+    ?`Full width preserved · ${metadata.vertical_crop_percent.toFixed(2)}% hidden at top and bottom`
+    :`Full height preserved · ${Number(metadata.side_crop_percent).toFixed(2)}% hidden on each side`;
+   crop.title=trim+' · '+(metadata.checked?'Checked':'Unchecked');
+  }else{
+   crop.title=custom(frame)?`X ${frame.x||0} · Y ${frame.y||0} · Zoom ${frame.zoom??1} · ${frame.fit||'contain'}${frame.reference?' · Saved reference':''}`:'Centered · 1× zoom · Fit whole photo';
+  }
   const message=el('p','naiDebugMessage');message.setAttribute('role','status');
   function button(text,action,label){const b=el('button','',text);b.type='button';if(label)b.setAttribute('aria-label',label);b.onclick=action;return b;}
   function run(action){
