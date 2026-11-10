@@ -390,7 +390,8 @@ class Organizer:
         try:
             catalog=self.engine.library.catalog(owner)
             expected=config.get('library_instance')
-            if expected and catalog.get('stable_library_id')!=expected:return
+            # Sections store tracking's instance ID, not the catalog's store ID.
+            if expected and self.engine.library.request('/api/tracking/status')['instance']!=expected:return
             main={}
             for row in catalog['files']:
                 if row.get('character_id',owner)!=owner:continue

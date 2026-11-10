@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "id": "2026-11-10-organizer-main-placement",
+  "id": "2026-11-10-organizer-main-status-identity-fix",
   "components": [
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Show Main image status separately from set membership in the folder organizer grid and suggested additions. Images can show In Main and In 1 set(s) together. Read current library placement for saved collections without rescanning; distinguish Not in Main from unavailable status. Preserve source images, sets, rankings and saved organizer progress."
+  "workbench_notes": "Fix Main status unavailable appearing on every organizer card. Validate the saved collection against the companion's tracking instance ID so live Main placement is recognized correctly. Keep In Main and set membership visible together, with no rescan or reimport required."
 }
