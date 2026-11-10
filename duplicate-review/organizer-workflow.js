@@ -206,7 +206,7 @@ async function editIndividualImports(owner='',ids=[...selection]){
  const catalog=await api('import-catalog',{job:data.job,character_id:owner});
  const dialog=el('dialog');dialog.id='individualImportDialog';dialog.style.cssText='width:min(660px,94vw);height:auto;max-height:90vh;overflow:auto;padding:24px';document.body.append(dialog);
  dialog.addEventListener('close',()=>dialog.remove(),{once:true});
- if(catalog.choose_character){dialog.append(el('h2','Choose the destination girl'));for(const c of catalog.choose_character)dialog.append(button(c.name,()=>task(async()=>{dialog.close();await editIndividualImports(c.id)})));dialog.append(button('Cancel',()=>dialog.close()));dialog.showModal();return;}
+ if(catalog.choose_character){dialog.append(el('h2','Choose the destination girl'));for(const c of catalog.choose_character)dialog.append(button(c.name,()=>task(async()=>{dialog.close();await editIndividualImports(c.id,ids)})));dialog.append(button('Cancel',()=>dialog.close()));dialog.showModal();return;}
  const existing=(data.individuals||[]).filter(r=>ids.includes(r.id)),preset=existing.length===ids.length&&existing.every(r=>JSON.stringify(r.options)===JSON.stringify(existing[0].options))?existing[0].options:{};
  dialog.append(el('h2','Save '+ids.length+' individual images · '+catalog.name),el('p','No set is required. Existing set memberships are kept. These choices are saved locally until you use Import to library.'));
  const destination=el('select');destination.id='individualDestination';destination.setAttribute('aria-label','Individual import destination');
@@ -227,7 +227,14 @@ async function editIndividualImports(owner='',ids=[...selection]){
  const save=button('Save to import queue',()=>task(async()=>{
   const options={destination:destination.value,categories:[...categoryList.querySelectorAll('input:checked')].map(i=>i.value)};for(const [key,input]of Object.entries(fields))options[key]=input.checked;
   if(options.destination==='categories'&&!options.categories.length){toast('Choose a category or use Main.');return;}
-  save.disabled=true;try{await mutate('queue_individuals',{ids,character_id:catalog.character_id,library_instance:catalog.library_instance,options});dialog.close();await open('imports','imports',0,false);toast(ids.length+' images saved in the import queue.');}finally{save.disabled=false}
+  const grid=$('grid'),nav=document.querySelector('.workspace>nav'),gridScroll=grid.scrollTop,navScroll=nav.scrollTop;
+  save.disabled=true;try{
+   await mutate('queue_individuals',{ids,character_id:catalog.character_id,library_instance:catalog.library_instance,options});dialog.close();
+   // Queueing only changes saved choices and badges. Keep this post's images,
+   // page, viewer and Back history; the queue button is explicit navigation.
+   grid.scrollTop=gridScroll;nav.scrollTop=navScroll;scheduleSession();
+   toast(ids.length+' images saved in the import queue.');
+  }finally{save.disabled=false}
  }),'primary');save.id='saveIndividualImports';dialog.append(save,button('Cancel',()=>dialog.close()));dialog.showModal();
 }
 // Shift selects a range in the visible grid; browsing and zooming remain separate.

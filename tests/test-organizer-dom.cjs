@@ -11,17 +11,22 @@ async function fixture(custom={}){
  const vc=new VirtualConsole();vc.on('jsdomError',e=>{if(!e.message.includes('Not implemented:'))errors.push(e.message)});
  const dom=new JSDOM(code,{url:'http://127.0.0.1:8844/organizer',runScripts:'dangerously',pretendToBeVisual:true,virtualConsole:vc,beforeParse(w){
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true};w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'))};w.HTMLElement.prototype.scrollIntoView=function(){};w.ResizeObserver=class{observe(){}disconnect(){}};
- w.fetch=async(url,options={})=>{const u=new URL(url,w.location),route=u.pathname.split('/').at(-1),body=JSON.parse(options.body||'{}');calls.push({route,body});let data=state;
- if(route==='page'){const ids=u.searchParams.get('kind')==='up_next'?state.up_next:u.searchParams.get('kind')==='imports'?(state.individuals||[]).map(r=>r.id).filter(Boolean):photos.map(p=>p.id);data={label:u.searchParams.get('kind')==='up_next'?'Up next':u.searchParams.get('kind')==='imports'?'Individual import queue':state.posts.find(p=>p.id===u.searchParams.get('id'))?.label,total:ids.length,offset:0,ids,images:ids.map(id=>photos.find(p=>p.id===id)||photo),job:'job'};}
+ w.fetch=async(url,options={})=>{const u=new URL(url,w.location),route=u.pathname.split('/').at(-1),body=JSON.parse(options.body||'{}'),query=Object.fromEntries(u.searchParams);calls.push({route,body,query});let data=state;
+ if(route==='page'){
+  const {kind,id}=query,ids=custom.pages?.[kind+':'+id]||(kind==='up_next'?state.up_next:kind==='imports'?(state.individuals||[]).map(r=>r.id).filter(Boolean):photos.map(p=>p.id));
+  const at=ids.includes(query.focus)?ids.indexOf(query.focus):Number(query.offset)||0,offset=Math.floor(Math.max(0,Math.min(at,Math.max(0,ids.length-1)))/60)*60;
+  data={label:kind==='up_next'?'Up next':kind==='imports'?'Individual import queue':state.posts.find(p=>p.id===id)?.label||state.sets.find(s=>s.id===id)?.name,total:ids.length,offset,ids,images:ids.slice(offset,offset+60).map(id=>photos.find(p=>p.id===id)||photo),job:'job'};
+  if(!query.peek)state.state.view={kind,id,offset,order:query.order};
+ }
  else if(route==='draft'){state.state.selection=body.ids;state.state.new_name=body.new_name;data={ok:true};}
  else if(route==='pin'){state.up_next=body.pinned?['photo']:[];state.state.revision++;}
  else if(route==='post'){state.posts.find(p=>p.id===body.id).status=body.status;state.later_count=state.posts.filter(p=>p.status==='deferred').length;state.state.revision++;}
  else if(route==='related')data={images:[],posts:[],sets:[],total:0};
  else if(route==='transfer-preview')data={token:'preview',sets:[{name:'Draft',action:'Create',count:1}],imports:[],existing_count:1,conflicts:[],issues:['Source file missing']};
- else if(route==='session')data={ok:true};
+ else if(route==='session'){state.state.ui=body.ui;data={ok:true};}
  if(custom.route){const override=await custom.route(route,body,state,calls);if(override!==undefined)data=override;}
  return {ok:true,json:async()=>JSON.parse(JSON.stringify(data))};};}});
- try{await ready(()=>dom.window.document.querySelector('[data-star="photo"]'))}catch(e){const note=dom.window.document.getElementById('notice').textContent;dom.window.close();throw Error(note+' '+JSON.stringify(errors)+' '+JSON.stringify(calls));}
+ try{await ready(()=>dom.window.document.querySelector('[data-star]')&&dom.window.eval('sessionReady'))}catch(e){const note=dom.window.document.getElementById('notice').textContent;dom.window.close();throw Error(note+' '+JSON.stringify(errors)+' '+JSON.stringify(calls));}
  return {dom,d:dom.window.document,state,calls,errors};
 }
 test('organizer stars do not change selection and Later moves to the next active post',async()=>{
@@ -59,6 +64,60 @@ test('individual image choices save a queue without creating a set',async()=>{
  const call=f.calls.find(c=>c.route==='queue_individuals');assert.deepEqual(call.body.ids,['photo']);assert.equal(call.body.character_id,'owner');assert.equal(call.body.options.destination,'review');assert.equal(call.body.options.favorite,true);assert.deepEqual(call.body.options.categories,['ghost']);assert.equal(f.state.sets.length,0);
  await ready(()=>f.d.getElementById('individualQueue').textContent.includes('1'));assert.ok(!f.calls.some(c=>c.route==='transfer-import'||c.route==='transfer-apply'));assert.deepEqual(f.errors,[]);
  }finally{f.dom.window.close()}
+});
+
+for(const context of ['forum post','Instagram post','set','import queue'])test('queue save keeps the current page and navigation in a '+context,async()=>{
+ const photos=Array.from({length:125},(_,n)=>({id:n?'photo-'+n:'photo',name:n+'.png',path:'/source/'+n+'.png',media_type:'image',sources:['first'],sets:[],origins:[]}));
+ const ids=photos.map(p=>p.id),pages={'post:first':ids,'post:second':['photo-124'],'set:shoot':ids};
+ const individuals=context==='import queue'?ids.map(id=>({id,key:id,options:{destination:'main',categories:[]}})):[{id:'photo-124',key:'photo-124',options:{destination:'main',categories:[]}}];
+ const custom={photos,pages,state:{individuals,sets:[{id:'shoot',name:'Saved shoot',members:ids,count:ids.length}]},route(route,body,state){
+  if(route==='import-catalog')return {character_id:'owner',name:'Fixture',categories:[]};
+  if(route==='queue_individuals'){
+   for(const id of body.ids){const row=state.individuals.find(r=>r.id===id);if(row)row.options=body.options;else state.individuals.push({id,key:id,options:body.options});}
+   state.state.selection=[];state.state.revision++;return state;
+  }
+ }};
+ const f=await fixture(custom);try{
+  await f.dom.window.eval("open('post','second')");
+  const kind=context==='set'?'set':context==='import queue'?'imports':'post',id=kind==='set'?'shoot':kind==='imports'?'imports':'first';
+  f.d.getElementById('order').value=context==='Instagram post'?'original':'similar';
+  await f.dom.window.eval(`open(${JSON.stringify(kind)},${JSON.stringify(id)},60)`);
+  const grid=f.d.getElementById('grid'),nav=f.d.querySelector('.workspace>nav'),nodes=[...grid.children],title=f.d.getElementById('title').textContent,position=f.d.getElementById('position').textContent,history=f.dom.window.sessionStorage.getItem('organizer-back'),pageCalls=f.calls.filter(c=>c.route==='page').length;
+  grid.scrollTop=417;nav.scrollTop=181;f.d.getElementById('search').value='Saved filter';
+  grid.querySelector('[data-pick]').click();f.d.getElementById('queueIndividuals').click();await ready(()=>f.d.getElementById('individualImportDialog')?.open);
+  f.d.getElementById('individualDestination').value='review';f.d.getElementById('saveIndividualImports').click();
+  await ready(()=>!f.d.getElementById('individualImportDialog')&&f.d.getElementById('notice').textContent.includes('saved in the import queue'));
+  assert.equal(f.d.getElementById('title').textContent,title);assert.equal(f.d.getElementById('position').textContent,position);
+  assert.deepEqual([...grid.children],nodes);assert.deepEqual([...grid.querySelectorAll('.card')].map(c=>c.dataset.id),ids.slice(60,120));
+  assert.equal(grid.scrollTop,417);assert.equal(nav.scrollTop,181);assert.equal(f.d.getElementById('search').value,'Saved filter');
+  assert.equal(f.calls.filter(c=>c.route==='page').length,pageCalls);assert.equal(f.dom.window.sessionStorage.getItem('organizer-back'),history);
+  assert.equal(f.d.getElementById('selectionCount').textContent,'0 selected');assert.match(grid.querySelector('[data-id="photo-60"] .individualBadge').textContent,/Review first/);
+  assert.equal(f.state.individuals.find(r=>r.id==='photo-60').options.destination,'review');
+  await ready(()=>f.state.state.ui?.gridScroll===417);
+  assert.deepEqual(f.state.state.ui.view,{kind,id,offset:60});assert.deepEqual(f.state.state.view,{kind,id,offset:60,order:f.d.getElementById('order').value});
+  const reopened=await fixture({...custom,state:JSON.parse(JSON.stringify(f.state))});try{
+   assert.equal(reopened.d.getElementById('title').textContent,title);assert.equal(reopened.d.getElementById('position').textContent,position);assert.equal(reopened.d.getElementById('grid').scrollTop,417);
+  }finally{reopened.dom.window.close();}
+  f.d.getElementById('back').click();await ready(()=>f.d.getElementById('title').textContent==='Post 2');
+  assert.deepEqual([...f.d.querySelectorAll('#grid .card')].map(c=>c.dataset.id),['photo-124']);assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close();}
+});
+
+test('queue save from a suggestion keeps the post and the explicitly chosen image through girl selection',async()=>{
+ const photos=['photo','suggestion'].map(id=>({id,name:id+'.png',path:'/source/'+id+'.png',media_type:'image',sources:['first'],sets:[],origins:[]}));
+ const f=await fixture({photos,pages:{'post:first':['photo']},route(route,body,state){
+  if(route==='related')return {images:[photos[1]],posts:[],sets:[],total:1};
+  if(route==='edit-read')return {not_imported:true};
+  if(route==='import-catalog')return body.character_id?{character_id:'owner',name:'Fixture',categories:[]}:{choose_character:[{id:'owner',name:'Fixture'}]};
+  if(route==='queue_individuals'){state.individuals=body.ids.map(id=>({id,key:id,options:body.options}));state.state.selection=[];state.state.revision++;return state;}
+ }});try{
+  f.d.querySelector('#grid [data-pick]').click();await ready(()=>f.d.querySelector('#suggestions [data-edit-image="suggestion"]'));
+  f.d.querySelector('#suggestions [data-edit-image="suggestion"]').click();await ready(()=>f.d.getElementById('individualImportDialog')?.textContent.includes('Choose the destination girl'));
+  [...f.d.querySelectorAll('#individualImportDialog button')].find(b=>b.textContent==='Fixture').click();await ready(()=>f.d.getElementById('saveIndividualImports'));
+  f.d.getElementById('saveIndividualImports').click();await ready(()=>f.d.getElementById('notice').textContent.includes('saved in the import queue'));
+  assert.deepEqual(f.calls.find(c=>c.route==='queue_individuals').body.ids,['suggestion']);assert.equal(f.d.getElementById('title').textContent,'Post 1');
+  assert.deepEqual([...f.d.querySelectorAll('#grid .card')].map(c=>c.dataset.id),['photo']);assert.match(f.d.querySelector('#suggestions .individualBadge').textContent,/Main/);assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close();}
 });
 
 test('solo transfer defaults to individual images and applies without any sets',async()=>{

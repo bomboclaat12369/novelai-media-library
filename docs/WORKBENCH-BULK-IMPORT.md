@@ -117,8 +117,22 @@ tests, 364 native production-card renders, and 13 release-pipeline tests. The
 native renderer was also run explicitly with the pinned canvas dependency to
 verify its completion report. The new edit and import regressions use real
 local HTTP servers and disposable libraries. No live Windows UI check.
-Workbench 2.0.27 is authorized for publication. Its release receipt must confirm
-both published manifests and downloadable bytes before announcing availability.
+Workbench 2.0.27 was published and verified; see
+`releases/2026-11-10-workbench-import-editing.json`.
+
+## Stay in place when queueing (Workbench 2.0.28)
+
+**Save to import queue** updates the count and image badges without opening a
+different screen or reloading the image grid. The current post/set, page, image
+order, scroll position, viewer and Back history stay in place. The saved session
+also keeps that location for reopening the Workbench. Use **Import queue** to
+open the queue explicitly. Editing choices within the queue keeps its page too.
+
+When an individual image opens a destination-girl chooser, that exact image
+remains the import target even if other images are selected in the background.
+Regression checks cover later pages, original/similar ordering, set and queue
+views, reopening the session, Back navigation and suggested-image imports.
+These are DOM checks; no live Windows desktop check was performed.
 
 ## Storage and compatibility
 

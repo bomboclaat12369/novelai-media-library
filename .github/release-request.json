@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "id": "2026-11-10-workbench-import-and-editing",
+  "id": "2026-11-10-workbench-queue-stay-in-place",
   "components": [
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Fix oversized import previews being reported as companion connection failures. Keep preview requests focused on the selected imports, show actionable connection errors, and offer Retry preview. Add Workbench editing for existing set names, colors, categories, favorites and Set Purgatory; edit image categories in the library or Rapid Review, and reopen individual import choices directly from image cards. Preserve existing media identities, memberships and pending draft changes."
+  "workbench_notes": "Saving individual images to the import queue now keeps the current post or set, page, image order, scroll position and Back history. Update queue badges and the count in place; open the queue only when requested. Preserve the explicitly chosen image when the destination girl must be selected."
 }
