@@ -1,0 +1,33 @@
+{
+  "status": "published_verified",
+  "source_commit": "d8e11c0d137ca8baaaa436193d70fb35e9b7a236",
+  "components": [
+    "workbench"
+  ],
+  "publish": true,
+  "artifacts": {
+    "workbench": {
+      "version": "2.0.28",
+      "sha256": "1f92102b1f6e6ef2a014eb87eedf0c0827174979e804e7e46b79177ad65f8b06",
+      "bytes": 347851
+    }
+  },
+  "payload_commit": "f87ecdc49d5b98f40b0f5f2eb1eaa30e834fea7f",
+  "release_commit": "d81aa43f70577fe4340192c3490a26578b17299a",
+  "generated_files": 9,
+  "push_attempted": true,
+  "workflow_run": "https://github.com/bomboclaat12369/novelai-media-library/actions/runs/42856979458",
+  "validation": {
+    "runtime_tests": 215,
+    "workbench_tests": 187,
+    "dom_tests": 82,
+    "native_card_renders": 364,
+    "release_pipeline_tests": 13,
+    "status": "passed"
+  },
+  "ui_limits": "Queue navigation, saved-session restoration and explicit image selection were exercised in the DOM; no live Windows desktop check.",
+  "receipt_artifact": {
+    "id": 13782674457,
+    "sha256": "ef9f3c3cf908d7033ac2ed0adf6e544c00b7a28141837a888e1802cdec0aee41"
+  }
+}
