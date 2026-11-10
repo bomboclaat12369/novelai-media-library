@@ -1,0 +1,45 @@
+{
+  "status": "published_verified",
+  "source_commit": "f84aea3aa5391cdecce83e7b08b608f1cd259b1c",
+  "components": [
+    "runtime",
+    "standalone",
+    "workbench"
+  ],
+  "publish": true,
+  "artifacts": {
+    "runtime": {
+      "version": "2.7.79",
+      "sha256": "41ec0ce60f710baa339c5e424b508419be1d628e1fc1536d8dbd8d33d392ed72",
+      "bytes": 382173
+    },
+    "standalone": {
+      "version": "2.9.29",
+      "sha256": "38f099b8633648a70e3acfa33457746e08982053f58bcb21045485cf521f1fa3",
+      "bytes": 17240851
+    },
+    "workbench": {
+      "version": "2.0.31",
+      "sha256": "c21ce6f36054d20f5b789e158014c643c2c80c9a44ff396394a6a52afd9b714f",
+      "bytes": 351181
+    }
+  },
+  "payload_commit": "f2a7ffc64702210a637f7ad5c9e67eabfed43770",
+  "release_commit": "a680f4aa0fa953c874fd049a9bd4c5491f323757",
+  "generated_files": 61,
+  "push_attempted": true,
+  "workflow_run": "https://github.com/bomboclaat12369/novelai-media-library/actions/runs/42902188558",
+  "validation": {
+    "runtime_tests": 239,
+    "workbench_tests": 187,
+    "dom_tests": 89,
+    "native_card_renders": 364,
+    "release_pipeline_tests": 13,
+    "status": "passed"
+  },
+  "ui_limits": "Regression tests covered the reported image dimensions, code handling the editor and the original download. Native renderer checks passed. Live desktop browser verification was unavailable.",
+  "receipt_artifact": {
+    "id": 13804205779,
+    "sha256": "5b67d3d02b81ebbd2b144207e1b8fefdf15ba6d3ddd65d414c41154ea548bfad"
+  }
+}
