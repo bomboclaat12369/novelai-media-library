@@ -1,0 +1,33 @@
+{
+  "status": "published_verified",
+  "source_commit": "6eac5d97b51d6819e8b993282fd5592f4a260b08",
+  "components": [
+    "workbench"
+  ],
+  "publish": true,
+  "artifacts": {
+    "workbench": {
+      "version": "2.0.24",
+      "sha256": "6c8524f4c5f13c2d456acf319baa8514361e0a0a7b72ea2c6254b0e598a7d6f8",
+      "bytes": 342060
+    }
+  },
+  "payload_commit": "2b7ad23a902ea6b97051d07410da4193e3e58c73",
+  "release_commit": "128a4eca21b24b2e00cc69b52053045dc1648593",
+  "generated_files": 9,
+  "push_attempted": true,
+  "workflow_run": "https://github.com/bomboclaat12369/novelai-media-library/actions/runs/42786712412",
+  "validation": {
+    "runtime_tests": 215,
+    "workbench_tests": 177,
+    "dom_tests": 73,
+    "native_card_renders": 364,
+    "release_pipeline_tests": 13,
+    "status": "passed"
+  },
+  "ui_limits": "No live Windows desktop check. Browser-access troubleshooting remains paused.",
+  "receipt_artifact": {
+    "id": 13749173947,
+    "sha256": "f3c332fe28a3e46c0e6e8b7a7f6558ebcb9f4c30aa45d5d4bffa6a8e97967360"
+  }
+}
