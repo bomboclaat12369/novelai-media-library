@@ -1,0 +1,53 @@
+// Leaderboard maintenance tools; all changes use the existing revision-checked APIs.
+(() => {
+ 'use strict';
+ const root=document.getElementById('nai-media-host')?.shadowRoot,cards=root?.naiCards;if(!cards)return;
+ const el=(tag,cls='',text='')=>{const e=document.createElement(tag);e.className=cls;e.textContent=text;return e;};
+ const style=el('style');style.textContent=`
+ .naiCardDebugPanel{box-sizing:border-box;height:266px;overflow:auto;padding:10px;background:#111c2a;border:1px solid #47566a;border-radius:8px;display:flex;flex-direction:column;gap:8px;color:#e4eaf4;font:12px/1.35 system-ui;scrollbar-width:thin}
+ .naiCardDebugPanel strong{overflow-wrap:anywhere}.naiCardDebugPanel button,.naiCardDebugPanel select{font:12px system-ui;min-width:0;max-width:100%;padding:5px 7px}
+ .naiCardDebugPanel label{display:flex;align-items:center;gap:6px}.naiCardDebugPanel label select{flex:1;width:0}.naiDebugRow{display:flex;flex-wrap:wrap;gap:5px;align-items:center}.naiDebugTraits{display:flex;flex-wrap:wrap;gap:4px;max-height:72px;overflow:auto;min-height:20px;flex-shrink:0}
+ .naiDebugTrait{display:inline-flex;align-items:center;gap:4px;border:1px solid #566275;border-radius:5px;padding:2px 5px;background:#233146}.naiDebugTrait button{padding:0 4px!important;border:0}.naiDebugTrait small{color:#b8c5d8}
+ .naiDebugCrop{font-weight:700;color:#9bc9ae}.naiDebugCrop[data-custom=true]{color:#ffd58b}.naiDebugMessage{margin:0!important;min-height:16px;font-size:11px;color:#ffb9a9}.naiDebugFilename{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .naiDebugCrop[data-positioning=auto-unchecked]{color:#ffd58b}.naiDebugCrop[data-positioning=auto-checked]{color:#9bc9ae}
+ .naiBattleRankCard[data-debug=true] .naiFramedSource{box-shadow:0 0 0 2px #ff263f!important}
+ .naiBattleRankCard[data-debug=true]>.naiCardDetails{display:none}
+ .naiDebugHelp{font-size:12px;color:#bac8dc;margin:8px 0}.naiDebugToggle{display:inline-flex;align-items:center;gap:6px;margin-left:14px}
+ `;root.append(style);
+ const frameFor=(owner,mid)=>cards.cache.get(owner)?.collection.frames['image:'+mid];
+ const metaFor=(owner,mid)=>cards.cache.get(owner)?.collection.frame_meta?.['image:'+mid];
+ const custom=frame=>!!frame&&(Number(frame.x||0)!==0||Number(frame.y||0)!==0||Number(frame.zoom??1)!==1||(frame.fit||'contain')!=='contain'||!!frame.reference);
+ cards.hasCustomCrop=(owner,mid)=>custom(frameFor(owner,mid));
+ cards.framingStatus=(owner,mid)=>metaFor(owner,mid)?.mode==='auto'?(metaFor(owner,mid).checked?'auto-checked':'auto-unchecked'):custom(frameFor(owner,mid))?'custom':'default';
+ cards.matchesCropFilter=(owner,mid,filter)=>filter==='all'||(filter==='auto'?cards.framingStatus(owner,mid).startsWith('auto-'):cards.framingStatus(owner,mid)===filter);
+ let saveQueue=Promise.resolve();
+ cards.debugPanel=function(entry,owner,kind,onSaved,rows){
+  const panel=el('section','naiCardDebugPanel'),mid=entry.preview_id||entry.captain_id||entry.images[0],names=new Map(cards.editionNames),owned=new Set(entry.edition_settings?.traits||[]),automatic=new Set(entry.automatic_editions||[]),frame=frameFor(owner,mid);
+  panel.setAttribute('aria-label','Debug tools for '+entry.name);
+  const filename=el('strong','naiDebugFilename',entry.name);filename.title=entry.name;
+  const metadata=metaFor(owner,mid),automaticFrame=metadata?.mode==='auto',positioning=cards.framingStatus(owner,mid);
+  const crop=el('span','naiDebugCrop',automaticFrame?'Auto-positioned · '+(metadata.checked?'Checked':'Unchecked'):custom(frame)?'Custom crop':'Default crop');crop.dataset.custom=String(custom(frame));crop.dataset.positioning=positioning;crop.title=automaticFrame?`Full height preserved · ${Number(metadata.side_crop_percent).toFixed(2)}% hidden on each side · ${metadata.checked?'Checked by you':'Composition has not been checked'}`:custom(frame)?`X ${frame.x||0} · Y ${frame.y||0} · Zoom ${frame.zoom??1} · ${frame.fit||'contain'}${frame.reference?' · Saved reference':''}`:'Centered · 1× zoom · Fit whole photo';
+  const message=el('p','naiDebugMessage');message.setAttribute('role','status');
+  function button(text,action,label){const b=el('button','',text);b.type='button';if(label)b.setAttribute('aria-label',label);b.onclick=action;return b;}
+  function run(action){
+   const controls=[...panel.querySelectorAll('button,select')].map(e=>[e,e.disabled]);controls.forEach(([e])=>e.disabled=true);message.textContent='Saving…';
+   const work=saveQueue.then(action);saveQueue=work.catch(()=>{});
+   work.then(()=>{message.textContent='Saved';},e=>{message.textContent=e.message||String(e);}).finally(()=>controls.forEach(([e,disabled])=>e.disabled=disabled));
+  }
+  function saveEdition(payload){run(async()=>{const current=await cards.load(owner),saved=await root.naiOutfitRequest('/api/collection/edition',{character_id:owner,revision:current.collection.revision,entry_id:entry.id,kind,...payload});cards.cache.set(owner,saved);await onSaved();});}
+  const actions=el('div','naiDebugRow');actions.append(crop,button('Position / crop',()=>cards.adjust(owner,mid,'image:'+mid,onSaved,{entry,rows}), 'Position crop for '+entry.name),button('Edit edition',()=>cards.editEdition(entry,owner,kind,onSaved),'Edit traits and edition for '+entry.name));
+  const reviewActions=el('div','naiDebugRow');
+  if(automaticFrame){
+   const saveFrame=(action,extra={})=>run(async()=>{const current=await cards.load(owner),saved=await root.naiOutfitRequest('/api/collection/'+action,{character_id:owner,revision:current.collection.revision,media_id:mid,token:metadata.token,...extra});cards.cache.set(owner,saved);await onSaved();});
+   reviewActions.append(button(metadata.checked?'Mark unchecked':'Mark checked',()=>saveFrame('frame-review',{checked:!metadata.checked})),button('Restore default',()=>saveFrame('frame-default'),'Restore default positioning for '+entry.name));
+  }
+  const traits=el('div','naiDebugTraits');traits.setAttribute('aria-label','Card traits');
+  for(const id of entry.owned_editions||[]){const chip=el('span','naiDebugTrait',names.get(id)||id);if(automatic.has(id))chip.append(el('small','','Auto'));if(owned.has(id))chip.append(button('×',()=>saveEdition({remove_traits:[id]}),'Remove '+(names.get(id)||id)+' trait'));traits.append(chip);}
+  for(const title of entry.titles||[])if(title.id==='team_captain')traits.append(el('span','naiDebugTrait','Captain · Auto'));
+  if(!traits.childElementCount)traits.append(el('span','','No traits'));
+  const field=(label,values,value)=>{const l=el('label','',label),select=el('select');select.setAttribute('aria-label',label+' for '+entry.name);for(const [id,name]of values){const o=el('option','',name);o.value=id;select.append(o)}select.value=value;l.append(select);return [l,select];};
+  const [displayLabel,display]=field('Frame',[['auto','Automatic'],['none','Base card'],...cards.editionNames.filter(([id])=>entry.owned_editions?.includes(id))],entry.edition_settings?.choice||'auto');display.onchange=()=>saveEdition({choice:display.value});
+  const additions=cards.editionNames.filter(([id])=>!entry.owned_editions?.includes(id));const [addLabel,add]=field('Add trait',[['','Choose trait…'],...additions],'');add.disabled=!additions.length;add.onchange=()=>{if(add.value)saveEdition({add_traits:[add.value]});};
+  panel.append(filename,actions);if(automaticFrame)panel.append(reviewActions);panel.append(traits,displayLabel,addLabel,message);return panel;
+ };
+})();

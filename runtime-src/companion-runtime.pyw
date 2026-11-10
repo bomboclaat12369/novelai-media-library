@@ -3600,6 +3600,69 @@ class LibraryStore:
             default = 'photoshoot' if re.match(r'^mikayla\b', character.get('name', '').strip(), re.I) else 'outfit'
             return {'character_id': character_id, 'mode': saved if saved in ('outfit', 'photoshoot') else default}
 
+    @staticmethod
+    def _frame_source(item):
+        return {k:item.get(k) for k in ('sha256','width','height','crop_top','crop_bottom')}
+
+    def _automatic_card_frame(self, item):
+        """A small centered side crop only; preserve the full displayed height.
+
+        Stored dimensions cheaply select candidates. Verify the source header and
+        EXIF orientation before deriving a frame; never decode/resave the image.
+        The shared opening is 840 x 1120 in a 1050 x 1500 card.
+        """
+        if (Image is None or item.get('media_type') != 'image' or not self._in_main(item) or
+                item.get('flagged_for_removal') or item.get('crop_top') or item.get('crop_bottom') or
+                not item.get('sha256')):
+            return None
+        width,height=item.get('width'),item.get('height')
+        if any(type(v) not in (int,float) or not math.isfinite(v) or v<=0 for v in (width,height)):
+            return None
+        def suitable(ratio):return .750001 < ratio <= .75/.92
+        if not (suitable(width/height) or suitable(height/width)):
+            return None
+        try:
+            with Image.open(self.root / item['stored_rel']) as image:
+                if getattr(image,'n_frames',1)!=1:return None
+                width,height=image.size
+                orientation=image.getexif().get(274,1)
+                if orientation not in range(1,9):return None
+                if orientation in (5,6,7,8):width,height=height,width
+        except (OSError,ValueError,KeyError,TypeError,SyntaxError,Image.DecompressionBombError):
+            return None
+        if not suitable(width/height):return None
+        frame={'x':0.,'y':0.,'zoom':(width/height)/.75,'fit':'contain',
+               'reference':{'left':.1,'top':.13,'width':.8,'height':1120/1500}}
+        return {'frame':frame,'dimensions':[width,height],
+                'side_crop_percent':(1-.75/(width/height))*50}
+
+    def _sync_automatic_card_frames(self, data, media):
+        """Apply once per source; explicit saved/reset frames always take priority.
+
+        Collection changes use the existing atomic save/outbox, whose durable
+        character history retains before/after framing and versioned evidence.
+        """
+        frames=data['frames'];metadata=data.setdefault('frame_meta',{})
+        for mid,item in media.items():
+            key='image:'+mid;record=metadata.get(key,{})
+            if key in frames and record.get('mode')!='auto':continue
+            if record.get('mode')=='auto':
+                if frames.get(key)!=record.get('frame'):
+                    # Preserve an external/older-client override without claiming
+                    # to know who made it. The saved frame now blocks automation.
+                    metadata.pop(key,None)
+                    if key in frames:continue
+                elif record.get('source')==self._frame_source(item) and record.get('algorithm')=='center-height-v1':
+                    continue
+                else:
+                    frames.pop(key,None);metadata.pop(key,None)
+            candidate=self._automatic_card_frame(item)
+            if candidate:
+                frames[key]=candidate['frame']
+                metadata[key]={'mode':'auto','algorithm':'center-height-v1','token':uuid.uuid4().hex,
+                               'at':now_iso(),'checked':False,'source':self._frame_source(item),
+                               **copy.deepcopy(candidate)}
+
     def collection_request(self, action, body):
         """Presentation/progress metadata is independent of battle ratings and profiles."""
         with self.lock:
@@ -3628,10 +3691,11 @@ class LibraryStore:
             for ident,mid in list(data['captains'].items()):
                 if ident not in groups or mid not in groups[ident].get('media_ids',[]) or mid not in media:
                     data['captains'].pop(ident,None)
-            if action not in ('state', 'save', 'frame', 'review', 'captain', 'title', 'title-correction', 'edition'):
+            if action not in ('state', 'save', 'frame', 'frame-review', 'frame-default', 'review', 'captain', 'title', 'title-correction', 'edition'):
                 raise ValueError('Unknown collection action.')
             if action != 'state' and body.get('revision', '') != data['revision']:
                 raise ValueError('Collection changed in another window. Reopen it before saving.')
+            self._sync_automatic_card_frames(data,media)
             if action == 'save':
                 attrs = body.get('attributes', data['attributes'])
                 if not isinstance(attrs, list) or len(attrs) != 4:
@@ -3741,6 +3805,20 @@ class LibraryStore:
                 data['frames'][key] = {name:frame[name] for name in ('x','y','zoom')}
                 data['frames'][key]['fit']=fit
                 if reference is not None:data['frames'][key]['reference']=dict(reference)
+                data['frame_meta'][key]={'mode':'manual','at':now_iso()}
+            elif action in ('frame-review','frame-default'):
+                mid=body.get('media_id');key='image:'+str(mid)
+                record=data['frame_meta'].get(key,{})
+                if mid not in media or record.get('mode')!='auto' or body.get('token')!=record.get('token'):
+                    raise ValueError('Automatic positioning changed. Refresh the card before checking or restoring it.')
+                if action=='frame-review':
+                    checked=body.get('checked')
+                    if type(checked) is not bool:raise ValueError('Choose whether this positioning has been checked.')
+                    record['checked']=checked
+                    record['checked_at']=now_iso() if checked else None
+                else:
+                    data['frames'][key]={'x':0.,'y':0.,'zoom':1.,'fit':'contain'}
+                    data['frame_meta'][key]={'mode':'manual','at':now_iso(),'reason':'restored_default'}
             elif action == 'review':
                 mid = body.get('media_id')
                 if mid not in media:
@@ -5909,7 +5987,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                 body = self._read_json()
                 self._send_json(200, self.server.ui_updates.activate(str(body.get("version", ""))))
                 return
-            if path in {"/api/collection/state", "/api/collection/save", "/api/collection/frame", "/api/collection/review", "/api/collection/captain", "/api/collection/title", "/api/collection/title-correction", "/api/collection/edition"}:
+            if path in {"/api/collection/state", "/api/collection/save", "/api/collection/frame", "/api/collection/frame-review", "/api/collection/frame-default", "/api/collection/review", "/api/collection/captain", "/api/collection/title", "/api/collection/title-correction", "/api/collection/edition"}:
                 self._send_json(200, self.store.collection_request(path.rsplit("/", 1)[1], self._read_json()))
                 return
             if path in {"/api/profile/state", "/api/profile/save"}:

@@ -15,6 +15,7 @@ Read selected source files, not generated HTML or encoded runtime chunks.
 | Manual matching search | `ui-src/manual-search.js`, runtime `manual_search` / `manual_group` | Metadata filters, paged results, membership validation; no model dependency |
 | Sets and matching | Selected `.sets.txt`, `.groups.txt`, `.outfit-matching.txt`, `.set-picker.txt` | One Set per item; categories and main-view placement are separate |
 | Production cards | Selected `.collection.txt`, `.editions.txt`, `.base-layout.txt`, `.card-debug.txt` | Catalogs/layouts under `assets/cards`; no independent Studio renderer |
+| Automatic framing and crop review | Runtime `_automatic_card_frame`, `_sync_automatic_card_frames`, `collection_request`; `ui-src/card-debug.js`, `ui-src/battles.js` | [Automatic positioning](AUTOMATIC-CARD-POSITIONING.md); versioned source-bound evidence, manual priority |
 | Loop editor and video reference frame | `ui-src/video-workflow.js` | Source timestamps come from local FFmpeg; frame matching retains the video identity |
 | Card Studio and library project tools | `ui-src/project-tools.js` | Original-resolution photo; calls `naiCards.lightCard`; preview controls do not save cards |
 | Workbench server | `duplicate-review/app.py` | Loopback UI with per-launch token, serial operations |

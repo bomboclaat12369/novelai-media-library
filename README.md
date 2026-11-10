@@ -1,3 +1,20 @@
+## Automatic card positioning (Media Library 2.9.28 / companion 2.7.78)
+
+Open or refresh Battles to automatically position eligible untouched Main
+images. The first version preserves full height and applies only a small centered
+side crop, capped at 4% per side. For a 4:5 image this is 6.7% extra zoom and
+3.125% hidden per side. Original files, aspect ratio and saved manual positions
+are preserved. Tall images, larger crops and uncertain sources stay at default.
+
+In the leaderboard, enable **Debug mode**, then choose **Crop filter →
+Auto-positioned · Unchecked**. Each automatic crop offers **Mark checked**,
+**Position / crop** and **Restore default**. Explicit resets and manual edits
+block future automatic positioning. A changed image source invalidates its old
+check mark. See [automatic framing behavior](docs/AUTOMATIC-CARD-POSITIONING.md).
+
+Update the standalone page and restart the companion. Workbench 2.0.30 includes
+the same companion source. Existing images need no reimport, rescan or rank reset.
+
 ## Faster initial rankings (companion 2.7.77 / Workbench 2.0.29)
 
 New collections build a small starter group, then finish images in small batches

@@ -17,7 +17,7 @@ def main():
         run(sys.executable,'tools/build-release.py','--components','standalone','userscript','runtime')
         run(sys.executable,'-m','unittest','discover','-s','tests','-p','test_runtime_*.py')
         run(sys.executable,'-m','unittest','discover','-s','duplicate-review/tests','-p','test_*.py')
-        run('node','--test','tests/test-ui-stability.cjs','tests/test-review-dom.cjs','tests/test-workflow-dom.cjs','tests/test-organizer-dom.cjs','tests/test-missing-files-dom.cjs')
+        run('node','--test','tests/test-ui-stability.cjs','tests/test-review-dom.cjs','tests/test-workflow-dom.cjs','tests/test-organizer-dom.cjs','tests/test-missing-files-dom.cjs','tests/test-card-auto-frame-dom.cjs')
         run('node','tests/test-final-card-renderer.cjs')
     finally:
         manifest.write_bytes(before)
