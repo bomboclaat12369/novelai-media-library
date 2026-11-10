@@ -66,7 +66,13 @@ let transferIncludeSets=true,transferIncludeIndividuals=true,transferOwner='';
 async function previewTransfer(options={}){
  await saveDraft();
  if(!options.keepScope){transferIncludeIndividuals=true;transferIncludeSets=!(data.individuals||[]).length;transferOwner='';}
- let result=await api('transfer-preview',{job:data.job,revision:data.state.revision,include_sets:transferIncludeSets,include_individuals:transferIncludeIndividuals,character_id:transferOwner});
+ transferDialog.oncancel=null;
+ transferDialog.replaceChildren(el('h2','Import to library'),el('p','Preparing import preview…'),button('Close',()=>transferDialog.close()));
+ if(!transferDialog.open)transferDialog.showModal();
+ let result;
+ try{result=await api('transfer-preview',{job:data.job,revision:data.state.revision,include_sets:transferIncludeSets,include_individuals:transferIncludeIndividuals,character_id:transferOwner});}
+ catch(error){if(transferDialog.open)transferDialog.replaceChildren(el('h2','Import preview could not load'),el('p',error.message,'error'),button('Retry preview',()=>task(()=>previewTransfer({keepScope:true})),'primary'),button('Close',()=>transferDialog.close()));return;}
+ if(!transferDialog.open)return;
  if(result.choose_character){
   transferDialog.replaceChildren(el('h2','Choose the destination girl'));
   for(const c of result.choose_character)transferDialog.append(button(c.name,()=>task(async()=>{transferOwner=c.id;await previewTransfer({keepScope:true});})));
@@ -195,8 +201,8 @@ controls=function(){individualControls();const rows=data?.individuals||[],byId=n
   else badge?.remove();
  }
 };
-async function editIndividualImports(owner=''){
- const ids=[...selection];if(!ids.length)return;
+async function editIndividualImports(owner='',ids=[...selection]){
+ if(!ids.length)return;
  const catalog=await api('import-catalog',{job:data.job,character_id:owner});
  const dialog=el('dialog');dialog.id='individualImportDialog';dialog.style.cssText='width:min(660px,94vw);height:auto;max-height:90vh;overflow:auto;padding:24px';document.body.append(dialog);
  dialog.addEventListener('close',()=>dialog.remove(),{once:true});
@@ -245,3 +251,60 @@ const missingQueued=button('Remove unavailable queue entries',()=>task(async()=>
  await mutate('remove_individuals',{keys:rows.map(r=>r.key),ids:[]});await open('imports','imports',offset,false);
 }));missingQueued.id='removeUnavailableImports';removeIndividuals.after(missingQueued);
 const availableImportControls=controls;controls=function(){availableImportControls();const count=(data?.individuals||[]).filter(r=>!r.id).length;missingQueued.classList.toggle('hidden',currentKind!=='imports'||!count);missingQueued.disabled=busy;missingQueued.textContent='Remove '+count+' unavailable queue entries';};
+
+// Edit the existing record; import choices stay local until explicitly imported.
+const editSelected=button('Edit selected image',()=>task(()=>editWorkbenchImage([...selection][0])),'small quiet');
+editSelected.id='editSelectedImage';queueIndividuals.after(editSelected);
+const viewerEdit=button('Edit image',()=>task(()=>editWorkbenchImage(viewerIds[viewerAt])),'small quiet');
+viewerEdit.id='viewerEdit';$('viewerReference').before(viewerEdit);
+const metadataControls=controls;
+controls=function(){metadataControls();editSelected.disabled=busy||selection.size!==1;document.querySelectorAll('[data-edit-image]').forEach(b=>b.disabled=busy);const i=images.get(viewerIds[viewerAt]);viewerEdit.disabled=busy||!i||i.quarantined||i.discarded;};
+const metadataViewer=drawViewer;drawViewer=function(){metadataViewer();const i=images.get(viewerIds[viewerAt]);viewerEdit.disabled=busy||!i||i.quarantined||i.discarded;};
+const metadataCard=card;
+card=function(i,suggestion=false){const c=metadataCard(i,suggestion);if(!i.quarantined&&!i.discarded){const edit=button('Edit',()=>task(()=>editWorkbenchImage(i.id)),'small quiet');edit.dataset.editImage=i.id;edit.setAttribute('aria-label','Edit '+i.name);c.querySelector('footer').append(edit);}return c;};
+
+const setNameLabel=el('label','Name'),setEditName=el('input');setEditName.id='setEditName';setEditName.maxLength=250;setEditName.setAttribute('aria-label','Set name');setEditName.style.cssText='display:block;width:100%;margin:8px 0 14px';setNameLabel.append(setEditName);$('colorSetName').after(setNameLabel);$('colorSetName').hidden=true;
+const metadataOpenColors=openColors;openColors=function(target=''){metadataOpenColors(target);setEditName.value=(target?data.sets.find(g=>g.id===target)?.name:$('setName').value)||'';setEditName.focus();};
+$('editSetColors').textContent='Edit set';
+$('editSetColors').onclick=()=>task(async()=>{const group=data.sets.find(g=>g.id===currentId);if(group?.library_id)await editLibraryMetadata('set',currentId);else openColors(currentId);});
+
+async function editWorkbenchImage(id){
+ if(!id)return;
+ if(currentKind==='imports'&&(data.individuals||[]).some(row=>row.id===id)){await editIndividualImports('',[id]);return;}
+ await editLibraryMetadata('image',id);
+}
+
+async function editLibraryMetadata(kind,id){
+ await saveDraft();
+ const dialog=el('dialog');dialog.id='libraryMetadataEditor';dialog.style.cssText='width:min(600px,94vw);height:auto;max-height:88vh;overflow:auto;padding:24px';
+ dialog.addEventListener('close',()=>dialog.remove(),{once:true});document.body.append(dialog);
+ dialog.append(el('h2',kind==='set'?'Edit set':'Edit image'),el('p','Loading current library details…'),button('Close',()=>dialog.close()));dialog.showModal();
+ let record;
+ try{record=await api('edit-read',{job:data.job,kind,id});}
+ catch(error){dialog.replaceChildren(el('h2','Could not load details'),el('p',error.message,'error'),button('Close',()=>dialog.close()));return;}
+ if(!dialog.open)return;
+ if(record.not_imported){dialog.close();await editIndividualImports(record.character_id,[id]);return;}
+ const pending=record.location==='rapid_review';
+ dialog.replaceChildren(el('h2',kind==='set'?'Edit library set':pending?'Edit Rapid Review image':'Edit library image'),el('p',record.name,'muted'));
+ const fields={};
+ if(kind==='set'){
+  for(const [key,label]of [['name','Name'],['colors','Colors (comma-separated)']]){const row=el('label',label),input=el('input');input.id='metadata-'+key;input.setAttribute('aria-label',label);input.style.cssText='display:block;width:100%;margin:8px 0 14px';input.value=key==='colors'?(record.fields.colors||[]).join(', '):record.fields.name;input.maxLength=key==='name'?250:7500;row.append(input);dialog.append(row);fields[key]=input;}
+  const flags=el('div',undefined,'row');for(const [key,label]of [['favorite','Favorite set'],['in_purgatory','Set Purgatory']]){const row=el('label'),input=el('input');input.type='checkbox';input.checked=!!record.fields[key];input.setAttribute('aria-label',label);row.append(input,document.createTextNode(' '+label));flags.append(row);fields[key]=input;}dialog.append(flags);
+ }
+ dialog.append(el('h3',kind==='set'?'Set categories':'Image categories'));
+ const categories=el('div');categories.id='metadataCategories';categories.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0';
+ for(const category of record.categories){const row=el('label'),input=el('input');input.type='checkbox';input.value=category.id;input.checked=record.fields.categories.includes(category.id);row.append(input,document.createTextNode(' '+category.name+(category.ghost?' (ghost)':'')));categories.append(row);}
+ if(!record.categories.length)categories.append(el('p','No categories have been created for this girl.','muted'));
+ dialog.append(categories,el('p',pending?'Saves these choices in Rapid Review. The image stays in the queue.':kind==='set'?'Saves directly to the library. Pending image additions remain in your organizer draft.':'Saves directly to the library. Checked categories replace this image’s current categories.','muted'));
+ if(kind==='image'&&!pending&&(record.in_review||record.in_purgatory))dialog.append(el('p','Adding a new category moves this image out of Review or Purgatory, following the library’s usual category rules.','muted'));
+ const status=el('p');status.setAttribute('role','status');dialog.append(status);
+ const save=button(pending?'Save review choices':'Save to library',()=>task(async()=>{
+  const values={categories:[...categories.querySelectorAll('input:checked')].map(input=>input.value)};
+  if(kind==='set'){values.name=fields.name.value.trim();values.colors=fields.colors.value.split(',').map(s=>s.trim()).filter(Boolean);values.favorite=fields.favorite.checked;values.in_purgatory=fields.in_purgatory.checked;}
+  save.disabled=true;status.textContent='Saving…';let saved=false;
+  try{await api('edit-save',{job:data.job,token:record.token,fields:values});saved=true;dialog.close();await refresh();if(view)await open(currentKind,currentId,offset,false);toast(pending?'Review choices saved. The image remains in the queue.':'Library details saved.');}
+  catch(error){if(saved)toast('The library edit was saved. Refresh Workbench to reload it: '+error.message);else status.textContent=error.message;}
+  finally{save.disabled=false;}
+ }),'primary');save.id='saveLibraryMetadata';dialog.append(save,button('Cancel',()=>dialog.close()));
+ if(kind==='image'&&(data.individuals||[]).some(row=>row.id===id))dialog.append(button('Edit queued import choices',()=>task(async()=>{dialog.close();await editIndividualImports('',[id]);}),'small quiet'));
+}

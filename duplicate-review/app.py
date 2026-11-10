@@ -41,6 +41,8 @@ def make_server(engine, port=0, token=None):
     from organizer import Organizer
     from updater import Updater
     organizer = Organizer(engine, bulk)
+    from library_editing import LibraryEditor
+    library_editor = LibraryEditor(organizer)
     from checkpoints import Checkpoints
     checkpoints=Checkpoints(engine,bulk,organizer)
     checkpoints.recover()
@@ -248,6 +250,8 @@ def make_server(engine, port=0, token=None):
                     result=organizer.assign_collection(body)
                 elif path in ('/api/organizer/import-catalog','/api/organizer/import-category-create'):
                     result=organizer.create_import_category(body) if path.endswith('-create') else organizer.import_catalog(body)
+                elif path in ('/api/organizer/edit-read','/api/organizer/edit-save'):
+                    result=library_editor.read(body) if path.endswith('-read') else library_editor.save(body)
                 elif path == '/api/organizer/manual-search':
                     result=organizer.manual_search(body)
                 elif path == '/api/organizer/attach-library':

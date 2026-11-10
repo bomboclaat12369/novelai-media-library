@@ -68,13 +68,57 @@ register/rapid-review/organizer APIs. The Workbench side is `organizer.py`,
 | Pause/resume and recovery | Saved queue, resumable copies, stop-after-current-file, stale-preview validation, coordinated checkpoints |
 | Provenance and future tracking | Original paths, origins, keeper/copy links, choices and apply results in the durable journal; export/checkpoint preserved |
 | Raw URLs and drag/drop of loose files | Existing library uploader remains available; not newly implemented inside Workbench |
-| Full editing of already imported media | Existing library tools; the Workbench import dialog adds options, it is not a replacement for every library editor |
+| Editing existing records | Workbench can rename sets, edit set colors/categories/favorites/Set Purgatory, and change image categories in the library or Rapid Review. Other image controls remain in the library. |
 
 There is no claim that all library controls have been moved into Workbench.
 The import path retains their availability and uses the shared review workflow.
 Replacing an existing image is a distinct reviewed operation, not what the
 Needs replacement flag does. Local Undo edits queued choices and set drafts;
 restoring an applied transfer uses its checkpoint or normal library tools.
+
+## Direct editing and import preview repair (Workbench 2.0.27)
+
+Image cards and the large viewer have an **Edit** action. An existing library
+image opens its current categories, including selected and ghost categories;
+saving replaces its category choices through the same companion API as the
+library. Native Main/holding-area rules still apply and are explained when
+editing a held image. Rapid Review images stay in their queue; category edits
+preserve their crop, other choices, queue cursor, selection and scroll position.
+In the Workbench import queue, Edit reopens that image's saved destination,
+categories and flags without importing it. Outside that queue, an unimported
+image opens import choices; an already imported image can open either editor.
+
+**Edit set** loads a library set's current name, colors, categories, favorite
+and Set Purgatory status. **Save to library** applies changed metadata directly.
+Set membership is not submitted or replaced. Cached metadata is refreshed,
+while pending member additions/removals and unrelated unsent draft fields are
+preserved. New local set drafts also have an editable name in Set details.
+Edits validate the selected character/library and re-read the target before
+saving, rejecting stale details rather than silently overwriting them. Ordinary
+library edits use the companion's existing Undo and tracking services.
+
+An oversized preview was reproduced over real HTTP: a healthy companion rejects
+a request beyond its 24 MiB JSON limit before reading the body, and the former
+client reported the closed socket as "Cannot reach the media companion". The
+preview no longer serializes the organizer backup (including undo snapshots,
+dispositions and post history). It sends only the selected drafts/imports,
+their source records and relevant duplicate choices. Full exported history and
+provenance remain intact and still transfer on Apply. A regression with over
+25 MiB of undo history now produces a small, successful preview.
+
+Oversized JSON is caught before transmission; refusal, disconnection and timeout
+have separate messages. All organizer transfer stages allow the existing long
+operation timeout. Failed previews remain visible with **Retry preview**, and
+never automatically retry a write. This reproduces a cause of the reported
+error; it does not establish the exact request size on the user's Windows PC.
+
+Preparation checks passed: 215 companion tests, 187 Workbench tests, 77 DOM
+tests, 364 native production-card renders, and 13 release-pipeline tests. The
+native renderer was also run explicitly with the pinned canvas dependency to
+verify its completion report. The new edit and import regressions use real
+local HTTP servers and disposable libraries. No live Windows UI check.
+Workbench 2.0.27 is authorized for publication. Its release receipt must confirm
+both published manifests and downloadable bytes before announcing availability.
 
 ## Storage and compatibility
 

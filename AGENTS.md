@@ -1,7 +1,9 @@
 # Working on Media Library and Media Workbench
 
-- Follow the user's authorization for implementation and publication separately.
-  Do not push a release merely because the user asked a feasibility question.
+- Standing user authorization (2026-11-10): requested updates should be tested
+  and published as part of the same task, without another push confirmation.
+  Honor an explicit "do not push" instruction. A feasibility question alone
+  still does not authorize making or publishing an update.
 - For any publishing work, read `tools/PUBLISHING.md` first. Use the source
   release workflow or authenticated Git from disk. Never copy generated HTML,
   encoded artwork, ZIPs or Base64 release payloads into chat/tool arguments.

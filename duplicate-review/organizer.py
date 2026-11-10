@@ -794,13 +794,15 @@ class Organizer:
                 elif action in ('set_colors','set_details'):
                     target=str(body.get('target',''));group=self.sets(include_discarded=True).get(target)
                     if not group:raise ValueError('Choose an available set.')
+                    name=title_case_label(body.get('name',group['name']))
+                    if not name or len(name)>250:raise ValueError('Enter a set name (up to 250 characters).')
                     colors=self.colors(body.get('colors',group.get('colors',[])))
                     categories=self.categories(body.get('categories',group.get('categories',[])),group.get('categories',[]))
                     old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
                     state['undo']={'action':'set','id':target,'previous':old[0] if old else None,'selection':state.get('selection',[])}
                     favorite=self.favorite(body.get('favorite',group.get('favorite',False)))
                     if 'in_purgatory' in body and self.favorite(body['in_purgatory'])!=bool(group.get('in_purgatory')):group['purgatory_edited']=True
-                    group.update(colors=set_name_colors(group['name'],colors),categories=categories,favorite=favorite,in_purgatory=self.favorite(body.get('in_purgatory',group.get('in_purgatory',False))),updated=time.time())
+                    group.update(name=name,colors=set_name_colors(name,colors),categories=categories,favorite=favorite,in_purgatory=self.favorite(body.get('in_purgatory',group.get('in_purgatory',False))),updated=time.time())
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)))
                 elif action=='remove':
                     target=str(body.get('target',''));old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
@@ -1002,13 +1004,18 @@ class Organizer:
                     if len(owners)==1:owner=owners.pop()
                 if not owner and len(library.get('characters',[]))==1:owner=library['characters'][0]['id']
                 if not owner:return {'choose_character':[{'id':c['id'],'name':c['name']} for c in library.get('characters',[])]}
-                draft=self.export(include_tracking=False);draft['scope']=self.scope
-                draft['sets']=[g for g in draft['sets'] if g.get('saved')] if body.get('include_sets',True) else []
+                # A preview is not a backup: undo snapshots, dispositions, post
+                # history and UI state can exceed the companion's JSON limit.
+                # Full provenance still travels through tracking.transfer on Apply.
+                draft={'format':'folder-organizer-2','scope':self.scope,'category_catalog':self.category_catalog()}
+                draft['sets']=[g for g in self.sets().values() if g.get('saved')] if body.get('include_sets',True) else []
                 draft['individuals']=self.individual_imports() if body.get('include_individuals',True) else []
                 if any(not r['id'] for r in draft['individuals']):raise ValueError('A queued image is unavailable or discarded. Restore it or remove it from the import queue before applying.')
                 if len({r['id'] for r in draft['individuals']})!=len(draft['individuals']):raise ValueError('Queued copies now share a keeper. Select that image and save its import choices again to combine them.')
                 wanted={i for g in draft['sets'] for i in g['members']+g.get('removed_members',[])}|{r['id'] for r in draft['individuals']}
                 draft['source_catalog']={i:r for i,r in self.catalog.items() if i in wanted}
+                hashes={r['sha'] for r in draft['source_catalog'].values()}
+                draft['state']={'duplicate_choices':{h:v for h,v in self.state().get('duplicate_choices',{}).items() if h in hashes}}
                 result=self.engine.library.request('/api/organizer/preview',{'character_id':owner,'draft':draft})
                 if draft['individuals'] and 'individuals' not in result:raise ValueError('Update the Media Library companion to use individual Workbench imports. Nothing has been imported.')
                 if (any(g.get('purgatory_edited') for g in draft['sets']) or draft['state'].get('duplicate_choices')) and 'duplicates' not in result:raise ValueError('Update and restart the companion to apply Set Purgatory and duplicate choices. Nothing has been imported.')

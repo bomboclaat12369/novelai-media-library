@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "id": "2026-11-10-organizer-placement-labels",
+  "id": "2026-11-10-workbench-import-and-editing",
   "components": [
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Simplify organizer image labels to Main, Review, Purgatory and In 1 set (or In N sets). Show each actual location independently, including Purgatory or Review alongside set membership. Remove In library, Not in Main and unavailable labels. Use the same compact labels in suggested additions, with set names available on hover. No rescan or reimport required."
+  "workbench_notes": "Fix oversized import previews being reported as companion connection failures. Keep preview requests focused on the selected imports, show actionable connection errors, and offer Retry preview. Add Workbench editing for existing set names, colors, categories, favorites and Set Purgatory; edit image categories in the library or Rapid Review, and reopen individual import choices directly from image cards. Preserve existing media identities, memberships and pending draft changes."
 }

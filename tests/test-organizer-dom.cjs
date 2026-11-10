@@ -12,7 +12,7 @@ async function fixture(custom={}){
  const dom=new JSDOM(code,{url:'http://127.0.0.1:8844/organizer',runScripts:'dangerously',pretendToBeVisual:true,virtualConsole:vc,beforeParse(w){
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true};w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'))};w.HTMLElement.prototype.scrollIntoView=function(){};w.ResizeObserver=class{observe(){}disconnect(){}};
  w.fetch=async(url,options={})=>{const u=new URL(url,w.location),route=u.pathname.split('/').at(-1),body=JSON.parse(options.body||'{}');calls.push({route,body});let data=state;
- if(route==='page'){const ids=u.searchParams.get('kind')==='up_next'?state.up_next:u.searchParams.get('kind')==='imports'?(state.individuals||[]).map(r=>r.id).filter(Boolean):photos.map(p=>p.id);data={label:u.searchParams.get('kind')==='up_next'?'Up next':state.posts.find(p=>p.id===u.searchParams.get('id'))?.label,total:ids.length,offset:0,ids,images:ids.map(id=>photos.find(p=>p.id===id)||photo),job:'job'};}
+ if(route==='page'){const ids=u.searchParams.get('kind')==='up_next'?state.up_next:u.searchParams.get('kind')==='imports'?(state.individuals||[]).map(r=>r.id).filter(Boolean):photos.map(p=>p.id);data={label:u.searchParams.get('kind')==='up_next'?'Up next':u.searchParams.get('kind')==='imports'?'Individual import queue':state.posts.find(p=>p.id===u.searchParams.get('id'))?.label,total:ids.length,offset:0,ids,images:ids.map(id=>photos.find(p=>p.id===id)||photo),job:'job'};}
  else if(route==='draft'){state.state.selection=body.ids;state.state.new_name=body.new_name;data={ok:true};}
  else if(route==='pin'){state.up_next=body.pinned?['photo']:[];state.state.revision++;}
  else if(route==='post'){state.posts.find(p=>p.id===body.id).status=body.status;state.later_count=state.posts.filter(p=>p.status==='deferred').length;state.state.revision++;}
@@ -136,5 +136,53 @@ test('placement badges show only actual locations and combine with set membershi
    if(!expected.length)assert.equal(c.querySelector('.badges'),null);
   }
   assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close()}
+});
+
+test('failed import preview stays visible and can be retried without applying anything',async()=>{
+ let attempts=0;
+ const f=await fixture({route(route){if(route==='transfer-preview'&&++attempts===1)throw Error('Import preview: the companion closed the connection.');}});
+ try{
+  f.d.getElementById('applyDrafts').click();await ready(()=>f.d.getElementById('transferDialog').textContent.includes('Retry preview'));
+  const dialog=f.d.getElementById('transferDialog');assert.ok(dialog.open);assert.match(dialog.textContent,/companion closed the connection/);
+  [...dialog.querySelectorAll('button')].find(b=>b.textContent==='Retry preview').click();
+  await ready(()=>dialog.textContent.includes('Source file missing'));assert.equal(attempts,2);
+  assert.ok(!f.calls.some(c=>['transfer-import','transfer-apply'].includes(c.route)));assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close()}
+});
+
+test('image Edit replaces checked library categories and does not import or create a set',async()=>{
+ const f=await fixture({route(route){if(route==='edit-read')return {token:'edit-token',kind:'image',location:'library',name:'Photo.png',fields:{categories:['old']},categories:[{id:'old',name:'Old'},{id:'new',name:'New'}]};if(route==='edit-save')return {ok:true};}});
+ try{
+  f.d.querySelector('[data-edit-image="photo"]').click();await ready(()=>f.d.getElementById('saveLibraryMetadata'));
+  const panel=f.d.getElementById('libraryMetadataEditor');panel.querySelector('input[value="old"]').checked=false;panel.querySelector('input[value="new"]').checked=true;
+  f.d.getElementById('saveLibraryMetadata').click();await ready(()=>!f.d.getElementById('libraryMetadataEditor'));
+  const saved=f.calls.find(c=>c.route==='edit-save');assert.deepEqual(saved.body,{job:'job',token:'edit-token',fields:{categories:['new']}});
+  assert.ok(!f.calls.some(c=>['save','queue_individuals','transfer-import','transfer-apply'].includes(c.route)));assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close()}
+});
+
+test('queued image Edit reopens its own saved import choices without changing library metadata',async()=>{
+ const row={id:'photo',key:'hash',options:{destination:'review',categories:['old'],favorite:true}};
+ const f=await fixture({state:{individuals:[row]},route(route,body,state){if(route==='import-catalog')return {character_id:'owner',library_instance:'instance',name:'Fixture',categories:[{id:'old',name:'Old'},{id:'new',name:'New'}]};if(route==='queue_individuals'){state.individuals=[{...row,options:body.options}];return state;}}});
+ try{
+  f.d.getElementById('individualQueue').click();await ready(()=>f.d.getElementById('title').textContent==='Individual import queue');
+  f.d.querySelector('[data-edit-image="photo"]').click();await ready(()=>f.d.getElementById('individualImportDialog'));
+  assert.equal(f.d.getElementById('individualDestination').value,'review');assert.ok(f.d.querySelector('#individualCategories input[value="old"]').checked);
+  f.d.querySelector('#individualCategories input[value="old"]').checked=false;f.d.querySelector('#individualCategories input[value="new"]').checked=true;
+  f.d.getElementById('saveIndividualImports').click();await ready(()=>f.calls.some(c=>c.route==='queue_individuals'));
+  const saved=f.calls.find(c=>c.route==='queue_individuals');assert.deepEqual(saved.body.ids,['photo']);assert.deepEqual(saved.body.options.categories,['new']);assert.equal(saved.body.options.favorite,true);assert.equal(saved.body.options.destination,'review');
+  assert.ok(!f.calls.some(c=>['edit-save','transfer-apply'].includes(c.route)));assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close()}
+});
+
+test('Edit set renames the library record and never submits replacement membership',async()=>{
+ const group={id:'library:set',library_id:'set',name:'Old set',members:['photo'],count:1,colors:[],categories:[],favorite:false,saved:false};
+ const f=await fixture({state:{sets:[group]},route(route){if(route==='edit-read')return {token:'set-token',kind:'set',location:'library',name:'Old set',fields:{name:'Old set',colors:[],categories:[],favorite:false,in_purgatory:false},categories:[]};if(route==='edit-save')return {ok:true};}});
+ try{
+  await f.dom.window.eval("open('set','library:set',0,false)");f.d.getElementById('editSetColors').click();await ready(()=>f.d.getElementById('saveLibraryMetadata'));
+  f.d.getElementById('metadata-name').value='New set';f.d.getElementById('saveLibraryMetadata').click();await ready(()=>!f.d.getElementById('libraryMetadataEditor'));
+  const saved=f.calls.find(c=>c.route==='edit-save');assert.equal(saved.body.fields.name,'New set');assert.ok(!('members' in saved.body.fields));assert.ok(!('media_ids' in saved.body.fields));
+  assert.ok(!f.calls.some(c=>['set_details','transfer-apply'].includes(c.route)));assert.deepEqual(f.errors,[]);
  }finally{f.dom.window.close()}
 });

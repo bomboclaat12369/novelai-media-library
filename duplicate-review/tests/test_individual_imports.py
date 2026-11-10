@@ -95,3 +95,20 @@ class IndividualHTTPTests(unittest.TestCase):
         with patch.object(self.engine.library,'request',side_effect=older):
             with self.assertRaisesRegex(ValueError,'Update the Media Library companion'):org.transfer('preview',{'job':state['job'],'include_sets':False})
         self.assertFalse(self.store.data['media']);self.assertTrue(org.summary()['individuals'])
+
+    def test_preview_excludes_large_undo_history_but_keeps_selected_provenance(self):
+        org=self.server.organizer;state=org.summary();job=state['job']
+        org.mutate('queue_individuals',{'job':job,'revision':state['state']['revision'],'ids':[self.ids[3]],'options':{},'character_id':self.owner['id']})
+        saved=org.state();saved['undo']={'old_inventory':'x'*(25*1024*1024)}
+        sent=[];request=self.engine.library.request
+        def capture(path,body=None,**kwargs):
+            if path=='/api/organizer/preview':sent.append(copy.deepcopy(body))
+            return request(path,body,**kwargs)
+        with patch.object(org,'state',return_value=saved),patch.object(self.engine.library,'request',side_effect=capture):
+            plan=self.request('transfer-preview',{'job':job,'include_sets':False})
+        self.assertEqual(len(plan['imports']),1)
+        self.assertLess(len(json.dumps(sent[0])),20000)
+        self.assertEqual(sent[0]['draft']['state'],{'duplicate_choices':{}})
+        self.assertEqual(sent[0]['draft']['source_catalog'][self.ids[3]]['origins'],org.catalog[self.ids[3]]['origins'])
+        self.assertEqual(len(saved['undo']['old_inventory']),25*1024*1024)
+        self.assertFalse(self.store.data['media'])
