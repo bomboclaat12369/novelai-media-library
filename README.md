@@ -1,3 +1,21 @@
+## Faster initial rankings (companion 2.7.77 / Workbench 2.0.29)
+
+New collections build a small starter group, then finish images in small batches
+against placed opponents. Favorites receive a modest one-time starting rating
+hint; actual wins, losses and ties determine the ranking. Existing comparisons
+and Undo are retained, with the same confidence requirements for ranked cards.
+Partially ranked collections reuse their already-started placements automatically.
+
+In a synthetic 120-image example, the first five placed cards took 17 comparisons
+instead of 138, and 150 comparisons produced 47 placed cards instead of 6.
+This improves time to usable rankings; completing the entire collection still
+requires comparisons for each image. See [behavior and measured limits](docs/FAST-RANKING-START.md).
+
+Close and relaunch the Media Library companion to load runtime 2.7.77, then start
+or continue battles. If using Workbench's bundled companion, install 2.0.29 via
+**Updates → Download update → Restart & apply update**. No reimport or ranking
+reset is needed. The standalone interface remains 2.9.27.
+
 ## Remove temporary Yoga preview (Media Library 2.9.27)
 
 Removes the old **Yoga preview** testing button beside Collection HQ by excluding

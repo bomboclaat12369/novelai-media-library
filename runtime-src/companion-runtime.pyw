@@ -661,6 +661,9 @@ class OutfitMatcher:
 class BattleRankings:
     """Personal rankings, atomic vote persistence and resumable per-character rounds."""
     MODEL = 'joint-history-v1'
+    FAVORITE_START = 1360.
+    STARTER_SIZE = 12
+    STARTER_PLACED = 8
     def __init__(self, store):
         self.store = store
         self.path = store.root / 'battles.json'
@@ -718,12 +721,17 @@ class BattleRankings:
         """Freeze pre-log evidence, NOT the latest rating that already includes the log.
 
         Earliest before-values include older unlogged battles. Even an undone first
-        event supplies the correct starting point. New entries start at 1200/350.
+        event supplies the correct starting point. New entries use 1200/350,
+        with any recorded one-time favorite preference applied explicitly.
         """
         if 'history_priors' in board:
             return board['history_priors']
         priors = {}
         for event in board.get('history', []):
+            if event.get('type') == 'starting_preferences':
+                for ident, change in event.get('changes', {}).items():
+                    priors[ident] = dict(change['after'])
+                continue
             if event.get('type') != 'vote':
                 continue
             for ident, score in zip((event['left'], event['right']), event['before']):
@@ -733,6 +741,39 @@ class BattleRankings:
             priors.setdefault(ident, {'rating':score['rating'], 'rd':score['rd']})
         board['history_priors'] = priors
         return priors
+
+    def _starting_preferences(self, board, entries, kind):
+        """Freeze a modest favorite hint once, without inventing votes/confidence.
+
+        Early existing entries can use the hint only when their original prior
+        was the neutral new-image prior. Legacy evidence and developed rankings
+        are never replaced. Observed non-favorites are frozen too: toggling a
+        favorite later cannot repeatedly boost a rating.
+        """
+        if kind != 'images':
+            return False
+        priors = self._priors(board)
+        observed = board.setdefault('starting_preferences', {})
+        changes = {}
+        at = now_iso()
+        for ident, entry in entries.items():
+            if ident in observed:
+                continue
+            score = self._score(board, ident)
+            prior = priors.get(ident, {'rating':1200., 'rd':350.})
+            favorite = bool(entry.get('favorite'))
+            apply = (favorite and score['played'] <= 4 and
+                     self._quality(score) in ('Unrated', 'Provisional') and
+                     prior['rating'] == 1200. and prior['rd'] == 350.)
+            observed[ident] = {'version':1, 'at':at, 'favorite':favorite, 'applied':apply}
+            if apply:
+                updated = {'rating':self.FAVORITE_START, 'rd':350.}
+                changes[ident] = {'before':dict(prior), 'after':dict(updated)}
+                priors[ident] = updated
+        if changes:
+            board.setdefault('history', []).append({'id':uuid.uuid4().hex, 'type':'starting_preferences',
+                'version':1, 'at':at, 'source':'favorite', 'changes':changes})
+        return any(ident in board['ratings'] for ident in changes)
 
     @staticmethod
     def _sparse_inverse_diagonal(diagonal, edges):
@@ -844,7 +885,7 @@ class BattleRankings:
     def _fit_during_vote(self,board):
         """Fit a private board while allowing unrelated library reads/writes.
 
-        Called only by vote/undo with one store-lock acquisition. Optimistic
+        Called by battle actions with one store-lock acquisition. Optimistic
         validation discards the private fit if either persisted state changed.
         """
         revision=self.store.revision;previous=self.data;started=time.perf_counter()
@@ -961,7 +1002,8 @@ class BattleRankings:
 
     @staticmethod
     def _score(board, ident):
-        score = dict(board['ratings'].get(ident, {'rating':1200., 'played':0, 'wins':0, 'ties':0, 'losses':0}))
+        prior = board.get('history_priors', {}).get(ident, {'rating':1200., 'rd':350.})
+        score = dict(board['ratings'].get(ident, {**prior, 'played':0, 'wins':0, 'ties':0, 'losses':0}))
         # Retain old Elo scores; their uncertainty is only an initial estimate.
         score.setdefault('rd', max(160., 350. / math.sqrt(1 + score['played']/3)))
         score.setdefault('opponents', {})
@@ -1007,6 +1049,7 @@ class BattleRankings:
                 captain=self._captain(owner,group,media)
                 if captain:captains.setdefault(captain,[]).append(label)
             return {ident:{'id':ident, 'name':m.get('original_name',m.get('filename','Image')), 'images':[ident], 'count':1,
+                           'favorite':bool(m.get('favorite')),
                            'categories':list(m.get('categories',[])), 'flagged_for_removal':bool(m.get('flagged_for_removal')),
                            'sets':memberships.get(ident,[]),'captain_sets':captains.get(ident,[])}
                     for ident,m in media.items() if self.store._in_main(m)}
@@ -1104,6 +1147,69 @@ class BattleRankings:
                 (not session.get('category') or session['category'] in entry.get('categories',[])) and
                 (not scheduling or not entry.get('flagged_for_removal')))
 
+    def _placement_candidates(self, board, pool, scores, waiting, rng):
+        """Finish a connected starter group, then place small rotating batches.
+
+        Persist identity rather than reselecting the least-played image from the
+        whole collection after every vote. Bound each turn so a difficult image
+        cannot block new arrivals. Read-only lookahead works on a private copy.
+        """
+        scheduler = board.setdefault('scheduler', {})
+        if scheduler.get('version') != 2:
+            scheduler.clear()
+            scheduler.update(version=2, batch=[], batch_start={}, rotations={})
+        by_id = {e['id']:e for e in pool}
+        pending = set(waiting)
+        ready = set(by_id) - pending
+        calibrating = len(ready) < min(self.STARTER_PLACED, len(pool))
+        scheduler['phase'] = 'starter' if calibrating else 'placement'
+        if calibrating:
+            starter = [i for i in scheduler.get('starter', []) if i in by_id]
+            size = min(self.STARTER_SIZE, len(pool))
+            # Reuse work already done, including partially placed collections.
+            known = sorted((i for i in by_id if i not in starter and scores[i]['played']),
+                           key=lambda i:(i not in ready, scores[i]['rd'], -scores[i]['played'], i))
+            starter += known[:max(0, size-len(starter))]
+            favorites = [i for i,e in by_id.items() if i not in starter and e.get('favorite')]
+            ordinary = [i for i,e in by_id.items() if i not in starter and not e.get('favorite')]
+            rng.shuffle(favorites); rng.shuffle(ordinary)
+            favorite_slots = max(0, size//3 - sum(bool(by_id[i].get('favorite')) for i in starter))
+            chosen = favorites[:min(favorite_slots, max(0, size-len(starter)))]
+            starter += chosen
+            starter += ordinary[:max(0, size-len(starter))]
+            starter += [i for i in favorites if i not in chosen][:max(0, size-len(starter))]
+            scheduler['starter'] = starter
+            candidates = [i for i in starter if i in pending]
+            candidates.sort(key=lambda i:(scores[i]['played'] >= 8, scores[i]['played'] == 0,
+                scores[i]['last_seen'] if scores[i]['played'] >= 8 else -scores[i]['played'],
+                scores[i]['rd'], rng.random()))
+            scheduler['batch'] = candidates[:8]
+            scheduler['batch_start'] = {}
+            return candidates, set(starter) | ready, True
+
+        starts = scheduler.setdefault('batch_start', {})
+        rotations = scheduler.setdefault('rotations', {})
+        batch = []
+        for ident in scheduler.get('batch', []):
+            if ident not in pending:
+                continue
+            start = starts.get(ident, scores[ident]['played'])
+            if scores[ident]['played'] - start >= 6:
+                rotations[ident] = rotations.get(ident, 0) + 1
+            else:
+                batch.append(ident)
+        candidates = [i for i in waiting if i not in batch]
+        candidates.sort(key=lambda i:(rotations.get(i, 0), scores[i]['played'] == 0,
+            scores[i]['rd'], -scores[i]['played'], scores[i]['last_seen'], rng.random()))
+        batch = batch[:4]
+        for ident in candidates[:max(0, 4-len(batch))]:
+            batch.append(ident); starts[ident] = scores[ident]['played']
+        scheduler['batch'] = batch
+        scheduler['batch_start'] = {i:starts.get(i, scores[i]['played']) for i in batch}
+        batch.sort(key=lambda i:(rotations.get(i, 0), scores[i]['played'] == 0,
+                                 scores[i]['rd'], -scores[i]['played'], rng.random()))
+        return batch, ready, False
+
     def _pair(self, board, entries, champion=None, rng=None):
         rng = rng or self.rng
         session = board['session']
@@ -1119,31 +1225,32 @@ class BattleRankings:
         recent = {tuple(sorted(p)) for p in board.get('recent', [])}
         scheduler = board.setdefault('scheduler', {'batch':[]})
         waiting = [e['id'] for e in pool if self._quality(scores[e['id']]) in ('Unrated','Provisional')]
-        # First spread a few observations across the collection. Then rotate
-        # unfinished entries by recency and uncertainty; no sticky batch can starve them.
-        waiting.sort(key=lambda i:(scores[i]['played']>=4, scores[i]['played'] if scores[i]['played']<4 else scores[i]['last_seen'],
-                                   -scores[i]['rd'], scores[i]['last_seen'], rng.random()))
-        batch = waiting[:8]
-        scheduler['batch'] = batch
+        calibration_pool = set()
+        calibrating = False
+        skipped = set(scheduler.pop('skip_once', []))
         target = session.get('target_id')
         forced = champion if champion in by_id else target if target in by_id else None
         if target and target not in by_id:
             return None
         if forced:
             candidates = [by_id[forced]]
-        elif waiting and not refining and (session['mode']=='placements' or board.get('votes',0)%8 != 7):
-            candidates = [by_id[i] for i in waiting]
+        elif waiting and not refining:
+            batch, calibration_pool, calibrating = self._placement_candidates(board,pool,scores,waiting,rng)
+            candidates = [by_id[i] for i in batch]
+            candidates.sort(key=lambda e:e['id'] in skipped)
         else:
             if session['mode']=='placements' and not waiting:
+                scheduler['batch'] = []
                 return None
             # Developing ratings get attention; established images mainly serve
             # as opponents. Occasional recency-first turns preserve broad coverage.
             candidates = sorted(pool,key=lambda e:((scores[e['id']]['last_seen'], -scores[e['id']]['rd'])
                                 if board.get('votes',0)%8==7 else
                                 (self._quality(scores[e['id']])=='Established',-scores[e['id']]['rd'],scores[e['id']]['last_seen'])))
-        if not forced and session['mode']!='placements':
+        if not forced and (session['mode']!='placements' or waiting):
             chosen = {e['id'] for e in candidates}
-            candidates += [e for e in pool if e['id'] not in chosen]
+            candidates += [e for e in pool if e['id'] not in chosen and
+                           (session['mode']!='placements' or e['id'] in waiting)]
         for attempt in range(2):
             for left in candidates:
                 ls = scores[left['id']]
@@ -1152,6 +1259,10 @@ class BattleRankings:
                            (attempt or tuple(sorted((left['id'],e['id']))) not in recent)]
                 if not choices:
                     continue
+                if not forced and waiting and not refining:
+                    anchors = [e for e in choices if e['id'] in calibration_pool]
+                    if anchors:
+                        choices = anchors
                 def utility(right):
                     rs = scores[right['id']]
                     q = math.log(10)/400
@@ -1160,7 +1271,8 @@ class BattleRankings:
                     information = g*g*probability*(1-probability)
                     # Reliable, similarly rated and varied opponents are informative.
                     diversity = 1/math.sqrt(1+ls.get('opponents',{}).get(right['id'],0))
-                    return information*diversity*(.9+.2*rng.random())
+                    progress = 1.2 if calibrating and self._quality(rs) in ('Unrated','Provisional') else 1.
+                    return information*diversity*progress*(.9+.2*rng.random())
                 choices.sort(key=utility,reverse=True)
                 # Periodic broad comparisons keep rating ranges connected.
                 right = rng.choice(choices[:min(8,len(choices))]) if board.get('votes',0)%8 == 7 else choices[0]
@@ -1168,7 +1280,8 @@ class BattleRankings:
                 if rng.random()<.5:
                     ids.reverse()
                 return {'id':uuid.uuid4().hex, 'left':ids[0], 'right':ids[1],
-                        'reason':'Focus comparisons' if target else 'Refine top rankings' if refining else 'Initial comparisons' if ls['played']<4 else 'Finish placement' if left['id'] in waiting else 'Calibration'}
+                        'reason':'Focus comparisons' if target else 'Refine top rankings' if refining else
+                        'Starter calibration' if calibrating else 'Fast placement' if left['id'] in waiting else 'Calibration'}
         return None
 
     def _ranked_rows(self, board, entries):
@@ -1254,7 +1367,8 @@ class BattleRankings:
             values=lambda s:[round(s['rating'],1),round(s['rd'],1),s['played']]
             if values(old)==values(new):continue
             points=paths.setdefault(ident,[[clock-1,at,*values(old),'baseline']])
-            points.append([clock,at,*values(new),'undo' if action=='undo' else 'direct' if ident in participants else 'indirect'])
+            points.append([clock,at,*values(new),'starting preference' if action=='starting_preferences' else
+                           'undo' if action=='undo' else 'direct' if ident in participants else 'indirect'])
             # Keep a long overview and detailed recent history, bounded per entry.
             if len(points)>400:paths[ident]=points[:200:2]+points[200:]
 
@@ -1317,6 +1431,7 @@ class BattleRankings:
         # Stable seed for likely next opponents. Forecasts approximate confidence;
         # only saved votes run the full joint uncertainty calculation.
         rng=random.Random(previous_pair['id']+':'+outcome)
+        if outcome=='skip':board.setdefault('scheduler', {})['skip_once']=[previous_pair['left'],previous_pair['right']]
         session['pair']=self._pair(board,entries,champion,rng) if not session['limit'] or session['done']<session['limit'] else None
 
     def _forecast(self, board, entries):
@@ -1328,6 +1443,8 @@ class BattleRankings:
             # Do not copy the growing history or undo buffers for previews.
             forecast={key:copy.deepcopy(board.get(key,default)) for key,default in
                       (('ratings',{}),('session',{}),('scheduler',{}),('recent',[]),('votes',0))}
+            # _score reads fixed starting priors; forecasts never modify them.
+            forecast['history_priors']=board.get('history_priors',{})
             forecast['recent']=(forecast['recent']+[[pair['left'],pair['right']]])[-32:]
             if outcome!='skip':
                 self._apply_comparison(forecast,pair,outcome)
@@ -1400,6 +1517,10 @@ class BattleRankings:
             data['rating_model'] = self.MODEL
             board.setdefault('history', [])
             self._priors(board)
+            if action in ('start','place','challenge','vote','resume') and self._starting_preferences(board,entries,kind):
+                previous_ratings=copy.deepcopy(board['ratings'])
+                self._fit_during_vote(board)
+                self._record_rating_path(board,previous_ratings,'starting_preferences',{})
             if action=='seen':
                 cards=self._sync_cards(board,entries);tokens=body.get('tokens',{})
                 if not isinstance(tokens,dict) or len(tokens)>200:raise ValueError('Invalid arrival selection.')

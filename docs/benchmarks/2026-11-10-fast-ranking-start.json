@@ -1,0 +1,371 @@
+{
+  "schema": 1,
+  "description": "Synthetic placement comparisons; see ../FAST-RANKING-START.md for method and limits.",
+  "scenarios": [
+    {
+      "schema": 1,
+      "baseline_ref": "08d45f2a3d9248426afbed018090432d4b4cd5bd",
+      "current_runtime_sha256": "b402ff49f3a6babe877ac29008f8d07ef24a36fcadaf1423ff335745992b3713",
+      "entries": 120,
+      "votes": 550,
+      "seed": 7,
+      "noise_sd": 65,
+      "favorites": "helpful",
+      "favorite_count": 27,
+      "agreement_minimum_true_gap": 50,
+      "results": [
+        {
+          "model": "previous",
+          "first_placed_at": {
+            "1": 5,
+            "5": 138,
+            "8": 176,
+            "10": 192,
+            "20": 242,
+            "40": 288,
+            "60": 307,
+            "100": 354,
+            "120": 375
+          },
+          "snapshots": [
+            {
+              "votes": 25,
+              "placed": 1,
+              "seen": 26,
+              "pairwise_agreement": null
+            },
+            {
+              "votes": 50,
+              "placed": 2,
+              "seen": 51,
+              "pairwise_agreement": 1.0
+            },
+            {
+              "votes": 100,
+              "placed": 4,
+              "seen": 101,
+              "pairwise_agreement": 1.0
+            },
+            {
+              "votes": 150,
+              "placed": 6,
+              "seen": 120,
+              "pairwise_agreement": 0.9091
+            },
+            {
+              "votes": 550,
+              "placed": 120,
+              "seen": 120,
+              "pairwise_agreement": 0.981
+            }
+          ],
+          "seconds": 36.628
+        },
+        {
+          "model": "fast_start",
+          "first_placed_at": {
+            "1": 4,
+            "5": 17,
+            "8": 21,
+            "10": 34,
+            "20": 63,
+            "40": 126,
+            "60": 190,
+            "100": 313,
+            "120": 374
+          },
+          "snapshots": [
+            {
+              "votes": 25,
+              "placed": 8,
+              "seen": 9,
+              "pairwise_agreement": 0.9231
+            },
+            {
+              "votes": 50,
+              "placed": 15,
+              "seen": 17,
+              "pairwise_agreement": 0.957
+            },
+            {
+              "votes": 100,
+              "placed": 31,
+              "seen": 32,
+              "pairwise_agreement": 0.9757
+            },
+            {
+              "votes": 150,
+              "placed": 47,
+              "seen": 48,
+              "pairwise_agreement": 0.9647
+            },
+            {
+              "votes": 550,
+              "placed": 120,
+              "seen": 120,
+              "pairwise_agreement": 0.9819
+            }
+          ],
+          "seconds": 4.999
+        }
+      ]
+    },
+    {
+      "schema": 1,
+      "baseline_ref": "08d45f2a3d9248426afbed018090432d4b4cd5bd",
+      "current_runtime_sha256": "b402ff49f3a6babe877ac29008f8d07ef24a36fcadaf1423ff335745992b3713",
+      "entries": 500,
+      "votes": 150,
+      "seed": 19,
+      "noise_sd": 65,
+      "favorites": "helpful",
+      "favorite_count": 102,
+      "agreement_minimum_true_gap": 50,
+      "results": [
+        {
+          "model": "previous",
+          "first_placed_at": {
+            "1": 6
+          },
+          "snapshots": [
+            {
+              "votes": 25,
+              "placed": 1,
+              "seen": 27,
+              "pairwise_agreement": null
+            },
+            {
+              "votes": 50,
+              "placed": 2,
+              "seen": 52,
+              "pairwise_agreement": 1.0
+            },
+            {
+              "votes": 100,
+              "placed": 3,
+              "seen": 102,
+              "pairwise_agreement": 0.6667
+            },
+            {
+              "votes": 150,
+              "placed": 3,
+              "seen": 152,
+              "pairwise_agreement": 1.0
+            }
+          ],
+          "seconds": 5.875
+        },
+        {
+          "model": "fast_start",
+          "first_placed_at": {
+            "1": 4,
+            "5": 17,
+            "8": 27,
+            "10": 32,
+            "20": 64,
+            "40": 126
+          },
+          "snapshots": [
+            {
+              "votes": 25,
+              "placed": 7,
+              "seen": 12,
+              "pairwise_agreement": 0.9474
+            },
+            {
+              "votes": 50,
+              "placed": 15,
+              "seen": 16,
+              "pairwise_agreement": 0.9474
+            },
+            {
+              "votes": 100,
+              "placed": 31,
+              "seen": 32,
+              "pairwise_agreement": 0.9664
+            },
+            {
+              "votes": 150,
+              "placed": 47,
+              "seen": 48,
+              "pairwise_agreement": 0.9784
+            }
+          ],
+          "seconds": 1.036
+        }
+      ]
+    },
+    {
+      "schema": 1,
+      "baseline_ref": "08d45f2a3d9248426afbed018090432d4b4cd5bd",
+      "current_runtime_sha256": "b402ff49f3a6babe877ac29008f8d07ef24a36fcadaf1423ff335745992b3713",
+      "entries": 120,
+      "votes": 150,
+      "seed": 7,
+      "noise_sd": 65,
+      "favorites": "none",
+      "favorite_count": 0,
+      "agreement_minimum_true_gap": 50,
+      "results": [
+        {
+          "model": "previous",
+          "first_placed_at": {
+            "1": 5,
+            "5": 138
+          },
+          "snapshots": [
+            {
+              "votes": 25,
+              "placed": 1,
+              "seen": 26,
+              "pairwise_agreement": null
+            },
+            {
+              "votes": 50,
+              "placed": 2,
+              "seen": 51,
+              "pairwise_agreement": 1.0
+            },
+            {
+              "votes": 100,
+              "placed": 4,
+              "seen": 101,
+              "pairwise_agreement": 1.0
+            },
+            {
+              "votes": 150,
+              "placed": 6,
+              "seen": 120,
+              "pairwise_agreement": 0.9091
+            }
+          ],
+          "seconds": 7.138
+        },
+        {
+          "model": "fast_start",
+          "first_placed_at": {
+            "1": 4,
+            "5": 17,
+            "8": 22,
+            "10": 27,
+            "20": 60,
+            "40": 126
+          },
+          "snapshots": [
+            {
+              "votes": 25,
+              "placed": 9,
+              "seen": 10,
+              "pairwise_agreement": 1.0
+            },
+            {
+              "votes": 50,
+              "placed": 17,
+              "seen": 17,
+              "pairwise_agreement": 0.9508
+            },
+            {
+              "votes": 100,
+              "placed": 31,
+              "seen": 32,
+              "pairwise_agreement": 0.9709
+            },
+            {
+              "votes": 150,
+              "placed": 48,
+              "seen": 48,
+              "pairwise_agreement": 0.9634
+            }
+          ],
+          "seconds": 0.623
+        }
+      ]
+    },
+    {
+      "schema": 1,
+      "baseline_ref": "08d45f2a3d9248426afbed018090432d4b4cd5bd",
+      "current_runtime_sha256": "b402ff49f3a6babe877ac29008f8d07ef24a36fcadaf1423ff335745992b3713",
+      "entries": 120,
+      "votes": 150,
+      "seed": 7,
+      "noise_sd": 65,
+      "favorites": "wrong",
+      "favorite_count": 27,
+      "agreement_minimum_true_gap": 50,
+      "results": [
+        {
+          "model": "previous",
+          "first_placed_at": {
+            "1": 5,
+            "5": 138
+          },
+          "snapshots": [
+            {
+              "votes": 25,
+              "placed": 1,
+              "seen": 26,
+              "pairwise_agreement": null
+            },
+            {
+              "votes": 50,
+              "placed": 2,
+              "seen": 51,
+              "pairwise_agreement": 1.0
+            },
+            {
+              "votes": 100,
+              "placed": 4,
+              "seen": 101,
+              "pairwise_agreement": 1.0
+            },
+            {
+              "votes": 150,
+              "placed": 6,
+              "seen": 120,
+              "pairwise_agreement": 0.9091
+            }
+          ],
+          "seconds": 7.089
+        },
+        {
+          "model": "fast_start",
+          "first_placed_at": {
+            "1": 4,
+            "5": 15,
+            "8": 20,
+            "10": 27,
+            "20": 61,
+            "40": 126
+          },
+          "snapshots": [
+            {
+              "votes": 25,
+              "placed": 9,
+              "seen": 10,
+              "pairwise_agreement": 1.0
+            },
+            {
+              "votes": 50,
+              "placed": 17,
+              "seen": 17,
+              "pairwise_agreement": 0.9918
+            },
+            {
+              "votes": 100,
+              "placed": 32,
+              "seen": 32,
+              "pairwise_agreement": 0.9605
+            },
+            {
+              "votes": 150,
+              "placed": 48,
+              "seen": 48,
+              "pairwise_agreement": 0.9594
+            }
+          ],
+          "seconds": 0.643
+        }
+      ]
+    }
+  ]
+}

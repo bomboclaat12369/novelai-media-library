@@ -7,7 +7,7 @@ Read selected source files, not generated HTML or encoded runtime chunks.
 | Area | Authoritative source | Notes |
 | --- | --- | --- |
 | Companion API, library metadata, imports and Undo | `runtime-src/companion-runtime.pyw` / `LibraryStore`, `MediaHandler` | `library.json`, managed originals and thumbnails |
-| Battle model and history | Same file / `BattleRankings` | Separate `battles.json`; fixed history priors, joint fit, linked Undo |
+| Battle model and history | Same file / `BattleRankings` | Separate `battles.json`; fixed history priors, versioned favorite starting evidence, joint fit, linked Undo; [fast placement](FAST-RANKING-START.md) |
 | Organizer transfer | Same file / `organizer_preview`, `organizer_import`, `organizer_apply` | Preview token, source hashes, owner fingerprint, resumable imports, atomic membership commit |
 | Library checkpoints | Same file / `create_checkpoint`, `checkpoint_preview`, `checkpoint_restore` | Verified ZIP; library + battles; optional originals; selected video frames always included when available |
 | Viewer, imports and metadata controls | `.part01.txt` selected in each release config | Standalone supports management; NovelAI overlay is viewer focused |
@@ -69,10 +69,15 @@ shared Rapid Review, and the comparison with the library uploader.
   every successful edit, fsynced and atomically replaced; backups stay readable.
   General edits invalidate serialization and lookup caches. There is no journal
   migration, background pending save, or new database dependency.
-- Battle ratings/priors are unchanged. Dense covariance calculation uses NumPy
+- The battle covariance optimization preserves rating and prior semantics. Dense calculation uses NumPy
   for medium boards; larger boards use bounded sparse batches with the same
   residual tolerance. The prior solver remains available without NumPy. Vote calculation
   releases the library lock and rejects a stale fit before saving.
+- Runtime 2.7.77 records a one-time favorite starting preference for eligible new
+  or early provisional images. It preserves real comparisons and uses the same
+  joint-history model and confidence thresholds. Placement scheduling finishes a
+  connected starter group, then small rotating batches; fixed history priors and
+  preference events survive checkpoints, reload and Undo.
 
 ## Tests and diagnostics
 

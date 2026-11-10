@@ -1,5 +1,4 @@
 """Placement coverage, category isolation, flags, rating paths and achievements."""
-import copy
 import random
 import unittest
 from test_runtime_battles import BattleTests
@@ -11,18 +10,24 @@ class CollectionRankingTests(unittest.TestCase):
     post=BattleTests.post
     call=BattleTests.call
 
-    def test_initial_coverage_and_finish_placements(self):
-        images=[self.import_image(i) for i in range(20)]
+    def test_early_placements_and_eventual_full_coverage(self):
+        for i in range(20):self.import_image(i)
         self.store.battles.rng=random.Random(42)
         state=self.call('start',mode='placements',limit=0)
         for _ in range(20):
             state=self.call('vote',revision=state['revision'],pair_id=state['session']['pair']['id'],outcome='tie')
-        self.assertTrue(all(e['played']>=1 for e in state['entries']))
+        # Finish a usable group early instead of requiring a first vote for
+        # every image before completing placements. Full coverage still matters.
+        self.assertGreaterEqual(sum(not e['provisional'] for e in state['entries']),5)
         self.assertGreater(state['unfinished_count'],0)
-        data=copy.deepcopy(self.store.battles._load());board=data['boards'][self.character['id']+':images']
-        for m in images:
-            board['ratings'][m['id']]={'rating':1200.,'rd':80.,'played':20,'opponents':{o['id']:1 for o in images if o!=m}}
-        self.store.battles._save(data)
+        for _ in range(80):
+            if not state['session']['pair']:break
+            state=self.call('vote',revision=state['revision'],pair_id=state['session']['pair']['id'],outcome='tie')
+        self.assertEqual(state['unfinished_count'],0)
+        for entry in state['entries']:
+            self.assertGreaterEqual(entry['played'],3)
+            self.assertGreaterEqual(entry['opponent_count'],3)
+            self.assertLessEqual(entry['rd'],220.)
         done=self.call('start',mode='placements',revision=state['revision'])
         self.assertEqual(done['unfinished_count'],0);self.assertIsNone(done['session']['pair'])
 

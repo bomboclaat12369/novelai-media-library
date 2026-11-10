@@ -1,8 +1,10 @@
 {
   "schema": 1,
-  "id": "2026-11-10-remove-yoga-preview",
+  "id": "2026-11-10-fast-ranking-start",
   "components": [
-    "standalone"
+    "runtime",
+    "workbench"
   ],
-  "publish": true
+  "publish": true,
+  "workbench_notes": "Includes companion 2.7.77: faster initial rankings through a small starter group and focused placement batches, with one-time favorite starting preferences. Existing votes, Undo and confidence requirements are preserved."
 }
