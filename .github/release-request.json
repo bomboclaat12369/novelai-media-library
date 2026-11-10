@@ -1,12 +1,9 @@
 {
   "schema": 1,
-  "id": "2026-11-06-bulk-import-manual-search-set-purgatory",
+  "id": "2026-11-10-organizer-main-placement",
   "components": [
-    "standalone",
-    "userscript",
-    "runtime",
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Bulk import individual images to Main, categories, Review or Purgatory with persistent queues and original-quality viewing. Search Sets or images manually across the library or saved folders. Separate Set Purgatory, with reversible restoration. Compare import duplicates side by side, use saved scan matches, and explicitly Keep, Replace source, or Import separately. Preserve media IDs, metadata, source history and resumable transfers. Includes companion 2.7.76."
+  "workbench_notes": "Show Main image status separately from set membership in the folder organizer grid and suggested additions. Images can show In Main and In 1 set(s) together. Read current library placement for saved collections without rescanning; distinguish Not in Main from unavailable status. Preserve source images, sets, rankings and saved organizer progress."
 }

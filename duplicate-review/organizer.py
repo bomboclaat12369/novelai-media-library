@@ -33,6 +33,7 @@ class Organizer:
         self.engine=engine;self.bulk=bulk;self.path=engine.state_dir/'organizer.sqlite3'
         self.lock=threading.RLock();self.cancel=threading.Event();self.thread=None
         self.job={'running':False,'phase':'Saved inventory ready','done':0,'total':0,'eta_seconds':None}
+        self.library_placement=None
         self.bound=None;self.catalog={};self.posts={};self.order_cache={};self.vector_by_id={};self.quick={}
         self.encoder_type=None;self.recipe=None;self.scope='';self.revision=0;self.discarded=set();self.parked={}
         with self.db() as db:
@@ -310,7 +311,7 @@ class Organizer:
 
     def summary(self):
         with self.lock,self.bulk.lock:
-            self.bind();state=self.state();state['selection']=[i for i in state.get('selection',[]) if i in self.catalog and i not in self.discarded];sets=self.sets();assigned={i for g in sets.values() for i in g['members']}
+            self.bind();self.refresh_library_placement(force=True);state=self.state();state['selection']=[i for i in state.get('selection',[]) if i in self.catalog and i not in self.discarded];sets=self.sets();assigned={i for g in sets.values() for i in g['members']}
             reference=state.get('suggestion_reference')
             if reference not in self.catalog or reference in self.discarded or self.catalog[reference].get('quarantine_only'):state['suggestion_reference']='';reference=None
             with self.db() as db:statuses=dict(db.execute('SELECT id,status FROM posts WHERE scope=?',(self.scope,)))
@@ -375,9 +376,39 @@ class Organizer:
         if len(self.order_cache)>100:self.order_cache.pop(next(iter(self.order_cache)))
         return result
 
+    def refresh_library_placement(self,force=False):
+        # Live metadata also covers inventories saved before placement badges existed.
+        # Cache across the many image() calls in one page/suggestions response.
+        config=(self.bulk.current or {}).get('config',{})
+        key=(self.scope,config.get('character_id'),config.get('library_instance'))
+        cached=self.library_placement
+        if not force and cached and cached['key']==key and time.monotonic()-cached['at']<5:return
+        result={'key':key,'at':time.monotonic(),'main':None}
+        self.library_placement=result
+        owner=config.get('character_id') or self.category_catalog().get('character_id')
+        if not owner:return
+        try:
+            catalog=self.engine.library.catalog(owner)
+            expected=config.get('library_instance')
+            if expected and catalog.get('stable_library_id')!=expected:return
+            main={}
+            for row in catalog['files']:
+                if row.get('character_id',owner)!=owner:continue
+                digest=row.get('sha')
+                if not digest:continue
+                visible=bool(row.get('in_all',True)) and not row.get('in_review') and not row.get('in_purgatory')
+                main[digest]=main.get(digest,False) or bool(visible)
+            result['main']=main
+        except (ValueError,OSError,KeyError,TypeError):
+            # Disconnected or changed library is unknown, never "not in Main".
+            pass
+
     def image(self,ident):
-        r=self.catalog[ident]
-        return {'id':ident,'name':re.split(r'[\\/]',r['path'])[-1],'path':r['path'],'media_type':r.get('media_type','image'),'frame_seconds':r.get('frame_seconds'),'quarantined':bool(r.get('quarantine_only')),
+        self.refresh_library_placement()
+        r=self.catalog[ident];main=self.library_placement['main']
+        present=None if main is None else r.get('sha') in main
+        in_main=None if main is None else main.get(r.get('sha'),False)
+        return {'id':ident,'library_present':present,'in_main':in_main,'name':re.split(r'[\\/]',r['path'])[-1],'path':r['path'],'media_type':r.get('media_type','image'),'frame_seconds':r.get('frame_seconds'),'quarantined':bool(r.get('quarantine_only')),
                 'sources':list(r.get('sources',{})),'origins':r.get('origins',[]),'reference':bool(r.get('reference')),'discarded':ident in self.discarded}
 
     def pinned_ids(self,state=None):

@@ -106,3 +106,18 @@ test('import comparison saves explicit Keep and refreshes the preview',async()=>
   if(route==='duplicate-choice'){state.state.duplicate_choices={photo:{action:body.action,target_name:'Library photo'}};state.state.revision++;return {choice:state.state.duplicate_choices.photo};}
  }});try{f.d.getElementById('applyDrafts').click();await ready(()=>f.d.getElementById('compareImportDuplicates'));f.d.getElementById('compareImportDuplicates').click();await ready(()=>f.d.getElementById('duplicateCompare')?.textContent.includes('Library photo'));[...f.d.querySelectorAll('#duplicateCompare button')].find(b=>b.textContent==='Compare').click();await ready(()=>f.d.querySelectorAll('#comparisonImages img').length===2);[...f.d.querySelectorAll('#duplicateCompare button')].find(b=>b.textContent==='Keep existing image').click();await ready(()=>f.calls.some(c=>c.route==='duplicate-choice'));assert.equal(f.calls.find(c=>c.route==='duplicate-choice').body.target,'existing');assert.ok(!f.calls.some(c=>c.route==='transfer-apply'));f.d.getElementById('duplicateCompare').close();await ready(()=>f.d.getElementById('transferDialog').open);assert.deepEqual(f.errors,[]);}finally{f.dom.window.close()}
 });
+
+test('Main and set membership badges are independent in grid and suggestions',async()=>{
+ const photo={id:'photo',name:'Photo.png',path:'/source/Photo.png',media_type:'image',sources:['first'],sets:['Existing shoot'],reference:true,library_present:true,in_main:true};
+ const f=await fixture({photos:[photo]});try{
+  const grid=f.d.querySelector('#grid .card');assert.match(grid.textContent,/In Main/);assert.match(grid.textContent,/In 1 set\(s\)/);
+  f.dom.window.badgePhoto=photo;
+  const suggestion=f.dom.window.eval('card(window.badgePhoto,true)');assert.match(suggestion.textContent,/In Main/);assert.match(suggestion.textContent,/In: Existing shoot/);
+  for(const [value,label] of [[false,'Not in Main'],[null,'Main status unavailable']]){
+   f.dom.window.badgePhoto={...photo,in_main:value};const c=f.dom.window.eval('card(window.badgePhoto)');assert.ok(c.textContent.includes(label));assert.match(c.textContent,/In 1 set\(s\)/);assert.ok(![...c.querySelectorAll('.badge')].some(b=>b.textContent==='In Main'));
+  }
+  f.dom.window.badgePhoto={...photo,sets:[]};assert.match(f.dom.window.eval('card(window.badgePhoto)').textContent,/In Main/);
+  f.dom.window.badgePhoto={...photo,quarantined:true};const q=f.dom.window.eval('card(window.badgePhoto)');assert.match(q.textContent,/Unresolved/);assert.doesNotMatch(q.textContent,/In Main/);
+  assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close()}
+});
