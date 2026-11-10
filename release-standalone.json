@@ -49,14 +49,13 @@
     "payload/userscript-2.9.9.presentation.txt",
     "payload/userscript-2.9.7.no-autofill.txt",
     "payload/userscript-2.9.12.search-clear.txt",
-    "payload/userscript-2.9.22.yoga-preview.txt",
     "payload/userscript-2.9.23.video-workflow.txt",
     "payload/userscript-2.9.24.missing-files.txt",
     "payload/userscript-2.9.24.project-tools.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 180,
-  "version": "2.9.26",
+  "release_build": 181,
+  "version": "2.9.27",
   "title_artwork": {
     "team_captain": "assets/cards/captain-royal-ink.webp",
     "former_number_one": "assets/cards/former-number-one-legacy-gold.webp"

@@ -1,3 +1,9 @@
+## Remove temporary Yoga preview (Media Library 2.9.27)
+
+Removes the old **Yoga preview** testing button beside Collection HQ by excluding
+its temporary module from the standalone library. The archived artwork remains
+available in the repository. Existing cards, traits and saved media are unchanged.
+
 ## Character sections and approved card repairs (2.0.22 / UI 2.9.25)
 
 Folder Organizer now lists every library girl, including Nikki, and keeps multiple
@@ -50,6 +56,8 @@ sets qualify immediately without a scan. Set dates, memberships and source histo
 are preserved; the tag is recalculated as membership or provenance changes.
 
 ## Temporary Yoga artwork preview (Media Library 2.9.22)
+
+Historical release note: this temporary button was removed in 2.9.27.
 
 Adds a Yoga preview button beside Collection HQ. It opens the current unaltered
 artwork for review, without adding a trait or changing any live cards or crops.

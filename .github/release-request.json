@@ -1,9 +1,8 @@
 {
   "schema": 1,
-  "id": "2026-11-10-workbench-queue-stay-in-place",
+  "id": "2026-11-10-remove-yoga-preview",
   "components": [
-    "workbench"
+    "standalone"
   ],
-  "publish": true,
-  "workbench_notes": "Saving individual images to the import queue now keeps the current post or set, page, image order, scroll position and Back history. Update queue badges and the count in place; open the queue only when requested. Preserve the explicitly chosen image when the destination girl must be selected."
+  "publish": true
 }
