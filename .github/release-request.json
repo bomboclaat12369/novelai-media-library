@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "id": "2026-11-10-organizer-main-status-identity-fix",
+  "id": "2026-11-10-organizer-placement-labels",
   "components": [
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Fix Main status unavailable appearing on every organizer card. Validate the saved collection against the companion's tracking instance ID so live Main placement is recognized correctly. Keep In Main and set membership visible together, with no rescan or reimport required."
+  "workbench_notes": "Simplify organizer image labels to Main, Review, Purgatory and In 1 set (or In N sets). Show each actual location independently, including Purgatory or Review alongside set membership. Remove In library, Not in Main and unavailable labels. Use the same compact labels in suggested additions, with set names available on hover. No rescan or reimport required."
 }

@@ -107,17 +107,34 @@ test('import comparison saves explicit Keep and refreshes the preview',async()=>
  }});try{f.d.getElementById('applyDrafts').click();await ready(()=>f.d.getElementById('compareImportDuplicates'));f.d.getElementById('compareImportDuplicates').click();await ready(()=>f.d.getElementById('duplicateCompare')?.textContent.includes('Library photo'));[...f.d.querySelectorAll('#duplicateCompare button')].find(b=>b.textContent==='Compare').click();await ready(()=>f.d.querySelectorAll('#comparisonImages img').length===2);[...f.d.querySelectorAll('#duplicateCompare button')].find(b=>b.textContent==='Keep existing image').click();await ready(()=>f.calls.some(c=>c.route==='duplicate-choice'));assert.equal(f.calls.find(c=>c.route==='duplicate-choice').body.target,'existing');assert.ok(!f.calls.some(c=>c.route==='transfer-apply'));f.d.getElementById('duplicateCompare').close();await ready(()=>f.d.getElementById('transferDialog').open);assert.deepEqual(f.errors,[]);}finally{f.dom.window.close()}
 });
 
-test('Main and set membership badges are independent in grid and suggestions',async()=>{
- const photo={id:'photo',name:'Photo.png',path:'/source/Photo.png',media_type:'image',sources:['first'],sets:['Existing shoot'],reference:true,library_present:true,in_main:true};
+test('placement badges show only actual locations and combine with set membership',async()=>{
+ const photo={id:'photo',name:'Photo.png',path:'/source/Photo.png',media_type:'image',sources:['first'],sets:['Existing shoot'],reference:true,library_present:true,in_main:true,in_review:false,in_purgatory:false};
  const f=await fixture({photos:[photo]});try{
-  const grid=f.d.querySelector('#grid .card');assert.match(grid.textContent,/In Main/);assert.match(grid.textContent,/In 1 set\(s\)/);
-  f.dom.window.badgePhoto=photo;
-  const suggestion=f.dom.window.eval('card(window.badgePhoto,true)');assert.match(suggestion.textContent,/In Main/);assert.match(suggestion.textContent,/In: Existing shoot/);
-  for(const [value,label] of [[false,'Not in Main'],[null,'Main status unavailable']]){
-   f.dom.window.badgePhoto={...photo,in_main:value};const c=f.dom.window.eval('card(window.badgePhoto)');assert.ok(c.textContent.includes(label));assert.match(c.textContent,/In 1 set\(s\)/);assert.ok(![...c.querySelectorAll('.badge')].some(b=>b.textContent==='In Main'));
+  const labels=c=>[...c.querySelectorAll('.badge')].map(b=>b.textContent);
+  assert.deepEqual(labels(f.d.querySelector('#grid .card')),['Main','In 1 set']);
+  const cases=[
+   [{},['Main','In 1 set']],
+   [{in_main:false},['In 1 set']],
+   [{in_main:null,in_review:null,in_purgatory:null},['In 1 set']],
+   [{in_main:false,in_review:true},['Review','In 1 set']],
+   [{in_main:false,in_purgatory:true},['Purgatory','In 1 set']],
+   [{in_main:false,in_review:true,in_purgatory:true},['Review','Purgatory','In 1 set']],
+   [{sets:[]},['Main']],
+   [{sets:[],in_main:false,in_review:true},['Review']],
+   [{sets:[],in_main:false,in_purgatory:true},['Purgatory']],
+   [{sets:[],in_main:false},[]],
+   [{sets:[],in_main:null,in_review:null,in_purgatory:null},[]],
+   [{sets:['First shoot','Second shoot'],in_main:false},['In 2 sets']],
+   [{quarantined:true},['Unresolved · quarantine']],
+  ];
+  for(const suggestion of [false,true])for(const [changes,expected] of cases){
+   f.dom.window.badgePhoto={...photo,...changes};
+   const c=f.dom.window.eval('card(window.badgePhoto,'+suggestion+')');
+   assert.deepEqual(labels(c),expected);
+   const membership=c.querySelector('.membership');
+   if(membership)assert.equal(membership.title,f.dom.window.badgePhoto.sets.join(', '));
+   if(!expected.length)assert.equal(c.querySelector('.badges'),null);
   }
-  f.dom.window.badgePhoto={...photo,sets:[]};assert.match(f.dom.window.eval('card(window.badgePhoto)').textContent,/In Main/);
-  f.dom.window.badgePhoto={...photo,quarantined:true};const q=f.dom.window.eval('card(window.badgePhoto)');assert.match(q.textContent,/Unresolved/);assert.doesNotMatch(q.textContent,/In Main/);
   assert.deepEqual(f.errors,[]);
  }finally{f.dom.window.close()}
 });

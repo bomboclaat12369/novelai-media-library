@@ -383,7 +383,7 @@ class Organizer:
         key=(self.scope,config.get('character_id'),config.get('library_instance'))
         cached=self.library_placement
         if not force and cached and cached['key']==key and time.monotonic()-cached['at']<5:return
-        result={'key':key,'at':time.monotonic(),'main':None}
+        result={'key':key,'at':time.monotonic(),'main':None,'review':None,'purgatory':None}
         self.library_placement=result
         owner=config.get('character_id') or self.category_catalog().get('character_id')
         if not owner:return
@@ -392,14 +392,16 @@ class Organizer:
             expected=config.get('library_instance')
             # Sections store tracking's instance ID, not the catalog's store ID.
             if expected and self.engine.library.request('/api/tracking/status')['instance']!=expected:return
-            main={}
+            main={};review=set();purgatory=set()
             for row in catalog['files']:
                 if row.get('character_id',owner)!=owner:continue
                 digest=row.get('sha')
                 if not digest:continue
                 visible=bool(row.get('in_all',True)) and not row.get('in_review') and not row.get('in_purgatory')
                 main[digest]=main.get(digest,False) or bool(visible)
-            result['main']=main
+                if row.get('in_review'):review.add(digest)
+                if row.get('in_purgatory'):purgatory.add(digest)
+            result.update(main=main,review=review,purgatory=purgatory)
         except (ValueError,OSError,KeyError,TypeError):
             # Disconnected or changed library is unknown, never "not in Main".
             pass
@@ -409,7 +411,9 @@ class Organizer:
         r=self.catalog[ident];main=self.library_placement['main']
         present=None if main is None else r.get('sha') in main
         in_main=None if main is None else main.get(r.get('sha'),False)
-        return {'id':ident,'library_present':present,'in_main':in_main,'name':re.split(r'[\\/]',r['path'])[-1],'path':r['path'],'media_type':r.get('media_type','image'),'frame_seconds':r.get('frame_seconds'),'quarantined':bool(r.get('quarantine_only')),
+        in_review=None if main is None else r.get('sha') in self.library_placement['review']
+        in_purgatory=None if main is None else r.get('sha') in self.library_placement['purgatory']
+        return {'id':ident,'library_present':present,'in_main':in_main,'in_review':in_review,'in_purgatory':in_purgatory,'name':re.split(r'[\\/]',r['path'])[-1],'path':r['path'],'media_type':r.get('media_type','image'),'frame_seconds':r.get('frame_seconds'),'quarantined':bool(r.get('quarantine_only')),
                 'sources':list(r.get('sources',{})),'origins':r.get('origins',[]),'reference':bool(r.get('reference')),'discarded':ident in self.discarded}
 
     def pinned_ids(self,state=None):

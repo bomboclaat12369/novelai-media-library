@@ -22,11 +22,11 @@ class MainPlacementTests(unittest.TestCase):
                 path = Path(org.catalog[ident]['path'])
                 items.append(store.import_bytes(path.read_bytes(), path.name, owner, [], {}, 'image/jpeg')[0])
             items[1]['in_all'] = False
-            items[2]['in_review'] = True
-            items[3]['in_purgatory'] = True
-            group = store.create_set(owner, 'Existing shoot', [item['id'] for item in items[:2]], preserve_placement=True)
+            group = store.create_set(owner, 'Existing shoot', [item['id'] for item in items], preserve_placement=True)
+            store.set_review(items[2]['id'], True)
+            store.set_purgatory(items[3]['id'], True)
             store.save()
-            for ident in ids[:2]:
+            for ident in ids[:4]:
                 bulk.current['source_catalog'][ident]['existing_sets'] = [group['id']]
             bulk.current['library_sets'] = {group['id']: group}
             bulk.current['config']['character_id'] = owner
@@ -47,10 +47,16 @@ class MainPlacementTests(unittest.TestCase):
                     before_library = store.db_path.read_bytes()
                     org.summary()
                     self.assertEqual([org.image(ident)['in_main'] for ident in ids[:5]], [True, False, False, False, False])
+                    self.assertEqual([org.image(ident)['in_review'] for ident in ids[:5]], [False, False, True, False, False])
+                    self.assertEqual([org.image(ident)['in_purgatory'] for ident in ids[:5]], [False, False, False, True, False])
                     page = org.page('post', 'post:1')
                     photo = next(image for image in page['images'] if image['id'] == ids[0])
                     self.assertTrue(photo['in_main'])
                     self.assertTrue(photo['sets'])
+                    for ident, flag in ((ids[2], 'in_review'), (ids[3], 'in_purgatory')):
+                        photo = next(image for image in page['images'] if image['id'] == ident)
+                        self.assertTrue(photo[flag])
+                        self.assertTrue(photo['sets'])
                     self.assertEqual(bulk.current, before_inventory)
                     self.assertEqual(store.db_path.read_bytes(), before_library)
                 finally:
@@ -71,6 +77,8 @@ class MainPlacementTests(unittest.TestCase):
                     patch.object(engine.library, 'request', return_value={'instance': 'library-one'}) as request:
                 org.summary()
                 self.assertEqual([org.image(i)['in_main'] for i in ids[:5]], [True, False, False, False, False])
+                self.assertEqual([org.image(i)['in_review'] for i in ids[:5]], [False, False, True, False, False])
+                self.assertEqual([org.image(i)['in_purgatory'] for i in ids[:5]], [False, False, False, True, False])
                 self.assertTrue(org.image(ids[1])['library_present'])
                 self.assertFalse(org.image(ids[4])['library_present'])
                 self.assertEqual(catalog.call_count, 1)  # shared across page and suggestions
@@ -80,32 +88,44 @@ class MainPlacementTests(unittest.TestCase):
                 self.assertTrue(photo['in_main'])
                 self.assertTrue(photo['sets'])
                 rows[0]['in_all'] = False
+                rows[0]['in_review'] = True
+                rows[0]['in_purgatory'] = True
                 org.summary()
                 self.assertFalse(org.image(ids[0])['in_main'])
+                self.assertTrue(org.image(ids[0])['in_review'])
+                self.assertTrue(org.image(ids[0])['in_purgatory'])
                 rows.clear()
                 org.summary()
                 self.assertFalse(org.image(ids[0])['library_present'])
+                self.assertFalse(org.image(ids[0])['in_review'])
+                self.assertFalse(org.image(ids[0])['in_purgatory'])
             self.assertEqual(bulk.current, before)
 
     def test_unavailable_or_different_library_is_unknown_and_clears_old_status(self):
         with tempfile.TemporaryDirectory() as temp:
             engine, bulk, org, ids = fixture(temp)
             bulk.current['config'].update(character_id='patricia', library_instance='library-one')
-            response = dict(stable_library_id='store-one', files=[dict(sha=ids[0], in_all=True)])
+            response = dict(stable_library_id='store-one', files=[dict(sha=ids[0], in_all=True), dict(sha=ids[1], in_review=True, in_purgatory=True)])
             with patch.object(engine.library, 'catalog', return_value=response), \
                     patch.object(engine.library, 'request', return_value={'instance': 'library-one'}):
                 org.summary()
                 self.assertTrue(org.image(ids[0])['in_main'])
+                self.assertTrue(org.image(ids[1])['in_review'])
+                self.assertTrue(org.image(ids[1])['in_purgatory'])
             with patch.object(engine.library, 'catalog', side_effect=ValueError('Companion unavailable')):
                 org.summary()
                 self.assertIsNone(org.image(ids[0])['in_main'])
                 self.assertIsNone(org.image(ids[0])['library_present'])
+                self.assertIsNone(org.image(ids[1])['in_review'])
+                self.assertIsNone(org.image(ids[1])['in_purgatory'])
             for status in ({'instance': 'other'}, {}):
                 with self.subTest(status=status), patch.object(engine.library, 'catalog', return_value=response), \
                         patch.object(engine.library, 'request', return_value=status):
                     org.summary()
                     self.assertIsNone(org.image(ids[0])['in_main'])
                     self.assertIsNone(org.image(ids[0])['library_present'])
+                    self.assertIsNone(org.image(ids[1])['in_review'])
+                    self.assertIsNone(org.image(ids[1])['in_purgatory'])
             with patch.object(engine.library, 'catalog', return_value=response), \
                     patch.object(engine.library, 'request', side_effect=ValueError('Companion unavailable')):
                 org.summary()
