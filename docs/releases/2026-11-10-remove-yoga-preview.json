@@ -1,0 +1,33 @@
+{
+  "status": "published_verified",
+  "source_commit": "906ef5899a5e4c0c7aa24a9604e73b8092425ff2",
+  "components": [
+    "standalone"
+  ],
+  "publish": true,
+  "artifacts": {
+    "standalone": {
+      "version": "2.9.27",
+      "sha256": "5053e5f2f0e3ea244c9220cf7b1057ffc9946c55a426421d9081afa3dcd907ed",
+      "bytes": 17238622
+    }
+  },
+  "payload_commit": "20153c483a8314960b8574a0dc89aa39fd946489",
+  "release_commit": "067d834acc7fe03ff075260c380ec8bfb102f0f1",
+  "generated_files": 1,
+  "push_attempted": true,
+  "workflow_run": "https://github.com/bomboclaat12369/novelai-media-library/actions/runs/42860623550",
+  "validation": {
+    "runtime_tests": 215,
+    "workbench_tests": 187,
+    "dom_tests": 82,
+    "native_card_renders": 364,
+    "release_pipeline_tests": 13,
+    "status": "passed"
+  },
+  "ui_limits": "Built-page inspection and current DOM/native-renderer suites passed; no live Windows desktop check.",
+  "receipt_artifact": {
+    "id": 13783789684,
+    "sha256": "544a810fcb3275b1bc5f224447fc8183619f40cac5c985a977fd7417da5bb20f"
+  }
+}
