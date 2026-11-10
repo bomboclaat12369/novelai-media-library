@@ -97,7 +97,7 @@
     "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/runtime-2.7.76.part50.b64"
   ],
   "userscript_sha256": "318183793d803aa860ba5de97633ab3577fda07bc7194bc9dd83e09174a87208",
-  "standalone_url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/standalone-2.9.26.html",
-  "standalone_sha256": "34388a2c56c870df5fd090c75bdb702f8b0d00a32d6b122d3a506a98ef7b2ada",
-  "standalone_version": "2.9.26"
+  "standalone_url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/standalone-2.9.27.html",
+  "standalone_sha256": "5053e5f2f0e3ea244c9220cf7b1057ffc9946c55a426421d9081afa3dcd907ed",
+  "standalone_version": "2.9.27"
 }
