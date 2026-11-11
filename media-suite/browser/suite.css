@@ -1,21 +1,25 @@
-:root { font: 10pt "Segoe UI", sans-serif; color: #151515; background: #f0f0f0; color-scheme: light }
+:root { font: 10pt "Segoe UI", sans-serif; color: #151515; background: #f0f0f0; color-scheme: light; --mode-width: 3.8rem; --edge: max(20px, env(safe-area-inset-right)) }
 * { box-sizing: border-box }
-body { margin: 0; height: 100dvh; display: flex; flex-direction: column }
-header { flex: none; display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: #e0e9ef; border-bottom: 1px solid #bdc6cc }
-nav { display: flex; min-width: 0; overflow-x: auto }
+body { margin: 0 }
 button, input { font: inherit; color: inherit }
-header button { white-space: nowrap; background: transparent; border: 1px solid transparent; padding: 4px 8px }
-header button:hover { background: #d2e5f3; border-color: #9fbfd4 }
-header button[aria-selected=true] { background: #c5dceb; border-color: #94b3c7 }
+main { position: fixed; inset: 0 }
+main > section, iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0 }
+#mode-toggle { position: fixed; z-index: 1; top: 50%; right: var(--edge); transform: translateY(-50%); width: var(--mode-width); min-height: 30px; padding: 3px 0; border: 1px solid #81929f; border-radius: 20px; background: #25333e; color: white; box-shadow: 0 1px 5px #0004; cursor: pointer }
+#mode-toggle:hover, #mode-toggle[aria-expanded=true] { background: #374d5e }
+#mode-picker { position: fixed; inset: 50% calc(var(--edge) + var(--mode-width) + 6px) auto auto; transform: translateY(-50%); margin: 0; width: min(160px, calc(100vw - var(--edge) - var(--mode-width) - 14px)); max-height: calc(100dvh - 12px); overflow: auto; padding: 4px; border: 1px solid #abb8c1; border-radius: 9px; background: #f7f9fa; box-shadow: 0 3px 15px #0004 }
+#mode-picker::backdrop { background: transparent }
+#mode-picker button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 32px; padding: 5px 9px; border: 0; border-radius: 5px; text-align: left; background: transparent; cursor: pointer }
+#mode-picker button:hover { background: #e4ebef }
+#mode-picker [aria-current=page] { background: #d5e5ef; font-weight: 600 }
+#mode-picker [aria-current=page]::after { content: ''; width: 5px; height: 9px; margin: 0 3px; border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg) }
+#mode-picker nav { margin-bottom: 3px; padding-bottom: 3px; border-bottom: 1px solid #cbd5dc }
 button:focus-visible, input:focus-visible { outline: 2px solid #246a9a; outline-offset: -2px }
-#locations { margin-left: auto }
-main { flex: 1; min-height: 0; position: relative }
-[role=tabpanel], iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0 }
+#mode-toggle:focus-visible { outline-color: white; outline-offset: -4px }
 [hidden] { display: none !important }
 .feedback { padding: 20px; max-width: 680px; line-height: 1.5 }
 .feedback p { margin-top: 0 }
-dialog { width: min(590px, 94vw); padding: 18px; border: 1px solid #9b9b9b; background: #f0f0f0; box-shadow: 0 8px 36px #0004 }
-dialog::backdrop { background: #0004 }
+#settings { width: min(590px, 94vw); padding: 18px; border: 1px solid #9b9b9b; background: #f0f0f0; box-shadow: 0 8px 36px #0004 }
+#settings::backdrop { background: #0004 }
 dialog h1 { margin: 0 0 15px; font-size: 15px; font-weight: 600 }
 dialog label { display: block; margin-top: 12px; margin-bottom: 3px }
 dialog form > div, dialog footer { display: flex; gap: 6px }

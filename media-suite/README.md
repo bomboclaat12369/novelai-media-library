@@ -1,16 +1,16 @@
 # Media Suite for Windows
 
-Open Media Library, Battles, Workbench and After Hours in one regular Google Chrome tab. The four buttons across the top keep each section open while you switch. Battles uses the character selected in Media Library when opening a matchup. The suite remembers the last section for your next launch.
+Open Media Library, Battles, Workbench and After Hours in one regular Google Chrome tab. Each mode fills the tab. Click **Mode** halfway down the right edge to switch. A checkmark shows the current mode. Each page keeps your place when you switch, and the suite remembers the last mode for your next launch. Battles uses the character selected in Media Library when opening a matchup.
 
 ## Install
 
-With Google Chrome installed on Windows, download **Install-Media-Suite.cmd** from the [Windows suite release](https://github.com/bomboclaat12369/novelai-media-library/releases/tag/media-suite-v1.1.0) and run it. It checks the package hash and installs the local launcher for your account. Your Desktop and Start shortcuts open the suite in Chrome. Opening the shortcut again selects the existing suite tab. To install from the ZIP, extract it and double-click **Install Media Suite.cmd**.
+With Google Chrome installed on Windows, download **Install-Media-Suite.cmd** from the [Windows suite release](https://github.com/bomboclaat12369/novelai-media-library/releases/tag/media-suite-v1.1.1) and run it. It checks the package hash and installs the local launcher for your account. Your Desktop and Start shortcuts open the suite in Chrome. Opening the shortcut again selects the existing suite tab. To install from the ZIP, extract it and double-click **Install Media Suite.cmd**.
 
 The first installation also prepares a main Git checkout next to the existing After Hours checkout, usually at C:\Codex\Media-Suite, and opens a new local Codex chat with a starter message. Press Send in that chat. Use the existing After Hours chat for game development. **Media Suite - Main Codex** in Start can reopen the first-time setup if it was interrupted. Future day-to-day work belongs in the same chat.
 
 ## Connect existing applications
 
-Running services are recognized on their normal loopback addresses. For a cold start, the suite looks in common installation locations. Open **Locations…** once if a folder is missing or several copies exist.
+Running services are recognized on their normal loopback addresses. For a cold start, the suite looks in common installation locations. Choose **Mode → Locations…** if a folder is missing or several copies exist.
 
 | Location | Choose |
 | --- | --- |

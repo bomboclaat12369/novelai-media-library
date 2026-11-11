@@ -2,6 +2,8 @@
 const byId = id => document.getElementById(id);
 const pages = new Map();
 const dialog = byId('settings');
+const modeToggle = byId('mode-toggle');
+const picker = byId('mode-picker');
 let token, selected, remember = Promise.resolve();
 
 async function session() {
@@ -81,7 +83,7 @@ function select(id) {
   selected = id;
   for (const other of pages.values()) {
     const active = page === other;
-    other.button.setAttribute('aria-selected', String(active)); other.button.tabIndex = active ? 0 : -1;
+    other.button.setAttribute('aria-current', active ? 'page' : 'false');
     other.panel.hidden = !active;
   }
   remember = remember.catch(() => {}).then(() => request('select/' + id)).catch(error => {
@@ -91,10 +93,10 @@ function select(id) {
   else if (id === 'Battles') openBattles();
 }
 
-for (const button of document.querySelectorAll('[role=tab]')) {
+for (const button of picker.querySelectorAll('nav button')) {
   const panel = document.createElement('section');
   panel.id = 'panel-' + button.id; panel.hidden = true;
-  panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', button.id);
+  panel.setAttribute('aria-label', button.textContent);
   button.setAttribute('aria-controls', panel.id);
   const feedback = document.createElement('div'), message = document.createElement('p'), retry = document.createElement('button');
   feedback.className = 'feedback'; message.setAttribute('role','status'); retry.textContent = 'Retry'; retry.hidden = true;
@@ -102,16 +104,30 @@ for (const button of document.querySelectorAll('[role=tab]')) {
   retry.onclick = () => connect(page);
   feedback.append(message, retry); panel.append(feedback);
   document.querySelector('main').append(panel); pages.set(button.id, page);
-  button.onclick = () => select(button.id);
-  button.onkeydown = event => {
-    const ids = Array.from(pages.keys()), index = ids.indexOf(button.id);
-    const next = {ArrowLeft: (index + 3) % 4, ArrowRight: (index + 1) % 4, Home: 0, End: 3}[event.key];
-    if (next !== undefined) { event.preventDefault(); byId(ids[next]).focus(); select(ids[next]); }
-  };
+  button.onclick = () => { select(button.id); picker.close(); };
 }
+
+modeToggle.onclick = () => {
+  picker.showModal();
+  modeToggle.setAttribute('aria-expanded', 'true');
+  (pages.get(selected)?.button || byId('Library')).focus();
+};
+picker.onclose = () => modeToggle.setAttribute('aria-expanded', String(picker.open));
+picker.onclick = event => {
+  if (event.target !== picker) return;
+  const box = picker.getBoundingClientRect();
+  if (event.clientX < box.left || event.clientX >= box.right || event.clientY < box.top || event.clientY >= box.bottom) picker.close();
+};
+picker.onkeydown = event => {
+  const choices = Array.from(picker.querySelectorAll('button'));
+  const index = choices.indexOf(document.activeElement), count = choices.length;
+  const next = {ArrowUp: (index + count - 1) % count, ArrowDown: (index + 1) % count, Home: 0, End: count - 1}[event.key];
+  if (next !== undefined) { event.preventDefault(); choices[next].focus(); }
+};
 
 const fields = Array.from(dialog.querySelectorAll('input'));
 byId('locations').onclick = async () => {
+  picker.close();
   byId('settings-error').textContent = '';
   try {
     const current = await session();
@@ -153,4 +169,4 @@ setInterval(async () => {
 session().then(data => select(pages.has(data.lastSection) ? data.lastSection : 'Library')).catch(error => {
   const first = pages.get('Library'); first.panel.hidden = false; first.message.textContent = error.message;
   first.retry.hidden = false; first.retry.onclick = () => location.reload();
-});
+}).finally(() => { modeToggle.disabled = false; });

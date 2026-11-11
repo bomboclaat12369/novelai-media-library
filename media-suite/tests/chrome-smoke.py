@@ -9,7 +9,7 @@ from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 
 @contextmanager
@@ -48,17 +48,35 @@ def until(frame, expression, arg=None):
 def verify(page, address, root):
     page.set_default_timeout(120_000)
     page.goto(address)
-    tabs = page.get_by_role("tablist")
+    toggle = page.get_by_role("button", name="Mode", exact=True)
+    picker = page.get_by_role("dialog", name="Choose a mode")
 
-    def section(name, label):
-        tabs.get_by_role("tab", name=label, exact=True).click()
+    def full_viewport(frame_tag):
+        size = page.viewport_size
+        assert frame_tag.bounding_box() == {"x": 0, "y": 0, **size}, (frame_tag.bounding_box(), size)
+        frame = frame_tag.element_handle().content_frame()
+        assert frame.evaluate("[innerWidth, innerHeight]") == [size["width"], size["height"]]
+
+    def section(name, label, keys=()):
+        toggle.click()
+        choice = picker.get_by_role("button", name=label, exact=True)
+        if keys:
+            for key in keys:
+                page.keyboard.press(key)
+            expect(choice).to_be_focused()
+            page.keyboard.press("Enter")
+        else:
+            choice.click()
+        expect(picker).to_be_hidden()
         frame_tag = page.locator(f'iframe[name="suite-{name}"]')
         try:
             frame_tag.wait_for(state="visible")
         except Exception:
             print("Connection status:", page.locator(f"#panel-{name} .feedback").inner_text()[:320], flush=True)
             raise
-        print("Opened", label, flush=True)
+        full_viewport(frame_tag)
+        assert frame_tag.evaluate("frame => [4, innerWidth / 2, innerWidth - 4].every(x => document.elementFromPoint(x, 4) === frame)"), 'The suite covers the top of the app.'
+        print("Opened", label, "at full tab size", flush=True)
         return frame_tag.element_handle().content_frame()
 
     library = section("Library", "Media Library")
@@ -73,7 +91,29 @@ def verify(page, address, root):
     assert partial.status == 206 and partial.headers["content-range"].startswith("bytes 0-7/")
     assert partial.body() == bytes.fromhex("89504e470d0a1a0a")
 
-    page.get_by_role("button", name="Locations…").click()
+    library_frame = page.locator('iframe[name="suite-Library"]')
+    desktop = page.viewport_size
+    page.set_viewport_size({"width": 390, "height": 560})
+    full_viewport(library_frame)
+    toggle.click()
+    modes = picker.get_by_role("navigation", name="Suite modes").get_by_role("button")
+    expect(modes).to_have_text(["Media Library", "Battles", "Workbench", "After Hours"])
+    expect(picker.locator('[aria-current="page"]')).to_have_text("Media Library")
+    expect(picker.get_by_role("button", name="Media Library")).to_be_focused()
+    box = picker.bounding_box()
+    assert box["x"] >= 0 and box["y"] >= 0 and box["x"] + box["width"] <= 390 and box["y"] + box["height"] <= 560
+    full_viewport(library_frame)
+    page.keyboard.press("Escape")
+    expect(toggle).to_be_focused()
+    expect(toggle).to_have_attribute("aria-expanded", "false")
+    toggle.click()
+    page.mouse.click(6, 6)  # Over the underlying cross-origin app, outside the picker.
+    expect(picker).to_be_hidden()
+    page.set_viewport_size(desktop)
+    full_viewport(library_frame)
+
+    toggle.click()
+    picker.get_by_role("button", name="Locations…").click()
     locations = page.get_by_role("dialog", name="Suite locations")
     locations.wait_for(state="visible")
     actual_library = Path(locations.locator("#libraryFolder").input_value())
@@ -88,7 +128,7 @@ def verify(page, address, root):
     assert page.request.get(address + "api/session").status == 403
     assert page.request.get(address, headers={"Host": "example.org"}).status == 403
 
-    bench = section("Workbench", "Workbench")
+    bench = section("Workbench", "Workbench", keys=("Home", "ArrowDown", "ArrowDown"))
     post = bench.locator("#postList .post").filter(has_text="Post 2")
     until(bench, "!!document.getElementById('position')?.textContent && !document.getElementById('collectionPicker').disabled "
           "&& !!document.querySelector('#grid .card')")
@@ -137,9 +177,13 @@ def verify(page, address, root):
                                headers={"Origin": "https://example.org"})
     assert forged.status == 403
     page.reload()
-    page.locator('#Workbench[aria-selected="true"]').wait_for()
+    page.locator('#panel-Workbench iframe').wait_for()
+    toggle.click()
+    expect(picker.locator('[aria-current="page"]')).to_have_text("Workbench")
+    expect(picker.get_by_role("button", name="Workbench")).to_be_focused()
+    page.keyboard.press("Escape")
     assert json.loads((root / "Suite profile/settings.json").read_text())["LastSection"] == "Workbench"
-    print("Verified real Chrome tabs, owner handoff, thumbnails, Locations, origin checks, an import during a tab switch, the original career and last section.")
+    print("Verified the full-size mode picker layout, keyboard and pointer switching, owner handoff, thumbnails, Locations, origin checks, an import during a switch, the original career and last mode.")
 
 
 if __name__ == "__main__":

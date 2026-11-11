@@ -55,6 +55,12 @@ jobs:
           python media-suite/tests/chrome-smoke.py $fixture media-suite/tests/browser/bin/Release/net8.0-windows/MediaSuite.BrowserSmoke.dll
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python media-suite/tests/check-result.py $fixture
+      - name: Check the release pipeline with disposable Git repositories
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: core.autocrlf
+          GIT_CONFIG_VALUE_0: 'false'
+        run: python -m unittest discover -s tests -p test_release_pipeline.py -q
       - uses: actions/upload-artifact@v4
         with:
           name: windows-media-suite
@@ -83,7 +89,7 @@ jobs:
             cmp "release/$zip" "existing/$zip"
             cmp release/Install-Media-Suite.cmd existing/Install-Media-Suite.cmd
           else
-            gh release create "$tag" "release/$zip" release/Install-Media-Suite.cmd release/media-suite-manifest.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Windows Media Suite ${tag#media-suite-v}" --notes "Open Media Library, Battles, Workbench and After Hours in one normal Google Chrome tab using your existing shortcut and local data."
+            gh release create "$tag" "release/$zip" release/Install-Media-Suite.cmd release/media-suite-manifest.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Windows Media Suite ${tag#media-suite-v}" --notes "All four modes now fill the Chrome tab. Use the small Mode button halfway down the right edge to switch between Media Library, Battles, Workbench and After Hours, or to open Locations."
           fi
           gh release download "$tag" --repo "$GITHUB_REPOSITORY" -D verified
           cmp release/media-suite-manifest.json verified/media-suite-manifest.json

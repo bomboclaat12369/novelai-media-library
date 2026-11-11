@@ -9,15 +9,16 @@
   <script src="/suite.js" defer></script>
 </head>
 <body>
-  <header>
-    <nav role="tablist" aria-label="Media Suite">
-      <button type="button" role="tab" id="Library">Media Library</button>
-      <button type="button" role="tab" id="Battles">Battles</button>
-      <button type="button" role="tab" id="Workbench">Workbench</button>
-      <button type="button" role="tab" id="AfterHours">After Hours</button>
+  <button type="button" id="mode-toggle" aria-haspopup="dialog" aria-controls="mode-picker" aria-expanded="false" disabled>Mode</button>
+  <dialog id="mode-picker" aria-label="Choose a mode">
+    <nav aria-label="Suite modes">
+      <button type="button" id="Library">Media Library</button>
+      <button type="button" id="Battles">Battles</button>
+      <button type="button" id="Workbench">Workbench</button>
+      <button type="button" id="AfterHours">After Hours</button>
     </nav>
     <button type="button" id="locations">Locations…</button>
-  </header>
+  </dialog>
   <main></main>
   <dialog id="settings" aria-labelledby="settings-title">
     <form>
