@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updater_bytes": 8320,
-  "updater_sha256": "5ee65899a9c567e0cebf5aae663243b2f14af9f4360fb42d1126e8a13735a03d",
-  "version": "1.0.0"
+  "updater_bytes": 11056,
+  "updater_sha256": "f7f9a403f12d01f2d24955e91bf3f9cca319c9f6ab45a26aad60404311e50689",
+  "version": "1.0.1"
 }
