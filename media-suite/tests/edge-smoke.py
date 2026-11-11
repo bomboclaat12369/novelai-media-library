@@ -1,4 +1,4 @@
-"""Drive the real suite pages in Chrome with an isolated profile, library and career."""
+"""Drive the real suite pages in Edge with an isolated profile, library and career."""
 import argparse
 import ctypes
 import json
@@ -51,6 +51,12 @@ def verify(page, address, root):
     toggle = page.get_by_role("button", name="Mode", exact=True)
     picker = page.get_by_role("dialog", name="Choose a mode")
 
+    def bottom_right():
+        b = page.locator('#mode-toggle').bounding_box()
+        size = page.viewport_size
+        assert 0 <= size["height"] - b["y"] - b["height"] <= 24 and 0 <= size["width"] - b["x"] - b["width"] <= 24, b
+        return b
+
     def full_viewport(frame_tag):
         size = page.viewport_size
         assert frame_tag.bounding_box() == {"x": 0, "y": 0, **size}, (frame_tag.bounding_box(), size)
@@ -58,6 +64,7 @@ def verify(page, address, root):
         assert frame.evaluate("[innerWidth, innerHeight]") == [size["width"], size["height"]]
 
     def section(name, label, keys=()):
+        bottom_right()
         toggle.click()
         choice = picker.get_by_role("button", name=label, exact=True)
         if keys:
@@ -95,6 +102,7 @@ def verify(page, address, root):
     desktop = page.viewport_size
     page.set_viewport_size({"width": 390, "height": 560})
     full_viewport(library_frame)
+    corner = bottom_right()
     toggle.click()
     modes = picker.get_by_role("navigation", name="Suite modes").get_by_role("button")
     expect(modes).to_have_text(["Media Library", "Battles", "Workbench", "After Hours"])
@@ -102,6 +110,7 @@ def verify(page, address, root):
     expect(picker.get_by_role("button", name="Media Library")).to_be_focused()
     box = picker.bounding_box()
     assert box["x"] >= 0 and box["y"] >= 0 and box["x"] + box["width"] <= 390 and box["y"] + box["height"] <= 560
+    assert box["y"] + box["height"] < corner["y"] and abs(box["x"] + box["width"] - corner["x"] - corner["width"]) <= 1
     full_viewport(library_frame)
     page.keyboard.press("Escape")
     expect(toggle).to_be_focused()
@@ -199,7 +208,7 @@ if __name__ == "__main__":
             address = host.stdout.readline().strip()
             assert address.startswith("http://127.0.0.1:"), address
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(channel="chrome", headless=True)
+                browser = playwright.chromium.launch(channel="msedge", headless=True)
                 try:
                     page = browser.new_page(viewport={"width": 1280, "height": 850})
                     errors = []
@@ -210,8 +219,20 @@ if __name__ == "__main__":
                             if req.url.startswith("http://127.0.0.1:") else None)
                     try:
                         verify(page, address, fixture)
+                        until(page, "presence.readyState === EventSource.OPEN")
+                        def host_command(command):
+                            host.stdin.write(command + "\n")
+                            host.stdin.flush()
+                            return host.stdout.readline().strip()
+                        assert host_command("handoff") == "busy", "An open tab would have been restarted."
+                        page.goto("about:blank")
+                        deadline = time.monotonic() + 15
+                        while host_command("handoff") != "idle":
+                            assert time.monotonic() < deadline, "Closed tabs prevented the update from applying."
+                            time.sleep(.2)
+                        print("Verified an open tab defers upgrades and closing it releases the host.")
                     except Exception:
-                        print("Chrome fixture errors:", errors[-12:], flush=True)
+                        print("Edge fixture errors:", errors[-12:], flush=True)
                         raise
                 finally:
                     browser.close()

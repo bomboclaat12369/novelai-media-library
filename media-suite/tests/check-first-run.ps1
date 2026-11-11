@@ -1,4 +1,4 @@
-param([string]$Program,[string]$TestRoot)
+param([string]$Program,[string]$TestRoot,[string]$OlderLauncher,[string]$StagedUpdate)
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true') { throw 'Run this isolated desktop startup check on the disposable Windows runner.' }
 $profile = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'NovelAI Media Suite'
@@ -9,37 +9,89 @@ try {
     @{LibraryFolder=$missing; CompanionFolder=$missing; WorkbenchFolder=$missing; GameFolder=$missing} | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $profile 'settings.json') -Encoding ascii
     Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
-    Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class SuiteTestWindow { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h); }'
+    Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class SuiteTestWindow { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h); [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); }'
     function Get-SuiteTabs($window) {
         $element = [Windows.Automation.AutomationElement]::FromHandle($window)
         $condition = New-Object Windows.Automation.PropertyCondition(
             [Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::TabItem)
-        $element.FindAll([Windows.Automation.TreeScope]::Descendants,$condition) | Where-Object { $_.Current.Name -match '^Media Suite($| [\u002d\u2013] )' }
+        $element.FindAll([Windows.Automation.TreeScope]::Descendants,$condition) | Where-Object { $_.Current.Name -like 'Media Suite*' }
     }
     $exe = Join-Path $Program 'MediaSuite.exe'
     $first = Start-Process -FilePath $exe -PassThru
     for ($n=0; $n -lt 200; $n++) {
         Start-Sleep -Milliseconds 250
-        if ($first.HasExited) { throw 'Packaged launcher exited before opening Chrome.' }
-        $chrome = Get-Process chrome -ErrorAction SilentlyContinue | Where-Object MainWindowTitle -like 'Media Suite*' | Select-Object -First 1
-        if ($chrome -and @(Get-SuiteTabs $chrome.MainWindowHandle).Count -eq 1) { break }
+        if ($first.HasExited) { throw 'Packaged launcher exited before opening Edge.' }
+        $edge = Get-Process msedge -ErrorAction SilentlyContinue | Where-Object MainWindowTitle -like 'Media Suite*' | Select-Object -First 1
+        if ($edge -and @(Get-SuiteTabs $edge.MainWindowHandle).Count -eq 1) { break }
     }
-    if (!$chrome -or @(Get-SuiteTabs $chrome.MainWindowHandle).Count -ne 1) { throw 'Packaged launcher did not show one Media Suite tab in Chrome.' }
-    $window = $chrome.MainWindowHandle
-    Start-Process -FilePath $chrome.Path -ArgumentList 'about:blank'
-    for ($n=0; $n -lt 40 -and $chrome.MainWindowTitle -like 'Media Suite*'; $n++) { Start-Sleep -Milliseconds 150; $chrome.Refresh() }
+    if (!$edge -or @(Get-SuiteTabs $edge.MainWindowHandle).Count -ne 1) { throw 'Packaged launcher did not show one Media Suite tab in Edge.' }
+    $window = $edge.MainWindowHandle
+    Start-Process -FilePath $edge.Path -ArgumentList 'about:blank'
+    for ($n=0; $n -lt 40 -and $edge.MainWindowTitle -like 'Media Suite*'; $n++) { Start-Sleep -Milliseconds 150; $edge.Refresh() }
     $null = [SuiteTestWindow]::ShowWindow($window,6)
     $second = Start-Process -FilePath $exe -PassThru
     if (!$second.WaitForExit(10000)) { throw 'Second launch opened another instance.' }
     for ($n=0; $n -lt 100; $n++) {
-        Start-Sleep -Milliseconds 200; $chrome.Refresh()
-        if (![SuiteTestWindow]::IsIconic($window) -and $chrome.MainWindowTitle -like 'Media Suite*') { break }
+        Start-Sleep -Milliseconds 200; $edge.Refresh()
+        if (![SuiteTestWindow]::IsIconic($window) -and $edge.MainWindowTitle -like 'Media Suite*') { break }
     }
-    if ([SuiteTestWindow]::IsIconic($window) -or $chrome.MainWindowTitle -notlike 'Media Suite*' -or @(Get-SuiteTabs $window).Count -ne 1) {
-        throw 'Second launch did not restore the original Chrome tab.'
+    if ([SuiteTestWindow]::IsIconic($window) -or $edge.MainWindowTitle -notlike 'Media Suite*' -or @(Get-SuiteTabs $window).Count -ne 1) {
+        throw 'Second launch did not restore the original Edge tab.'
     }
+    $marker = Join-Path $TestRoot 'edge-window.html'
+    Set-Content -LiteralPath $marker -Value '<title>Suite second profile</title>' -Encoding ascii
+    $otherProfile = Join-Path $env:RUNNER_TEMP 'Media Suite second Edge profile'
+    Start-Process -FilePath $edge.Path -ArgumentList ('--no-first-run --no-default-browser-check --user-data-dir="' + $otherProfile + '" "' + ([uri]$marker).AbsoluteUri + '"')
+    for ($n=0; $n -lt 150; $n++) {
+        Start-Sleep -Milliseconds 200
+        $other = Get-Process msedge -ErrorAction SilentlyContinue | Where-Object MainWindowTitle -like 'Suite second profile*' | Select-Object -First 1
+        if ($other -and [SuiteTestWindow]::GetForegroundWindow() -eq $other.MainWindowHandle) { break }
+    }
+    if (!$other -or [SuiteTestWindow]::GetForegroundWindow() -ne $other.MainWindowHandle) { throw 'The second Edge profile did not become active.' }
+    $otherWindow = $other.MainWindowHandle
+    for ($attempt=0; $attempt -lt 2; $attempt++) {
+        Start-Process -FilePath $exe -Wait
+        for ($n=0; $n -lt 80; $n++) {
+            Start-Sleep -Milliseconds 150; $other.Refresh()
+            if ($other.MainWindowTitle -like 'Media Suite*' -and @(Get-SuiteTabs $otherWindow).Count -eq 1) { break }
+        }
+        if ($other.MainWindowTitle -notlike 'Media Suite*' -or [SuiteTestWindow]::GetForegroundWindow() -ne $otherWindow -or
+            @(Get-SuiteTabs $otherWindow).Count -ne 1 -or @(Get-SuiteTabs $window).Count -ne 1) { throw 'The shortcut did not use the previously active Edge window and profile.' }
+    }
+    Write-Host 'Verified opening and reusing one tab in the active Edge profile while another profile holds its own suite tab.'
+    Start-Process -FilePath $exe -ArgumentList '--stop' -Wait
+    if (!$first.WaitForExit(12000)) { throw 'Test host did not stop.' }
+    $updateDir = Join-Path $profile 'updates'
+    Copy-Item -LiteralPath (Join-Path $StagedUpdate 'updates/versions') -Destination $updateDir -Recurse
+    Copy-Item -LiteralPath (Join-Path $StagedUpdate 'updates/active.json') -Destination $updateDir
+    $v = (Get-Content -Raw -LiteralPath (Join-Path $updateDir 'active.json') | ConvertFrom-Json).version
+    $expected = [IO.Path]::GetFullPath((Join-Path $updateDir "versions/$v/MediaSuite.exe"))
+    $bootstrap = Start-Process -FilePath $OlderLauncher -PassThru
+    if (!$bootstrap.WaitForExit(20000) -or $bootstrap.ExitCode -ne 0) { throw 'Older shortcut did not hand off to its verified update.' }
+    for ($n=0; $n -lt 80; $n++) {
+        $first = Get-Process MediaSuite -ErrorAction SilentlyContinue | Where-Object Path -eq $expected | Select-Object -First 1
+        if ($first) { break }; Start-Sleep -Milliseconds 200
+    }
+    if (!$first) { throw 'The original shortcut did not run the updated executable.' }
+    $port = (Get-Content -Raw -LiteralPath (Join-Path $profile 'chrome-ports.json') | ConvertFrom-Json)[0]
+    for ($n=0; $n -lt 80; $n++) {
+        try { $session = Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$port/api/session" -Headers @{'X-Suite-Request'='session'} -TimeoutSec 2; if ($session.version -eq $v) { break } } catch {}
+        Start-Sleep -Milliseconds 150
+    }
+    if ($session.version -ne $v) { throw 'The verified replacement did not serve its own version.' }
+    Write-Host 'Verified the original launcher starts the staged release without another installer.'
+} catch {
+    foreach ($proc in (Get-Process msedge,MediaSuite -ErrorAction SilentlyContinue | Where-Object MainWindowHandle -ne 0)) {
+        Write-Host "Fixture window: $($proc.ProcessName) $($proc.MainWindowTitle)"
+        $ui = [Windows.Automation.AutomationElement]::FromHandle($proc.MainWindowHandle)
+        $type = if ($proc.ProcessName -eq 'MediaSuite') { [Windows.Automation.ControlType]::Text } else { [Windows.Automation.ControlType]::Edit }
+        $filter = New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty,$type)
+        $ui.FindAll([Windows.Automation.TreeScope]::Descendants,$filter) | Select-Object -First 6 | ForEach-Object { Write-Host "  $($_.Current.Name) $($_.Current.ClassName) $($_.Current.AutomationId)" }
+    }
+    throw
 } finally {
     if ($first -and !$first.HasExited) { Start-Process $exe -ArgumentList '--stop' -Wait; if (!$first.WaitForExit(10000)) { $first.Kill() } }
+    if ($other -and !$other.HasExited) { $null = $other.CloseMainWindow() }
     Remove-Item -LiteralPath $profile -Recurse -Force
 }
 

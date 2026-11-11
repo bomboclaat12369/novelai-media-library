@@ -1,12 +1,12 @@
-:root { font: 10pt "Segoe UI", sans-serif; color: #151515; background: #f0f0f0; color-scheme: light; --mode-width: 3.8rem; --edge: max(20px, env(safe-area-inset-right)) }
+:root { font: 10pt "Segoe UI", sans-serif; color: #151515; background: #f0f0f0; color-scheme: light; --edge: max(16px, env(safe-area-inset-right)); --bottom: max(16px, env(safe-area-inset-bottom)); --mode-height: max(30px, 2rem) }
 * { box-sizing: border-box }
 body { margin: 0 }
 button, input { font: inherit; color: inherit }
 main { position: fixed; inset: 0 }
 main > section, iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0 }
-#mode-toggle { position: fixed; z-index: 1; top: 50%; right: var(--edge); transform: translateY(-50%); width: var(--mode-width); min-height: 30px; padding: 3px 0; border: 1px solid #81929f; border-radius: 20px; background: #25333e; color: white; box-shadow: 0 1px 5px #0004; cursor: pointer }
+#mode-toggle { position: fixed; z-index: 1; right: var(--edge); bottom: var(--bottom); width: 3.8rem; height: var(--mode-height); padding: 3px 0; border: 1px solid #81929f; border-radius: 20px; background: #25333e; color: white; box-shadow: 0 1px 5px #0004; cursor: pointer }
 #mode-toggle:hover, #mode-toggle[aria-expanded=true] { background: #374d5e }
-#mode-picker { position: fixed; inset: 50% calc(var(--edge) + var(--mode-width) + 6px) auto auto; transform: translateY(-50%); margin: 0; width: min(160px, calc(100vw - var(--edge) - var(--mode-width) - 14px)); max-height: calc(100dvh - 12px); overflow: auto; padding: 4px; border: 1px solid #abb8c1; border-radius: 9px; background: #f7f9fa; box-shadow: 0 3px 15px #0004 }
+#mode-picker { position: fixed; inset: auto var(--edge) calc(var(--bottom) + var(--mode-height) + 6px) auto; margin: 0; width: min(160px, calc(100vw - var(--edge) - 8px)); max-height: calc(100dvh - var(--bottom) - var(--mode-height) - 14px); overflow: auto; padding: 4px; border: 1px solid #abb8c1; border-radius: 9px; background: #f7f9fa; box-shadow: 0 3px 15px #0004 }
 #mode-picker::backdrop { background: transparent }
 #mode-picker button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 32px; padding: 5px 9px; border: 0; border-radius: 5px; text-align: left; background: transparent; cursor: pointer }
 #mode-picker button:hover { background: #e4ebef }

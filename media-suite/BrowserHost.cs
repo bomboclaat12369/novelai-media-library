@@ -27,6 +27,19 @@ internal sealed class BrowserHost : IDisposable
     private readonly CancellationTokenSource closing = new();
     private readonly List<WebApplication> servers = new();
     private readonly Dictionary<Section, ApplicationProxy> applications = new();
+    private readonly object requestLock = new();
+    private int activeRequests;
+    private bool handingOff;
+    internal bool InUse { get { lock (requestLock) return activeRequests != 0; } }
+    internal bool TryHandOff()
+    {
+        lock (requestLock)
+        {
+            if (activeRequests != 0) return false;
+            handingOff = true;
+            return true;
+        }
+    }
     internal Uri Address { get; private set; }
     private volatile bool ready;
 
@@ -72,7 +85,13 @@ internal sealed class BrowserHost : IDisposable
             app.Run(async context => {
                 if (context.Request.Host.Value != "127.0.0.1:" + context.Connection.LocalPort)
                 { context.Response.StatusCode = 403; return; }
-                await handle(context);
+                lock (requestLock)
+                {
+                    if (handingOff) { context.Response.StatusCode = 503; return; }
+                    activeRequests++;
+                }
+                try { await handle(context); }
+                finally { lock (requestLock) activeRequests--; }
             });
             try { await app.StartAsync(); }
             catch (IOException) when (port != 0) { await app.DisposeAsync(); continue; }
@@ -111,11 +130,20 @@ internal sealed class BrowserHost : IDisposable
                 case "/suite.js": await Asset(context, "suite.js", "text/javascript; charset=utf-8"); return;
                 case "/suite.css": await Asset(context, "suite.css", "text/css; charset=utf-8"); return;
                 case "/favicon.ico": await Asset(context, "favicon.ico", "image/x-icon"); return;
+                case "/api/presence":
+                    if (req.Headers["Sec-Fetch-Site"] != "same-origin" || req.Headers.Accept != "text/event-stream")
+                    { res.StatusCode = 403; return; }
+                    res.ContentType = "text/event-stream";
+                    await res.WriteAsync(": connected\n\n", context.RequestAborted);
+                    await res.Body.FlushAsync(context.RequestAborted);
+                    using (var lifetime = CancellationTokenSource.CreateLinkedTokenSource(closing.Token, context.RequestAborted))
+                        try { await Task.Delay(Timeout.Infinite, lifetime.Token); } catch (OperationCanceledException) { }
+                    return;
                 case "/api/session":
                     if (req.Headers["X-Suite-Request"] != "session") { res.StatusCode = 403; return; }
                     object snapshot;
                     lock (preferencesLock)
-                        snapshot = new {token, lastSection = settings.LastSection, locations = new {
+                        snapshot = new {token, version = typeof(BrowserHost).Assembly.GetName().Version.ToString(3), lastSection = settings.LastSection, locations = new {
                             settings.LibraryFolder, settings.CompanionFolder, settings.WorkbenchFolder, settings.GameFolder }};
                     await res.WriteAsJsonAsync(snapshot); return;
                 default: res.StatusCode = 404; return;

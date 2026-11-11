@@ -44,15 +44,21 @@ jobs:
           dotnet publish media-suite/MediaSuite.csproj -c Release -r win-x64 --self-contained true
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python media-suite/package.py
-      - name: Test the installer and actual Chrome tab against disposable copies
+      - name: Test automatic updates, two Edge profiles and the four real modes
         shell: pwsh
         run: |
           $archive = (Get-Item media-suite/artifacts/Media-Suite-*.zip).FullName
-          & media-suite/tests/check-install.ps1 $archive
+          $older = Join-Path $env:RUNNER_TEMP 'Older suite launcher'
+          $staged = Join-Path $env:RUNNER_TEMP 'Suite update fixture'
+          dotnet build media-suite/MediaSuite.csproj -c Debug -p:Version=1.0.99 -o $older
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          dotnet run --project media-suite/tests/updates/UpdateChecks.csproj -c Release -- $archive $staged
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & media-suite/tests/check-install.ps1 $archive -OlderLauncher (Join-Path $older 'MediaSuite.exe') -StagedUpdate $staged
           $fixture = Join-Path $env:RUNNER_TEMP 'Suite integration fixture'
           python media-suite/tests/fixture.py $fixture game-qa-source
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          python media-suite/tests/chrome-smoke.py $fixture media-suite/tests/browser/bin/Release/net8.0-windows/MediaSuite.BrowserSmoke.dll
+          python media-suite/tests/edge-smoke.py $fixture media-suite/tests/browser/bin/Release/net8.0-windows/MediaSuite.BrowserSmoke.dll
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python media-suite/tests/check-result.py $fixture
       - name: Check the release pipeline with disposable Git repositories
@@ -89,15 +95,40 @@ jobs:
             cmp "release/$zip" "existing/$zip"
             cmp release/Install-Media-Suite.cmd existing/Install-Media-Suite.cmd
           else
-            gh release create "$tag" "release/$zip" release/Install-Media-Suite.cmd release/media-suite-manifest.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Windows Media Suite ${tag#media-suite-v}" --notes "All four modes now fill the Chrome tab. Use the small Mode button halfway down the right edge to switch between Media Library, Battles, Workbench and After Hours, or to open Locations."
+            gh release create "$tag" "release/$zip" release/Install-Media-Suite.cmd release/media-suite-manifest.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Windows Media Suite ${tag#media-suite-v}" --notes "Media Suite now opens in the current Microsoft Edge window and checks for verified updates automatically. Mode is in the bottom-right corner and its menu opens upward."
           fi
+          jq --arg commit "$GITHUB_SHA" --arg tag "$tag" '. + {status:"published_verification_pending",commit:$commit,tag:$tag}' release/media-suite-manifest.json > release-receipt.json
           gh release download "$tag" --repo "$GITHUB_REPOSITORY" -D verified
           cmp release/media-suite-manifest.json verified/media-suite-manifest.json
           cd verified
           echo "$(jq -r .sha256 media-suite-manifest.json)  $zip" | sha256sum -c -
           echo "$(jq -r .installer_sha256 media-suite-manifest.json)  Install-Media-Suite.cmd" | sha256sum -c -
-          jq --arg commit "$GITHUB_SHA" --arg tag "$tag" '. + {status:"published_verified",commit:$commit,tag:$tag}' media-suite-manifest.json > ../release-receipt.json
+          # The auto-update feed is a separate, small file on main. Promote only
+          # after the public versioned package and downloader have both verified.
+          channel=release-media-suite.json
+          api="repos/$GITHUB_REPOSITORY"
+          sha=$(gh api "$api/git/trees/main" --jq '.tree[] | select(.path=="release-media-suite.json") | .sha')
+          if [[ -n "$sha" ]]; then
+            gh api -H 'Accept: application/vnd.github.raw+json' "$api/contents/$channel?ref=main" > ../previous-feed.json
+            previous=$(jq -er .version ../previous-feed.json)
+            version=$(jq -er .version media-suite-manifest.json)
+            [[ $(printf '%s\n' "$previous" "$version" | sort -V | tail -1) == "$version" ]]
+            if [[ "$previous" == "$version" ]]; then cmp ../previous-feed.json media-suite-manifest.json; fi
+          fi
+          if ! cmp -s ../previous-feed.json media-suite-manifest.json; then
+            jq -n --rawfile body media-suite-manifest.json --arg sha "$sha" --arg tag "$tag" '{message:("Promote verified " + $tag),branch:"main",content:($body|@base64)} + (if $sha!="" then {sha:$sha} else {} end)' > ../feed-request.json
+            gh api --method PUT "$api/contents/$channel" --input ../feed-request.json > /dev/null
+          fi
+          gh api -H 'Accept: application/vnd.github.raw+json' "$api/contents/$channel?ref=main" > ../api-feed.json
+          cmp media-suite-manifest.json ../api-feed.json
+          for attempt in {1..32}; do
+            if curl -fsSL --max-time 10 "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/$channel" -o ../raw-feed.json && cmp -s media-suite-manifest.json ../raw-feed.json; then break; fi
+            sleep 12
+          done
+          cmp media-suite-manifest.json ../raw-feed.json
+          jq --arg commit "$GITHUB_SHA" --arg tag "$tag" --arg feed "$channel" '. + {status:"published_verified",commit:$commit,tag:$tag,feed:$feed}' media-suite-manifest.json > ../release-receipt.json
       - uses: actions/upload-artifact@v4
+        if: always() && hashFiles('release-receipt.json') != ''
         with:
           name: windows-suite-release-receipt
           path: release-receipt.json

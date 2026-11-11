@@ -41,7 +41,8 @@ try
     using var host = new BrowserHost(settings, profile, services);
     await host.StartAsync();
     Console.WriteLine(host.Address.AbsoluteUri);
-    Console.ReadLine();
+    while (Console.ReadLine() == "handoff")
+        Console.WriteLine(host.TryHandOff() ? "idle" : "busy");
     if (started.Count != 3) throw new Exception("Expected three cold starts, got " + started.Count);
 }
 finally

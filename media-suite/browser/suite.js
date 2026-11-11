@@ -4,6 +4,10 @@ const pages = new Map();
 const dialog = byId('settings');
 const modeToggle = byId('mode-toggle');
 const picker = byId('mode-picker');
+// Keep the current host while this tab, including a background tab, is using it.
+let presence;
+window.addEventListener('pageshow', () => { presence = new EventSource('/api/presence'); });
+window.addEventListener('pagehide', () => { presence?.close(); });
 let token, selected, remember = Promise.resolve();
 
 async function session() {

@@ -2,6 +2,20 @@
 param([string]$WorkspaceParent, [switch]$PrepareOnly)
 $ErrorActionPreference = 'Stop'
 $stateDir = Join-Path $env:LOCALAPPDATA 'NovelAI Media Suite'
+$pointer = Join-Path $stateDir 'updates/active.json'
+$index = Join-Path $PSScriptRoot 'suite-install.json'
+if ((Test-Path -LiteralPath $index) -and (Test-Path -LiteralPath $pointer)) {
+    $updatedScript = $null
+    try {
+        $current = [version](Get-Content -Raw -LiteralPath $index | ConvertFrom-Json).version
+        $version = (Get-Content -Raw -LiteralPath $pointer | ConvertFrom-Json).version
+        if ($version -match '^\d+\.\d+\.\d+$' -and [version]$version -gt $current) {
+            $candidate = Join-Path $stateDir "updates/versions/$version/Open-MainCodex.ps1"
+            if (Test-Path -LiteralPath $candidate) { $updatedScript = $candidate }
+        }
+    } catch { Write-Verbose 'Using the installed main-workspace helper.' }
+    if ($updatedScript) { & $updatedScript @PSBoundParameters; return }
+}
 $record = Join-Path $stateDir 'main-workspace.txt'
 $remote = 'https://github.com/bomboclaat12369/novelai-media-library.git'
 $prompt = 'This is my main Media Suite Codex thread for the Windows suite, Media Library, Battles, and Workbench. Read AGENTS.md, media-suite/MAIN-CODEX.md, and docs/PROJECT-MAP.md. Identify my existing installed programs, fill in any missing suite locations, and verify the connections on my PC. Continue using my separate After Hours thread for game development.'
