@@ -66,7 +66,14 @@ namespace NovelAI.MediaSuite
         {
             if (string.IsNullOrWhiteSpace(value)) return null;
             return string.Equals(Path.GetFileName(value), "library.json", StringComparison.OrdinalIgnoreCase)
-                ? Path.GetDirectoryName(value) : value;
+                ? (string.IsNullOrEmpty(Path.GetDirectoryName(value)) ? "." : Path.GetDirectoryName(value)) : value;
+        }
+
+        internal static string GameLibrary(string folder,string value)
+        {
+            var directory=LibraryDirectory(value);
+            if(string.IsNullOrWhiteSpace(directory)) return null;
+            return Path.GetFullPath(Path.Combine(folder,directory));
         }
 
         internal static string InFolder(string root, Func<string, bool> valid, params string[] relatives)
@@ -121,7 +128,7 @@ namespace NovelAI.MediaSuite
                 var sources = new List<string> { Path.Combine(docs,"NovelAI Media Library"), Path.Combine(user,"NovelAI Media Library") };
                 if (Game(settings.GameFolder))
                 {
-                    try { sources.Add(LibraryDirectory(Preferences.Load<GameConfig>(Path.Combine(settings.GameFolder,"local.json")).Library)); }
+                    try { sources.Add(GameLibrary(settings.GameFolder,Preferences.Load<GameConfig>(Path.Combine(settings.GameFolder,"local.json")).Library)); }
                     catch (IOException) { } catch (SerializationException) { }
                 }
                 settings.LibraryFolder = ChooseUnique(sources,Library);

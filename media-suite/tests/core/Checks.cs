@@ -37,7 +37,7 @@ internal static class Checks
         try
         {
             var settings=new Preferences{CompanionFolder=Path.Combine(root,"Library program"),WorkbenchFolder=Path.Combine(root,"Workbench"),
-                LibraryFolder=Path.Combine(root,"Real media"),GameFolder=Path.Combine(root,"Game checkout","game"),LastSection="AfterHours"};
+                LibraryFolder=Path.Combine(root,"Real media"),GameFolder=Path.Combine(root,"Game checkout","game"),LastSection="AfterHours",Maximized=true};
             foreach(var dir in new[]{settings.CompanionFolder,settings.WorkbenchFolder,settings.LibraryFolder,settings.GameFolder}) Directory.CreateDirectory(dir);
             foreach(var item in new[]{(settings.CompanionFolder,"companion.pyw"),(settings.CompanionFolder,".venv/Scripts/python.exe"),
                 (settings.WorkbenchFolder,"app.py"),(settings.WorkbenchFolder,"organizer.py"),(settings.WorkbenchFolder,".venv/Scripts/python.exe"),
@@ -51,6 +51,7 @@ internal static class Checks
             Check(Installations.ChooseUnique(new[]{settings.LibraryFolder,settings.LibraryFolder},Installations.Library)==settings.LibraryFolder,"Deduplicate paths");
             foreach(var url in new[]{"https://example.com/organizer","http://127.0.0.1.evil.com/organizer","file:///organizer","http://user@127.0.0.1/organizer","http://127.0.0.1:4321/organizer?token=bad","http://127.0.0.1:4321/game/"})
                 Check(Services.WorkbenchAddress(url)==null,"Untrusted or stale address: "+url);
+            Check(Installations.GameLibrary(settings.GameFolder,"../media/library.json")==Path.GetFullPath(Path.Combine(settings.GameFolder,"..","media")),"Resolve the game launcher's relative library paths");
             Check(Services.Quote("a b")=="\"a b\"","Quoted path with spaces");
             Check(Services.Quote("x\\")=="\"x\\\\\"","Trailing slash quoting");
             var mock=new Mock{Root=settings.LibraryFolder};

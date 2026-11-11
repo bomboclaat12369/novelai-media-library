@@ -14,6 +14,12 @@ namespace NovelAI.MediaSuite
     {
         [DllImport("user32.dll")] private static extern bool AllowSetForegroundWindow(int processId);
 
+        internal static void PrepareBrowserLoader()
+        {
+            if (File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"WebView2Loader.dll")))
+                CoreWebView2Environment.SetLoaderDllFolderPath(AppDomain.CurrentDomain.BaseDirectory);
+        }
+
         [STAThread]
         private static void Main()
         {
@@ -32,8 +38,7 @@ namespace NovelAI.MediaSuite
                 }
                 try
                 {
-                    if (File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"WebView2Loader.dll")))
-                        CoreWebView2Environment.SetLoaderDllFolderPath(AppDomain.CurrentDomain.BaseDirectory);
+                    PrepareBrowserLoader();
                     var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
                     var folder = Path.Combine(local,"NovelAI Media Suite");
                     var settings = Preferences.Load<Preferences>(Path.Combine(folder,"settings.json"));

@@ -18,6 +18,7 @@
     const plan = await call('transfer-preview', {job, include_sets:false});
     if (!plan.imports.length) throw new Error('The fixture import was missing');
     window.suiteImportStarted = true;
+    if (window.suiteImportGate) await window.suiteImportGate;
     for (const item of plan.imports) await call('transfer-import', {job,token:plan.token,id:item.id});
     const result = await call('transfer-apply', {job,token:plan.token});
     if (!result.checkpoint) throw new Error('Missing import checkpoint');

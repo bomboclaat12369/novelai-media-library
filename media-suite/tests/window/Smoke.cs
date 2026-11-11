@@ -42,6 +42,7 @@ internal static class Smoke
             process.ErrorDataReceived+=(s,e)=>{if(e.Data!=null) Console.Error.WriteLine(e.Data);}; process.BeginErrorReadLine();
             lock(processes) processes.Add(process);
         });
+        NovelAI.MediaSuite.Program.PrepareBrowserLoader();
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
         int result=0;
         using(var form=new SuiteWindow(settings,Path.Combine(root,"Suite profile"),services))
@@ -50,7 +51,13 @@ internal static class Smoke
             async Task Page(Section section,string ready)
             {
                 form.SelectPage(section);
-                await Until(async ()=>form.Loaded(section)&&await JS(section,ready)=="true","render "+section);
+                try { await Until(async ()=>form.Loaded(section)&&await JS(section,ready)=="true","render "+section); }
+                catch (TimeoutException)
+                {
+                    if(form.View(section)?.CoreWebView2!=null) Console.Error.WriteLine(await JS(section,
+                        "(document.getElementById('nai-media-host')?.shadowRoot?.getElementById('app')?.innerText || document.body.innerText).slice(0,400)"));
+                    throw;
+                }
             }
             form.Shown+=async(s,e)=>{
                 try
@@ -61,13 +68,15 @@ internal static class Smoke
                     await JS(Section.Workbench,"Array.from(document.querySelectorAll('#postList .post')).find(e=>e.textContent.includes('Post 2')).click()");
                     await Until(async()=>await JS(Section.Workbench,"document.getElementById('title').textContent.includes('Post 2')")=="true","open the second post");
                     var id=File.ReadAllText(Path.Combine(root,"import-id.txt")).Trim();
-                    await JS(Section.Workbench,"window.suiteFinished=false;window.suiteMark='same-document';("+code+")('"+id+"').then(()=>window.suiteFinished=true).catch(e=>window.suiteFinished=e.message);");
+                    await JS(Section.Workbench,"window.suiteImportGate=new Promise(r=>window.suiteResumeImport=r);window.suiteFinished=false;window.suiteMark='same-document';("+code+")('"+id+"').then(()=>window.suiteFinished=true).catch(e=>window.suiteFinished=e.message);");
+                    await Until(async()=>await JS(Section.Workbench,"window.suiteImportStarted===true")=="true","stage import on current post");
                     await Page(Section.Battles,"!!document.getElementById('nai-media-host')?.shadowRoot?.querySelector('.naiBattleWrap')");
-                    await Page(Section.AfterHours,"document.body.innerText.includes('Suite QA Patricia')");
+                    await Page(Section.AfterHours,"!!document.getElementById('nai-media-host')?.shadowRoot?.getElementById('app')?.innerText.includes('Suite QA Patricia')");
                     await JS(Section.AfterHours,"fetch('/game/api/state').then(r=>r.json()).then(x=>window.verifiedSeed=x.state.seed)");
                     await Until(async()=>await JS(Section.AfterHours,"window.verifiedSeed===123456")=="true","open original saved career");
+                    await JS(Section.Workbench,"window.suiteResumeImport()");
+                    await Until(async()=>{var v=await JS(Section.Workbench,"window.suiteFinished"); if(v.StartsWith("\""))throw new Exception(v);return v=="true";},"finish import while After Hours is visible");
                     await Page(Section.Workbench,"window.suiteMark==='same-document' && document.getElementById('title').textContent.includes('Post 2')");
-                    await Until(async()=>{var v=await JS(Section.Workbench,"window.suiteFinished"); if(v.StartsWith("\""))throw new Exception(v);return v=="true";},"finish Workbench import across tab changes");
                     var restored=Preferences.Load<Preferences>(Path.Combine(root,"Suite profile","settings.json"));
                     if(restored.LastSection!="Workbench" || processes.Count!=3) throw new Exception("Duplicate service or wrong last tab");
                     Console.WriteLine("Passed: three cold starts, persistent tabs and saved selection.");

@@ -82,8 +82,14 @@ namespace NovelAI.MediaSuite
 
         private async void WarmCompanion()
         {
-            try { await services.Library(closing.Token); }
+            try { await services.Library(closing.Token); RememberLibrary(); }
             catch (Exception) { /* The Library tab offers its own connection and retry. */ }
+        }
+
+        private void RememberLibrary()
+        {
+            if(!closing.IsCancellationRequested && string.IsNullOrEmpty(settings.LibraryFolder) && !string.IsNullOrEmpty(services.ActiveLibrary))
+            { settings.LibraryFolder=services.ActiveLibrary; WriteSettings(); }
         }
 
         internal void BringBack()
@@ -126,6 +132,7 @@ namespace NovelAI.MediaSuite
             try
             {
                 var address=await services.Open(section,closing.Token);
+                RememberLibrary();
                 closing.Token.ThrowIfCancellationRequested();
                 if(environment==null || environment.IsFaulted)
                     environment=CoreWebView2Environment.CreateAsync(null,Path.Combine(folder,"Browser"));

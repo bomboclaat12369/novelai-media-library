@@ -161,7 +161,7 @@ namespace NovelAI.MediaSuite
             if (!Installations.Game(folder))
                 throw new InvalidOperationException("In Locations, choose your After Hours installation containing game/Launch.ps1.");
             var local = Preferences.Load<GameConfig>(Path.Combine(folder,"local.json"));
-            var library = Installations.LibraryDirectory(local.Library);
+            var library = Installations.GameLibrary(folder,local.Library);
             if (string.IsNullOrWhiteSpace(library)) library = ActiveLibrary ?? settings.LibraryFolder;
             if (!Installations.Library(library))
                 throw new InvalidOperationException("After Hours needs an existing library.json. Check the library in game/local.json or in Locations.");

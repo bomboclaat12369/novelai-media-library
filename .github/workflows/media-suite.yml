@@ -50,7 +50,11 @@ jobs:
           $fixture = Join-Path $env:RUNNER_TEMP 'Suite integration fixture'
           python media-suite/tests/fixture.py $fixture game-qa-source
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & media-suite/tests/window/bin/Release/net48/MediaSuite.WindowSmoke.exe $fixture media-suite/tests/workbench-import.js
+          $unpacked = Join-Path $env:RUNNER_TEMP 'Packaged suite'
+          Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
+          $application = Join-Path $unpacked 'app'
+          Copy-Item media-suite/tests/window/bin/Release/net48/MediaSuite.WindowSmoke.exe* -Destination $application
+          & (Join-Path $application 'MediaSuite.WindowSmoke.exe') $fixture media-suite/tests/workbench-import.js
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python media-suite/tests/check-result.py $fixture
       - uses: actions/upload-artifact@v4
