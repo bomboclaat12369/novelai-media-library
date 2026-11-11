@@ -48,6 +48,14 @@ for _kind, _pay, _energy, _roles in (
     _title, _detail = flavor.EVENTS[_kind][0]
     DECISIONS[_kind] = {'title': _title, 'detail': _detail, 'revenue': _pay, 'energy': _energy, 'roles': _roles,
         'options': [{'id': 'accept', 'label': f'Accept · +${_pay}, −{_energy} energy'}, {'id': 'decline', 'label': 'Pass on the extra'}], 'default': 'decline'}
+for _kind, _title, _pay, _energy in (
+    ('second_round', 'The client wants a second round', 45, 8),
+    ('third_round', 'The client wants a third round', 60, 12),
+):
+    DECISIONS[_kind] = {'title': _title, 'detail': 'Another round for the same client.',
+        'revenue': _pay, 'energy': _energy, 'roles': ('room',), 'default': 'decline',
+        'options': [{'id': 'accept', 'label': f'Accept · +${_pay}, −{_energy} energy'},
+                    {'id': 'decline', 'label': 'Finish the booking'}]}
 for _kind, _cost, _energy, _loyalty in (('team_meal', 40, 20, 0), ('regular_perk', 20, 0, 4)):
     _title, _detail = flavor.EVENTS[_kind][0]
     DECISIONS[_kind] = {'title': _title, 'detail': _detail, 'cost': _cost, 'restore_energy': _energy, 'loyalty': _loyalty,
@@ -66,6 +74,7 @@ def ensure(state):
     state.setdefault('reputation', 0)
     state.setdefault('loyalty', 0)
     state.setdefault('promotion_until', 0)
+    state.setdefault('preferred_night_speed', (state.get('night') or {}).get('speed', 1))
     state.setdefault('saved_plans', {})
     state.setdefault('pack_vouchers', 0)
     state.setdefault('milestones', [])
@@ -227,6 +236,9 @@ def prepare_night(state):
         kind = pool[index]
         n['decisions'].append({'id': f"{state['day']}-{i}", 'kind': kind, 'at': at, 'until': at + 50,
                               'choice': None, 'copy': flavor.event(kind, state, occurrence)})
+    if n.get('stage_tracking') == 2:
+        from .bookings import prepare_events
+        n['decisions'] = prepare_events(state)
     n['department_revenue'] = 0; n['decision_costs'] = 0; n['activities'] = {}
     n['assignments'] = {p: assignment(state, p) for p in state['people']}
     for c in reservations(state):
@@ -235,13 +247,21 @@ def prepare_night(state):
 
 def resolve_decision(state, decision, choice, automatic=False):
     from .engine import RuleError, record
+    if state['night'].get('stage_tracking') == 2 and decision.get('meeting_id'):
+        from .bookings import resolve_request
+        return resolve_request(state, decision, choice, automatic)
     spec = DECISIONS[decision['kind']]
     if choice not in [o['id'] for o in spec['options']]: raise RuleError('Choose one of the offered options.')
     n = state['night']
     if choice == 'accept':
-        team = [w for p, w in state['people'].items() if assignment(state, p) in spec['roles'] and w['energy'] >= spec['energy']]
+        team = [(p, w) for p, w in state['people'].items() if assignment(state, p) in spec['roles'] and w['energy'] >= spec['energy']]
         if not team: raise RuleError('No club host has the energy for this booking.')
-        max(team, key=lambda w: w['energy'])['energy'] -= spec['energy']
+        owner, worker = max(team, key=lambda item: item[1]['energy'])
+        worker['energy'] -= spec['energy']
+        decision['worker'] = owner
+        if n.get('stage_tracking') and n['assignments'][owner] == 'room':
+            from .meetings import identity
+            decision['meeting_id'] = identity(state, owner, min(6, int(n['elapsed'] // 50) + 1))
         n['revenue'] += spec['revenue']
     if choice in ('refresh', 'promote', 'perk'):
         cost = spec['cost']
@@ -257,7 +277,8 @@ def resolve_decision(state, decision, choice, automatic=False):
     decision['choice'] = choice; decision['automatic'] = automatic
     title = decision.get('copy', {}).get('title', spec['title'])
     n['log'].append(title + ': ' + next(o['label'] for o in spec['options'] if o['id'] == choice))
-    record(state, 'business_decision', decision=decision['id'], opportunity=decision['kind'], choice=choice, automatic=automatic, title=title)
+    record(state, 'business_decision', decision=decision['id'], opportunity=decision['kind'], choice=choice,
+           automatic=automatic, title=title, worker=decision.get('worker'), meeting_id=decision.get('meeting_id'))
 
 
 def advance_wave(state, catalog, wave):
@@ -265,7 +286,7 @@ def advance_wave(state, catalog, wave):
     from .engine import record, draw
     n = state['night']
     for decision in n['decisions']:
-        if not decision['choice'] and wave * 50 >= decision['until']:
+        if n.get('stage_tracking') != 2 and not decision['choice'] and wave * 50 >= decision['until']:
             resolve_decision(state, decision, DECISIONS[decision['kind']]['default'], True)
     for c in reservations(state):
         worker = state['people'][c['owner']]

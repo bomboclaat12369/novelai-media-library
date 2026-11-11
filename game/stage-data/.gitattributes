@@ -1,0 +1,2 @@
+catalog.json -text whitespace=cr-at-eol
+stage-labels.json -text whitespace=cr-at-eol

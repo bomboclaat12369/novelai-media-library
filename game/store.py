@@ -4,12 +4,13 @@ import copy
 from contextlib import contextmanager, closing
 import hashlib
 import json
+import os
 import sqlite3
 import threading
 import time
 import uuid
 from pathlib import Path
-from . import engine, migrations
+from . import engine, migrations, stage_labels
 
 
 class Conflict(engine.RuleError):
@@ -24,6 +25,9 @@ class GameStore:
     def __init__(self,path,catalog):
         self.path=Path(path);self.path.parent.mkdir(parents=True,exist_ok=True)
         self.lock=threading.RLock();self.last_tick=None
+        self.label_path=self.path.parent/'stage-labels.json'
+        self.label_stamp=None;self.label_pack=stage_labels.bundled();self.label_error=None
+        self.sync_labels()
         with self.connect() as db:
             db.executescript('''CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS save(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL,body TEXT NOT NULL);
@@ -73,9 +77,44 @@ class GameStore:
 
     def read(self):
         with self.lock,self.connect() as db:
+            self.sync_labels()
             self.sync_catalog(db)
             row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
             return {'revision':row[0],'state':json.loads(row[1])} if row else {'revision':0,'state':None}
+
+    def sync_labels(self):
+        try:
+            info=self.label_path.stat()
+            stamp=(info.st_mtime_ns,info.st_size)
+            if stamp==self.label_stamp: return
+            if info.st_size>stage_labels.MAX_BYTES: raise ValueError('The custom label pack exceeds 32 MB.')
+            pack=stage_labels.LabelPack(self.label_path.read_bytes())
+            self.label_pack=pack;self.label_stamp=stamp;self.label_error=None
+        except FileNotFoundError:
+            self.label_pack=stage_labels.bundled();self.label_stamp=None;self.label_error=None
+        except (OSError,ValueError) as exc:
+            # A broken optional text file cannot prevent playing/recovering a save.
+            self.label_pack=stage_labels.bundled();self.label_error=str(exc)
+            if isinstance(exc,ValueError): self.label_stamp=stamp
+
+    def label_info(self):
+        with self.lock:
+            self.sync_labels()
+            return {**self.label_pack.summary,'custom':self.label_stamp is not None and not self.label_error,
+                    'error':self.label_error}
+
+    def import_labels(self, raw):
+        pack=stage_labels.load_upload(raw)
+        with self.lock:
+            temp=self.label_path.with_name(f'.stage-labels-{uuid.uuid4().hex}.tmp')
+            try:
+                with temp.open('wb') as target:
+                    target.write(pack.raw);target.flush();os.fsync(target.fileno())
+                os.replace(temp,self.label_path)
+            finally:
+                temp.unlink(missing_ok=True)
+            self.label_stamp=None;self.sync_labels()
+        return self.label_info()
 
     def sync_catalog(self,db):
         stamp=db.execute("SELECT value FROM meta WHERE key='catalog_stamp'").fetchone()
@@ -90,6 +129,7 @@ class GameStore:
         digest=hashlib.sha256(encode([action,body]).encode()).hexdigest()
         with self.lock,self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            self.sync_labels()
             self.sync_catalog(db)
             duplicate=db.execute('SELECT digest FROM requests WHERE id=?',(request_id,)).fetchone()
             row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
@@ -109,10 +149,10 @@ class GameStore:
                 clock=db.execute("SELECT value FROM meta WHERE key='clock_tick'").fetchone()
                 delta=0 if not clock else max(0,now-float(clock[0]))
                 speed=state['night']['speed'] if state['phase']=='night' else 1
-                state=engine.command(state,self.catalog,'advance',{'seconds':delta*speed,'stop_at_decision':True})
+                state=engine.command(state,self.catalog,'advance',{'seconds':delta*speed,'stop_at_decision':True},labels=self.label_pack)
             else:
                 if action=='advance': raise engine.RuleError('The server owns the game clock.')
-                state=engine.command(state,self.catalog,action,body)
+                state=engine.command(state,self.catalog,action,body,labels=self.label_pack)
             events=state.pop('journal',[]);state['journal']=[]
             db.execute('INSERT OR REPLACE INTO save VALUES (1,?,?)',(revision+1,encode(state)))
             db.execute('INSERT INTO requests VALUES (?,?)',(request_id,digest))

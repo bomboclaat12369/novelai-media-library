@@ -6,6 +6,7 @@ import random
 from .catalog import stable
 from . import management as m
 from . import flavor
+from . import meetings, stage_labels, bookings
 
 VERSION = '1.0.0-local'
 NIGHT_SPEEDS = (1, 2, 4, 8)
@@ -120,72 +121,120 @@ def start_night(state):
         raise RuleError('Finish opening your pack first.')
     state['phase'] = 'night'
     demand, factor = forecast(state)
-    state['night'] = {'elapsed':0,'wave':0,'paused':False,'speed':1,'demand':demand,
+    state['night'] = {'elapsed':0,'wave':0,'paused':False,'speed':state['preferred_night_speed'],'demand':demand,
                       'demand_factor':factor,'revenue':0,'served':0,'missed':0,'log':[],
                       'earnings':{p:0 for p in state['people']}, 'energy_spent':{p:0 for p in state['people']}}
+    state['night'].update(stage_tracking=2, duration=bookings.NIGHT_SECONDS,
+                          booking_rules_version=bookings.BOOKING_RULES_VERSION)
     m.prepare_night(state)
     record(state,'night_started',pricing=state['pricing'],assignments=copy.deepcopy(state['people']))
 
 
-def advance(state, catalog, seconds, stop_at_decision=False):
+def prepare_meetings(state, catalog, labels, force=False):
+    night = state['night']
+    if night.get('stage_tracking') == 2:
+        bookings.initialize(state, catalog, labels)
+        if not night['paused']:
+            bookings.process(state, catalog, labels, True)
+        return
+    if not night.get('stage_tracking') or night['wave'] >= 6 or night.get('meeting_round') == night['wave'] + 1:
+        return
+    if not force and any(not d['choice'] and d['at'] <= night['elapsed'] < d['until'] for d in night['decisions']):
+        return
+    # The existing deterministic rules establish whether this round has a
+    # booking. Run them on a copy; all real accounting still occurs at its
+    # original boundary. The tracker cannot alter acceptance or payment RNG.
+    preview = copy.deepcopy(state)
+    results = resolve_club_round(preview, catalog, night['wave'] + 1)
+    meetings.begin_round(state, results, force=force)
+    meetings.advance(state, night['elapsed'], labels)
+
+
+def resolve_club_round(state, catalog, wave, owners=None, rng=None):
+    night = state['night']; results = {}
+    rng = rng or random.Random(stable((state['seed'],state['day'],wave)))
+    multiplier, acceptance = PRICES[state['pricing']]
+    for owner, worker in state['people'].items():
+        if owners is not None and owner not in owners:
+            continue
+        role = night['assignments'][owner]
+        if role not in ('room','lounge'):
+            continue
+        card = catalog['cards'][worker['card']]
+        own = state['owned'][worker['card']]
+        strength = .06 + card['rarity']*.015 + own['mastery']*.01
+        energy_cost = 8*(1-strength if card['specialty']=='efficiency' else 1)
+        if worker['energy'] < energy_cost:
+            night['missed'] += 1
+            night['activities'][owner] = {'department':'club', 'label':'Paid sex' if role=='room' else 'Lounge hosting',
+                'status':flavor.activity('tired',state,owner,wave), 'round':wave}
+            results[owner] = {'served': False, 'reason': 'tired'}
+            continue
+        accept = min(.995, acceptance*night['demand_factor'] + .018*state['facilities']['reception']
+                     + (strength*.5 if card['specialty']=='service' else 0)
+                     + (min(.035,state['loyalty']/2000) if card['specialty']=='loyalty' else 0)
+                     + (.035 if state['promotion_until'] >= state['day'] else 0))
+        if rng.random() > accept:
+            night['missed'] += 1
+            night['activities'][owner] = {'department':'club', 'label':'Paid sex' if role=='room' else 'Lounge hosting',
+                'status':flavor.activity('quiet',state,owner,wave), 'round':wave}
+            results[owner] = {'served': False, 'reason': 'quiet'}
+            continue
+        value = (24 if role=='room' else 14) * multiplier * rng.uniform(.92,1.08)
+        value *= 1 + min(.20,worker['xp']//100*.01)
+        value *= 1 + m.skill_bonus(worker, 'club')
+        value *= 1 + (strength if card['specialty']=='tips' else strength*.35)
+        value = round(value)
+        worker['energy'] = round(worker['energy']-energy_cost,2)
+        worker['xp'] += 4
+        worker['skills']['club'] += 2
+        if card['specialty']=='loyalty': state['loyalty']=min(100,state['loyalty']+.15)
+        own['xp'] += 3; own['uses'] += 1
+        own['mastery'] = min(5,own['xp']//90)
+        night['energy_spent'][owner] += energy_cost
+        night['earnings'][owner] += value
+        night['revenue'] += value; night['served'] += 1
+        night['activities'][owner] = {'department':'club', 'label':'Paid sex' if role=='room' else 'Lounge hosting',
+            'status':flavor.activity(role,state,owner,wave)+f' +${value}', 'round':wave}
+        results[owner] = {'served': True, 'value': value}
+    return results
+
+
+def advance(state, catalog, seconds, stop_at_decision=False, labels=None):
     if state['phase'] != 'night' or state['night']['paused']:
         return
     if not isinstance(seconds, (float,int)) or not math.isfinite(seconds) or seconds < 0:
         raise RuleError('Invalid time step.')
     night = state['night']
+    labels = labels or stage_labels.bundled()
+    if night.get('stage_tracking') == 2:
+        bookings.advance(state, catalog, seconds, labels, stop_at_decision)
+        return
     target = min(300, night['elapsed'] + seconds)
     decision = next((d for d in sorted(night['decisions'],key=lambda d:d['at'])
                      if not d['choice'] and night['elapsed'] < d['until'] and target >= d['at']),None) if stop_at_decision else None
-    night['elapsed'] = max(night['elapsed'],decision['at']) if decision else target
+    target = max(night['elapsed'],decision['at']) if decision else target
     if decision: night['paused']=True
-    while night['wave'] < min(6, int(night['elapsed']//50)):
+    while night['wave'] < min(6, int(target//50)):
+        prepare_meetings(state, catalog, labels, force=True)
+        night['elapsed'] = (night['wave'] + 1) * 50
+        meetings.advance(state, night['elapsed'], labels)
         night['wave'] += 1
-        rng = random.Random(stable((state['seed'],state['day'],night['wave'])))
-        multiplier, acceptance = PRICES[state['pricing']]
-        for owner, worker in state['people'].items():
-            role = night['assignments'][owner]
-            if role not in ('room','lounge'):
-                continue
-            card = catalog['cards'][worker['card']]
-            own = state['owned'][worker['card']]
-            strength = .06 + card['rarity']*.015 + own['mastery']*.01
-            energy_cost = 8*(1-strength if card['specialty']=='efficiency' else 1)
-            if worker['energy'] < energy_cost:
-                night['missed'] += 1
-                night['activities'][owner] = {'department':'club', 'label':'Paid sex' if role=='room' else 'Lounge hosting',
-                    'status':flavor.activity('tired',state,owner,night['wave']), 'round':night['wave']}
-                continue
-            accept = min(.995, acceptance*night['demand_factor'] + .018*state['facilities']['reception']
-                         + (strength*.5 if card['specialty']=='service' else 0)
-                         + (min(.035,state['loyalty']/2000) if card['specialty']=='loyalty' else 0)
-                         + (.035 if state['promotion_until'] >= state['day'] else 0))
-            if rng.random() > accept:
-                night['missed'] += 1
-                night['activities'][owner] = {'department':'club', 'label':'Paid sex' if role=='room' else 'Lounge hosting',
-                    'status':flavor.activity('quiet',state,owner,night['wave']), 'round':night['wave']}
-                continue
-            value = (24 if role=='room' else 14) * multiplier * rng.uniform(.92,1.08)
-            value *= 1 + min(.20,worker['xp']//100*.01)
-            value *= 1 + m.skill_bonus(worker, 'club')
-            value *= 1 + (strength if card['specialty']=='tips' else strength*.35)
-            value = round(value)
-            worker['energy'] = round(worker['energy']-energy_cost,2)
-            worker['xp'] += 4
-            worker['skills']['club'] += 2
-            if card['specialty']=='loyalty': state['loyalty']=min(100,state['loyalty']+.15)
-            own['xp'] += 3; own['uses'] += 1
-            own['mastery'] = min(5,own['xp']//90)
-            night['energy_spent'][owner] += energy_cost
-            night['earnings'][owner] += value
-            night['revenue'] += value; night['served'] += 1
-            night['activities'][owner] = {'department':'club', 'label':'Paid sex' if role=='room' else 'Lounge hosting',
-                'status':flavor.activity(role,state,owner,night['wave'])+f' +${value}', 'round':night['wave']}
+        results = resolve_club_round(state, catalog, night['wave'])
+        meetings.complete_round(state, results)
         m.advance_wave(state,catalog,night['wave'])
         message = flavor.activity('round',state,'venue',night['wave'])+f" Round {night['wave']}: ${night['revenue']} earned so far."
         night['log'].append(message)
         record(state,'service_round',wave=night['wave'],revenue=night['revenue'],served=night['served'])
+    # Create the next plan at the processed boundary, before catching its
+    # display up to the requested time. Polling frequency must not shorten it.
+    if target < 300:
+        prepare_meetings(state, catalog, labels)
+    night['elapsed'] = target
     if night['elapsed'] >= 300:
         settle(state)
+    else:
+        meetings.advance(state, target, labels)
 
 
 def settle(state):
@@ -209,6 +258,10 @@ def settle(state):
               'department_revenue':night['department_revenue'], 'training_cost':training_cost,
               'decision_costs':night['decision_costs'], 'decisions':copy.deepcopy(night['decisions']),
               'activity':night['log'][-12:], 'assignments':night['assignments']}
+    if night.get('stage_tracking') == 2:
+        report['booking_history'] = copy.deepcopy(night['booking_history'])
+        report['duration'] = night['duration']
+        report['booking_rules_version'] = night.get('booking_rules_version', 3)
     state['reports'] = (state['reports']+[report])[-40:]
     for key, value in [('revenue',night['revenue']),('expenses',expense),('services',night['served'])]:
         state['totals'][key] += value
@@ -270,7 +323,7 @@ def buy_pack(state,catalog,pack,target=None,voucher=False):
     record(state,'pack_bought',pack=pack,target=target,price=price,voucher=voucher,results=results)
 
 
-def command(original,catalog,action,body=None):
+def command(original,catalog,action,body=None,labels=None):
     state=copy.deepcopy(original);body=body or {}
     m.ensure(state)
     state['journal']=[]
@@ -330,10 +383,11 @@ def command(original,catalog,action,body=None):
             state['pending_pack']=None
     elif action=='start': start_night(state)
     elif action=='advance':
-        advance(state,catalog,body.get('seconds',0),stop_at_decision=body.get('stop_at_decision',False))
+        advance(state,catalog,body.get('seconds',0),stop_at_decision=body.get('stop_at_decision',False),labels=labels)
     elif action=='finish':
         if state['phase']!='night': raise RuleError('No night is in progress.')
-        state['night']['paused']=False;advance(state,catalog,300)
+        state['night']['paused']=False
+        advance(state,catalog,state['night'].get('duration',300),labels=labels)
     elif action in ('pause','speed'):
         if state['phase']!='night': raise RuleError('No night is in progress.')
         if action=='pause':
@@ -345,6 +399,7 @@ def command(original,catalog,action,body=None):
             speed=body.get('speed')
             if type(speed) is not int or speed not in NIGHT_SPEEDS: raise RuleError('Choose 1x, 2x, 4x or 8x speed.')
             state['night']['speed']=speed
+            state['preferred_night_speed']=speed
     elif action=='recovery':
         prep_only(state)
         if state['cash']>=recurring_cost(state): raise RuleError('Recovery is available when the next night is unaffordable.')
@@ -358,4 +413,6 @@ def command(original,catalog,action,body=None):
         state['day']+=2;state['totals']['recovery_grants']+=1
         record(state,'recovery_break',days=2,cash=state['cash'])
     else: raise RuleError('Unknown game action.')
+    if action in ('start', 'decision') and state['phase'] == 'night':
+        prepare_meetings(state, catalog, labels or stage_labels.bundled())
     return m.ensure(state)

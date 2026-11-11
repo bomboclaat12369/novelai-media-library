@@ -1,0 +1,118 @@
+name: Publish verified After Hours
+
+on:
+  push:
+    branches: [game-build-20261109]
+    paths: [game/release-version.txt]
+
+permissions:
+  contents: read
+concurrency:
+  group: after-hours-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build from the committed source
+        run: python tools/after-hours/build.py --output release
+      - name: Exercise the adapter with the native Windows shell
+        run: python tools/after-hours/verify.py --output release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-after-hours
+          path: release/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-after-hours
+          path: release
+      - name: Verify both release assets before promoting the game feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch=game-build-20261109
+          feed=release-after-hours.json
+          version=$(jq -er .version "release/$feed")
+          tag="after-hours-v$version"
+          package="After-Hours-$version.zip"
+          adapter=Update-AfterHours.ps1
+          mkdir -p verify
+          if ! gh release view "$tag" --json isDraft,assets > verify/existing.json; then
+            gh release create "$tag" --draft --latest=false --target "$GITHUB_SHA" \
+              --title "After Hours $version" \
+              --notes "Media Suite can download this version while you play. It opens the update on a safe launch using your existing library and save."
+            gh release view "$tag" --json isDraft,assets > verify/existing.json
+          fi
+          for asset in "$adapter" "$package"; do
+            if jq -e --arg name "$asset" '.assets | any(.name == $name)' verify/existing.json >/dev/null; then
+              gh release download "$tag" -p "$asset" -D verify
+              cmp "release/$asset" "verify/$asset"
+            else
+              jq -e '.isDraft == true' verify/existing.json >/dev/null
+              gh release upload "$tag" "release/$asset"
+            fi
+          done
+          gh release download "$tag" --clobber -p "$adapter" -p "$package" -D verify
+          cmp "release/$adapter" "verify/$adapter"
+          cmp "release/$package" "verify/$package"
+          if jq -e '.isDraft' verify/existing.json >/dev/null; then
+            gh release edit "$tag" --draft=false --latest=false
+          fi
+          for asset in "$adapter" "$package"; do
+            curl -fsSL --retry 5 --retry-all-errors --max-time 90 \
+              "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/$asset" -o "verify/$asset"
+            cmp "release/$asset" "verify/$asset"
+          done
+          git fetch --no-tags origin "$branch"
+          if ! git show "FETCH_HEAD:$feed" > verify/previous.json 2>/dev/null || ! cmp -s "release/$feed" verify/previous.json; then
+            test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
+            if test -s verify/previous.json; then
+              previous=$(jq -er .version verify/previous.json)
+              test "$(printf '%s\n%s\n' "$version" "$previous" | sort -V | tail -1)" = "$version"
+              test "$previous" != "$version"
+            fi
+            cp "release/$feed" "$feed"
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add -- "$feed"
+            git commit -m "Promote verified After Hours $version"
+            git push origin "HEAD:refs/heads/$branch"
+          fi
+          gh api -H 'Accept: application/vnd.github.raw+json' \
+            "repos/$GITHUB_REPOSITORY/contents/$feed?ref=$branch" > verify/api-feed.json
+          cmp "release/$feed" verify/api-feed.json
+          for attempt in {1..24}; do
+            if curl -fsSL --max-time 15 "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$branch/$feed" \
+                -o verify/raw-feed.json && cmp -s "release/$feed" verify/raw-feed.json; then break; fi
+            sleep 10
+          done
+          cmp "release/$feed" verify/raw-feed.json
+          jq --arg tag "$tag" --arg commit "$GITHUB_SHA" --arg hash "$(sha256sum "release/$package" | cut -d' ' -f1)" \
+            --argjson bytes "$(wc -c < "release/$package")" \
+            '. + {status:"published_verified", tag:$tag, source:$commit, package_bytes:$bytes, package_sha256:$hash}' \
+            "release/$feed" > verify/release-receipt.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: after-hours-release-receipt
+          path: verify/release-receipt.json
+          if-no-files-found: error

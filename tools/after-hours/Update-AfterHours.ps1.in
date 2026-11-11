@@ -1,0 +1,179 @@
+# Windows PowerShell 5.1. The suite authenticates these exact bytes before use.
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)][ValidateSet('Stage','Apply','Launch')][string]$Phase,
+    [Parameter(Mandatory)][string]$GameFolder,
+    [Parameter(Mandatory)][string]$StateFolder,
+    [string]$Library,
+    [ValidateRange(1,65535)][int]$Port=8877
+)
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$ReleaseVersion = '@VERSION@'
+$PackageBytes = [long]@PACKAGE_BYTES@
+$PackageHash = '@PACKAGE_SHA256@'
+$ListHash = '@FILES_SHA256@'
+$AssetUrl = "https://github.com/bomboclaat12369/novelai-media-library/releases/download/after-hours-v$ReleaseVersion/After-Hours-$ReleaseVersion.zip"
+
+function Get-Digest([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-','') }
+    finally { $algorithm.Dispose(); $stream.Dispose() }
+}
+
+function Test-Bytes([string]$Path, [long]$Length, [string]$Hash) {
+    if (![IO.File]::Exists($Path)) { return $false }
+    $file = [IO.FileInfo]::new($Path)
+    if ($file.Length -ne $Length -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
+    return (Get-Digest $Path) -eq $Hash
+}
+
+function Get-Folder([string]$Path) {
+    $dir = [IO.Directory]::CreateDirectory($Path)
+    if ($dir.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Unexpected linked cache folder: $Path" }
+    return $dir.FullName
+}
+
+function Open-Lock([string]$Name) {
+    try {
+        return [IO.File]::Open((Join-Path $cache $Name), 'OpenOrCreate', 'ReadWrite', 'None')
+    } catch [IO.IOException] {
+        if (($_.Exception.GetBaseException().HResult -band 65535) -in @(32,33)) { return $null }
+        throw
+    }
+}
+
+function Test-PortInUse {
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $Port)
+    try {
+        $listener.Server.ExclusiveAddressUse = $true
+        $listener.Start()
+        return $false
+    } catch [Net.Sockets.SocketException] { return $true }
+    finally { $listener.Stop() }
+}
+
+function Set-AtomicFile([string]$Source, [string]$Dest) {
+    if (![IO.File]::Exists($Dest)) { [IO.File]::Move($Source, $Dest); return }
+    $backup = "$Dest.$([Guid]::NewGuid().ToString('N')).old"
+    [IO.File]::Replace($Source, $Dest, $backup)
+    [IO.File]::Delete($backup)
+}
+
+function Save-Package {
+    if (Test-Bytes $archive $PackageBytes $PackageHash) { return }
+    $partial = Join-Path $versionDir ("download-" + [Guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -UseBasicParsing -Uri $AssetUrl -OutFile $partial -TimeoutSec 180
+        if (!(Test-Bytes $partial $PackageBytes $PackageHash)) { throw 'The game package failed length or SHA-256 verification.' }
+        Set-AtomicFile $partial $archive
+    } finally { [IO.File]::Delete($partial) }
+}
+
+function Test-ReleaseTree([string]$Root) {
+    try {
+        $dir = [IO.DirectoryInfo]::new($Root)
+        if (!$dir.Exists -or ($dir.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
+        $listPath = Join-Path $Root 'after-hours-files.json'
+        if ((Get-Digest $listPath) -ne $ListHash) { return $false }
+        $list = [IO.File]::ReadAllText($listPath) | ConvertFrom-Json
+        if ($list.schema -ne 1 -or $list.version -ne $ReleaseVersion) { return $false }
+        $expected = @{}
+        foreach ($entry in $list.files) { $expected.Add($entry.path, $entry) }
+        $folders = [Collections.Generic.Stack[IO.DirectoryInfo]]::new()
+        $folders.Push($dir)
+        while ($folders.Count) {
+            foreach ($item in $folders.Pop().EnumerateFileSystemInfos()) {
+                if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+                if ($item -is [IO.DirectoryInfo]) { $folders.Push($item); continue }
+                $name = $item.FullName.Substring($Root.Length + 1).Replace('\','/')
+                if ($name -ceq 'after-hours-files.json') { continue }
+                $entry = $expected[$name]
+                if (!$entry -or !(Test-Bytes $item.FullName $entry.bytes $entry.sha256)) { return $false }
+                $expected.Remove($name)
+            }
+        }
+        return $expected.Count -eq 0
+    } catch { return $false }
+}
+
+function Get-Selection {
+    if (![IO.File]::Exists($selection)) { return $null }
+    $name = [IO.File]::ReadAllText($selection)
+    if ($name -cnotmatch '\Ar-[0-9a-f]{16}\z') { return $null }
+    $tree = Join-Path $versionDir $name
+    if (Test-ReleaseTree $tree) { return $tree }
+    return $null
+}
+
+function Install-Package {
+    if (Get-Selection) { return }
+    if (!(Test-Bytes $archive $PackageBytes $PackageHash)) { throw 'Stage a verified package before applying it.' }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $name = 'r-' + [Guid]::NewGuid().ToString('N').Substring(0,16)
+    $tree = Join-Path $versionDir $name
+    if (Test-Path -LiteralPath $tree) { throw 'The new release folder already exists.' }
+    $tree = Get-Folder $tree
+    $pointerTemp = Join-Path $versionDir "$name.tmp"
+    try {
+        # The archive hash above pins a writer-controlled ZIP of regular files.
+        # The framework additionally enforces destination containment on extract.
+        [IO.Compression.ZipFile]::ExtractToDirectory($archive, $tree)
+        if (!(Test-ReleaseTree $tree)) { throw 'The extracted game files failed verification.' }
+        [IO.File]::WriteAllText($pointerTemp, $name)
+        Set-AtomicFile $pointerTemp $selection
+    } finally { [IO.File]::Delete($pointerTemp) }
+}
+
+function Invoke-Update {
+    $session = $null
+    $update = $null
+    try {
+        if ($Phase -ne 'Stage') {
+            $session = Open-Lock 'session.lock'
+            if (!$session -or (Test-PortInUse)) { return 75 }
+        }
+        if ($Phase -ne 'Launch') {
+            $update = Open-Lock 'update.lock'
+            if (!$update) { return 75 }
+            if ($Phase -eq 'Stage') { Save-Package } else { Install-Package }
+            return 0
+        }
+        if (!$Library -or ![IO.Path]::IsPathRooted($Library) -or
+            ![IO.File]::Exists((Join-Path $Library 'library.json'))) { throw 'Launch requires an existing absolute library folder.' }
+        $tree = Get-Selection
+        $launcher = Join-Path $install 'Launch.ps1'
+        $launchArgs = @('-NoBrowser','-Library',$Library,'-Port',"$Port")
+        if ($tree) {
+            $launcher = Join-Path $tree 'game\Launch.ps1'
+            $launchArgs += @('-InstallFolder',$install)
+        } else { Write-Warning 'Using the original After Hours launcher because the selected release is unavailable.' }
+        $env:PYTHONDONTWRITEBYTECODE = '1'
+        & "$PSHOME\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $launcher @launchArgs | Out-Host
+        return $LASTEXITCODE
+    } finally {
+        if ($update) { $update.Dispose() }
+        if ($session) { $session.Dispose() }
+    }
+}
+
+try {
+    $install = (Get-Item -LiteralPath $GameFolder -ErrorAction Stop).FullName.TrimEnd('\')
+    if (![IO.File]::Exists((Join-Path $install 'Launch.ps1'))) { throw 'The original After Hours launcher was not found.' }
+    if (![IO.Path]::IsPathRooted($StateFolder)) { throw 'The suite cache path must be absolute.' }
+    $state = [IO.Path]::GetFullPath($StateFolder).TrimEnd('\')
+    if ($state -eq $install -or $state.StartsWith("$install\", [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The suite cache must be outside the original game folder.'
+    }
+    $cache = Get-Folder (Join-Path $state 'payload')
+    $versionDir = Get-Folder (Join-Path $cache $ReleaseVersion)
+    $archive = Join-Path $versionDir 'game.zip'
+    $selection = Join-Path $versionDir 'selected'
+    $code = Invoke-Update
+    exit $code
+} catch {
+    [Console]::Error.WriteLine($_.Exception.GetBaseException().Message)
+    exit 1
+}

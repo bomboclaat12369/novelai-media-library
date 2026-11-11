@@ -20,7 +20,7 @@ if __package__ in (None,''):
 from game.catalog import demo_catalog,read_library,public_catalog
 from game.engine import PACKS,UPGRADES,NIGHT_SPEEDS,RuleError,forecast,upkeep,recurring_cost,hire_cost,upgrade_cost
 from game.store import GameStore,Conflict
-from game import management
+from game import bookings, management, meetings, stage_labels
 
 WEB=Path(__file__).resolve().parent/'web'
 PROJECT=WEB.parents[1]
@@ -61,7 +61,9 @@ class Handler(BaseHTTPRequestHandler):
         result=result or self.server.store.read();s=result['state']
         if s:
             result['derived']={'demand':forecast(s)[0],'recurring':recurring_cost(s),'upkeep':upkeep(s),
-                                'hire_cost':hire_cost(s),'upgrade_costs':{k:upgrade_cost(s,k) for k in UPGRADES},**management.derived(s)}
+                                'hire_cost':hire_cost(s),'upgrade_costs':{k:upgrade_cost(s,k) for k in UPGRADES},
+                                'meetings':meetings.views(s,self.server.store.catalog),**management.derived(s)}
+        result['stage_labels']=self.server.store.label_info()
         return result
 
     def do_GET(self):
@@ -72,6 +74,7 @@ class Handler(BaseHTTPRequestHandler):
             current=self.state_payload()
             return self.send(200,{'token':self.server.token,'catalog':public_catalog(self.server.store.catalog),
                                   'restartable':self.server.restartable,'restarting':self.server.restarting,'night_speeds':NIGHT_SPEEDS,
+                                  'night_duration':bookings.NIGHT_SECONDS,
                                   'packs':PACKS,'upgrades':UPGRADES,'projects':management.PROJECTS,
                                   'stays':management.STAYS,'departments':management.DEPARTMENTS,
                                   'decisions':management.DECISIONS,'profiles':management.PROFILES,**current})
@@ -110,7 +113,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.permitted(): return self.send(403,{'error':'Host not allowed.'})
         path=urllib.parse.urlparse(self.path).path
         if path.startswith('/game/'): path=path[5:]
-        if path not in ('/api/action','/api/refresh','/api/restore','/api/backup','/api/restart'): return self.send(404,{'error':'Not found.'})
+        if path not in ('/api/action','/api/refresh','/api/restore','/api/backup','/api/restart','/api/stage-labels'): return self.send(404,{'error':'Not found.'})
         origin=self.headers.get('Origin')
         if origin and origin not in {f'http://127.0.0.1:{self.server.server_port}',f'http://localhost:{self.server.server_port}'}:
             return self.send(403,{'error':'Origin not allowed.'})
@@ -118,9 +121,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403,{'error':'Refresh this game tab to reconnect.'})
         try:
             length=int(self.headers.get('Content-Length','0'))
-            if not 0<length<=(32*1024*1024 if path=='/api/restore' else 65536): raise RuleError('Invalid request size.')
-            if self.headers.get('Content-Type','').split(';')[0]!='application/json': raise RuleError('Expected JSON.')
-            request=json.loads(self.rfile.read(length))
+            if not 0<length<=(stage_labels.MAX_BYTES if path in ('/api/restore','/api/stage-labels') else 65536): raise RuleError('Invalid request size.')
+            mime=self.headers.get('Content-Type','').split(';')[0]
+            allowed=('application/json','application/zip','application/octet-stream') if path=='/api/stage-labels' else ('application/json',)
+            if mime not in allowed: raise RuleError('Unsupported request format.')
+            raw=self.rfile.read(length)
+            request={} if path=='/api/stage-labels' else json.loads(raw)
             if not isinstance(request,dict) or not isinstance(request.get('body',{}),dict): raise RuleError('Invalid request.')
             with self.server.operation_lock:
                 # A restore can change the active file while this request is waiting.
@@ -129,6 +135,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(403,{'error':'Refresh this game tab to reconnect.'})
                 if self.server.restarting:
                     return self.send(503,{'error':'The game is restarting. Reconnect in a moment.'})
+                if path=='/api/stage-labels':
+                    self.server.store.import_labels(raw)
+                    return self.send(200,self.state_payload())
                 if path=='/api/restart':
                     if not self.server.restartable:
                         raise RuleError('Open the game with its Windows launcher to use Restart game.')

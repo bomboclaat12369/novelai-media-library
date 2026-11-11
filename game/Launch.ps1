@@ -1,8 +1,9 @@
-param([switch]$Demo, [switch]$Check, [switch]$NoBrowser, [int]$Port=8877, [string]$Save='', [string]$Library='')
+param([switch]$Demo, [switch]$Check, [switch]$NoBrowser, [int]$Port=8877, [string]$Save='', [string]$Library='', [string]$InstallFolder=$PSScriptRoot)
 $ErrorActionPreference = 'Stop'
-Set-Location -LiteralPath $PSScriptRoot
+Set-Location -LiteralPath $InstallFolder
+$install = (Get-Item -LiteralPath '.').FullName
 $config = @{}
-$configPath = Join-Path $PSScriptRoot 'local.json'
+$configPath = Join-Path $install 'local.json'
 if (Test-Path -LiteralPath $configPath) { $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
 $candidates = @()
 if ($config.python) { $candidates += $config.python }
@@ -19,6 +20,7 @@ if (!$config.python -or !(Test-Path -LiteralPath $config.python)) {
 $pythonExe = $null
 foreach ($candidate in ($candidates | Select-Object -Unique)) {
     if (!(Test-Path -LiteralPath $candidate)) { continue }
+    $candidate = (Get-Item -LiteralPath $candidate).FullName
     try { & $candidate -c 'import sys; assert sys.version_info >= (3,10)' 2>$null; if ($LASTEXITCODE -eq 0) { $pythonExe=$candidate;break } } catch {}
 }
 if (!$pythonExe) { throw 'Python 3.10+ is required. Install Python or set python in game/local.json. The Windows Store alias is not a Python installation.' }
@@ -35,12 +37,16 @@ if (!$Demo -and !$Library) { $Library=Read-Host 'Full path to the Media Library 
 if ($Library -and [IO.Path]::GetFileName($Library) -eq 'library.json') { $Library=Split-Path -Parent $Library }
 if (!$Demo -and !(Test-Path -LiteralPath (Join-Path $Library 'library.json'))) { throw 'The selected folder does not contain library.json.' }
 if (!$Save -and $config.save) { $Save=$config.save }
+if ($install -ne $PSScriptRoot -and !$env:AFTER_HOURS_DATA) {
+    $env:AFTER_HOURS_DATA = Join-Path $install 'data'
+}
 if ($Demo) {
-    $launchArgs=@('server.py','--port',"$Port",'--restartable')
+    $launchArgs=@((Join-Path $PSScriptRoot 'server.py'),'--port',"$Port",'--restartable')
     if ($Save) { $launchArgs+=@('--save',$Save) }
     if (!$NoBrowser) { $launchArgs+='--open' }
 } else {
-    $launchArgs=@('../runtime-src/companion-runtime.pyw','--game-only','--game-port',"$Port",'--root',$Library,'--game-restartable')
+    $runtime = Join-Path (Split-Path -Parent $PSScriptRoot) 'runtime-src\companion-runtime.pyw'
+    $launchArgs=@($runtime,'--game-only','--game-port',"$Port",'--root',$Library,'--game-restartable')
     if ($Save) { $launchArgs+=@('--game-save',$Save) }
     if (!$NoBrowser) { $launchArgs+='--open-game' }
 }

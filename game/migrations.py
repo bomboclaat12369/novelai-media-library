@@ -2,7 +2,7 @@
 from __future__ import annotations
 import copy
 import math
-from . import engine, management
+from . import engine, management, meetings
 
 SCHEMA = 2
 
@@ -38,6 +38,8 @@ def validate(state, catalog):
     try:
         if not integer(state['day'], 1) or not finite(state['cash'], -10**12): raise ValueError()
         if state['phase'] not in ('prepare', 'night'): raise ValueError()
+        if type(state['preferred_night_speed']) is not int or state['preferred_night_speed'] not in engine.NIGHT_SPEEDS:
+            raise ValueError()
         if not integer(state['seed'], -10**18, 10**18) or not integer(state['pack_counter']): raise ValueError()
         if not isinstance(state['people'], dict) or len(state['people']) < 2: raise ValueError()
         if not isinstance(state['owned'], dict) or len(state['owned']) > 250000: raise ValueError()
@@ -86,6 +88,7 @@ def validate(state, catalog):
             if not finite(n['revenue']) or not isinstance(n['decisions'],list): raise ValueError()
             if not finite(n['department_revenue']) or not finite(n['decision_costs']): raise ValueError()
             if any(role not in (*engine.ROLES,'studio','resort') for role in n['assignments'].values()): raise ValueError()
+        meetings.validate(state)
         if state['pending_pack']:
             pack=state['pending_pack']
             if pack['type'] not in engine.PACKS or len(pack['results'])!=5: raise ValueError()

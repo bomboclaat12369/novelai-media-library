@@ -123,3 +123,20 @@ documents over 16 MiB, failed/retried pushes, concurrent branch movement,
 same-version replacement rejection, component isolation, complete Workbench
 assembly, corrupt downloads, stale manifests and idempotent retries. They do
 not access the user's collections or publish to GitHub.
+
+## After Hours game channel
+
+The Windows suite reads `release-after-hours.json` on `game-build-20261109`.
+For an authorized game release, change `game/release-version.txt` to a new
+three-part version. Build from the committed source with
+`python tools/after-hours/build.py --output .release-output/after-hours`.
+On Windows, run `python tools/after-hours/verify.py --output .release-output/after-hours`
+with a disposable-data directory available. The checks start their own local
+game on a free port.
+
+Pushing the version change to the game branch starts **Publish verified After
+Hours**. It tests the actual adapter on Windows, verifies both public release
+assets, promotes the feed, checks its API and raw URLs, and saves the
+`after-hours-release-receipt` artifact. A version identifies immutable bytes.
+Only committed playable game files and required renderer assets belong in the
+ZIP. Keep personal settings, media, saves and offline writing materials out.
