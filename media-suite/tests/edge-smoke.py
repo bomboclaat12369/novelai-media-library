@@ -229,7 +229,8 @@ if __name__ == "__main__":
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(channel="msedge", headless=True)
                 try:
-                    page = browser.new_page(viewport={"width": 1280, "height": 850})
+                    context = browser.new_context(viewport={"width": 1280, "height": 850})
+                    page = context.new_page()
                     errors = []
                     page.on("pageerror", lambda e: errors.append(str(e).split("data:")[0][:200]))
                     page.on("response", lambda res: errors.append(f"{res.status} {urlsplit(res.url).path[:150]}")
