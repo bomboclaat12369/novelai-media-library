@@ -8,22 +8,38 @@ try {
     $missing = Join-Path $TestRoot 'unconfigured'
     @{LibraryFolder=$missing; CompanionFolder=$missing; WorkbenchFolder=$missing; GameFolder=$missing} | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $profile 'settings.json') -Encoding ascii
+    Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
     Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class SuiteTestWindow { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c); [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h); }'
+    function Get-SuiteTabs($window) {
+        $element = [Windows.Automation.AutomationElement]::FromHandle($window)
+        $condition = New-Object Windows.Automation.PropertyCondition(
+            [Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::TabItem)
+        $element.FindAll([Windows.Automation.TreeScope]::Descendants,$condition) | Where-Object { $_.Current.Name -match '^Media Suite($| [\u002d\u2013] )' }
+    }
     $exe = Join-Path $Program 'MediaSuite.exe'
     $first = Start-Process -FilePath $exe -PassThru
-    for ($n=0; $n -lt 80; $n++) {
-        Start-Sleep -Milliseconds 150; $first.Refresh()
-        if ($first.HasExited) { throw 'Packaged application exited before showing its window.' }
-        if ($first.MainWindowTitle -eq 'Media Suite') { break }
+    for ($n=0; $n -lt 200; $n++) {
+        Start-Sleep -Milliseconds 250
+        if ($first.HasExited) { throw 'Packaged launcher exited before opening Chrome.' }
+        $chrome = Get-Process chrome -ErrorAction SilentlyContinue | Where-Object MainWindowTitle -like 'Media Suite*' | Select-Object -First 1
+        if ($chrome -and @(Get-SuiteTabs $chrome.MainWindowHandle).Count -eq 1) { break }
     }
-    if ($first.MainWindowTitle -ne 'Media Suite') { throw 'Packaged window did not appear.' }
-    $null = [SuiteTestWindow]::ShowWindow($first.MainWindowHandle,6)
+    if (!$chrome -or @(Get-SuiteTabs $chrome.MainWindowHandle).Count -ne 1) { throw 'Packaged launcher did not show one Media Suite tab in Chrome.' }
+    $window = $chrome.MainWindowHandle
+    Start-Process -FilePath $chrome.Path -ArgumentList 'about:blank'
+    for ($n=0; $n -lt 40 -and $chrome.MainWindowTitle -like 'Media Suite*'; $n++) { Start-Sleep -Milliseconds 150; $chrome.Refresh() }
+    $null = [SuiteTestWindow]::ShowWindow($window,6)
     $second = Start-Process -FilePath $exe -PassThru
     if (!$second.WaitForExit(10000)) { throw 'Second launch opened another instance.' }
-    for ($n=0; $n -lt 40 -and [SuiteTestWindow]::IsIconic($first.MainWindowHandle); $n++) { Start-Sleep -Milliseconds 150 }
-    if ([SuiteTestWindow]::IsIconic($first.MainWindowHandle)) { throw 'Second launch did not restore the first window.' }
+    for ($n=0; $n -lt 100; $n++) {
+        Start-Sleep -Milliseconds 200; $chrome.Refresh()
+        if (![SuiteTestWindow]::IsIconic($window) -and $chrome.MainWindowTitle -like 'Media Suite*') { break }
+    }
+    if ([SuiteTestWindow]::IsIconic($window) -or $chrome.MainWindowTitle -notlike 'Media Suite*' -or @(Get-SuiteTabs $window).Count -ne 1) {
+        throw 'Second launch did not restore the original Chrome tab.'
+    }
 } finally {
-    if ($first -and !$first.HasExited) { $null = $first.CloseMainWindow(); if (!$first.WaitForExit(6000)) { $first.Kill() } }
+    if ($first -and !$first.HasExited) { Start-Process $exe -ArgumentList '--stop' -Wait; if (!$first.WaitForExit(10000)) { $first.Kill() } }
     Remove-Item -LiteralPath $profile -Recurse -Force
 }
 

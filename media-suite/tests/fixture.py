@@ -7,14 +7,22 @@ import json
 from pathlib import Path
 import runpy
 import shutil
+import socket
 import subprocess
 import sys
 from PIL import Image
 
 REPO = Path(__file__).resolve().parents[2]
 
-def prepare(root, source):
+def prepare(root, source, isolated_ports=False):
     root.mkdir(parents=True, exist_ok=False)
+    ports = [8765, 8877]
+    if isolated_ports:
+        with socket.socket() as library_socket, socket.socket() as game_socket:
+            for i, sock in enumerate((library_socket, game_socket)):
+                sock.bind(("127.0.0.1", 0))
+                ports[i] = sock.getsockname()[1]
+    (root / "test-ports.json").write_text(json.dumps(ports))
     media = root / "Media data"
     runtime = runpy.run_path(str(REPO / "runtime-src/companion-runtime.pyw"))
     store = runtime["LibraryStore"](media)
@@ -43,6 +51,15 @@ def prepare(root, source):
     shutil.copytree(REPO / "runtime-src", root / "runtime-src")
     bench = root / "Workbench program"
     shutil.copytree(REPO / "duplicate-review", bench, ignore=shutil.ignore_patterns(".venv", "__pycache__", "tests"))
+    if isolated_ports:
+        # Only the disposable copies use alternate ports when normal services are running on the PC.
+        for path, old, new in (
+            (companion / ".runtime/companion-runtime.pyw", "PORT = 8765", f"PORT = {ports[0]}"),
+            (bench / "library_bridge.py", "port=8765", f"port={ports[0]}"),
+        ):
+            original = path.read_text(encoding="utf-8")
+            assert original.count(old) == 1, path
+            path.write_text(original.replace(old, new), encoding="utf-8")
     sys.path.insert(0, str(REPO / "duplicate-review/tests"))
     from test_organizer import fixture
     _, bulk, _, identifiers = fixture(root / "Workbench data")
@@ -57,6 +74,8 @@ def prepare(root, source):
         for path in (source / "game").glob(pattern):
             shutil.copy(path, game)
     shutil.copytree(source / "game/web", game / "web")
+    if (source / "game/stage-data").is_dir():
+        shutil.copytree(source / "game/stage-data", game / "stage-data")
     shutil.copytree(source / "runtime-src", project / "runtime-src")
     shutil.copytree(source / "assets", project / "assets")
     shutil.copy(source / "release-standalone.json", project)
@@ -74,7 +93,7 @@ def prepare(root, source):
     (game / "local.json").write_text(json.dumps({"python": sys.executable, "library": str(media), "save": str(save)}))
     if sys.platform == "win32":
         for program in (companion, bench):
-            subprocess.run([sys.executable, "-m", "venv", "--system-site-packages", str(program / ".venv")], check=True)
+            subprocess.run([sys.executable, "-m", "venv", "--without-pip", "--system-site-packages", str(program / ".venv")], check=True)
     (root / "suite-qa.json").write_text(json.dumps({"LibraryFolder": str(media), "CompanionFolder": str(companion),
         "WorkbenchFolder": str(bench), "GameFolder": str(game), "LastSection": "Library"}))
 
@@ -82,5 +101,6 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("new_directory", type=Path)
     p.add_argument("game_checkout", type=Path)
+    p.add_argument("--isolated-ports", action="store_true")
     a = p.parse_args()
-    prepare(a.new_directory.resolve(), a.game_checkout.resolve())
+    prepare(a.new_directory.resolve(), a.game_checkout.resolve(), a.isolated_ports)

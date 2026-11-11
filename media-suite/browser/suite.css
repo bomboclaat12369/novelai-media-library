@@ -1,0 +1,26 @@
+:root { font: 10pt "Segoe UI", sans-serif; color: #151515; background: #f0f0f0; color-scheme: light }
+* { box-sizing: border-box }
+body { margin: 0; height: 100dvh; display: flex; flex-direction: column }
+header { flex: none; display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: #e0e9ef; border-bottom: 1px solid #bdc6cc }
+nav { display: flex; min-width: 0; overflow-x: auto }
+button, input { font: inherit; color: inherit }
+header button { white-space: nowrap; background: transparent; border: 1px solid transparent; padding: 4px 8px }
+header button:hover { background: #d2e5f3; border-color: #9fbfd4 }
+header button[aria-selected=true] { background: #c5dceb; border-color: #94b3c7 }
+button:focus-visible, input:focus-visible { outline: 2px solid #246a9a; outline-offset: -2px }
+#locations { margin-left: auto }
+main { flex: 1; min-height: 0; position: relative }
+[role=tabpanel], iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0 }
+[hidden] { display: none !important }
+.feedback { padding: 20px; max-width: 680px; line-height: 1.5 }
+.feedback p { margin-top: 0 }
+dialog { width: min(590px, 94vw); padding: 18px; border: 1px solid #9b9b9b; background: #f0f0f0; box-shadow: 0 8px 36px #0004 }
+dialog::backdrop { background: #0004 }
+dialog h1 { margin: 0 0 15px; font-size: 15px; font-weight: 600 }
+dialog label { display: block; margin-top: 12px; margin-bottom: 3px }
+dialog form > div, dialog footer { display: flex; gap: 6px }
+dialog input { min-width: 0; flex: 1; padding: 3px 5px }
+dialog button, .feedback button { padding: 3px 10px }
+dialog footer { justify-content: flex-end; margin-top: 16px }
+#settings-error { color: #922e24 }
+#settings-error:empty { display: none }

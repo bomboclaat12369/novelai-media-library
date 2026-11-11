@@ -1,6 +1,6 @@
 # Media Library / Media Workbench source map
 
-The [Windows Media Suite](../media-suite/README.md) opens the library, Battles, Workbench and the separately maintained After Hours game in persistent tabs. Its [main Codex handoff](../media-suite/MAIN-CODEX.md) covers the two development checkouts.
+The [Windows Media Suite](../media-suite/README.md) opens the library, Battles, Workbench and the separately maintained After Hours game as four persistent sections in one Chrome tab. Its [main Codex handoff](../media-suite/MAIN-CODEX.md) covers the two development checkouts.
 
 Start with `AGENTS.md`, then the three release configs. They select the active
 modules; older versioned payload parts remain immutable release history.

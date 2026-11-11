@@ -11,20 +11,31 @@ ROOT = Path(__file__).resolve().parent
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
+def runtime_notices():
+    assets = json.loads((ROOT / "obj/project.assets.json").read_text(encoding="utf-8-sig"))
+    sections = []
+    for framework in assets["project"]["frameworks"].values():
+        for pack in framework.get("downloadDependencies", []):
+            name = pack["name"]
+            if not name.lower().endswith(".app.runtime.win-x64"):
+                continue
+            version = pack["version"].strip("[]").split(",")[0].strip()
+            roots = (Path(folder) / name.lower() / version for folder in assets["packageFolders"])
+            directory = next(root for root in roots if root.is_dir())
+            for path in sorted(directory.iterdir()):
+                if path.name.upper() in {"LICENSE", "LICENSE.TXT", "THIRD-PARTY-NOTICES.TXT"}:
+                    sections.append(name.encode() + b" / " + path.name.encode() + b"\r\n" + path.read_bytes())
+    if not sections:
+        raise ValueError("Could not locate the restored Windows runtime notices.")
+    return b"\r\n\r\n".join(sections)
+
 def package(build, output):
     version = parse(ROOT / "MediaSuite.csproj").findtext(".//Version")
-    names = ["MediaSuite.exe", "Microsoft.Web.WebView2.Core.dll", "Microsoft.Web.WebView2.WinForms.dll",
-             "WebView2-LICENSE.txt", "WebView2-NOTICE.txt"]
-    files = {name: (build / name).read_bytes() for name in names}
-    loader = next((path for path in (build / "runtimes/win-x64/native/WebView2Loader.dll",
-                                     build / "x64/WebView2Loader.dll", build / "WebView2Loader.dll") if path.is_file()), None)
-    if loader is None:
-        raise FileNotFoundError("x64 WebView2Loader.dll is missing")
-    files["WebView2Loader.dll"] = loader.read_bytes()
+    files = {"MediaSuite.exe": (build / "MediaSuite.exe").read_bytes()}
+    if list(build.glob("*.dll")) or list(build.glob("*.runtimeconfig.json")):
+        raise ValueError("Publish the self-contained single-file launcher before packaging.")
     files["Open-MainCodex.ps1"] = (ROOT / "Open-MainCodex.ps1").read_bytes()
-    config = build / "MediaSuite.exe.config"
-    if config.exists():
-        files[config.name] = config.read_bytes()
+    files["DotNet-Notices.txt"] = runtime_notices()
     output.mkdir(parents=True, exist_ok=True)
     package_path = output / f"Media-Suite-{version}.zip"
     manifest = {"version": version, "files": [{"name": n, "sha256": sha(b)} for n, b in files.items()]}
@@ -53,7 +64,7 @@ def package(build, output):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--build", type=Path, default=ROOT / "bin/Release/net48")
+    parser.add_argument("--build", type=Path, default=ROOT / "bin/Release/net8.0-windows/win-x64/publish")
     parser.add_argument("--out", type=Path, default=ROOT / "artifacts")
     args = parser.parse_args()
     package(args.build, args.out)

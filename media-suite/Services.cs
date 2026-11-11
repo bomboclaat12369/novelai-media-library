@@ -22,6 +22,7 @@ namespace NovelAI.MediaSuite
     {
         internal static readonly Uri LibraryPage = new Uri("http://127.0.0.1:8765/library/");
         internal static readonly Uri GamePage = new Uri("http://127.0.0.1:8877/game/");
+        private readonly Uri libraryPage, gamePage;
         private readonly Preferences settings;
         private readonly string workbenchState;
         private readonly HttpClient http;
@@ -33,11 +34,13 @@ namespace NovelAI.MediaSuite
         internal string ActiveLibrary { get; private set; }
 
         internal Services(Preferences settings, string workbenchState, HttpMessageHandler handler = null,
-            Action<ProcessStartInfo> start = null, TimeSpan? wait = null)
+            Action<ProcessStartInfo> start = null, TimeSpan? wait = null, Uri libraryPage = null, Uri gamePage = null)
         {
             this.settings = settings;
             this.workbenchState = workbenchState;
             this.start = start ?? (info => { using (Process.Start(info)) { } });
+            this.libraryPage = libraryPage ?? LibraryPage;
+            this.gamePage = gamePage ?? GamePage;
             this.wait = wait ?? TimeSpan.FromSeconds(90);
             http = new HttpClient(handler ?? new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false });
             http.Timeout = TimeSpan.FromSeconds(2);
@@ -88,7 +91,7 @@ namespace NovelAI.MediaSuite
 
         private async Task<Uri> RunningLibrary(CancellationToken token)
         {
-            var bytes = await Probe(new Uri(LibraryPage,"/api/health"),token).ConfigureAwait(false);
+            var bytes = await Probe(new Uri(libraryPage,"/api/health"),token).ConfigureAwait(false);
             if (bytes == null) return null;
             Health health;
             try { using (var data = new MemoryStream(bytes)) health = Preferences.Read<Health>(data); }
@@ -100,7 +103,7 @@ namespace NovelAI.MediaSuite
                 throw new InvalidOperationException("The running companion uses " + health.Root +
                     ". Choose that library in Locations, or close that companion and retry with your chosen library.");
             ActiveLibrary = health.Root;
-            return LibraryPage;
+            return libraryPage;
         }
 
         private async Task<Uri> RunningWorkbench(CancellationToken token)
@@ -113,8 +116,8 @@ namespace NovelAI.MediaSuite
 
         private async Task<Uri> RunningGame(CancellationToken token)
         {
-            var bytes = await Probe(GamePage,token,2048).ConfigureAwait(false);
-            return bytes != null && Encoding.UTF8.GetString(bytes).IndexOf("<title>After Hours",StringComparison.OrdinalIgnoreCase)>=0 ? GamePage : null;
+            var bytes = await Probe(gamePage,token,2048).ConfigureAwait(false);
+            return bytes != null && Encoding.UTF8.GetString(bytes).IndexOf("<title>After Hours",StringComparison.OrdinalIgnoreCase)>=0 ? gamePage : null;
         }
 
         // ProcessStartInfo on .NET Framework takes a single Windows command line.

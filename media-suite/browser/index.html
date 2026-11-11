@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Media Suite</title>
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/suite.css">
+  <script src="/suite.js" defer></script>
+</head>
+<body>
+  <header>
+    <nav role="tablist" aria-label="Media Suite">
+      <button type="button" role="tab" id="Library">Media Library</button>
+      <button type="button" role="tab" id="Battles">Battles</button>
+      <button type="button" role="tab" id="Workbench">Workbench</button>
+      <button type="button" role="tab" id="AfterHours">After Hours</button>
+    </nav>
+    <button type="button" id="locations">Locations…</button>
+  </header>
+  <main></main>
+  <dialog id="settings" aria-labelledby="settings-title">
+    <form>
+      <h1 id="settings-title">Suite locations</h1>
+      <label for="libraryFolder">Media folder (contains library.json)</label>
+      <div><input id="libraryFolder"><button type="button" data-for="libraryFolder">Browse…</button></div>
+      <label for="companionFolder">Media Library program</label>
+      <div><input id="companionFolder"><button type="button" data-for="companionFolder">Browse…</button></div>
+      <label for="workbenchFolder">Workbench program</label>
+      <div><input id="workbenchFolder"><button type="button" data-for="workbenchFolder">Browse…</button></div>
+      <label for="gameFolder">After Hours program</label>
+      <div><input id="gameFolder"><button type="button" data-for="gameFolder">Browse…</button></div>
+      <p id="settings-error" role="alert"></p>
+      <footer><button type="button" id="cancel">Cancel</button><button>Save locations</button></footer>
+    </form>
+  </dialog>
+</body>
+</html>
