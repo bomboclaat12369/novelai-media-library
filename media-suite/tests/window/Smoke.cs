@@ -56,6 +56,9 @@ internal static class Smoke
                 {
                     if(form.View(section)?.CoreWebView2!=null) Console.Error.WriteLine(await JS(section,
                         "(document.getElementById('nai-media-host')?.shadowRoot?.getElementById('app')?.innerText || document.body.innerText).slice(0,400)"));
+                    if(section==Section.Workbench && form.View(section)?.CoreWebView2!=null) Console.Error.WriteLine(await JS(section,
+                        "({title:document.getElementById('title')?.textContent,position:document.getElementById('position')?.textContent,"+
+                        "active:document.querySelector('#postList .post.active')?.innerText,cards:document.querySelectorAll('#grid .card').length})"));
                     throw;
                 }
             }
@@ -64,10 +67,14 @@ internal static class Smoke
                 {
                     await Page(Section.Library,"!!document.getElementById('nai-media-host')?.shadowRoot?.getElementById('characterSelect')?.options.length");
                     await JS(Section.Library,@"(function(){const select=document.getElementById('nai-media-host').shadowRoot.getElementById('characterSelect');select.value=Array.from(select.options).find(o=>o.textContent.includes('Patricia')).value;select.dispatchEvent(new Event('change',{bubbles:true}));})()");
-                    await Page(Section.Workbench,"Array.from(document.querySelectorAll('#postList .post')).some(e=>e.textContent.includes('Post 2'))");
+                    await Page(Section.Workbench,
+                        "!!document.getElementById('position')?.textContent && " +
+                        "Array.from(document.querySelectorAll('#postList .post')).some(e=>e.textContent.includes('Post 2'))");
                     await JS(Section.Workbench,"Array.from(document.querySelectorAll('#postList .post')).find(e=>e.textContent.includes('Post 2')).click()");
                     await Until(async()=>await JS(Section.Workbench,"document.getElementById('title').textContent.includes('Post 2')")=="true","open the second post");
                     var id=File.ReadAllText(Path.Combine(root,"import-id.txt")).Trim();
+                    if(await JS(Section.Workbench,"Array.from(document.querySelectorAll('#grid .card')).some(card=>card.dataset.id==='"+id+"')")!="true")
+                        throw new Exception("The image to import is missing from the open post.");
                     await JS(Section.Workbench,"window.suiteImportGate=new Promise(r=>window.suiteResumeImport=r);window.suiteFinished=false;window.suiteMark='same-document';("+code+")('"+id+"').then(()=>window.suiteFinished=true).catch(e=>window.suiteFinished=e.message);");
                     await Until(async()=>await JS(Section.Workbench,"window.suiteImportStarted===true")=="true","stage import on current post");
                     await Page(Section.Battles,"!!document.getElementById('nai-media-host')?.shadowRoot?.querySelector('.naiBattleWrap')");
