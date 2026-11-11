@@ -64,7 +64,9 @@ internal static class Smoke
                 {
                     await Page(Section.Library,"!!document.getElementById('nai-media-host')?.shadowRoot?.getElementById('characterSelect')?.options.length");
                     await JS(Section.Library,@"(function(){const select=document.getElementById('nai-media-host').shadowRoot.getElementById('characterSelect');select.value=Array.from(select.options).find(o=>o.textContent.includes('Patricia')).value;select.dispatchEvent(new Event('change',{bubbles:true}));})()");
-                    await Page(Section.Workbench,"Array.from(document.querySelectorAll('#postList .post')).some(e=>e.textContent.includes('Post 2'))");
+                    await Page(Section.Workbench,
+                        "typeof sessionReady !== 'undefined' && sessionReady && !busy && !!view && data?.job === 'fixture-job' && " +
+                        "Array.from(document.querySelectorAll('#postList .post')).some(e=>e.textContent.includes('Post 2'))");
                     await JS(Section.Workbench,"Array.from(document.querySelectorAll('#postList .post')).find(e=>e.textContent.includes('Post 2')).click()");
                     await Until(async()=>await JS(Section.Workbench,"document.getElementById('title').textContent.includes('Post 2')")=="true","open the second post");
                     var id=File.ReadAllText(Path.Combine(root,"import-id.txt")).Trim();
