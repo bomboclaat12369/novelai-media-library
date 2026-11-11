@@ -8,6 +8,8 @@ using NovelAI.MediaSuite;
 
 var root = Path.GetFullPath(args[0]);
 if (!File.Exists(Path.Combine(root, "Original game save.sqlite3"))) throw new Exception("A disposable suite fixture is required.");
+Trace.Listeners.Add(new TextWriterTraceListener(Console.Error));
+Trace.AutoFlush = true;
 var ports = JsonSerializer.Deserialize<int[]>(File.ReadAllText(Path.Combine(root, "test-ports.json")));
 foreach (var port in ports)
 {

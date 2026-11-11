@@ -73,6 +73,20 @@ def prepare(root, source, isolated_ports=False):
     for pattern in ("*.py", "Launch.ps1"):
         for path in (source / "game").glob(pattern):
             shutil.copy(path, game)
+    # Exercise a cold service that is busy for the first script request. Only
+    # the disposable server is instrumented, and the real renderer must run.
+    with (game / "server.py").open("a", encoding="utf-8") as script:
+        script.write('''
+class SuiteTestHandler(Handler):
+    def do_GET(self):
+        marker = Path(__file__).with_name('suite-retried-renderer')
+        if self.path.split('?', 1)[0] == '/game/renderer.js' and not marker.exists():
+            marker.touch()
+            return self.send(503, {'error': 'Fixture service is starting.'})
+        return super().do_GET()
+
+Handler = SuiteTestHandler
+''')
     shutil.copytree(source / "game/web", game / "web")
     if (source / "game/stage-data").is_dir():
         shutil.copytree(source / "game/stage-data", game / "stage-data")

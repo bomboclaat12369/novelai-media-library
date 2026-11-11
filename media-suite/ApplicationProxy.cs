@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using System;
+using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -15,16 +17,55 @@ internal sealed class ApplicationProxy : IDisposable
 {
     private readonly Section section;
     private readonly string parent;
-    private readonly HttpClient client = new(new SocketsHttpHandler {
-        UseProxy = false, AllowAutoRedirect = false, UseCookies = false, ConnectTimeout = TimeSpan.FromSeconds(4)
-    }) {Timeout = Timeout.InfiniteTimeSpan};
+    private readonly HttpClient client;
     internal Uri Address { get; set; }
     internal volatile Uri Upstream;
     private static readonly string[] RequestHeaders = {"Accept","Range","If-Range","If-None-Match","If-Modified-Since","X-Review-Token","X-Game-Token"};
     private static readonly string[] ResponseHeaders = {"Accept-Ranges","Cache-Control","ETag","Referrer-Policy","X-Content-Type-Options","X-NovelAI-Filename"};
 
     internal ApplicationProxy(Section section, Uri shell)
-    { this.section = section; parent = shell.GetLeftPart(UriPartial.Authority); }
+    {
+        this.section = section;
+        parent = shell.GetLeftPart(UriPartial.Authority);
+        var handler = new SocketsHttpHandler {
+            UseProxy = false, AllowAutoRedirect = false, UseCookies = false, ConnectTimeout = TimeSpan.FromSeconds(4)
+        };
+        // The Python game server has a five-connection listen queue on Windows.
+        if (section == Section.AfterHours) handler.MaxConnectionsPerServer = 4;
+        client = new HttpClient(handler) {Timeout = Timeout.InfiniteTimeSpan};
+    }
+
+    private async Task<HttpResponseMessage> Send(HttpRequest req, Uri backend, string raw, CancellationToken cancellation)
+    {
+        string origin = backend.GetLeftPart(UriPartial.Authority);
+        bool read = req.Method is "GET" or "HEAD" && req.ContentLength.GetValueOrDefault() == 0;
+        for (int attempt = 0; ; attempt++)
+        {
+            using var outgoing = new HttpRequestMessage(new HttpMethod(req.Method), origin + raw);
+            foreach (string header in RequestHeaders)
+                if (req.Headers.TryGetValue(header, out var value)) outgoing.Headers.TryAddWithoutValidation(header, value.ToArray());
+            if (req.Headers.ContainsKey("Origin")) outgoing.Headers.TryAddWithoutValidation("Origin", origin);
+            if (!read && (req.ContentLength.HasValue || req.Method == "POST"))
+            {
+                outgoing.Content = new StreamContent(req.Body);
+                outgoing.Content.Headers.ContentLength = req.ContentLength ?? 0;
+                if (req.ContentType != null) outgoing.Content.Headers.TryAddWithoutValidation("Content-Type", req.ContentType);
+            }
+            bool retry = read && attempt < 2;
+            try
+            {
+                var reply = await client.SendAsync(outgoing, HttpCompletionOption.ResponseHeadersRead, cancellation);
+                if (!retry || reply.StatusCode is not (HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout))
+                    return reply;
+                reply.Dispose();
+            }
+            catch (Exception error) when (retry && !cancellation.IsCancellationRequested && error is HttpRequestException or IOException or OperationCanceledException)
+            {
+                Trace.TraceWarning("{0} upstream read interrupted: {1}", section, error.GetBaseException().Message);
+            }
+            await Task.Delay(150 * (attempt + 1), cancellation);
+        }
+    }
 
     internal async Task Handle(HttpContext context)
     {
@@ -46,20 +87,10 @@ internal sealed class ApplicationProxy : IDisposable
         string raw = context.Features.Get<IHttpRequestFeature>()?.RawTarget;
         if (string.IsNullOrEmpty(raw) || !raw.StartsWith('/') || raw.StartsWith("//") || raw.Contains('\\'))
         { res.StatusCode = 400; return; }
-        using var outgoing = new HttpRequestMessage(new HttpMethod(req.Method), backend.GetLeftPart(UriPartial.Authority) + raw);
-        foreach (string header in RequestHeaders)
-            if (req.Headers.TryGetValue(header, out var value)) outgoing.Headers.TryAddWithoutValidation(header, value.ToArray());
-        if (req.Headers.ContainsKey("Origin")) outgoing.Headers.TryAddWithoutValidation("Origin", backend.GetLeftPart(UriPartial.Authority));
         if (req.Headers.ContainsKey("Transfer-Encoding") && !req.ContentLength.HasValue) { res.StatusCode = 411; return; }
-        if (req.ContentLength.HasValue || req.Method == "POST")
-        {
-            outgoing.Content = new StreamContent(req.Body);
-            outgoing.Content.Headers.ContentLength = req.ContentLength ?? 0;
-            if (req.ContentType != null) outgoing.Content.Headers.TryAddWithoutValidation("Content-Type", req.ContentType);
-        }
         try
         {
-            using var reply = await client.SendAsync(outgoing, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
+            using var reply = await Send(req, backend, raw, context.RequestAborted);
             res.StatusCode = (int)reply.StatusCode;
             foreach (var header in ResponseHeaders)
                 if (reply.Headers.TryGetValues(header, out var values)) res.Headers[header] = string.Join(", ", values);
@@ -93,8 +124,9 @@ internal sealed class ApplicationProxy : IDisposable
             res.ContentLength = reply.Content.Headers.ContentLength;
             if (req.Method != "HEAD") await reply.Content.CopyToAsync(res.Body, context.RequestAborted);
         }
-        catch (Exception e) when (e is HttpRequestException or IOException && !context.RequestAborted.IsCancellationRequested)
+        catch (Exception e) when (e is HttpRequestException or IOException or OperationCanceledException && !context.RequestAborted.IsCancellationRequested)
         {
+            Trace.TraceWarning("{0} upstream request failed: {1}", section, e.GetBaseException().Message);
             if (res.HasStarted) { context.Abort(); return; }
             res.Clear(); res.StatusCode = 502;
             await res.WriteAsync("The local program disconnected. Reopen its section to reconnect.");

@@ -159,8 +159,11 @@ if __name__ == "__main__":
                 try:
                     page = browser.new_page(viewport={"width": 1280, "height": 850})
                     errors = []
-                    page.on("pageerror", lambda e: errors.append(str(e)[:240]))
-                    page.on("console", lambda msg: errors.append(msg.text[:240]) if msg.type == "error" else None)
+                    page.on("pageerror", lambda e: errors.append(str(e).split("data:")[0][:200]))
+                    page.on("response", lambda res: errors.append(f"{res.status} {urlsplit(res.url).path[:150]}")
+                            if res.status >= 400 and res.url.startswith("http://127.0.0.1:") else None)
+                    page.on("requestfailed", lambda req: errors.append(f"{req.failure} {urlsplit(req.url).path[:150]}")
+                            if req.url.startswith("http://127.0.0.1:") else None)
                     try:
                         verify(page, address, fixture)
                     except Exception:

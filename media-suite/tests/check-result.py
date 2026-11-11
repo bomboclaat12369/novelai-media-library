@@ -4,6 +4,7 @@ import sqlite3
 import sys
 
 root = Path(sys.argv[1])
+assert (root / 'Game project/game/suite-retried-renderer').is_file(), 'The cold-start retry was not exercised.'
 library = json.loads((root / "Media data/library.json").read_text(encoding="utf-8"))
 digest = (root / "import-id.txt").read_text()
 matches = [item for item in library["media"] if item["sha256"] == digest and item["in_all"]]
