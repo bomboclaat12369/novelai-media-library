@@ -134,6 +134,13 @@ On Windows, run `python tools/after-hours/verify.py --output .release-output/aft
 with a disposable-data directory available. The checks start their own local
 game on a free port.
 
+For the idle-session handoff, also run
+`python tools/after-hours/verify_handoff.py --output .release-output/after-hours`.
+It stages two disposable successor versions on a single port, preserves a
+restored club and checks deferral for live players, requests and independent
+launchers. Pass `--previous` with a 1.0.0 release directory to exercise the
+one-time migration from an already-running legacy game.
+
 Pushing the version change to the game branch starts **Publish verified After
 Hours**. It tests the actual adapter on Windows, verifies both public release
 assets, promotes the feed, checks its API and raw URLs, and saves the

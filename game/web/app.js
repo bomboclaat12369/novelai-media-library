@@ -172,8 +172,15 @@ let searchTimer;
 root.addEventListener('input',e=>{if(e.target.id==='search'){filter.text=e.target.value;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{page=0;render();},180);}});
 modal.addEventListener('cancel',e=>{if(save?.pending_pack)e.preventDefault();});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)pollGame();});
+let playerPresence=null;
+function connectPlayerPresence(){
+ if(!boot?.player_presence||window.self!==window.top||playerPresence)return;
+ playerPresence=new EventSource('/game/api/player-presence?key='+encodeURIComponent(boot.player_presence));
+}
+window.addEventListener('pagehide',()=>{playerPresence?.close();playerPresence=null;});
+window.addEventListener('pageshow',connectPlayerPresence);
 async function start(){
- try{const response=await fetch('/game/api/bootstrap');if(!response.ok)throw new Error('The game server is unavailable.');boot=await response.json();await AfterHoursCards.init(boot.catalog);initManagementUI();accept(boot);render();announceDecision();interval=setInterval(pollGame,1000);}
+ try{const response=await fetch('/game/api/bootstrap');if(!response.ok)throw new Error('The game server is unavailable.');boot=await response.json();connectPlayerPresence();await AfterHoursCards.init(boot.catalog);initManagementUI();accept(boot);render();announceDecision();interval=setInterval(pollGame,1000);}
  catch(e){$('#app').innerHTML=`<main class="panel error-panel"><h1>Unable to open the club.</h1><p>${escapeHTML(e.message)}</p><p class="note">Your saved game has not been replaced. Restart the local game launcher and reload this page.</p></main>`;}
 }
 document.addEventListener('DOMContentLoaded',start,{once:true});

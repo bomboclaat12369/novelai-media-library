@@ -8,8 +8,10 @@ import mimetypes
 import os
 from pathlib import Path
 import secrets
+import select
 import sys
 import tempfile
+import time
 import urllib.parse
 import webbrowser
 import threading
@@ -25,6 +27,7 @@ from game import bookings, management, meetings, stage_labels
 WEB=Path(__file__).resolve().parent/'web'
 PROJECT=WEB.parents[1]
 RESTART_EXIT_CODE=75
+HANDOFF_QUIET_SECONDS=3
 RENDERER={key:next(p for p in json.loads((PROJECT/'release-standalone.json').read_text())['parts'] if p.endswith('.'+suffix+'.txt'))
           for key,suffix in [('ranks','ranks'),('collection','collection'),('editions','editions'),('base','base-layout')]}
 
@@ -66,13 +69,47 @@ class Handler(BaseHTTPRequestHandler):
         result['stage_labels']=self.server.store.label_info()
         return result
 
-    def do_GET(self):
+    def game_request(self, dispatch):
         if not self.permitted(): return self.send(403,{'error':'Host not allowed.'})
+        session=self.server.suite_session
+        if not session: return dispatch()
+        with session.lock:
+            if session.closing: return self.send(503,{'error':'The game is closing for an update.'})
+            session.requests+=1
+        try: return dispatch()
+        finally:
+            with session.lock:
+                session.requests-=1
+                session.last_request=time.monotonic()
+
+    def do_GET(self):
+        return self.game_request(self.get_game)
+
+    def get_game(self):
         path=urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
         if path.startswith('/game/'): path=path[5:]
+        if path=='/api/player-presence':
+            session=self.server.suite_session
+            key=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('key',[''])[0]
+            if not session or not secrets.compare_digest(key.encode(),session.player_key.encode()):
+                return self.send(403,{'error':'Invalid player session.'})
+            self.send_response(200)
+            self.send_header('Content-Type','text/event-stream')
+            self.send_header('Cache-Control','no-store')
+            self.end_headers()
+            try:
+                while True:
+                    self.wfile.write(b': connected\n\n')
+                    self.wfile.flush()
+                    # A closed browser socket becomes readable even if the page
+                    # was frozen and could not run a final JavaScript callback.
+                    if select.select([self.connection],[],[],5)[0]: break
+            except OSError: pass
+            return
         if path=='/api/bootstrap':
             current=self.state_payload()
             return self.send(200,{'token':self.server.token,'catalog':public_catalog(self.server.store.catalog),
+                                  'player_presence':self.server.suite_session.player_key if self.server.suite_session else None,
                                   'restartable':self.server.restartable,'restarting':self.server.restarting,'night_speeds':NIGHT_SPEEDS,
                                   'night_duration':bookings.NIGHT_SECONDS,
                                   'packs':PACKS,'upgrades':UPGRADES,'projects':management.PROJECTS,
@@ -110,7 +147,31 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(200,file.read_bytes(),mimetypes.guess_type(file.name)[0] or 'text/plain')
 
     def do_POST(self):
-        if not self.permitted(): return self.send(403,{'error':'Host not allowed.'})
+        if urllib.parse.urlsplit(self.path).path=='/game/api/suite-handoff':
+            return self.suite_handoff()
+        return self.game_request(self.post_game)
+
+    def suite_handoff(self):
+        session=self.server.suite_session
+        owner=self.headers.get('X-After-Hours-Owner','').encode()
+        if not self.permitted() or self.headers.get('Origin') or not session or not secrets.compare_digest(owner,session.secret):
+            return self.send(403,{'error':'Unrecognized update session.'})
+        with session.lock:
+            if (session.requests or session.closing or self.server.restarting or
+                    time.monotonic()-session.last_request<HANDOFF_QUIET_SECONDS):
+                return self.send(409,{'error':'The game is in use.'})
+            # Admission and the request count share this lock. Once accepted,
+            # an action cannot start between the backup and process exit.
+            session.closing=True
+        try:
+            with self.server.operation_lock: self.server.store.backup()
+        except Exception:
+            with session.lock: session.closing=False
+            return self.send(503,{'error':'The saved game could not be backed up.'})
+        try: self.send(202,{'closing':True})
+        finally: threading.Thread(target=self.server.shutdown,daemon=True).start()
+
+    def post_game(self):
         path=urllib.parse.urlparse(self.path).path
         if path.startswith('/game/'): path=path[5:]
         if path not in ('/api/action','/api/refresh','/api/restore','/api/backup','/api/restart','/api/stage-labels'): return self.send(404,{'error':'Not found.'})
@@ -173,6 +234,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send(500,{'error':'The action could not be saved. Refresh before trying again.'})
 
 
+class SuiteSession:
+    def __init__(self,secret):
+        self.secret=secret.encode()
+        self.player_key=secrets.token_urlsafe(24)
+        self.lock=threading.Lock()
+        self.requests=0
+        self.closing=False
+        self.last_request=time.monotonic()
+
+
 def build_server(port=8877,save=None,library=None,preview=False,restartable=False):
     if preview and library: raise ValueError('Managed preview uses demo data only.')
     root=Path(library).resolve() if library else None
@@ -192,6 +263,8 @@ def build_server(port=8877,save=None,library=None,preview=False,restartable=Fals
     server.preview=preview;server.library_root=root
     server.restartable=restartable;server.restarting=False
     server.operation_lock=threading.RLock()
+    owner=os.environ.get('AFTER_HOURS_SUITE_OWNER','')
+    server.suite_session=SuiteSession(owner) if restartable and library and len(owner)==32 and all(c in '0123456789abcdef' for c in owner) else None
     return server
 
 

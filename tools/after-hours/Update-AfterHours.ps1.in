@@ -127,33 +127,86 @@ function Install-Package {
     } finally { [IO.File]::Delete($pointerTemp) }
 }
 
+function Request-OwnedSessionExit {
+    if (![IO.File]::Exists($ownerPath) -or [IO.FileInfo]::new($ownerPath).Length -gt 4096) { return $false }
+    try {
+        $owner = [IO.File]::ReadAllText($ownerPath) | ConvertFrom-Json
+        if ($owner.schema -ne 1 -or $owner.install -ne $install -or $owner.port -ne $Port -or
+            $owner.secret -cnotmatch '\A[0-9a-f]{32}\z' -or [Version]$owner.version -ge [Version]$ReleaseVersion) { return $false }
+    } catch { return $false }
+    if (!(Test-Bytes $archive $PackageBytes $PackageHash)) { throw 'Stage a verified package before handing off a game session.' }
+    $request = [Net.HttpWebRequest]::Create("http://127.0.0.1:$Port/game/api/suite-handoff")
+    $request.Proxy = $null
+    $request.AllowAutoRedirect = $false
+    $request.KeepAlive = $false
+    $request.Method = 'POST'
+    $request.ContentLength = 0
+    $request.Timeout = 6000
+    $request.Headers['X-After-Hours-Owner'] = $owner.secret
+    try {
+        $response = $request.GetResponse()
+        try { return $response.StatusCode -eq [Net.HttpStatusCode]::Accepted }
+        finally { $response.Dispose() }
+    } catch [Net.WebException] {
+        $failure = $_.Exception.GetBaseException()
+        if ($failure.Response) { $failure.Response.Dispose() }
+        return $false
+    }
+}
+
 function Invoke-Update {
     $session = $null
     $update = $null
+    $activation = $null
+    $ownsRecord = $false
     try {
-        if ($Phase -ne 'Stage') {
-            $session = Open-Lock 'session.lock'
-            if (!$session -or (Test-PortInUse)) { return 75 }
-        }
         if ($Phase -ne 'Launch') {
             $update = Open-Lock 'update.lock'
             if (!$update) { return 75 }
-            if ($Phase -eq 'Stage') { Save-Package } else { Install-Package }
-            return 0
+            if ($Phase -eq 'Stage') { Save-Package; return 0 }
         }
+        $activation = Open-Lock 'activation.lock'
+        if (!$activation) { return 75 }
+        $session = Open-Lock 'session.lock'
+        if (!$session -and $Phase -eq 'Apply') {
+            # Only the server launched with the matching per-install secret
+            # can retire itself. Older launchers and independent games defer.
+            if (!(Request-OwnedSessionExit)) { return 75 }
+            $wait = [Diagnostics.Stopwatch]::StartNew()
+            do {
+                Start-Sleep -Milliseconds 100
+                $session = Open-Lock 'session.lock'
+            } while (!$session -and $wait.Elapsed.TotalSeconds -lt 5)
+        }
+        if (!$session -or (Test-PortInUse)) { return 75 }
+        if ($Phase -eq 'Apply') { Install-Package; return 0 }
         if (!$Library -or ![IO.Path]::IsPathRooted($Library) -or
             ![IO.File]::Exists((Join-Path $Library 'library.json'))) { throw 'Launch requires an existing absolute library folder.' }
         $tree = Get-Selection
         $launcher = Join-Path $install 'Launch.ps1'
         $launchArgs = @('-NoBrowser','-Library',$Library,'-Port',"$Port")
+        $env:AFTER_HOURS_SUITE_OWNER = $null
         if ($tree) {
             $launcher = Join-Path $tree 'game\Launch.ps1'
             $launchArgs += @('-InstallFolder',$install)
+            $secret = [Guid]::NewGuid().ToString('N')
+            $owner = @{schema=1;version=$ReleaseVersion;install=$install;port=$Port;secret=$secret}
+            $temp = Join-Path $cache "$secret.tmp"
+            try {
+                [IO.File]::WriteAllText($temp, ($owner | ConvertTo-Json -Compress))
+                Set-AtomicFile $temp $ownerPath
+                $ownsRecord = $true
+            } finally { [IO.File]::Delete($temp) }
+            $env:AFTER_HOURS_SUITE_OWNER = $secret
         } else { Write-Warning 'Using the original After Hours launcher because the selected release is unavailable.' }
+        $activation.Dispose()
+        $activation = $null
         $env:PYTHONDONTWRITEBYTECODE = '1'
         & "$PSHOME\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $launcher @launchArgs | Out-Host
         return $LASTEXITCODE
     } finally {
+        if ($ownsRecord) { [IO.File]::Delete($ownerPath) }
+        if ($activation) { $activation.Dispose() }
         if ($update) { $update.Dispose() }
         if ($session) { $session.Dispose() }
     }
@@ -168,6 +221,7 @@ try {
         throw 'The suite cache must be outside the original game folder.'
     }
     $cache = Get-Folder (Join-Path $state 'payload')
+    $ownerPath = Join-Path $cache 'owner.json'
     $versionDir = Get-Folder (Join-Path $cache $ReleaseVersion)
     $archive = Join-Path $versionDir 'game.zip'
     $selection = Join-Path $versionDir 'selected'

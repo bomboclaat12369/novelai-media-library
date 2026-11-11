@@ -8,6 +8,9 @@ const source = fs.readFileSync(path.join(__dirname, '../game/web/app.js'), 'utf8
 
 function fixture() {
   const documentEvents = {};
+  const windowEvents = {};
+  const window = {addEventListener: (event, callback) => { windowEvents[event] = callback; }};
+  window.self = window.top = window;
   const element = {innerHTML: 'original screen', addEventListener() {}, classList: {add() {}, remove() {}}};
   const root = {selectOpen: false,
     querySelector: selector => selector === 'select:open' ? (root.selectOpen ? {} : null) : element,
@@ -20,6 +23,7 @@ function fixture() {
     crypto: {randomUUID: () => 'fixture-request'},
     setTimeout: callback => { callback(); return 1; }, clearTimeout() {},
     calls, studio() {}, resort() {}, saves() {}, expansion() {},
+    window,
   });
   vm.runInContext(source, context);
   vm.runInContext(`const actualRender=render;
@@ -27,7 +31,7 @@ function fixture() {
     boot={token:'fixture-token'}; render=()=>{}; notify=()=>{};
     accept=result=>{save=result.state;};
     act=(action,body)=>{calls.push({action,body});return Promise.resolve();};`, context);
-  return {context, documentEvents, calls, root, element};
+  return {context, documentEvents, windowEvents, calls, root, element};
 }
 
 (async () => {
@@ -64,5 +68,20 @@ function fixture() {
   await vm.runInContext('actionQueue', picker.context);
   assert.equal(picker.element.innerHTML, '3');
   assert.equal(vm.runInContext('renderDeferred', picker.context), false);
-  console.log('4 browser-control regression cases passed.');
+  const player = fixture();
+  const presence = [];
+  player.context.EventSource = class {
+    constructor(url) { presence.push(url); }
+    close() { presence.push('closed'); }
+  };
+  vm.runInContext("boot.player_presence='presence-key';connectPlayerPresence();connectPlayerPresence();", player.context);
+  assert.deepEqual(presence, ['/game/api/player-presence?key=presence-key']);
+  player.windowEvents.pagehide();
+  player.windowEvents.pageshow();
+  assert.deepEqual(presence.slice(-2), ['closed', '/game/api/player-presence?key=presence-key']);
+  player.windowEvents.pagehide();
+  player.context.window.top = {};
+  player.windowEvents.pageshow();
+  assert.equal(presence.at(-1), 'closed', 'The suite shell tracks its own framed tabs.');
+  console.log('5 browser-control regression cases passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -92,14 +92,11 @@ def contents(rev):
     return files
 
 
-def build(output, revision="HEAD"):
-    rev = git("rev-parse", "--verify", f"{revision}^{{commit}}").decode().strip()
-    version = git("show", f"{rev}:game/release-version.txt").decode().strip()
+def write_release(output, version, files, adapter):
     if not VERSION.fullmatch(version) or any(int(n) > 2147483647 for n in version.split(".")):
         raise ValueError("Expected a three-part numeric release version")
-    files = contents(rev)
     entries = [{"path": name, "bytes": len(data), "sha256": digest(data)} for name, data in sorted(files.items())]
-    files[FILE_LIST] = as_json({"schema": 1, "version": version, "files": entries})
+    files = {**files, FILE_LIST: as_json({"schema": 1, "version": version, "files": entries})}
     output.mkdir(parents=True, exist_ok=True)
     package = output / f"After-Hours-{version}.zip"
     with zipfile.ZipFile(package, "w") as bundle:
@@ -111,7 +108,7 @@ def build(output, revision="HEAD"):
             info.external_attr = 0o100644 << 16
             bundle.writestr(info, data)
     payload = package.read_bytes()
-    adapter = git("show", f"{rev}:{TOOLS}/Update-AfterHours.ps1.in").decode("ascii").replace("\r\n", "\n")
+    adapter = adapter.replace("\r\n", "\n")
     for token, value in {"@VERSION@": version, "@PACKAGE_BYTES@": str(len(payload)),
                          "@PACKAGE_SHA256@": digest(payload), "@FILES_SHA256@": digest(files[FILE_LIST])}.items():
         if adapter.count(token) != 1:
@@ -123,6 +120,13 @@ def build(output, revision="HEAD"):
     (output / "release-after-hours.json").write_bytes(as_json(feed))
     print(f"After Hours {version}: {len(entries)} files, {len(payload)} bytes, SHA-256 {digest(payload)}")
     return feed
+
+
+def build(output, revision="HEAD"):
+    rev = git("rev-parse", "--verify", f"{revision}^{{commit}}").decode().strip()
+    version = git("show", f"{rev}:game/release-version.txt").decode().strip()
+    template = git("show", f"{rev}:{TOOLS}/Update-AfterHours.ps1.in").decode("ascii")
+    return write_release(output, version, contents(rev), template)
 
 
 if __name__ == "__main__":

@@ -47,14 +47,21 @@ def api(port, path, body=None, token=None, raw=False):
 
 
 class Fixture:
-    def __init__(self, root, output):
-        self.root = root
+    def use_release(self, output):
         self.feed = json.loads((output / "release-after-hours.json").read_bytes())
         self.version = self.feed["version"]
         self.package = output / f"After-Hours-{self.version}.zip"
         self.adapter = output / "Update-AfterHours.ps1"
         data = self.adapter.read_bytes()
         check(len(data) == self.feed["updater_bytes"] and sha(data) == self.feed["updater_sha256"], "Adapter vs feed")
+
+    @property
+    def version_dir(self):
+        return self.state / "payload" / self.version
+
+    def __init__(self, root, output):
+        self.root = root
+        self.use_release(output)
         self.shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
         self.state = root / "suite cache"
         self.state.mkdir()
@@ -62,7 +69,6 @@ class Fixture:
         for name in ("active.json", "staged.json"):
             (self.state / name).write_text('{"owner":"suite"}', encoding="utf-8")
         self.suite_records = snapshot(self.state)
-        self.version_dir = self.state / "payload" / self.version
         self.install = root / "installed" / "game"
         with zipfile.ZipFile(self.package) as package:
             package.extractall(self.install.parent)
@@ -162,14 +168,19 @@ class Fixture:
               f"{(proc.stdout + proc.stderr)[-1750:].decode(errors='replace')}")
 
     @contextmanager
-    def playing(self, packaged):
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", 0))
-            port = probe.getsockname()[1]
+    def playing(self, packaged, port=None, standalone=False):
+        if port is None:
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = probe.getsockname()[1]
         self.stop.unlink(missing_ok=True)
         log_path = self.root / "launch.log"
         with log_path.open("wb") as log:
-            proc = subprocess.Popen(self.command("Launch", port), cwd=self.install, env=self.env, stdout=log,
+            command = self.command("Launch", port)
+            if standalone:
+                command = command[:command.index("-File")+1] + [str(self.install / "Launch.ps1"),
+                          "-NoBrowser", "-Port", str(port), "-Library", str(self.library)]
+            proc = subprocess.Popen(command, cwd=self.install, env=self.env, stdout=log,
                                     stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
             try:
                 deadline = time.monotonic() + 45

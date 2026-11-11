@@ -24,6 +24,10 @@ jobs:
         run: python tools/after-hours/build.py --output release
       - name: Exercise the adapter with the native Windows shell
         run: python tools/after-hours/verify.py --output release
+      - name: Check the browser tab lifecycle
+        run: node tests/test_game_browser_controls.cjs
+      - name: Transfer two idle game sessions and defer active players
+        run: python tools/after-hours/verify_handoff.py --output release
       - uses: actions/upload-artifact@v4
         with:
           name: verified-after-hours
@@ -60,7 +64,7 @@ jobs:
           if ! gh release view "$tag" --json isDraft,assets > verify/existing.json; then
             gh release create "$tag" --draft --latest=false --target "$GITHUB_SHA" \
               --title "After Hours $version" \
-              --notes "Media Suite can download this version while you play. It opens the update on a safe launch using your existing library and save."
+              --notes "Media Suite can download this version during play. Once all players leave, an updated suite-launched game backs up the club and exits for the next version. A game already running from 1.0.0 or earlier must exit once before automatic handoff is available."
             gh release view "$tag" --json isDraft,assets > verify/existing.json
           fi
           for asset in "$adapter" "$package"; do
