@@ -1,12 +1,37 @@
 """Drive the real suite pages in Chrome with an isolated profile, library and career."""
 import argparse
+import ctypes
 import json
 import subprocess
 import time
+from contextlib import contextmanager
+from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
+
+
+@contextmanager
+def fixture_processes(host):
+    # The companion launcher can leave a second Windows venv redirector between
+    # itself and the runtime. Job membership follows every descendant.
+    win = ctypes.WinDLL("kernel32", use_last_error=True)
+    win.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    win.CreateJobObjectW.restype = wintypes.HANDLE
+    win.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    win.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    win.CloseHandle.argtypes = [wintypes.HANDLE]
+    job = win.CreateJobObjectW(None, None)
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if not win.AssignProcessToJobObject(job, int(host._handle)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        yield
+    finally:
+        win.TerminateJobObject(job, 1)
+        win.CloseHandle(job)
 
 
 def until(frame, expression, arg=None):
@@ -16,7 +41,8 @@ def until(frame, expression, arg=None):
         if frame.evaluate(expression, arg):
             return
         time.sleep(0.15)
-    raise AssertionError("Timed out checking " + expression[:120])
+    summary = frame.evaluate("() => (document.getElementById('nai-media-host')?.shadowRoot?.getElementById('app')?.innerText || document.body.innerText).slice(0,350)")
+    raise AssertionError("Timed out checking " + expression[:120] + ". Fixture screen: " + summary)
 
 
 def verify(page, address, root):
@@ -79,7 +105,24 @@ def verify(page, address, root):
     battle.locator(".naiBattleWrap").wait_for()
     assert "Suite QA Patricia" in battle.locator(".naiBattleWrap h2").inner_text()
     game = section("AfterHours", "After Hours")
-    until(game, "document.getElementById('nai-media-host')?.shadowRoot?.getElementById('app')?.innerText.includes('Suite QA Patricia')")
+    try:
+        until(game, """(() => {
+            const app = document.getElementById('nai-media-host')?.shadowRoot?.getElementById('app');
+            return app?.innerText.includes('Suite QA Patricia') || !!app?.querySelector('.error-panel');
+        })()""")
+        assert "Suite QA Patricia" in game.locator("#app").inner_text(), game.locator("#app").inner_text()[:350]
+    except AssertionError:
+        details = game.evaluate("""async () => {
+            const paths = [...document.scripts].filter(s => s.src).map(s => new URL(s.src).pathname);
+            const resources = await Promise.all([...paths, '/game/style.css', '/game/api/bootstrap', '/game/api/renderer'].map(async path => {
+                const r = await fetch(path);
+                return [path, r.status, r.headers.get('content-type')];
+            }));
+            const state = await fetch('/game/api/state');
+            return {resources, renderer: typeof globalThis.AfterHoursCards, seed: state.ok ? (await state.json()).state?.seed : state.status};
+        }""")
+        print("Game fixture diagnostics:", details, flush=True)
+        raise
     assert game.evaluate("async () => (await (await fetch('/game/api/state')).json()).state.seed") == 123456
     bench.evaluate("window.suiteResumeImport()")
     until(bench, "window.suiteFinished !== undefined")
@@ -107,14 +150,22 @@ if __name__ == "__main__":
     args = parser.parse_args()
     fixture = args.fixture.resolve()
     with subprocess.Popen([args.dotnet, str(args.host_dll), str(fixture)], stdin=subprocess.PIPE,
-                          stdout=subprocess.PIPE, text=True) as host:
+                          stdout=subprocess.PIPE, text=True) as host, fixture_processes(host):
         try:
             address = host.stdout.readline().strip()
             assert address.startswith("http://127.0.0.1:"), address
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(channel="chrome", headless=True)
                 try:
-                    verify(browser.new_page(viewport={"width": 1280, "height": 850}), address, fixture)
+                    page = browser.new_page(viewport={"width": 1280, "height": 850})
+                    errors = []
+                    page.on("pageerror", lambda e: errors.append(str(e)[:240]))
+                    page.on("console", lambda msg: errors.append(msg.text[:240]) if msg.type == "error" else None)
+                    try:
+                        verify(page, address, fixture)
+                    except Exception:
+                        print("Chrome fixture errors:", errors[-12:], flush=True)
+                        raise
                 finally:
                     browser.close()
         finally:
