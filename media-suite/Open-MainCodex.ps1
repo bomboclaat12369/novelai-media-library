@@ -8,7 +8,7 @@ $prompt = 'This is my main Media Suite Codex thread for the Windows suite, Media
 
 function Test-MainWorkspace($Folder) {
     if (!(Test-Path -LiteralPath (Join-Path $Folder '.git'))) { return $false }
-    $url = [string](& git -C $Folder remote get-url origin 2>$null)
+    $url = [string](& git -C $Folder config --get remote.origin.url 2>$null)
     if ($LASTEXITCODE -ne 0 -or $url.Trim() -notmatch '^(https://github\.com/|git@github\.com:)bomboclaat12369/novelai-media-library(?:\.git)?/?$') { return $false }
     $branch = [string](& git -C $Folder branch --show-current)
     return ($LASTEXITCODE -eq 0 -and $branch -and $branch -notlike 'game-*' -and !(Test-Path -LiteralPath (Join-Path $Folder 'game/Launch.ps1')))

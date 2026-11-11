@@ -18,5 +18,8 @@ try {
     foreach ($item in $manifest.files) {
         if ((Get-FileHash -LiteralPath (Join-Path $dest $item.name)).Hash -ne $item.sha256) { throw "Invalid installed file $($item.name)" }
     }
+    if ($env:GITHUB_ACTIONS -eq 'true') {
+        & (Join-Path $PSScriptRoot 'check-first-run.ps1') -Program $dest -TestRoot $root
+    }
     Write-Host 'Verified clean installation, repeated installation and failed-upgrade rollback.'
 } finally { if (Test-Path $root) { Remove-Item -LiteralPath $root -Recurse -Force } }

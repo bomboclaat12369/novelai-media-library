@@ -21,7 +21,7 @@ Running services are recognized on their normal loopback addresses. For a cold s
 
 The companion starts in the background for Library, Battles and Workbench. Workbench launches with its installed updater and normal review database. After Hours launches through its own Launch.ps1 and reads its configured library and save. Closing the suite window leaves background services available for ongoing jobs and the next launch. Quit in Workbench and Restart game retain their usual behavior.
 
-The suite uses a dedicated WebView2 profile under %LOCALAPPDATA%\NovelAI Media Suite. Browser-only preferences such as the last selected girl can need setting once. Media, queue data, rankings and game saves are read by their original applications. Windows needs the x64 Microsoft Edge WebView2 Runtime. The three existing programs still use their own prerequisites.
+The suite uses a dedicated WebView2 profile under %LOCALAPPDATA%\NovelAI Media Suite. Browser-only preferences such as the last selected girl can need setting once. Media, queue data, rankings and game saves are read by their original applications. Setup checks for the Microsoft Edge WebView2 Runtime and installs it if needed. The three existing programs still use their own prerequisites.
 
 ## Development
 

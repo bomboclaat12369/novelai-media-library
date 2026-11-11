@@ -7,6 +7,9 @@ on:
     paths: ['media-suite/**', '.github/workflows/media-suite.yml']
 permissions:
   contents: read
+concurrency:
+  group: windows-media-suite-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   windows:
     runs-on: windows-2022

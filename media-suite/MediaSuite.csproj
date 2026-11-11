@@ -5,6 +5,8 @@
     <PlatformTarget>x64</PlatformTarget>
     <LangVersion>latest</LangVersion>
     <Version>1.0.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <PathMap>$(MSBuildProjectDirectory)=/_/media-suite</PathMap>
     <AssemblyName>MediaSuite</AssemblyName>
     <Product>Media Suite</Product>
     <ApplicationManifest>app.manifest</ApplicationManifest>

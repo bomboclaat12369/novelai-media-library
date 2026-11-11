@@ -21,7 +21,26 @@ try {
     foreach ($required in @('MediaSuite.exe','Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.WinForms.dll','WebView2Loader.dll','Open-MainCodex.ps1')) {
         if (!(Test-Path -LiteralPath (Join-Path $stage $required))) { throw "The package is missing $required." }
     }
+    $client = 'Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+    $runtime = @("HKLM:\SOFTWARE\WOW6432Node\$client","HKCU:\Software\$client") | Where-Object {
+        $value = (Get-ItemProperty -LiteralPath $_ -Name pv -ErrorAction SilentlyContinue).pv
+        $value -and $value -ne '0.0.0.0'
+    }
+    if (!$runtime) {
+        $bootstrap = Join-Path $stage 'MicrosoftEdgeWebView2Setup.exe'
+        Invoke-WebRequest -UseBasicParsing 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $bootstrap
+        $signature = Get-AuthenticodeSignature -LiteralPath $bootstrap
+        if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { throw 'WebView2 installer signature verification failed.' }
+        $setup = Start-Process $bootstrap -ArgumentList '/silent','/install' -Wait -PassThru
+        if ($setup.ExitCode -ne 0) { throw "Microsoft WebView2 setup exited with $($setup.ExitCode)." }
+        Remove-Item -LiteralPath $bootstrap
+    }
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'files.json') -Destination (Join-Path $stage 'suite-install.json')
     if ($installed) {
+        $oldIndex = Join-Path $InstallRoot 'suite-install.json'
+        if (!(Test-Path -LiteralPath $oldIndex)) { throw "The chosen installation folder already exists and belongs to a different installation: $InstallRoot" }
+        $oldFiles = @((Get-Content -LiteralPath $oldIndex -Raw | ConvertFrom-Json).files.name) + 'suite-install.json'
+        $keepPrevious = @(Get-ChildItem -LiteralPath $InstallRoot -Force | Where-Object { $_.Name -notin $oldFiles }).Count -gt 0
         $currentExe = Join-Path $InstallRoot 'MediaSuite.exe'
         if (Get-Process -Name MediaSuite -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $currentExe }) { throw 'Close the Media Suite window and run the installer again.' }
         if (!(Test-Path -LiteralPath (Join-Path $InstallRoot 'MediaSuite.exe'))) { throw "The install location is in use by a different folder: $InstallRoot" }
@@ -30,7 +49,10 @@ try {
     try { [IO.Directory]::Move($stage,$InstallRoot) }
     catch { if ($installed) { [IO.Directory]::Move($previous,$InstallRoot) }; throw }
 } finally { if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force } }
-if (Test-Path -LiteralPath $previous) { Remove-Item -LiteralPath $previous -Recurse -Force }
+if (Test-Path -LiteralPath $previous) {
+    if ($keepPrevious) { Write-Host "Kept the previous folder with your additional files at $previous" }
+    else { Remove-Item -LiteralPath $previous -Recurse -Force }
+}
 $exe = Join-Path $InstallRoot 'MediaSuite.exe'
 if (!$NoShortcuts) {
     $shell = New-Object -ComObject WScript.Shell
