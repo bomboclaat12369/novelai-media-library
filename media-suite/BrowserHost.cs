@@ -137,7 +137,19 @@ internal sealed class BrowserHost : IDisposable
                     await res.WriteAsync(": connected\n\n", context.RequestAborted);
                     await res.Body.FlushAsync(context.RequestAborted);
                     using (var lifetime = CancellationTokenSource.CreateLinkedTokenSource(closing.Token, context.RequestAborted))
-                        try { await Task.Delay(Timeout.Infinite, lifetime.Token); } catch (OperationCanceledException) { }
+                    {
+                        try
+                        {
+                            while (true)
+                            {
+                                await Task.Delay(TimeSpan.FromSeconds(5), lifetime.Token);
+                                await res.WriteAsync(": keepalive\n\n", lifetime.Token);
+                                await res.Body.FlushAsync(lifetime.Token);
+                            }
+                        }
+                        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+                        catch (IOException) { /* The browser closed its connection. */ }
+                    }
                     return;
                 case "/api/session":
                     if (req.Headers["X-Suite-Request"] != "session") { res.StatusCode = 403; return; }

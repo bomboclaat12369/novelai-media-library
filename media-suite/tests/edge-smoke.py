@@ -225,7 +225,12 @@ if __name__ == "__main__":
                             host.stdin.flush()
                             return host.stdout.readline().strip()
                         assert host_command("handoff") == "busy", "An open tab would have been restarted."
+                        another = browser.new_page()
+                        another.goto(address)
+                        until(another, "presence.readyState === EventSource.OPEN")
                         page.goto("about:blank")
+                        assert host_command("handoff") == "busy", "A tab in a second profile would have been restarted."
+                        another.close()
                         deadline = time.monotonic() + 15
                         while host_command("handoff") != "idle":
                             assert time.monotonic() < deadline, "Closed tabs prevented the update from applying."

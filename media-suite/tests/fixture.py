@@ -10,12 +10,24 @@ import shutil
 import socket
 import subprocess
 import sys
+from contextlib import ExitStack
 from PIL import Image
 
 REPO = Path(__file__).resolve().parents[2]
 
 def prepare(root, source, isolated_ports=False):
     root.mkdir(parents=True, exist_ok=False)
+    # A browser from an earlier packaged-shortcut test can reconnect to its
+    # original loopback address. Give this fixture four origins of its own.
+    profile = root / "Suite profile"
+    profile.mkdir()
+    with ExitStack() as sockets:
+        origins = []
+        for _ in range(4):
+            listener = sockets.enter_context(socket.socket())
+            listener.bind(("127.0.0.1", 0))
+            origins.append(listener.getsockname()[1])
+        (profile / "chrome-ports.json").write_text(json.dumps(origins))
     ports = [8765, 8877]
     if isolated_ports:
         with socket.socket() as library_socket, socket.socket() as game_socket:

@@ -92,6 +92,7 @@ try {
 } finally {
     if ($first -and !$first.HasExited) { Start-Process $exe -ArgumentList '--stop' -Wait; if (!$first.WaitForExit(10000)) { $first.Kill() } }
     if ($other -and !$other.HasExited) { $null = $other.CloseMainWindow() }
+    if ($edge -and !$edge.HasExited) { $null = $edge.CloseMainWindow() }
     Remove-Item -LiteralPath $profile -Recurse -Force
 }
 
