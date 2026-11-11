@@ -84,6 +84,7 @@ internal sealed class ApplicationProxy : IDisposable
         if (req.Method is "POST" or "DELETE" && req.Headers.Origin != self) { res.StatusCode = 403; return; }
         if (req.Path == "/_media-suite/battles.js" && section == Section.Library && req.Method == "GET")
         { await BrowserHost.Asset(context, "battles.js", "text/javascript; charset=utf-8"); return; }
+        if (req.Path == "/_media-suite/apply-runtime") { res.StatusCode = 404; return; }
         string raw = context.Features.Get<IHttpRequestFeature>()?.RawTarget;
         if (string.IsNullOrEmpty(raw) || !raw.StartsWith('/') || raw.StartsWith("//") || raw.Contains('\\'))
         { res.StatusCode = 400; return; }
@@ -119,6 +120,15 @@ internal sealed class ApplicationProxy : IDisposable
                 int end = html.IndexOf(head, StringComparison.OrdinalIgnoreCase);
                 if (end >= 0) html = html.Insert(end, "<script src=\"/_media-suite/battles.js\" data-parent=\"" + parent + "\" defer></script>");
                 await res.WriteAsync(html, Encoding.UTF8, context.RequestAborted);
+                return;
+            }
+            if (section == Section.Workbench && req.Method == "GET" && reply.IsSuccessStatusCode &&
+                reply.Content.Headers.ContentType?.MediaType == "text/html")
+            {
+                string html = await reply.Content.ReadAsStringAsync(context.RequestAborted);
+                int end = html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
+                if (end >= 0) html = html.Insert(end,"<style>#programUpdate{display:none!important}</style>");
+                await res.WriteAsync(html,Encoding.UTF8,context.RequestAborted);
                 return;
             }
             res.ContentLength = reply.Content.Headers.ContentLength;

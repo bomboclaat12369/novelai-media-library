@@ -2,6 +2,16 @@
 (() => {
   const parentOrigin = document.currentScript.dataset.parent;
   const root = () => document.getElementById('nai-media-host')?.shadowRoot;
+  // The same component runs in Library and Battles, inside its own shadow root.
+  const managed = new CSSStyleSheet();
+  managed.replaceSync('#naiUpdateStatus{display:none!important}');
+  function hideUpdateControls() {
+    const library = root();
+    if (library && !library.adoptedStyleSheets.includes(managed))
+      library.adoptedStyleSheets = [...library.adoptedStyleSheets, managed];
+  }
+  hideUpdateControls();
+  new MutationObserver(hideUpdateControls).observe(document.documentElement, {childList:true, subtree:true});
   let timer;
   window.addEventListener('message', event => {
     if (event.source !== parent || event.origin !== parentOrigin) return;

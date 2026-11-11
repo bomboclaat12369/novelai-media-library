@@ -17,9 +17,16 @@
       <button type="button" id="Workbench">Workbench</button>
       <button type="button" id="AfterHours">After Hours</button>
     </nav>
+    <button type="button" id="updates">Updates…</button>
     <button type="button" id="locations">Locations…</button>
   </dialog>
   <main></main>
+  <dialog id="update-dialog" aria-labelledby="update-title">
+    <h1 id="update-title">Suite updates</h1>
+    <p>Updates are checked automatically. Close the suite tabs to apply a waiting update when the app is idle.</p>
+    <dl id="update-list" aria-live="polite"></dl>
+    <footer><button type="button" id="check-updates">Check for updates</button><button type="button" id="close-updates">Close</button></footer>
+  </dialog>
   <dialog id="settings" aria-labelledby="settings-title">
     <form>
       <h1 id="settings-title">Suite locations</h1>

@@ -1,6 +1,6 @@
 # Media Library / Media Workbench source map
 
-The [Windows Media Suite](../media-suite/README.md) opens the library, Battles, Workbench and the separately maintained After Hours game as four persistent modes in the current Edge window. Its verified Windows updates use `release-media-suite.json`. The [main Codex handoff](../media-suite/MAIN-CODEX.md) covers the two development checkouts.
+The [Windows Media Suite](../media-suite/README.md) opens the library, Battles, Workbench and the separately maintained After Hours game as four persistent modes in the current Edge window. `media-suite/ApplicationUpdates.cs` coordinates the companion and Workbench updates with the Windows feed and the game adapter in `GameUpdates.cs`. The [main Codex handoff](../media-suite/MAIN-CODEX.md) covers the two development checkouts.
 
 Start with `AGENTS.md`, then the three release configs. They select the active
 modules; older versioned payload parts remain immutable release history.

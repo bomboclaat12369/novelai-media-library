@@ -4,6 +4,7 @@ import base64
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 import runpy
 import shutil
@@ -120,6 +121,24 @@ Handler = SuiteTestHandler
     if sys.platform == "win32":
         for program in (companion, bench):
             subprocess.run([sys.executable, "-m", "venv", "--without-pip", "--system-site-packages", str(program / ".venv")], check=True)
+        # Drive the real installed Workbench updater through the suite against a
+        # deterministic newer release. Only this disposable venv sees the feed.
+        from test_updater import payload
+        encoded = base64.b64encode(payload())
+        part_url = "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/" + "b"*40 + "/payload/fixture.txt"
+        feed = {"schema": 1, "version": "2.0.1", "sha256": hashlib.sha256(base64.b64decode(encoded)).hexdigest(),
+                "parts": [{"url": part_url, "sha256": hashlib.sha256(encoded).hexdigest()}]}
+        (root / "fixture-workbench-feed.json").write_text(json.dumps(feed))
+        (root / "fixture-workbench-part.txt").write_bytes(encoded)
+        engine = bench / "engine.py"
+        engine.write_text(re.sub(r"^VERSION = .*", "VERSION = '2.0.0'", engine.read_text(encoding="utf-8"), flags=re.M), encoding="utf-8")
+        (bench / ".venv/Lib/site-packages/sitecustomize.py").write_text(
+            "import io, urllib.request\nfrom pathlib import Path\n_original = urllib.request.urlopen\n"
+            "def _fixture(req, *args, **kwargs):\n"
+            "    url = getattr(req, 'full_url', req)\n"
+            f"    if url == {part_url!r}: return io.BytesIO(Path({str(root/'fixture-workbench-part.txt')!r}).read_bytes())\n"
+            f"    if url.endswith('/main/release-duplicate-review.json'): return io.BytesIO(Path({str(root/'fixture-workbench-feed.json')!r}).read_bytes())\n"
+            "    return _original(req, *args, **kwargs)\nurllib.request.urlopen = _fixture\n", encoding="utf-8")
     (root / "suite-qa.json").write_text(json.dumps({"LibraryFolder": str(media), "CompanionFolder": str(companion),
         "WorkbenchFolder": str(bench), "GameFolder": str(game), "LastSection": "Library"}))
 

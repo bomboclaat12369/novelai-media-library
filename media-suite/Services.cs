@@ -4,6 +4,7 @@ using System.IO;
 using System.Net.Http;
 using System.Runtime.Serialization;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -31,6 +32,8 @@ namespace NovelAI.MediaSuite
         private readonly SemaphoreSlim workbenchGate = new SemaphoreSlim(1);
         private readonly SemaphoreSlim gameGate = new SemaphoreSlim(1);
         private readonly TimeSpan wait;
+        internal GameUpdates GameUpdates { get; set; }
+        internal CompanionUpdates CompanionUpdates { get; set; }
         internal string ActiveLibrary { get; private set; }
 
         internal Services(Preferences settings, string workbenchState, HttpMessageHandler handler = null,
@@ -106,7 +109,7 @@ namespace NovelAI.MediaSuite
             return libraryPage;
         }
 
-        private async Task<Uri> RunningWorkbench(CancellationToken token)
+        internal async Task<Uri> RunningWorkbench(CancellationToken token)
         {
             var address = RecordedWorkbench();
             if (address == null) return null;
@@ -148,14 +151,46 @@ namespace NovelAI.MediaSuite
                 throw new InvalidOperationException("In Locations, choose your existing media folder containing library.json.");
             if (!Installations.Companion(settings.CompanionFolder))
                 throw new InvalidOperationException("In Locations, choose the installed Media Library program folder containing companion.pyw and its .venv.");
-            Start(Installations.Python(settings.CompanionFolder),settings.CompanionFolder,"companion.pyw","--headless","--root",settings.LibraryFolder);
+            if (CompanionUpdates != null) start(CompanionUpdates.Command("serve",settings.CompanionFolder,settings.LibraryFolder));
+            else Start(Installations.Python(settings.CompanionFolder),settings.CompanionFolder,"companion.pyw","--headless","--root",settings.LibraryFolder);
         }
 
         private void LaunchWorkbench()
         {
             if (!Installations.Workbench(settings.WorkbenchFolder))
                 throw new InvalidOperationException("In Locations, choose the installed Workbench folder containing app.py and its .venv.");
-            Start(Installations.Python(settings.WorkbenchFolder),settings.WorkbenchFolder,"app.py","--no-browser");
+            // During a native restart the next process can hold the state lock
+            // before posting its port. A second launcher would open a browser.
+            var lockPath = Path.Combine(workbenchState,"app.lock");
+            if (OperatingSystem.IsWindows() && File.Exists(lockPath))
+            {
+                try
+                {
+                    using var file = new FileStream(lockPath,FileMode.Open,FileAccess.ReadWrite,FileShare.ReadWrite);
+                    file.Lock(0,1);
+                    file.Unlock(0,1);
+                }
+                catch (IOException) { return; }
+            }
+            string program = ActiveWorkbench() ?? Path.Combine(settings.WorkbenchFolder,"app.py");
+            Start(Installations.Python(settings.WorkbenchFolder),Path.GetDirectoryName(program),program,"--no-browser");
+        }
+
+        private string ActiveWorkbench()
+        {
+            try
+            {
+                string updates = Path.Combine(workbenchState,"updates");
+                using var active = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(updates,"active.json")));
+                string name = active.RootElement.GetProperty("version").GetString();
+                if (!Version.TryParse(name,out var version) || version.Build<0 || version.Revision>=0 || version.ToString()!=name) return null;
+                string directory=Path.Combine(updates,"versions",name);
+                using var ready=JsonDocument.Parse(File.ReadAllBytes(Path.Combine(directory,"ready.json")));
+                string app=Path.Combine(directory,"duplicate-review","app.py");
+                return ready.RootElement.GetProperty("version").GetString()==name && File.Exists(app) ? app : null;
+            }
+            catch (Exception e) when (e is IOException or JsonException or System.Collections.Generic.KeyNotFoundException or UnauthorizedAccessException)
+            { return null; }
         }
 
         private void LaunchGame()
@@ -168,6 +203,8 @@ namespace NovelAI.MediaSuite
             if (string.IsNullOrWhiteSpace(library)) library = ActiveLibrary ?? settings.LibraryFolder;
             if (!Installations.Library(library))
                 throw new InvalidOperationException("After Hours needs an existing library.json. Check the library in game/local.json or in Locations.");
+            var managed = GameUpdates?.LaunchCommand(folder, library);
+            if (managed != null) { start(managed); return; }
             var shell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"WindowsPowerShell","v1.0","powershell.exe");
             Start(shell,folder,"-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",
                 Path.Combine(folder,"Launch.ps1"),"-NoBrowser","-Library",library);
@@ -196,13 +233,14 @@ namespace NovelAI.MediaSuite
         }
 
         internal Task<Uri> Library(CancellationToken token) => Connect(companionGate,RunningLibrary,LaunchLibrary,"Media Library",token);
+        internal Task<Uri> Workbench(CancellationToken token) => Connect(workbenchGate,RunningWorkbench,LaunchWorkbench,"Workbench",token);
         internal async Task<Uri> Open(Section section,CancellationToken token)
         {
             switch (section)
             {
                 case Section.Workbench:
                     await Library(token).ConfigureAwait(false);
-                    return await Connect(workbenchGate,RunningWorkbench,LaunchWorkbench,"Workbench",token).ConfigureAwait(false);
+                    return await Workbench(token).ConfigureAwait(false);
                 case Section.AfterHours:
                     return await Connect(gameGate,RunningGame,LaunchGame,"After Hours",token).ConfigureAwait(false);
                 default: return await Library(token).ConfigureAwait(false);

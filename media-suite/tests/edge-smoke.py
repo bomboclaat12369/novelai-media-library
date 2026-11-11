@@ -92,6 +92,7 @@ def verify(page, address, root):
     owner = select.locator("option").filter(has_text="Suite QA Patricia").get_attribute("value")
     select.select_option(value=owner)
     library.get_by_text("Local library connected", exact=True).first.wait_for()
+    expect(library.locator("#naiUpdateStatus")).to_be_hidden()
     until(library, "Array.from(document.getElementById('nai-media-host').shadowRoot.querySelectorAll('img')).some(img => img.naturalWidth > 0)")
     media_id = json.loads((root / "Media data/library.json").read_text(encoding="utf-8"))["media"][0]["id"]
     partial = page.request.get(library.url.split("/library/")[0] + f"/api/media/{media_id}/original", headers={"Range":"bytes=0-7"})
@@ -138,6 +139,24 @@ def verify(page, address, root):
     assert page.request.get(address, headers={"Host": "example.org"}).status == 403
 
     bench = section("Workbench", "Workbench", keys=("Home", "ArrowDown", "ArrowDown"))
+    expect(bench.locator("#programUpdate")).to_be_hidden()
+    toggle.click()
+    picker.get_by_role("button", name="Updates…").click()
+    updates = page.get_by_role("dialog", name="Suite updates")
+    expect(updates.locator("dt")).to_have_text(["Media Suite", "Media Library and Battles", "Workbench", "After Hours"])
+    updates.get_by_text("Ready for next session · 2.0.1").wait_for()
+    updates.get_by_role("button", name="Check for updates").click()
+    updates.get_by_text("Ready for next session · 2.0.1").wait_for()
+    updates.get_by_role("button", name="Close", exact=True).click()
+    direct = page.context.new_page()
+    try:
+        ports = json.loads((root / "test-ports.json").read_text())
+        direct.goto(f"http://127.0.0.1:{ports[0]}/library/")
+        direct.get_by_role("button", name="Check updates", exact=True).wait_for()
+        direct.goto((root / "Workbench data/state/running-url.txt").read_text().strip())
+        direct.locator("#programUpdate").wait_for()
+    finally:
+        direct.close()
     post = bench.locator("#postList .post").filter(has_text="Post 2")
     until(bench, "!!document.getElementById('position')?.textContent && !document.getElementById('collectionPicker').disabled "
           "&& !!document.querySelector('#grid .card')")
@@ -225,12 +244,19 @@ if __name__ == "__main__":
                             host.stdin.flush()
                             return host.stdout.readline().strip()
                         assert host_command("handoff") == "busy", "An open tab would have been restarted."
+                        assert host_command("apply") == "waiting", "The suite restarted Workbench under an active tab."
                         another = browser.new_page()
                         another.goto(address)
                         until(another, "presence.readyState === EventSource.OPEN")
                         page.goto("about:blank")
                         assert host_command("handoff") == "busy", "A tab in a second profile would have been restarted."
                         another.close()
+                        deadline = time.monotonic() + 30
+                        while host_command("apply") != "applied":
+                            assert time.monotonic() < deadline, "Workbench did not apply the verified release after the last tab closed."
+                            time.sleep(.2)
+                        pointer = json.loads((fixture / "Workbench data/state/updates/active.json").read_text())
+                        assert pointer["version"] == "2.0.1"
                         deadline = time.monotonic() + 15
                         while host_command("handoff") != "idle":
                             assert time.monotonic() < deadline, "Closed tabs prevented the update from applying."

@@ -39,6 +39,8 @@ jobs:
           python media-suite/make-icon.py
           dotnet run --project media-suite/tests/core/CoreChecks.csproj -c Release
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python media-suite/tests/companion-updates.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           dotnet build media-suite/tests/browser/BrowserSmoke.csproj -c Release
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           dotnet publish media-suite/MediaSuite.csproj -c Release -r win-x64 --self-contained true
@@ -95,7 +97,7 @@ jobs:
             cmp "release/$zip" "existing/$zip"
             cmp release/Install-Media-Suite.cmd existing/Install-Media-Suite.cmd
           else
-            gh release create "$tag" "release/$zip" release/Install-Media-Suite.cmd release/media-suite-manifest.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Windows Media Suite ${tag#media-suite-v}" --notes "Media Suite now opens in the current Microsoft Edge window and checks for verified updates automatically. Mode is in the bottom-right corner and its menu opens upward."
+            gh release create "$tag" "release/$zip" release/Install-Media-Suite.cmd release/media-suite-manifest.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Windows Media Suite ${tag#media-suite-v}" --notes "Media Suite checks for app updates automatically. Open Mode → Updates to see the Windows suite, Media Library and Battles, Workbench, and After Hours in one place. Verified updates wait for a safe session change. Standalone apps keep their update controls."
           fi
           jq --arg commit "$GITHUB_SHA" --arg tag "$tag" '. + {status:"published_verification_pending",commit:$commit,tag:$tag}' release/media-suite-manifest.json > release-receipt.json
           gh release download "$tag" --repo "$GITHUB_REPOSITORY" -D verified

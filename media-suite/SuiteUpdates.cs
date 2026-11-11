@@ -118,7 +118,7 @@ internal sealed class SuiteUpdates
         await File.WriteAllBytesAsync(Path.Combine(folder, "suite-install.json"), bytes, token);
     }
 
-    internal async Task CheckAsync()
+    internal async Task<bool> CheckAsync()
     {
         try
         {
@@ -130,17 +130,19 @@ internal sealed class SuiteUpdates
                 await Download(Feed, info, 32768, timeout.Token);
             var release = JsonSerializer.Deserialize<Release>(info.ToArray());
             var wanted = Parse(release?.version) ?? throw new InvalidDataException("Invalid update version.");
-            if (wanted <= current) return;
+            if (wanted <= current) return true;
             var active = NewerProgram();
-            if (active != null && Parse(Path.GetFileName(Path.GetDirectoryName(active))) >= wanted) return;
+            if (active != null && Parse(Path.GetFileName(Path.GetDirectoryName(active))) >= wanted) return true;
             if (release.file != $"Media-Suite-{wanted}.zip" || release.bytes <= 0 || release.bytes > Limit ||
                 release.sha256?.Length != 64 || !release.sha256.All(Uri.IsHexDigit))
                 throw new InvalidDataException("Invalid suite release manifest.");
             await Stage(release);
+            return true;
         }
         catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException or HttpRequestException or OperationCanceledException or JsonException)
         {
             Trace.TraceWarning("Suite update deferred: {0}", e.Message);
+            return false;
         }
     }
 

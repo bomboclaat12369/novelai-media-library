@@ -2,8 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using NovelAI.MediaSuite;
 
 var root = Path.GetFullPath(args[0]);
@@ -39,12 +43,31 @@ var services = new Services(settings, state, start: info => {
 try
 {
     using var host = new BrowserHost(settings, profile, services);
+    using var localApps = new HttpClient(new HttpClientHandler {UseProxy=false,AllowAutoRedirect=false});
+    services.CompanionUpdates = new CompanionUpdates(profile,localApps);
+    using var gameFeed = new HttpClient(new NoGameRelease());
+    var apps = new ApplicationUpdates(settings, services, localApps, new GameUpdates(profile,gameFeed),
+        () => Task.FromResult("Up to date"), host.WhileIdle, CancellationToken.None);
+    host.Updates = apps;
     await host.StartAsync();
+    _ = apps.Check();
     Console.WriteLine(host.Address.AbsoluteUri);
-    while (Console.ReadLine() == "handoff")
-        Console.WriteLine(host.TryHandOff() ? "idle" : "busy");
-    if (started.Count != 3) throw new Exception("Expected three cold starts, got " + started.Count);
+    string command;
+    while ((command = Console.ReadLine()) is "handoff" or "apply")
+    {
+        if (command == "handoff") Console.WriteLine(host.TryHandOff() ? "idle" : "busy");
+        else
+        {
+            await apps.ApplyWhenIdle();
+            var status = JsonSerializer.SerializeToElement(apps.Snapshot()).GetProperty("apps").GetProperty("Workbench").GetString();
+            Console.WriteLine(status == "Installed · 2.0.1" && File.Exists(Path.Combine(state,"updates","active.json")) ? "applied"
+                : status == "Ready for next session · 2.0.1" ? "waiting" : status);
+        }
+    }
+    if (started.Count != 3 && !(started.Count==4 && started[3].StartInfo.Arguments.Contains("2.0.1")))
+        throw new Exception("Unexpected service starts: " + started.Count);
 }
+
 finally
 {
     foreach (var process in started)
@@ -53,4 +76,10 @@ finally
         catch (InvalidOperationException) {}
         process.Dispose();
     }
+}
+
+internal sealed class NoGameRelease : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
 }

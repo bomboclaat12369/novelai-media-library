@@ -30,12 +30,25 @@ internal sealed class BrowserHost : IDisposable
     private readonly object requestLock = new();
     private int activeRequests;
     private bool handingOff;
-    internal bool InUse { get { lock (requestLock) return activeRequests != 0; } }
+    private TaskCompletionSource maintenance;
+    internal ApplicationUpdates Updates { get; set; }
+    internal bool InUse { get { lock (requestLock) return activeRequests != 0 || maintenance != null; } }
+    internal async Task<bool> WhileIdle(Func<Task> action)
+    {
+        TaskCompletionSource finished;
+        lock (requestLock)
+        {
+            if (activeRequests != 0 || handingOff || maintenance != null) return false;
+            maintenance = finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+        try { await action(); return true; }
+        finally { lock (requestLock) { maintenance = null; finished.SetResult(); } }
+    }
     internal bool TryHandOff()
     {
         lock (requestLock)
         {
-            if (activeRequests != 0) return false;
+            if (activeRequests != 0 || maintenance != null) return false;
             handingOff = true;
             return true;
         }
@@ -85,10 +98,16 @@ internal sealed class BrowserHost : IDisposable
             app.Run(async context => {
                 if (context.Request.Host.Value != "127.0.0.1:" + context.Connection.LocalPort)
                 { context.Response.StatusCode = 403; return; }
-                lock (requestLock)
+                while (true)
                 {
-                    if (handingOff) { context.Response.StatusCode = 503; return; }
-                    activeRequests++;
+                    Task idle;
+                    lock (requestLock)
+                    {
+                        if (handingOff) { context.Response.StatusCode = 503; return; }
+                        if (maintenance == null) { activeRequests++; break; }
+                        idle = maintenance.Task;
+                    }
+                    await idle.WaitAsync(context.RequestAborted);
                 }
                 try { await handle(context); }
                 finally { lock (requestLock) activeRequests--; }
@@ -169,6 +188,12 @@ internal sealed class BrowserHost : IDisposable
         try
         {
             string[] parts = path.Trim('/').Split('/');
+            if (path is "/api/updates" or "/api/updates/check")
+            {
+                if (Updates == null) { res.StatusCode = 503; return; }
+                if (path.EndsWith("/check", StringComparison.Ordinal)) _ = Updates.Check();
+                await res.WriteAsJsonAsync(Updates.Snapshot()); return;
+            }
             if (parts.Length == 3 && parts[0] == "api" && Enum.TryParse(parts[2], out Section section) && section.ToString() == parts[2] && Enum.IsDefined(section))
             {
                 if (parts[1] == "select")

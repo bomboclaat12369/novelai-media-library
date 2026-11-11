@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -62,8 +63,8 @@ internal static class Program
         var updates = new SuiteUpdates(folder, typeof(Program).Assembly.GetName().Version);
         string next = updates.NewerProgram();
         if (next != null) return next;
-        Task check = Task.Run(updates.CheckAsync);
-        check.GetAwaiter().GetResult();
+        Task<bool> check = Task.Run(updates.CheckAsync);
+        bool checkedSuite = check.GetAwaiter().GetResult();
         next = updates.NewerProgram();
         if (next != null) return next;
 
@@ -72,30 +73,56 @@ internal static class Program
         var services = new Services(settings, Path.Combine(local, "LocalDuplicateReview"));
         var edge = new EdgeLauncher();
         using var host = new BrowserHost(settings, folder, services);
+        using var stopping = new CancellationTokenSource();
+        using var localApps = new HttpClient(new SocketsHttpHandler {UseProxy=false, AllowAutoRedirect=false}) {Timeout=TimeSpan.FromSeconds(55)};
+        using var releases = new HttpClient {Timeout=TimeSpan.FromSeconds(15)};
+        var game = new GameUpdates(folder,releases);
+        services.GameUpdates = game;
+        services.CompanionUpdates = new CompanionUpdates(folder,localApps);
+        var checkLock = new object();
+        string SuiteStatus(bool online) => updates.NewerProgram() != null ? "Ready for next launch"
+            : online ? "Up to date · " + typeof(Program).Assembly.GetName().Version.ToString(3) : "Couldn’t check. Will retry.";
+        async Task<string> CheckSuite()
+        {
+            Task<bool> run;
+            lock (checkLock) { if (check.IsCompleted) check = Task.Run(updates.CheckAsync); run = check; }
+            return SuiteStatus(await run);
+        }
+        var apps = new ApplicationUpdates(settings,services,localApps,game,CheckSuite,host.WhileIdle,stopping.Token);
+        host.Updates = apps;
         host.StartAsync().GetAwaiter().GetResult();
+        _ = apps.Check(SuiteStatus(checkedSuite));
         var signals = new WaitHandle[] {stop, show};
         var lastCheck = DateTime.UtcNow;
-        while (true)
+        try
         {
-            edge.Show(host.Address);
-            int signal;
-            do
+            while (true)
             {
-                signal = WaitHandle.WaitAny(signals, TimeSpan.FromHours(4));
-                if (signal == 0) return null;
-                bool idleLaunch = signal == 1 && !host.InUse;
-                if (check.IsCompleted && (idleLaunch || DateTime.UtcNow - lastCheck > TimeSpan.FromMinutes(5)))
+                edge.Show(host.Address);
+                int signal;
+                do
                 {
-                    check = Task.Run(updates.CheckAsync);
-                    lastCheck = DateTime.UtcNow;
-                }
-                if (idleLaunch)
-                {
-                    check.GetAwaiter().GetResult();
-                    next = updates.NewerProgram();
-                    if (next != null && host.TryHandOff()) return next;
-                }
-            } while (signal != 1);
+                    signal = WaitHandle.WaitAny(signals, TimeSpan.FromSeconds(30));
+                    if (signal == 0) return null;
+                    bool idleLaunch = signal == 1 && !host.InUse;
+                    if (idleLaunch)
+                    {
+                        var status = CheckSuite().GetAwaiter().GetResult();
+                        next = updates.NewerProgram();
+                        if (next != null && host.TryHandOff()) return next;
+                        apps.ApplyWhenIdle().GetAwaiter().GetResult();
+                        _ = apps.Check(status);
+                        lastCheck = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        if (DateTime.UtcNow - lastCheck > TimeSpan.FromHours(1))
+                        { _ = apps.Check(); lastCheck = DateTime.UtcNow; }
+                        if (!host.InUse) _ = apps.ApplyWhenIdle();
+                    }
+                } while (signal != 1);
+            }
         }
+        finally { stopping.Cancel(); }
     }
 }

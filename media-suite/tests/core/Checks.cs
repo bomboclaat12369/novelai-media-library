@@ -79,6 +79,7 @@ internal static class Checks
             mock.Forged=true;settings.LibraryFolder=Path.Combine(root,"absent");
             refused=false;try{await api.Library(ct);}catch(InvalidOperationException){refused=true;}
             Check(refused && !Directory.Exists(settings.LibraryFolder),"Foreign service cannot create/reset a library");
+            await ApplicationUpdateChecks.Verify(root,settings);
             Console.WriteLine(count+" service and settings checks passed.");
         }
         finally { Directory.Delete(root,true); }

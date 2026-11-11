@@ -35,6 +35,7 @@ def package(build, output):
     if list(build.glob("*.dll")) or list(build.glob("*.runtimeconfig.json")):
         raise ValueError("Publish the self-contained single-file launcher before packaging.")
     files["Open-MainCodex.ps1"] = (ROOT / "Open-MainCodex.ps1").read_bytes()
+    files["companion-session.py"] = (ROOT / "companion-session.py").read_bytes()
     files["DotNet-Notices.txt"] = runtime_notices()
     output.mkdir(parents=True, exist_ok=True)
     package_path = output / f"Media-Suite-{version}.zip"

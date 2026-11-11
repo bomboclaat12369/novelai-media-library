@@ -28,3 +28,9 @@ dialog button, .feedback button { padding: 3px 10px }
 dialog footer { justify-content: flex-end; margin-top: 16px }
 #settings-error { color: #922e24 }
 #settings-error:empty { display: none }
+#update-dialog { width: min(400px, 92vw); border: 1px solid #9b9b9b; padding: 18px; background: #f0f0f0 }
+#update-dialog::backdrop { background: #0004 }
+#update-dialog p { line-height: 1.45 }
+#update-list { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px }
+#update-list dt { font-weight: 600 }
+#update-list dd { margin: 0 }

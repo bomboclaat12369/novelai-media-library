@@ -130,6 +130,32 @@ picker.onkeydown = event => {
 };
 
 const fields = Array.from(dialog.querySelectorAll('input'));
+const updateDialog = byId('update-dialog'), checkUpdates = byId('check-updates');
+let updateTimer;
+async function showUpdates(check = false) {
+  clearTimeout(updateTimer);
+  checkUpdates.disabled = true;
+  const list = byId('update-list');
+  try {
+    const state = await request(check ? 'updates/check' : 'updates');
+    if (!updateDialog.open) return;
+    list.replaceChildren(...Object.entries(state.apps).flatMap(([name, status]) => {
+      const label = document.createElement('dt'), value = document.createElement('dd');
+      label.textContent = name; value.textContent = status;
+      return [label, value];
+    }));
+    checkUpdates.disabled = state.checking;
+    if (state.checking) updateTimer = setTimeout(showUpdates, 1000);
+  } catch (error) {
+    list.textContent = error.message;
+    checkUpdates.disabled = false;
+  }
+}
+byId('updates').onclick = () => { picker.close(); updateDialog.showModal(); showUpdates(); };
+checkUpdates.onclick = () => showUpdates(true);
+byId('close-updates').onclick = () => updateDialog.close();
+updateDialog.onclose = () => { clearTimeout(updateTimer); modeToggle.focus(); };
+
 byId('locations').onclick = async () => {
   picker.close();
   byId('settings-error').textContent = '';
