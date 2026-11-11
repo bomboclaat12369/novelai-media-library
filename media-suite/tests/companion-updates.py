@@ -46,7 +46,8 @@ def verify(root):
     (runtime / "companion-runtime.pyw").write_text(code, encoding="utf-8")
     (runtime / "version.txt").write_text("1.0.0")
     body = (code + "\n# Next verified fixture release\n").encode()
-    manifest = {"schema": 2, "runtime_version": "1.0.1", "runtime_sha256": hashlib.sha256(body).hexdigest(), "runtime_parts": ["fixture"]}
+    part_url = "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/fixture-runtime.b64"
+    manifest = {"schema": 2, "runtime_version": "1.0.1", "runtime_sha256": hashlib.sha256(body).hexdigest(), "runtime_parts": [part_url]}
     feed = root / "feed.json"
     feed.write_text(json.dumps(manifest))
     part = root / "part.txt"

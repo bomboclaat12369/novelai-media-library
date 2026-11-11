@@ -134,7 +134,7 @@ const updateDialog = byId('update-dialog'), checkUpdates = byId('check-updates')
 let updateTimer;
 async function showUpdates(check = false) {
   clearTimeout(updateTimer);
-  checkUpdates.disabled = true;
+  if (check) checkUpdates.disabled = true;
   const list = byId('update-list');
   try {
     const state = await request(check ? 'updates/check' : 'updates');
@@ -144,7 +144,7 @@ async function showUpdates(check = false) {
       label.textContent = name; value.textContent = status;
       return [label, value];
     }));
-    checkUpdates.disabled = state.checking;
+    checkUpdates.disabled = false;
     if (state.checking) updateTimer = setTimeout(showUpdates, 1000);
   } catch (error) {
     list.textContent = error.message;

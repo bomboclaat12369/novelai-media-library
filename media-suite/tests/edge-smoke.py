@@ -252,8 +252,8 @@ if __name__ == "__main__":
                         assert host_command("handoff") == "busy", "A tab in a second profile would have been restarted."
                         another.close()
                         deadline = time.monotonic() + 30
-                        while host_command("apply") != "applied":
-                            assert time.monotonic() < deadline, "Workbench did not apply the verified release after the last tab closed."
+                        while (result := host_command("apply")) != "applied":
+                            assert time.monotonic() < deadline, f"A verified release did not resume after the last tab closed: {result}"
                             time.sleep(.2)
                         pointer = json.loads((fixture / "Workbench data/state/updates/active.json").read_text())
                         assert pointer["version"] == "2.0.1"

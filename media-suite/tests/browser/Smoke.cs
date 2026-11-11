@@ -60,7 +60,10 @@ try
         {
             await apps.ApplyWhenIdle();
             var status = JsonSerializer.SerializeToElement(apps.Snapshot()).GetProperty("apps").GetProperty("Workbench").GetString();
-            Console.WriteLine(status == "Installed · 2.0.1" && File.Exists(Path.Combine(state,"updates","active.json")) ? "applied"
+            var companionSessions=Directory.GetFiles(Path.Combine(profile,"companions"),"session.json",SearchOption.AllDirectories);
+            bool latest=Array.Exists(companionSessions,path=>
+                JsonSerializer.Deserialize<JsonElement>(File.ReadAllBytes(path)).GetProperty("version").GetString()=="9.9.1");
+            Console.WriteLine(status == "Installed · 2.0.1" && latest && File.Exists(Path.Combine(state,"updates","active.json")) ? "applied"
                 : status == "Ready for next session · 2.0.1" ? "waiting" : status);
         }
     }

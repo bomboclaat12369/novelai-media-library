@@ -121,6 +121,24 @@ Handler = SuiteTestHandler
     if sys.platform == "win32":
         for program in (companion, bench):
             subprocess.run([sys.executable, "-m", "venv", "--without-pip", "--system-site-packages", str(program / ".venv")], check=True)
+        # Interface and companion use the real download/verification paths.
+        # All requests in this test resolve to known bytes, including on a
+        # runner whose Git checkout uses Windows line endings.
+        runtime_part = "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/fixture-runtime.b64"
+        next_runtime = (companion / ".runtime/companion-runtime.pyw").read_bytes() + b"\n# Updated suite fixture\n"
+        (root/"fixture-runtime.b64").write_bytes(base64.b64encode(next_runtime))
+        test_manifest = {**manifest, "runtime_version":"9.9.1", "runtime_sha256":hashlib.sha256(next_runtime).hexdigest(),
+                         "runtime_parts":[runtime_part], "standalone_sha256":hashlib.sha256(body).hexdigest()}
+        (root/"fixture-library-feed.json").write_text(json.dumps(test_manifest))
+        html_path = REPO / "payload" / f"standalone-{config['version']}.html"
+        (companion/".venv/Lib/site-packages/sitecustomize.py").write_text(
+            "import urllib.request\nfrom pathlib import Path\n_original = urllib.request.urlopen\n"
+            "def _fixture(req, *args, **kwargs):\n"
+            "    url = getattr(req, 'full_url', req).split('?',1)[0]\n"
+            f"    if url.endswith('/manifest.json'): return Path({str(root/'fixture-library-feed.json')!r}).open('rb')\n"
+            f"    if url == {runtime_part!r}: return Path({str(root/'fixture-runtime.b64')!r}).open('rb')\n"
+            f"    if url == {manifest['standalone_url']!r}: return Path({str(html_path)!r}).open('rb')\n"
+            "    return _original(req, *args, **kwargs)\nurllib.request.urlopen = _fixture\n", encoding="utf-8")
         # Drive the real installed Workbench updater through the suite against a
         # deterministic newer release. Only this disposable venv sees the feed.
         from test_updater import payload

