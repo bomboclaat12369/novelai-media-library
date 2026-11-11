@@ -40,6 +40,7 @@ def prepare(root, source):
     manifest = json.loads((REPO / "manifest.json").read_text())
     (companion / ".runtime/version.txt").write_text(manifest["runtime_version"])
 
+    shutil.copytree(REPO / "runtime-src", root / "runtime-src")
     bench = root / "Workbench program"
     shutil.copytree(REPO / "duplicate-review", bench, ignore=shutil.ignore_patterns(".venv", "__pycache__", "tests"))
     sys.path.insert(0, str(REPO / "duplicate-review/tests"))

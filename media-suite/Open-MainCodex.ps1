@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 $stateDir = Join-Path $env:LOCALAPPDATA 'NovelAI Media Suite'
 $record = Join-Path $stateDir 'main-workspace.txt'
 $remote = 'https://github.com/bomboclaat12369/novelai-media-library.git'
-$prompt = 'This is my main Media Suite Codex thread for the Windows suite, Media Library, Battles, and Workbench. Read AGENTS.md, media-suite/MAIN-CODEX.md, and docs/PROJECT-MAP.md. Check the working tree and the installed suite against my existing locations. Continue using my separate After Hours thread for game development.'
+$prompt = 'This is my main Media Suite Codex thread for the Windows suite, Media Library, Battles, and Workbench. Read AGENTS.md, media-suite/MAIN-CODEX.md, and docs/PROJECT-MAP.md. Identify my existing installed programs, fill in any missing suite locations, and verify the connections on my PC. Continue using my separate After Hours thread for game development.'
 
 function Test-MainWorkspace($Folder) {
     if (!(Test-Path -LiteralPath (Join-Path $Folder '.git'))) { return $false }

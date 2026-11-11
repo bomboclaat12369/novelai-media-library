@@ -134,8 +134,9 @@ namespace NovelAI.MediaSuite
                 if (page.Browser==null || page.Browser.CoreWebView2==null)
                 {
                     if(page.Browser!=null) page.Browser.Dispose();
-                    var web=new WebView2 {Dock=DockStyle.Fill,Visible=false};
-                    page.Host.Controls.Add(web);page.Browser=web;
+                    var web=new WebView2 {Dock=DockStyle.Fill};
+                    page.Host.Controls.Add(web);web.SendToBack();page.Browser=web;
+                    var handle=web.Handle;
                     await web.EnsureCoreWebView2Async(env);
                     closing.Token.ThrowIfCancellationRequested();
                     var core=web.CoreWebView2;

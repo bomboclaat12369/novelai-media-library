@@ -22,6 +22,8 @@ try {
         if (!(Test-Path -LiteralPath (Join-Path $stage $required))) { throw "The package is missing $required." }
     }
     if ($installed) {
+        $currentExe = Join-Path $InstallRoot 'MediaSuite.exe'
+        if (Get-Process -Name MediaSuite -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $currentExe }) { throw 'Close the Media Suite window and run the installer again.' }
         if (!(Test-Path -LiteralPath (Join-Path $InstallRoot 'MediaSuite.exe'))) { throw "The install location is in use by a different folder: $InstallRoot" }
         try { [IO.Directory]::Move($InstallRoot,$previous) } catch { throw 'Close the Media Suite window and run the installer again.' }
     }
