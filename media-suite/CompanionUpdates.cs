@@ -22,8 +22,7 @@ internal sealed class CompanionUpdates
 
     private string State(string program,string library)
     {
-        string key = string.Join("\n",Path.TrimEndingDirectorySeparator(Path.GetFullPath(program)),
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(library))).ToUpperInvariant();
+        string key = string.Join("\n",Installations.CanonicalFolder(program),Installations.CanonicalFolder(library)).ToUpperInvariant();
         return Path.Combine(root,Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key))));
     }
 

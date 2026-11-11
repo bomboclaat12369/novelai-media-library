@@ -86,7 +86,8 @@ def verify(root):
         assert wait_for(lambda: apply(token) == 202)
         assert wait_for(lambda: session()["version"] == "1.0.1")
         with urllib.request.urlopen(base + "/api/health") as response:
-            assert Path(json.load(response)["library_root"]) == library
+            actual_root = Path(json.load(response)["library_root"])
+            assert actual_root.samefile(library), (actual_root, library)
         assert (runtime / "version.txt").read_text() == "1.0.0"
     finally:
         try:

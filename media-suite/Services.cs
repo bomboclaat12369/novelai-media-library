@@ -101,8 +101,8 @@ namespace NovelAI.MediaSuite
             catch (SerializationException) { return null; }
             if (health == null || !health.Standalone || string.IsNullOrWhiteSpace(health.Root)) return null;
             if (!string.IsNullOrWhiteSpace(settings.LibraryFolder) &&
-                !string.Equals(Path.GetFullPath(settings.LibraryFolder).TrimEnd(Path.DirectorySeparatorChar),
-                               Path.GetFullPath(health.Root).TrimEnd(Path.DirectorySeparatorChar),StringComparison.OrdinalIgnoreCase))
+                !string.Equals(Installations.CanonicalFolder(settings.LibraryFolder),
+                               Installations.CanonicalFolder(health.Root),StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("The running companion uses " + health.Root +
                     ". Choose that library in Locations, or close that companion and retry with your chosen library.");
             ActiveLibrary = health.Root;

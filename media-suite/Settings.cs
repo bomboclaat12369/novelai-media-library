@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
+using System.Runtime.InteropServices;
+using System.Text;
 
 namespace NovelAI.MediaSuite
 {
@@ -52,6 +54,23 @@ namespace NovelAI.MediaSuite
 
     internal static class Installations
     {
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true)]
+        private static extern uint GetLongPathNameW(string path,StringBuilder buffer,uint capacity);
+
+        internal static string CanonicalFolder(string path)
+        {
+            string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            if (!OperatingSystem.IsWindows()) return full;
+            var buffer = new StringBuilder(full.Length + 256);
+            uint length = GetLongPathNameW(full,buffer,(uint)buffer.Capacity);
+            if (length >= buffer.Capacity)
+            {
+                buffer.EnsureCapacity(checked((int)length + 1));
+                length = GetLongPathNameW(full,buffer,(uint)buffer.Capacity);
+            }
+            return length > 0 && length < buffer.Capacity ? buffer.ToString() : full;
+        }
+
         internal static string Python(string root) => Path.Combine(root, ".venv", "Scripts", "python.exe");
         internal static bool Library(string root) => Has(root, "library.json");
         internal static bool Companion(string root) => Has(root, "companion.pyw") && File.Exists(Python(root));
