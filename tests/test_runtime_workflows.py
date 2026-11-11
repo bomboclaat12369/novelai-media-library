@@ -46,6 +46,18 @@ class WorkflowTests(unittest.TestCase):
         self.store.organizer_apply({'token':again['token'],'conflicts':'move'})
         self.assertEqual(len(self.store.data['media']),2);self.assertEqual(len(self.store.data['sets']),2)
 
+    def test_opening_battles_preserves_pending_import_preview(self):
+        draft = self.draft(True)
+        token = self.store.organizer_preview(draft)['token']
+        owner = self.character['id']
+        self.assertNotIn('collection', self.store.character(owner))
+        self.store.collection_request('state', {'character_id': owner})
+        earned = copy.deepcopy(self.store.character(owner)['collection'])
+        self.store.organizer_import({'token': token, 'id': 'new'})
+        result = self.store.organizer_apply({'token': token})
+        self.assertEqual(result['sets'], 1)
+        self.assertEqual(self.store.character(owner)['collection'], earned)
+
     def test_transfer_skip_and_stale_preview(self):
         draft=self.draft(True);plan=self.store.organizer_preview(draft)
         self.store.organizer_import({'token':plan['token'],'id':'new'})

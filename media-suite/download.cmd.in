@@ -1,0 +1,4 @@
+@echo off
+setlocal
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $temp=Join-Path ([IO.Path]::GetTempPath()) ('MediaSuite-'+[guid]::NewGuid().ToString('N')); $null=New-Item -ItemType Directory -Path $temp; try { $zip=Join-Path $temp 'setup.zip'; Invoke-WebRequest -UseBasicParsing -Uri '@DOWNLOAD@' -OutFile $zip; if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne '@SHA256@') { throw 'The downloaded installer did not match the published version.' }; Expand-Archive -LiteralPath $zip -DestinationPath $temp; & (Join-Path $temp 'Install.ps1') } finally { Remove-Item -LiteralPath $temp -Recurse -Force }"
+if errorlevel 1 pause

@@ -2675,8 +2675,10 @@ class LibraryStore:
             return {"ok": True}
 
     def _organizer_fingerprint(self,owner):
-        # Thumbnail completion does not invalidate a membership preview.
-        return hashlib.sha256(json.dumps({'character':self.character(owner),
+        # Opening Battles updates card progress, which is independent of an organizer transfer.
+        character = self.character(owner)
+        membership = {key: value for key, value in character.items() if key != 'collection'} if character else None
+        return hashlib.sha256(json.dumps({'character':membership,
             'sets':[g for g in self.data.get('sets',[]) if g.get('character_id')==owner],
             'media':[(m['id'],m['sha256'],m.get('in_review'),m.get('in_purgatory')) for m in self.data['media']
                      if m['character_id']==owner and not m.get('source',{}).get('organizer_pending')]},sort_keys=True).encode()).hexdigest()
