@@ -48,7 +48,7 @@ def prepare(root, source):
     _, bulk, _, identifiers = fixture(root / "Workbench data")
     bulk.current["config"]["character_id"] = owners[0]
     bulk.persist()
-    (root / "import-id.txt").write_text(identifiers[3])
+    (root / "import-id.txt").write_text(identifiers[8])
 
     project = root / "Game project"
     game = project / "game"
