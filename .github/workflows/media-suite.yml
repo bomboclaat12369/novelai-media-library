@@ -1,0 +1,87 @@
+name: Windows Media Suite
+on:
+  pull_request:
+    paths: ['media-suite/**', '.github/workflows/media-suite.yml']
+  push:
+    branches: [main]
+    paths: ['media-suite/**', '.github/workflows/media-suite.yml']
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: game-build-20261109
+          path: game-qa-source
+          sparse-checkout: |
+            game
+            runtime-src
+            assets
+            payload
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build the Windows program and test its service connections
+        shell: pwsh
+        run: |
+          python -m pip install -r duplicate-review/requirements.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python media-suite/make-icon.py
+          dotnet run --project media-suite/tests/core/CoreChecks.csproj -c Release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          dotnet build media-suite/tests/window/WindowSmoke.csproj -c Release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python media-suite/package.py
+      - name: Test the installer and actual WebView2 tabs against disposable copies
+        shell: pwsh
+        run: |
+          $archive = (Get-Item media-suite/artifacts/Media-Suite-*.zip).FullName
+          & media-suite/tests/check-install.ps1 $archive
+          $fixture = Join-Path $env:RUNNER_TEMP 'Suite integration fixture'
+          python media-suite/tests/fixture.py $fixture game-qa-source
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & media-suite/tests/window/bin/Release/net48/MediaSuite.WindowSmoke.exe $fixture media-suite/tests/workbench-import.js
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python media-suite/tests/check-result.py $fixture
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-media-suite
+          path: media-suite/artifacts/*
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-media-suite
+          path: release
+      - name: Publish a versioned installer and verify the downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="media-suite-v$(jq -r .version release/media-suite-manifest.json)"
+          zip=$(jq -r .file release/media-suite-manifest.json)
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" -D existing
+            cmp "release/$zip" "existing/$zip"
+            cmp release/Install-Media-Suite.cmd existing/Install-Media-Suite.cmd
+          else
+            gh release create "$tag" "release/$zip" release/Install-Media-Suite.cmd release/media-suite-manifest.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Windows Media Suite ${tag#media-suite-v}" --notes "Download Install-Media-Suite.cmd to install the taskbar-ready Windows app and open a fresh main Codex thread. The ZIP includes an offline installer for the suite."
+          fi
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" -D verified
+          cmp release/media-suite-manifest.json verified/media-suite-manifest.json
+          cd verified
+          echo "$(jq -r .sha256 media-suite-manifest.json)  $zip" | sha256sum -c -
+          echo "$(jq -r .installer_sha256 media-suite-manifest.json)  Install-Media-Suite.cmd" | sha256sum -c -
