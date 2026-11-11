@@ -48,7 +48,10 @@ def verify(page, address, root):
     assert partial.body() == bytes.fromhex("89504e470d0a1a0a")
 
     page.get_by_role("button", name="Locations…").click()
-    assert Path(page.locator("#libraryFolder").input_value()) == root / "Media data"
+    locations = page.get_by_role("dialog", name="Suite locations")
+    locations.wait_for(state="visible")
+    actual_library = Path(locations.locator("#libraryFolder").input_value())
+    assert actual_library == root / "Media data", f"Unexpected library in Locations: {actual_library}"
     page.locator("#libraryFolder").fill(str(root / "missing folder"))
     page.get_by_role("button", name="Save locations").click()
     page.get_by_role("alert").filter(has_text="Could not find").wait_for()
