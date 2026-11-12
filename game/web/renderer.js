@@ -178,7 +178,11 @@
       photo.src = url;
     }
     const mediaID = form?.media_id || card.id;
-    const entry = entries.get(mediaID) || entryFor({id: mediaID, name: form?.name || card.name}, false);
+    // Duo identity and stats belong to the pair. The photo ID selects the side's saved crop.
+    const isDuoSide = owned && card.source === 'duo' && (form?.side === 'front' || form?.side === 'back');
+    const entry = isDuoSide
+      ? {...entries.get(card.id), duo_side: form.side}
+      : entries.get(mediaID) || entryFor({id: mediaID, name: form?.name || card.name}, false);
     node = root.naiCards.lightCard(entry, rows.get(card.owner) || [], card.owner, photo, true, mediaID);
     // Native artwork is 7:10; the approved aperture inside it is exactly 3:4.
     node.style.width = '100%';

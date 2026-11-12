@@ -1,0 +1,344 @@
+// Approved studio artwork, layered over live card photographs and labels.
+(()=>{
+'use strict';
+const RefinedRenderer = (() => {
+  const geometry = { width:1050, height:1500, window:{x:105,y:195,width:840,height:1120} };
+  function map(value, source, dest) {
+    let i = value < source[1] ? 0 : value < source[2] ? 1 : 2;
+    return dest[i] + (value-source[i])*(dest[i+1]-dest[i])/(source[i+1]-source[i]);
+  }
+  function axes(image, layout) {
+    const w=geometry.window,drop=layout.headerDrop||0;
+    return {sx:[0,layout.opening[0],layout.opening[2],image.width], sy:[0,layout.opening[1],layout.opening[3],image.height], dx:[0,w.x,w.x+w.width,1050],dy:[drop,w.y+drop,w.y+w.height,1500]};
+  }
+  function frame(ctx,image,layout,preservedUpper) {
+    if(layout.renderMode==='preserved-upper'){
+      if(!preservedUpper)throw Error('Original upper-frame artwork is required.');
+      const cut=layout.footerStart;
+      ctx.save();ctx.beginPath();ctx.rect(0,0,1050,cut);ctx.clip();ctx.drawImage(preservedUpper,0,0,1050,1500);ctx.restore();
+      ctx.save();ctx.beginPath();ctx.rect(0,cut,1050,1500-cut);ctx.clip();ctx.drawImage(image,0,0,1050,1500);ctx.restore();
+      return;
+    }
+    const {sx,sy,dx,dy}=axes(image,layout);
+    for(let row=0;row<3;row++) for(let col=0;col<3;col++) {
+      ctx.drawImage(image,sx[col],sy[row],sx[col+1]-sx[col],sy[row+1]-sy[row],dx[col],dy[row],dx[col+1]-dx[col],dy[row+1]-dy[row]);
+    }
+  }
+  function box(sourceBox,image,layout) {
+    const {sx,sy,dx,dy}=axes(image,layout),[x,y,w,h]=sourceBox;
+    const left=map(x-w/2,sx,dx),right=map(x+w/2,sx,dx),top=map(y-h/2,sy,dy),bottom=map(y+h/2,sy,dy);
+    return {x:(left+right)/2,y:(top+bottom)/2,width:right-left,height:bottom-top};
+  }
+  function centered(ctx,text,b,size,font,palette) {
+    ctx.save();ctx.font='700 '+size+'px '+font;
+    let m=ctx.measureText(text),iw=m.actualBoundingBoxLeft+m.actualBoundingBoxRight,ih=m.actualBoundingBoxAscent+m.actualBoundingBoxDescent;
+    size*=Math.min(1,b.width/Math.max(iw,1),b.height/Math.max(ih,1));
+    ctx.font='700 '+size+'px '+font;m=ctx.measureText(text);
+    for(let pass=0;pass<6;pass++){
+      const mw=m.actualBoundingBoxLeft+m.actualBoundingBoxRight,mh=m.actualBoundingBoxAscent+m.actualBoundingBoxDescent;
+      if(mw<=b.width&&mh<=b.height)break;
+      size*=Math.min(b.width/Math.max(1,mw),b.height/Math.max(1,mh))*.99;
+      ctx.font='700 '+size+'px '+font;m=ctx.measureText(text);
+    }
+    const asc=m.actualBoundingBoxAscent,desc=m.actualBoundingBoxDescent;
+    const x=b.x-(m.actualBoundingBoxRight-m.actualBoundingBoxLeft)/2,y=b.y+(asc-desc)/2;
+    const g=ctx.createLinearGradient(0,b.y-b.height/2,0,b.y+b.height/2);
+    g.addColorStop(0,palette[0]);g.addColorStop(.42,palette[1]);g.addColorStop(.53,palette[0]);g.addColorStop(1,palette[1]);
+    ctx.fillStyle=g;ctx.strokeStyle=palette[2];ctx.lineWidth=palette[3]||.9;ctx.shadowColor='#000b';ctx.shadowBlur=2;ctx.shadowOffsetY=1.8;
+    ctx.strokeText(text,x,y);ctx.fillText(text,x,y);ctx.restore();
+    return {x:x-m.actualBoundingBoxLeft,y:y-asc,width:m.actualBoundingBoxLeft+m.actualBoundingBoxRight,height:asc+desc,box:b};
+  }
+  // Fit the visible emblem, rather than its transparent source canvas.
+  // Keep the full source image intact and preserve its aspect ratio.
+  function rankRect(source,b,emblemScale=1) {
+    b={...b,width:b.width*emblemScale,height:b.height*emblemScale};
+    const [left,top,right,bottom]=source.bounds;
+    const scale=Math.min(b.width/(right-left),b.height/(bottom-top));
+    const width=(right-left)*scale,height=(bottom-top)*scale;
+    return {x:b.x-width/2-left*scale,y:b.y-height/2-top*scale,
+      width:source.width*scale,height:source.height*scale,
+      visible:{x:b.x-width/2,y:b.y-height/2,width,height},box:b};
+  }
+  function lettering(ctx,image,layout,state) {
+    const p=layout.palette,rp=layout.ratingDark?['#684734','#3e251e','#21130e']:p, result={};
+    const rating=box(layout.rating,image,layout);
+    if(state.ratingStyle==='side'){
+      const measure=(text,size)=>{ctx.font='700 '+size+'px EditionNumeralsV2';const m=ctx.measureText(text);return {width:m.actualBoundingBoxLeft+m.actualBoundingBoxRight,height:m.actualBoundingBoxAscent+m.actualBoundingBoxDescent};};
+      let ns=88,ls=32,gap=10,n=measure(state.rating,ns),l=measure('OVR',ls);
+      const scale=Math.min(1,rating.width/(n.width+gap+l.width),rating.height/Math.max(n.height,l.height));
+      ns*=scale;ls*=scale;gap*=scale;n=measure(state.rating,ns);l=measure('OVR',ls);
+      for(let pass=0;pass<6;pass++){
+        if(n.width+gap+l.width<=rating.width&&Math.max(n.height,l.height)<=rating.height)break;
+        const correction=Math.min(rating.width/(n.width+gap+l.width),rating.height/Math.max(n.height,l.height))*.99;
+        ns*=correction;ls*=correction;gap*=correction;n=measure(state.rating,ns);l=measure('OVR',ls);
+      }
+      const left=rating.x-(n.width+gap+l.width)/2;
+      const rn=centered(ctx,state.rating,{x:left+n.width/2,y:rating.y,width:n.width,height:n.height},ns,'EditionNumeralsV2',rp);
+      const rl=centered(ctx,'OVR',{x:left+n.width+gap+l.width/2,y:rating.y+(n.height-l.height)/2,width:l.width,height:l.height},ls,'EditionNumeralsV2',rp);
+      const x=Math.min(rn.x,rl.x),y=Math.min(rn.y,rl.y);
+      result.rating={x,y,width:Math.max(rn.x+rn.width,rl.x+rl.width)-x,height:Math.max(rn.y+rn.height,rl.y+rl.height)-y,box:rating};
+    }else result.rating=centered(ctx,state.rating,rating,88,'EditionNumeralsV2',rp);
+    result.name=centered(ctx,(state.name.trim()||'Untitled').toUpperCase(),box(layout.name,image,layout),72,'EditionDisplayV2',p);
+    result.placing=centered(ctx,String(state.placing),box(layout.placing,image,layout),60,'EditionDisplayV2',p);
+    return result;
+  }
+  function photoRect(width,height,framing) {
+    const w=geometry.window,scale=(framing.fit==='fill'?Math.max(w.width/width,w.height/height):Math.min(w.width/width,w.height/height))*framing.zoom;
+    const dw=width*scale,dh=height*scale;
+    return {x:w.x+(w.width-dw)/2+w.width*framing.x/100,y:w.y+(w.height-dh)/2+w.height*framing.y/100,width:dw,height:dh};
+  }
+  return {geometry,map,axes,frame,box,centered,lettering,photoRect,rankRect};
+})();
+
+const GuideRenderer = (() => {
+  // Number colors follow the emblem; the small OVR label stays neutral.
+  const rankPalettes={Bronze:['#ffd0a5','#c8804b','#28150a',2.2],Silver:['#ffffff','#c5d0df','#121b29',2.2],Gold:['#ffe99e','#e4b12f','#302007',2.2],Platinum:['#a0ffe8','#14c6a4','#073b32',2.2],Diamond:['#b6e4ff','#299cf5','#082d52',2.2],Master:['#e5b9ff','#ad63ed','#28103f',2.2],Grandmaster:['#ffe89b','#d5a034','#030307',3]};
+  function distance(p,a,b){const dx=b[0]-a[0],dy=b[1]-a[1],t=Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[1]-a[1])*dy)/(dx*dx+dy*dy||1)));return Math.hypot(p[0]-a[0]-t*dx,p[1]-a[1]-t*dy);}
+  function inside(p,poly){let yes=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>p[1])!==(b[1]>p[1])&&p[0]<(b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0])yes=!yes;}return yes;}
+  function fits(zone,w,h){
+    if(w>zone.fit[0]+.01||h>zone.fit[1]+.01)return false;
+    const [cx,cy]=zone.anchor,pts=[];
+    for(let i=0;i<=10;i++){const t=i/10;pts.push([cx-w/2+w*t,cy-h/2],[cx-w/2+w*t,cy+h/2],[cx-w/2,cy-h/2+h*t],[cx+w/2,cy-h/2+h*t]);}
+    return pts.every(p=>inside(p,zone.outline)&&zone.outline.every((a,i)=>distance(p,a,zone.outline[(i+1)%zone.outline.length])>=zone.padding-.02));
+  }
+  function measure(ctx,text,size,font){ctx.font='700 '+size+'px '+font;const m=ctx.measureText(text);return {width:m.actualBoundingBoxLeft+m.actualBoundingBoxRight,height:m.actualBoundingBoxAscent+m.actualBoundingBoxDescent};}
+  function fittingScale(zone,dimensions){let lo=0,hi=1;for(let i=0;i<25;i++){const mid=(lo+hi)/2,q=dimensions(mid);if(fits(zone,q.width,q.height))lo=mid;else hi=mid;}return lo;}
+  function label(ctx,text,z,font,palette,R){
+    const scale=fittingScale(z,s=>measure(ctx,text,z.maxFontSize*s,font));
+    if(scale<.001)return null;
+    const m=measure(ctx,text,z.maxFontSize*scale,font);
+    return R.centered(ctx,text,{x:z.anchor[0],y:z.anchor[1],width:m.width+.001,height:m.height+.001},z.maxFontSize*scale,font,palette);
+  }
+  function lettering(ctx,layout,zones,state,R){
+    const p=layout.palette,tierPalette=rankPalettes[state.rankTier],rp=tierPalette||(layout.ratingDark?['#684734','#3e251e','#21130e']:p),lp=tierPalette?['#f2f1ed','#c0c7d0','#111826']:rp,z=zones.rating,result={};
+    const number=String(state.rating||'0'),font=tierPalette?'EditionRankNumeralsV1':'EditionNumeralsV2';
+    function dims(s){const n=measure(ctx,number,z.maxFontSize*s,font),l=measure(ctx,'OVR',z.maxFontSize*32/88*s,font);return {n,l,width:n.width+l.width+10*s,height:Math.max(n.height,l.height),gap:10*s};}
+    if(state.ratingStyle==='number'){
+      result.rating=label(ctx,number,z,font,rp,R);
+    }else{
+    const s=fittingScale(z,dims),d=dims(s),left=z.anchor[0]-d.width/2;
+    if(s>.001){
+      const n=R.centered(ctx,number,{x:left+d.n.width/2,y:z.anchor[1],width:d.n.width+.001,height:d.n.height+.001},z.maxFontSize*s,font,rp);
+      const l=R.centered(ctx,'OVR',{x:left+d.n.width+d.gap+d.l.width/2,y:z.anchor[1]+(d.n.height-d.l.height)/2,width:d.l.width+.001,height:d.l.height+.001},z.maxFontSize*32/88*s,font,lp);
+      result.rating={x:n.x,y:Math.min(n.y,l.y),width:l.x+l.width-n.x,height:Math.max(n.y+n.height,l.y+l.height)-Math.min(n.y,l.y),box:{x:z.anchor[0],y:z.anchor[1]}};
+    }
+    }
+    result.name=label(ctx,(state.name.trim()||'Untitled').toUpperCase(),zones.name,'EditionDisplayV2',p,R);
+    result.placing=label(ctx,String(state.placing||'0'),zones.placing,'EditionDisplayV2',p,R);
+    return result;
+  }
+  function rank(source,z,R){return R.rankRect(source,{x:z.anchor[0],y:z.anchor[1],width:z.fit[0],height:z.fit[1]},1+z.overflowPercent/100);}
+  function simple(poly){
+    const cross=(a,b,c)=>(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+    for(let i=0;i<poly.length;i++)for(let j=i+1;j<poly.length;j++){
+      if(j===i+1||(i===0&&j===poly.length-1))continue;
+      const a=poly[i],b=poly[(i+1)%poly.length],c=poly[j],d=poly[(j+1)%poly.length];
+      if(cross(a,b,c)*cross(a,b,d)<0&&cross(c,d,a)*cross(c,d,b)<0)return false;
+    }
+    return poly.every((p,i)=>Math.hypot(p[0]-poly[(i+1)%poly.length][0],p[1]-poly[(i+1)%poly.length][1])>.1);
+  }
+  function validate(doc,baseline){
+    const finite=v=>typeof v==='number'&&Number.isFinite(v);
+    const point=p=>Array.isArray(p)&&p.length===2&&p.every(finite)&&p[0]>=0&&p[0]<=1050&&p[1]>=0&&p[1]<=1500;
+    if(!doc||doc.schemaVersion!==1||doc.canvas?.width!==1050||doc.canvas?.height!==1500||!doc.editions)throw Error('Use a 1050 × 1500 layout-guides export.');
+    if(Object.keys(doc.editions).length!==Object.keys(baseline.editions).length)throw Error('The file must contain all '+Object.keys(baseline.editions).length+' editions.');
+    for(const [key,original]of Object.entries(baseline.editions)){
+      const e=doc.editions[key];if(e?.frameSha256!==original.frameSha256)throw Error('Artwork does not match: '+key);
+      if(original.headerSha256&&e.headerSha256!==original.headerSha256)throw Error('Original upper artwork does not match: '+key);
+      for(const f of ['rating','rank','name','placing']){const z=e.zones?.[f];
+        if(!z||!point(z.anchor)||!Array.isArray(z.outline)||z.outline.length<3||z.outline.length>64||!z.outline.every(point)||!Array.isArray(z.fit)||z.fit.length!==2||!z.fit.every(v=>finite(v)&&v>=1&&v<=1050)||!finite(z.padding)||z.padding<0||z.padding>30||!finite(z.maxFontSize)||z.maxFontSize<0||z.maxFontSize>160||!finite(z.overflowPercent)||z.overflowPercent<0||z.overflowPercent>50)throw Error('Invalid guide: '+key+' / '+f);
+        if(!simple(z.outline))throw Error('Outline edges must not cross or collapse: '+key+' / '+f);
+        if(f!=='rank'&&(z.maxFontSize<1||!fits(z,1,1)))throw Error('Center must sit inside the usable plaque: '+key+' / '+f);
+        if(f==='rank'&&!inside(z.anchor,z.outline))throw Error('Rank center must sit inside its plaque: '+key);
+      }
+    }
+    return true;
+  }
+  return {inside,fits,distance,measure,fittingScale,label,lettering,rank,validate,rankPalettes};
+})();
+
+const root=document.getElementById('nai-media-host')?.shadowRoot,pack=typeof naiCardEditionAssets==='undefined'?null:naiCardEditionAssets;
+if(!root?.naiCards||!pack)return;
+const cards=root.naiCards,el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;};
+const style=el('style');style.textContent=`
+.naiTradingCard.naiEdition.naiCardShell{background:transparent!important;border:0!important;border-radius:0!important;padding:0!important;box-shadow:none!important;overflow:hidden!important;isolation:isolate;container-type:inline-size;aspect-ratio:7/10;clip-path:none!important}
+.naiEdition>.naiCardOrnament,.naiEdition>.naiCardRail,.naiEdition>.naiCardName,.naiEdition>.naiCardTitleArt{display:none!important}
+.naiEdition>.naiCardPhotoWindow,.naiEdition>.naiBattleGalleryVisual,.naiEdition>.naiBattleMosaic{position:absolute!important;left:var(--window-left)!important;top:var(--window-top)!important;right:calc(100% - var(--window-right))!important;bottom:calc(100% - var(--window-bottom))!important;width:auto!important;height:auto!important;border:0!important;border-radius:0!important;margin:0!important;padding:0!important;background:var(--mat)!important;z-index:1;overflow:hidden}
+.naiEdition>.naiBattleMosaic{display:grid!important}
+.naiEdition .naiCardPhotoWindow img,.naiEdition>.naiBattleGalleryVisual img{width:100%!important;height:100%!important;max-width:none!important;max-height:none!important}
+.naiEdition>.naiEditionFrame,.naiEdition>.naiEditionLetters{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;transform:none!important;object-fit:fill!important;pointer-events:none!important;border:0!important;border-radius:0!important}
+.naiEdition>.naiEditionFrame{z-index:4}.naiEdition>.naiEditionLetters{z-index:5}
+.naiEdition>.naiEditionRank{position:absolute!important;z-index:5;transform:translate(-50%,-50%)!important;object-fit:contain!important;pointer-events:none;max-width:none!important;max-height:none!important}
+.naiEdition>.naiEditionRank .naiRankBadge{border:0!important;background:none!important;padding:0!important;width:100%;height:100%}.naiEdition>.naiEditionRank .naiRankBadge>span{display:none}.naiEdition>.naiEditionRank .naiRankEmblem{width:100%!important;height:100%!important;filter:none!important}
+.naiTradingCard>.naiEditionCaptain{position:absolute;left:calc(var(--window-left,5%) + 2%);bottom:calc(100% - var(--window-bottom,87.8%) + 2%);width:8%;height:6%;z-index:6;display:grid;place-items:center;pointer-events:none;background:linear-gradient(135deg,var(--metal-light),var(--metal-low,var(--metal-dark)) 48%,var(--metal-light));clip-path:polygon(12% 0,88% 0,100% 14%,100% 72%,50% 100%,0 72%,0 14%);font:700 5.4cqw EditionDisplayV2,Georgia,serif;color:var(--metal-light);padding-bottom:.6cqw;isolation:isolate}
+.naiTradingCard>.naiEditionCaptain:before{content:'';position:absolute;inset:6%;background:linear-gradient(145deg,var(--mat,#101215),#050509);clip-path:inherit;z-index:-1}
+.naiTradingCard[data-captain-corner=right]>.naiEditionCaptain{left:auto;right:calc(100% - var(--window-right,95%) + 2%)}
+.naiEditionGalleryLink{margin:0 0 12px}.naiEditionCatalog{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:18px 12px}.naiEditionCatalog button{display:flex;flex-direction:column;align-items:center;gap:6px;background:#111925;border:1px solid #334055;border-radius:8px;padding:10px;color:#e6edf7;cursor:pointer}.naiEditionCatalog img{display:block;width:100%;aspect-ratio:7/10;object-fit:contain;max-height:370px}.naiEditionCatalog small{color:#aab6c9}.naiEditionFramePreview{display:block;margin:12px auto;max-width:100%;width:auto;height:min(76vh,1000px);object-fit:contain}.naiBattleGallery .naiGalleryActionStrip button{padding:5px 6px!important}.naiBattleGallery[data-selecting=true] .naiGalleryActionStrip>div>button:not([title="Edit edition"]){display:none!important}.naiEditionEditorLayout{display:grid;grid-template-columns:minmax(240px,1fr) minmax(260px,1fr);gap:24px;align-items:start}.naiEditionLivePreview{width:min(100%,440px);margin:auto}.naiEditionLivePreview>.naiTradingCard{width:100%;aspect-ratio:7/10}.naiOwnedTraits{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.naiOwnedTrait{display:flex;align-items:center;border:1px solid #596b84;border-radius:7px;overflow:hidden}.naiOwnedTrait button{border:0;border-radius:0}.naiOwnedTrait [aria-pressed=true]{background:#695635!important;color:#fff1c4}.naiOwnedTrait small{padding:0 7px}.naiEditionEditTools{display:grid;gap:12px}.naiEditionEditTools label{display:grid;gap:5px}@media(max-width:650px){.naiEditionEditorLayout{grid-template-columns:1fr}.naiEditionLivePreview{max-width:280px}}.naiEditionChoices{display:grid;gap:8px}.naiEditionChoices label{display:flex;flex-direction:column;gap:5px}.naiEditionChoices [role=status]:empty{display:none}
+`;root.append(style);queueMicrotask(()=>root.append(style));
+const tracked=new Map(),fonts=Object.entries(pack.fonts).map(([family,source])=>{const f=new FontFace(family,`url(${source})`);document.fonts.add(f);return f.load();});
+// The local app's CSP excludes data-URL font requests. Load the approved
+// numeral bytes directly for opted-in overall labels; retain legacy typography
+// for Pregnant, names and placement numbers.
+const numeralSource=pack.fonts.EditionNumeralsV2;
+if(numeralSource){const bytes=numeralSource.startsWith('data:')?Uint8Array.from(atob(numeralSource.split(',')[1]),c=>c.charCodeAt(0)):`url(${numeralSource})`,face=new FontFace('EditionRankNumeralsV1',bytes);document.fonts.add(face);fonts.push(face.load());}
+const sizes=new ResizeObserver(entries=>{for(const {target,contentRect} of entries){const info=tracked.get(target);if(info)draw(target,info,contentRect.width);}});
+let cleanupPending=false;
+new MutationObserver(()=>{if(cleanupPending)return;cleanupPending=true;queueMicrotask(()=>{cleanupPending=false;for(const card of tracked.keys())if(!card.isConnected){sizes.unobserve(card);tracked.delete(card);}});}).observe(root,{childList:true,subtree:true});
+cards.frameTypography={guide:GuideRenderer,refined:RefinedRenderer,ready:Promise.allSettled(fonts)};
+Promise.allSettled(fonts).then(()=>{for(const [card,info] of tracked)draw(card,info,card.clientWidth);});
+function drawCentered(ctx,text,x,y,size,family,colors,maxWidth,maxHeight){
+ ctx.save();ctx.font='700 '+size+'px '+family;let m=ctx.measureText(text);
+ const inkWidth=m.actualBoundingBoxLeft+m.actualBoundingBoxRight,inkHeight=m.actualBoundingBoxAscent+m.actualBoundingBoxDescent;
+ const scale=Math.min(1,maxWidth?maxWidth/inkWidth:1,maxHeight?maxHeight/inkHeight:1);
+ if(scale<1){size*=scale;ctx.font='700 '+size+'px '+family;m=ctx.measureText(text);}
+ const asc=m.actualBoundingBoxAscent||size*.7,desc=m.actualBoundingBoxDescent||0;
+ const baseline=y+(asc-desc)/2,origin=x-(m.actualBoundingBoxRight-m.actualBoundingBoxLeft)/2;
+ const fill=ctx.createLinearGradient(0,y-asc/2,0,y+asc/2+desc);
+ fill.addColorStop(0,colors[0]);fill.addColorStop(.27,colors[0]);fill.addColorStop(.48,colors[1]);fill.addColorStop(.52,colors[2]);fill.addColorStop(.59,colors[0]);fill.addColorStop(1,colors[1]);
+ ctx.textAlign='left';ctx.textBaseline='alphabetic';ctx.shadowColor='#000a';ctx.shadowOffsetY=1.8;ctx.shadowBlur=2;ctx.lineWidth=.7;ctx.strokeStyle=colors[2];ctx.strokeText(text,origin,baseline);ctx.fillStyle=fill;ctx.fillText(text,origin,baseline);ctx.restore();
+ return {x,y,width:m.width,height:asc+desc};
+}
+function drawDuoSeal(ctx,zone,front){
+ const [x,y]=zone.anchor,r=Math.min(...zone.fit)/2;
+ ctx.save();ctx.translate(x,y);ctx.scale(r,r);
+ const metal=ctx.createLinearGradient(-.7,-.85,.75,.95);
+ const tones=front?['#fff0b7','#d8a749','#8f642d','#ffd47c']:['#edf7ff','#b3c7dc','#5f7597','#dae6f4'];
+ [0,.4,.58,1].forEach((stop,i)=>metal.addColorStop(stop,tones[i]));
+ ctx.strokeStyle=metal;ctx.fillStyle=metal;
+ ctx.lineWidth=.034;
+ ctx.beginPath();ctx.arc(0,0,.91,0,Math.PI*2);ctx.stroke();
+ if(front){
+  for(let i=0;i<12;i++){
+   ctx.rotate(Math.PI/6);ctx.beginPath();ctx.moveTo(-.055,-.48);
+   ctx.lineTo(0,i%2===0?-.78:-.65);ctx.lineTo(.055,-.48);ctx.closePath();ctx.fill();
+  }
+  ctx.beginPath();ctx.arc(0,0,.39,0,Math.PI*2);ctx.fill();
+ }else{
+  ctx.beginPath();ctx.moveTo(.18,-.63);
+  ctx.bezierCurveTo(-.89,-.58,-.91,.71,.13,.65);
+  ctx.bezierCurveTo(.38,.63,.60,.50,.69,.28);
+  ctx.bezierCurveTo(-.08,.62,-.45,-.23,.18,-.63);ctx.closePath();ctx.fill();
+  ctx.beginPath();ctx.moveTo(.38,-.53);ctx.lineTo(.43,-.37);ctx.lineTo(.58,-.32);
+  ctx.lineTo(.43,-.27);ctx.lineTo(.38,-.11);ctx.lineTo(.33,-.27);ctx.lineTo(.18,-.32);
+  ctx.lineTo(.33,-.37);ctx.closePath();ctx.fill();
+ }
+ ctx.restore();
+}
+function draw(card,info,width){
+ const {entry,rows,owner,edition}=info,layout=edition.layout,canvas=card.querySelector('.naiEditionLetters');if(!canvas)return;
+ const pixels=Math.min(1575,Math.max(1,Math.ceil((width||420)*2)));canvas.width=pixels;canvas.height=Math.round(pixels*10/7);
+ const ctx=canvas.getContext('2d');ctx.setTransform(pixels/1050,0,0,canvas.height/1500,0,0);
+ const colors=['--metal-light','--metal-mid','--metal-low'].map(p=>edition.style[p]);
+ if(card.dataset.duoSide){
+  const front=card.dataset.duoSide==='front',side=front?'Front':'Back';
+  const person=root.naiGetLibrary?.()?.characters?.find(c=>c.id===owner)?.name||'Collection';
+  const group=entry.name||'Set',zones=edition.guides;
+  for(const [label,zone] of [[group,zones.set],[person,zones.name],[side,zones.side]]){
+   GuideRenderer.label(ctx,label.toUpperCase(),zone,'EditionDisplayV2',colors,RefinedRenderer);
+  }
+  drawDuoSeal(ctx,zones.seal,front);
+  card.title=person+' · '+group+' · Duo · '+side;
+  canvas.setAttribute('aria-label',card.title);
+  return;
+ }
+ const rating=String(cards.ovr(entry,rows)??'—');
+ if(edition.guides){
+  const person=root.naiGetLibrary?.()?.characters?.find(c=>c.id===owner)?.name||'Collection',name=entry.preview_name||(card.dataset.cardKind==='set'?entry.name:person)||'Collection';
+  GuideRenderer.lettering(ctx,edition.refined.layout,edition.guides,{name,rating,placing:entry.position?String(entry.position):'—',ratingStyle:'side',rankTier:edition.rankColoredOverall?entry.tier:null},RefinedRenderer);
+  card.title=person+' · '+edition.name+' · '+rating+' OVR'+(entry.position?' · '+entry.position:'');canvas.setAttribute('aria-label',name+', '+rating+' OVR, placing '+(entry.position||'unplaced'));return;
+ }
+ if(edition.refined){
+  const person=root.naiGetLibrary?.()?.characters?.find(c=>c.id===owner)?.name||'Collection',name=entry.preview_name||(card.dataset.cardKind==='set'?entry.name:person),source=edition.refined;
+  RefinedRenderer.lettering(ctx,{width:source.sourceWidth,height:source.sourceHeight},source.layout,{name:name||'Collection',rating,placing:entry.position?String(entry.position):'—',ratingStyle:'side'});
+  card.title=person+' · '+edition.name+' · '+rating+' OVR'+(entry.position?' · '+entry.position:'');canvas.setAttribute('aria-label',name+', '+rating+' OVR, placing '+(entry.position||'unplaced'));return;
+ }
+ const rx=layout.rating[0]*10.5,ry=layout.rating[1]*15,rw=layout.rating[2]*10.5,rh=layout.rating[3]*15,ratingColors=layout.ratingDark?['#533426','#382219','#26160f']:colors;
+ {
+  let ns=layout.ratingDark?110:98,ls=32,gap=12;
+  const measure=size=>{ctx.font='700 '+size+'px EditionNumeralsV2';const m=ctx.measureText(rating);return {w:m.actualBoundingBoxLeft+m.actualBoundingBoxRight,h:m.actualBoundingBoxAscent+m.actualBoundingBoxDescent};};
+  let n=measure(ns);ctx.font='700 '+ls+'px EditionNumeralsV2';let m=ctx.measureText('OVR'),lw=m.actualBoundingBoxLeft+m.actualBoundingBoxRight,lh=m.actualBoundingBoxAscent+m.actualBoundingBoxDescent;
+  const scale=Math.min(1,rw/(n.w+gap+lw),(rh-6)/n.h);ns*=scale;ls*=scale;gap*=scale;n=measure(ns);lw*=scale;lh*=scale;const left=rx-(n.w+gap+lw)/2;
+  drawCentered(ctx,rating,left+n.w/2,ry,ns,'EditionNumeralsV2',ratingColors,n.w+1,n.h+1);
+  drawCentered(ctx,'OVR',left+n.w+gap+lw/2,ry+n.h/2-lh/2-2*scale,ls,'EditionNumeralsV2',ratingColors,lw+1,lh+1);
+ }
+ const person=root.naiGetLibrary?.()?.characters?.find(c=>c.id===owner)?.name||'Collection',name=(entry.preview_name||(card.dataset.cardKind==='set'?entry.name:person)).toUpperCase(),box=layout.name;
+ drawCentered(ctx,name,box[0]*10.5,box[1]*15,layout.nameSize||64,'EditionDisplayV2',colors,box[2]*10.5,box[3]*15);
+ drawCentered(ctx,entry.position?String(entry.position):'—',layout.placing[0]*10.5,layout.placing[1]*15,layout.placingSize||44,'EditionDisplayV2',colors,layout.placing[2]*10.5,layout.placing[3]*15-4);
+ card.title=person+' · '+edition.name+' · '+rating+' OVR'+(entry.position?' · '+entry.position:'');
+ canvas.setAttribute('aria-label',name+', '+rating+' OVR, placing '+(entry.position||'unplaced'));
+}
+function captain(card,entry,show){
+ card.querySelectorAll(':scope>.naiCardTitleArt').forEach(e=>e.remove());
+ if(!show||!entry.captain_sets?.length||card.dataset.cardKind==='set')return;
+ const crest=el('div','naiEditionCaptain','C');crest.setAttribute('role','img');crest.setAttribute('aria-label','Captain');card.dataset.captainCorner='left';card.append(crest);
+}
+function decorate(card,entry,rows,owner,show){
+ const duo=pack.duo&&(entry.duo_side==='front'||entry.duo_side==='back');
+ captain(card,entry,show&&!duo);if(!show)return card;
+ const edition=duo?pack.duo:pack.editions[entry.edition_id];if(!edition)return card;
+ card.classList.add('naiEdition');card.dataset.edition=duo?'duo':entry.edition_id;
+ if(duo)card.dataset.duoSide=entry.duo_side;
+ for(const [key,value] of Object.entries(edition.style))card.style.setProperty(key,value);
+ const photo=card.querySelector('.naiFramedSource');if(photo&&edition.legacyWindow)photo.naiLegacyFramingReference=edition.legacyWindow;
+ const art=el('img','naiEditionFrame');art.src=edition.art;art.alt=edition.name+' edition';art.draggable=false;
+ const canvas=el('canvas','naiEditionLetters');card.append(art,canvas);
+ if(!duo){
+  const fit=edition.rankFits[entry.tier]||edition.rankDefaultFit||edition.rankFits.Diamond;
+  const rank=pack.ranks[entry.tier]?el('img','naiEditionRank'):el('div','naiEditionRank');
+  if(pack.ranks[entry.tier]){rank.src=pack.ranks[entry.tier];rank.alt=entry.tier+' rank';}else{rank.append(root.naiRanks.badge(entry.tier||'Unranked'));rank.setAttribute('aria-label',(entry.tier||'Unranked')+' rank');}
+  for(const key of ['left','top','width','height'])rank.style[key]=fit[key]+'%';card.append(rank);
+ }
+ const info={entry,rows,owner,edition};draw(card,info,420);
+ queueMicrotask(()=>{if(card.isConnected){tracked.set(card,info);sizes.observe(card);draw(card,info,card.clientWidth);}});
+ return card;
+}
+cards.editionsVisible=()=>localStorage.getItem('nai-show-editions')!=='0';
+cards.setEditionsVisible=value=>localStorage.setItem('nai-show-editions',value?'1':'0');
+function photoReference(edition){const st=edition.style,l=parseFloat(st['--window-left'])/100,t=parseFloat(st['--window-top'])/100;return {left:l,top:t,width:parseFloat(st['--window-right'])/100-l,height:parseFloat(st['--window-bottom'])/100-t};}
+for(const method of ['battle','lightCard']){
+ const original=cards[method];cards[method]=function(...args){
+  const card=original(...args),entry=args[method==='battle'?1:0],hidden=method==='battle'&&args[0].classList.contains('naiBattleRankCard')&&!cards.editionsVisible()&&args[0].dataset.debug!=='true',shown=hidden?{...entry,edition_id:null}:entry;
+  if(hidden&&pack.editions[entry.edition_id]){const im=card.querySelector('.naiBattleGalleryVisual img');if(im){const e=pack.editions[entry.edition_id];im.naiFramingReference=photoReference(e);im.naiLegacyFramingReference=e.legacyWindow;}}
+  return method==='battle'?decorate(card,shown,args[2],args[3],args[4]!==false):decorate(card,shown,args[1],args[2],args[4]!==false);
+ };
+}
+const oldFit=cards.fitBattle;
+cards.fitBattle=(stage,isSet)=>oldFit(stage,isSet&&!stage.firstElementChild?.classList.contains('naiEdition'));
+cards.editionNames=Object.entries(pack.editions).map(([id,e])=>[id,e.name]);
+cards.openEditionGallery=function(){
+ const m=cards.modal('Special edition frames');m.inner.classList.add('naiEditionGallery');
+ function overview(){m.heading.textContent='Special edition frames';const grid=el('div','naiEditionCatalog');
+  m.body.replaceChildren(el('p','naiCollectionMuted','Open a frame to inspect its artwork. Use Edit edition to customize an ordinary card. Create a Duo in Set details to use its two-sided frame.'),grid);
+  const frames=Object.entries(pack.editions);
+  if(pack.duo)frames.push(['duo',pack.duo]);
+  for(const [id,edition] of frames){const tile=el('button'),im=el('img'),label=el('strong','',edition.name);tile.type='button';tile.dataset.edition=id;tile.setAttribute('aria-label','Preview '+edition.name+' frame');im.src=edition.art;im.alt=edition.name+' frame';im.loading='lazy';tile.append(im,label,el('small','',id==='duo'?'Two-sided Set card':edition.automatic?'Automatic or manual':'Manual edition'));tile.onclick=()=>{m.heading.textContent=edition.name;const back=el('button','','All special edition frames'),large=el('img','naiEditionFramePreview');back.type='button';back.onclick=overview;large.src=edition.art;large.alt=edition.name+' frame';m.body.replaceChildren(back,large);back.focus();};grid.append(tile);}
+ }
+ overview();
+};
+cards.editEdition=async function(entry,owner,kind,onSaved){
+ const m=cards.modal('Edit special edition');let url;const clean=new MutationObserver(()=>{if(!m.wrap.isConnected){if(url)URL.revokeObjectURL(url);clean.disconnect();}});clean.observe(root,{childList:true});m.body.textContent='Loading card…';
+ await m.run(async()=>{
+  await cards.load(owner);const board=await root.naiOutfitRequest('/api/battles/summary',{character_id:owner,kind}),fresh=board.entries.find(e=>e.id===entry.id);if(fresh)Object.assign(entry,fresh);
+  const mid=entry.preview_id||entry.captain_id||entry.images[0],im=el('img');im.alt='Live edition preview';const media=root.naiGetLibrary?.()?.media?.find(i=>i.id===mid);if(media?.media_type==='video')im.src='http://127.0.0.1:8765/api/media/'+encodeURIComponent(mid)+'/thumb?size=1200';else{url=URL.createObjectURL(await root.naiOutfitOriginal(mid));im.src=url;}await im.decode();
+  if(!m.wrap.isConnected)return;
+  const initial=new Set(entry.edition_settings?.traits||[]),owned=new Set(initial),automatic=new Set(entry.automatic_editions||[]),draft={...entry.edition_settings},layout=el('div','naiEditionEditorLayout'),preview=el('div','naiEditionLivePreview'),tools=el('div','naiEditionEditTools'),chips=el('div','naiOwnedTraits');
+  const displayLabel=el('label','','Displayed frame'),display=el('select');display.setAttribute('aria-label','Displayed frame');displayLabel.append(display);
+  const addLabel=el('label','','Add an edition trait'),add=el('select'),addButton=el('button','','Add trait');add.setAttribute('aria-label','Add an edition trait');addButton.type='button';addLabel.append(add);
+  tools.append(el('h3','','Owned traits'),chips,displayLabel,el('hr'),addLabel,addButton,el('p','naiCollectionMuted','Automatic uses the sole owned trait when there is no automatic title. Save changes to keep your additions and selection. Captain is assigned automatically from set membership.'));
+  layout.append(preview,tools);m.body.replaceChildren(layout);
+  function redraw(){const effective=draft.choice==='auto'?(entry.automatic_editions?.[0]||([...new Set([...owned,...automatic])].length===1?[...new Set([...owned,...automatic])][0]:null)):draft.choice==='none'?null:draft.choice;preview.replaceChildren(cards.lightCard({...entry,edition_id:effective,edition_settings:draft},board.entries,owner,im,true,mid));}
+  function choices(){const all=new Set([...owned,...automatic]);chips.replaceChildren();for(const [id,name] of cards.editionNames.filter(([id])=>all.has(id))){const chip=el('div','naiOwnedTrait'),use=el('button','',name);use.type='button';use.setAttribute('aria-pressed',String(draft.choice===id));use.onclick=()=>{draft.choice=id;choices();redraw()};chip.append(use);if(automatic.has(id))chip.append(el('small','','Automatic'));if(owned.has(id)){const remove=el('button','','×');remove.type='button';remove.setAttribute('aria-label','Remove '+name+' trait');remove.onclick=()=>{owned.delete(id);if(draft.choice===id&&!automatic.has(id))draft.choice='auto';choices();redraw()};chip.append(remove)}chips.append(chip)}if(!all.size)chips.append(el('p','naiCollectionMuted','No edition traits yet.'));
+   display.replaceChildren();for(const [id,name] of [['auto','Automatic'],['none','Base card'],...cards.editionNames.filter(([id])=>all.has(id))]){const o=el('option','',name);o.value=id;display.append(o)}display.value=draft.choice||'auto';
+   add.replaceChildren();for(const [id,name] of cards.editionNames.filter(([id])=>!all.has(id))){const o=el('option','',name);o.value=id;add.append(o)}add.disabled=addButton.disabled=!add.options.length;
+  }
+  display.onchange=()=>{draft.choice=display.value;choices();redraw()};addButton.onclick=()=>{if(add.value)owned.add(add.value);choices();redraw()};
+  const save=el('button','','Save changes');save.type='button';save.onclick=()=>m.run(async()=>{const current=await cards.load(owner),saved=await root.naiOutfitRequest('/api/collection/edition',{character_id:owner,revision:current.collection.revision,entry_id:entry.id,kind,choice:draft.choice||'auto',add_traits:[...owned].filter(id=>!initial.has(id)),remove_traits:[...initial].filter(id=>!owned.has(id))});cards.cache.set(owner,saved);const updated=await root.naiOutfitRequest('/api/battles/summary',{character_id:owner,kind});Object.assign(entry,updated.entries.find(e=>e.id===entry.id)||{});root.naiRankingsChanged?.(updated);m.wrap.remove();onSaved?.();});tools.append(save);choices();redraw();
+ });
+};
+cards.bulkEdition=function(entries,owner,kind,onSaved){
+ const m=cards.modal('Edition traits · '+entries.length+' cards'),addLabel=el('label','','Add a trait to selected cards'),add=el('select'),displayLabel=el('label','','Display an owned frame'),display=el('select');add.setAttribute('aria-label','Bulk add trait');display.setAttribute('aria-label','Bulk displayed frame');
+ for(const [id,name] of cards.editionNames){const count=entries.filter(e=>e.owned_editions?.includes(id)).length,o=el('option','',name+' · '+count+'/'+entries.length+' already own');o.value=id;add.append(o)}
+ for(const [id,name] of [['auto','Automatic'],['none','Base card'],...cards.editionNames.filter(([id])=>entries.every(e=>e.owned_editions?.includes(id)))]){const o=el('option','',name);o.value=id;display.append(o)}addLabel.append(add);displayLabel.append(display);
+ const save=(text,payload)=>{const b=el('button','',text);b.type='button';b.onclick=()=>m.run(async()=>{const current=await cards.load(owner),saved=await root.naiOutfitRequest('/api/collection/edition',{character_id:owner,revision:current.collection.revision,kind,entry_ids:entries.map(e=>e.id),...payload()});cards.cache.set(owner,saved);m.wrap.remove();onSaved?.();});return b;};m.body.append(el('p','naiCollectionMuted','Traits stay owned when you switch frames. Photo framing is preserved.'),addLabel,save('Add trait to selected cards',()=>({add_traits:[add.value]})),el('hr'),displayLabel,save('Display frame on selected cards',()=>({choice:display.value})));
+};
+})();

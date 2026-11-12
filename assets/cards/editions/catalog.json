@@ -6244,6 +6244,7 @@
     "EditionNumeralsV2": "assets/cards/editions/EditionNumeralsV2.woff"
   },
   "sha256": {
+    "assets/cards/duo/duo-eclipse.webp": "50bded8c648b90975edea47ffc2349e1bd147b1674125c35342bbf80c7457f7c",
     "assets/cards/editions/number-one.webp": "c1b406f50e5423bf5ccb7e42b5b85bf3d32812637ca21446c82d0928401d9478",
     "assets/cards/editions/former-one.webp": "d85fe419c19396642de7d7b4f03ddae41ef2ac64e493ba574d793fc5c1e0f2c5",
     "assets/cards/editions/cosplay.webp": "2475f7e7deafa7dec3ba6fec1131c15eca063eb7a1f099d79dc50ed527e21bad",
@@ -6360,6 +6361,202 @@
         388,
         383
       ]
+    }
+  },
+  "duo": {
+    "name": "Duo",
+    "art": "assets/cards/duo/duo-eclipse.webp",
+    "sourceSize": [
+      1036,
+      1518
+    ],
+    "sourceOpening": [
+      82,
+      243,
+      947,
+      1325
+    ],
+    "style": {
+      "--window-left": "10%",
+      "--window-right": "90%",
+      "--window-top": "13%",
+      "--window-bottom": "87.66666666666667%",
+      "--metal-light": "#fff3d4",
+      "--metal-mid": "#d6b276",
+      "--metal-low": "#59452e",
+      "--mat": "#10141c"
+    },
+    "guides": {
+      "set": {
+        "outline": [
+          [
+            110.83,
+            106.73
+          ],
+          [
+            143.84,
+            79.44
+          ],
+          [
+            337.09,
+            79.44
+          ],
+          [
+            365.25,
+            106.73
+          ],
+          [
+            336.12,
+            131.6
+          ],
+          [
+            144.82,
+            131.6
+          ]
+        ],
+        "anchor": [
+          238.04,
+          105.93
+        ],
+        "fit": [
+          206.84,
+          44.94
+        ],
+        "padding": 3,
+        "maxFontSize": 54,
+        "overflowPercent": 0
+      },
+      "seal": {
+        "outline": [
+          [
+            767.29,
+            79.44
+          ],
+          [
+            806.13,
+            48.15
+          ],
+          [
+            864.4,
+            48.15
+          ],
+          [
+            907.13,
+            80.25
+          ],
+          [
+            907.13,
+            132.41
+          ],
+          [
+            867.31,
+            165.31
+          ],
+          [
+            808.08,
+            165.31
+          ],
+          [
+            767.29,
+            132.41
+          ]
+        ],
+        "anchor": [
+          837.21,
+          106.73
+        ],
+        "fit": [
+          114.59,
+          95.5
+        ],
+        "padding": 3,
+        "maxFontSize": 0,
+        "overflowPercent": 0
+      },
+      "name": {
+        "outline": [
+          [
+            149.67,
+            1360.05
+          ],
+          [
+            188.51,
+            1317.88
+          ],
+          [
+            865.37,
+            1317.88
+          ],
+          [
+            905.18,
+            1360.05
+          ],
+          [
+            865.37,
+            1395.52
+          ],
+          [
+            187.54,
+            1395.52
+          ]
+        ],
+        "anchor": [
+          526.46,
+          1357.18
+        ],
+        "fit": [
+          666.17,
+          60.39
+        ],
+        "padding": 3,
+        "maxFontSize": 72,
+        "overflowPercent": 0
+      },
+      "side": {
+        "outline": [
+          [
+            420.61,
+            1441.53
+          ],
+          [
+            441.97,
+            1419.48
+          ],
+          [
+            608.03,
+            1419.48
+          ],
+          [
+            629.39,
+            1441.53
+          ],
+          [
+            607.06,
+            1464.53
+          ],
+          [
+            441.97,
+            1464.53
+          ]
+        ],
+        "anchor": [
+          525.49,
+          1441.53
+        ],
+        "fit": [
+          151.49,
+          35.46
+        ],
+        "padding": 3,
+        "maxFontSize": 45,
+        "overflowPercent": 0
+      }
+    },
+    "legacyWindow": {
+      "left": 0.05,
+      "top": 0.038,
+      "width": 0.9,
+      "height": 0.84
     }
   }
 }
