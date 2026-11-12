@@ -25,10 +25,12 @@ if config.get('base_catalog'):
     asset_code+='const naiCardBaseAssets=Object.freeze('+json.dumps(bases,separators=(',',':'))+');\n'
 if config.get('edition_catalog'):
     catalog=json.loads(Path(config['edition_catalog']).read_text())
-    def embedded(path):
-        mime=mimetypes.guess_type(path)[0] or 'application/octet-stream'
+    def embedded(path, mime=None):
+        mime=mime or mimetypes.guess_type(path)[0] or 'application/octet-stream'
         return 'data:'+mime+';base64,'+base64.b64encode(Path(path).read_bytes()).decode('ascii')
     for edition in catalog['editions'].values():edition['art']=embedded(edition['art'])
+    if 'duo' in catalog:
+        catalog['duo']['art'] = embedded(catalog['duo']['art'], 'image/webp')
     for kind in ('ranks','fonts'):
         catalog[kind]={key:embedded(path) for key,path in catalog[kind].items()}
     asset_code+='const naiCardEditionAssets=Object.freeze('+json.dumps(catalog,separators=(',',':'))+');\n'

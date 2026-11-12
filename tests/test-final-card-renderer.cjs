@@ -41,5 +41,18 @@ vm.runInNewContext(fs.readFileSync('payload/userscript-2.9.15.ranks.txt','utf8')
   }
  }
  assert.deepEqual(pack.editions['ass-chrome'].guides.placing.anchor,[525.5,1426.5]);
+ const duo=pack.duo;
+ assert.equal(crypto.createHash('sha256').update(fs.readFileSync(duo.art)).digest('hex'),pack.sha256[duo.art]);
+ const faces=['front','back'].map(side=>{
+  const entry={duo_side:side,name:'Nocturne',edition_id:'signature',tier:'Gold',rating:95};
+  const card=root.naiCards.lightCard(entry,[],'owner',null,true);
+  assert.equal(card.dataset.edition,'duo');assert.equal(card.dataset.duoSide,side);
+  assert.equal(card.querySelector('.naiEditionFrame').src,duo.art);
+  const letters=card.querySelector('.naiEditionLetters');
+  for(const name of ['NOCTURNE','ALEXANDRIA MONTGOMERY',side.toUpperCase()])assert(letters.log.includes(name));
+  assert(!letters.log.includes('OVR'));
+  return letters.toBuffer('image/png');
+ });
+ assert(!faces[0].equals(faces[1]));
  console.log(`Passed: ${count} production card renders; 13 native frames, seven actual alpha bounds, 7/92 whole-string centering, long names, OVR forced beside the number for both legacy preferences, fallback ranks and saved Ass anchor.`);
 })().catch(e=>{console.error(e);process.exitCode=1});

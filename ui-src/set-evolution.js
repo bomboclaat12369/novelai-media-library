@@ -37,11 +37,11 @@
     .naiDuoSides strong,.naiDuoSides small{grid-column:2;overflow-wrap:anywhere}
     .naiDuoSides strong{align-self:end}.naiDuoSides small{align-self:start}
     .naiDuoPreview{display:grid;justify-items:center;gap:12px;perspective:1200px}
-    .naiDuoTurn{position:relative;width:min(286px,80vw);aspect-ratio:3/4;transform-style:preserve-3d;transition:transform .36s ease-in-out}
+    .naiDuoTurn{position:relative;width:min(350px,80vw,46vh);aspect-ratio:7/10;transform-style:preserve-3d;transition:transform .36s ease-in-out}
     .naiDuoTurn[data-side=back]{transform:rotateY(180deg)}
     .naiDuoFace{position:absolute;inset:0;backface-visibility:hidden}
     .naiDuoFace:nth-child(2){transform:rotateY(180deg)}
-    .naiDuoFace .naiTradingCard{width:100%;height:100%;aspect-ratio:3/4}
+    .naiDuoFace .naiTradingCard{width:100%;height:100%;aspect-ratio:7/10}
     .naiDuoFace p{position:absolute;inset:38% 0 auto;text-align:center;background:#151a29}
     @media(prefers-reduced-motion:reduce){.naiDuoTurn{transition:none}}
     @media(max-width:520px){.naiDuoSides button{display:flex;flex-direction:column;align-items:stretch}.naiDuoSides strong,.naiDuoSides small{align-self:auto}}
@@ -56,13 +56,17 @@
     ).map(item => [item.id, item]));
   }
 
-  async function showOriginal(tile, item, owner, request, urls) {
+  async function showOriginal(tile, item, owner, request, urls, duo) {
     if (!item) { tile.append(make('p', 'Photo unavailable')); return; }
     const image = make('img');
     image.alt = item.original_name || 'Set photo';
     const id = item.id;
     const entry = {id, images:[id], count:1, name:image.alt, tier:'Unranked', titles:[]};
-    tile.append(root.naiCards.lightCard(entry, [entry], owner.id, image, false, id));
+    if (duo) {
+      entry.name = duo.setName;
+      entry.duo_side = duo.side;
+    }
+    tile.append(root.naiCards.lightCard(entry, [entry], owner.id, image, !!duo, id));
     root.naiCards.applyFrame(image, owner.collection?.frames?.['image:' + id]);
     try {
       const blob = await request({path:'/api/media/' + encodeURIComponent(id) + '/original', responseType:'blob'});
@@ -266,7 +270,7 @@
   };
 
   const sides = ['Front', 'Back'];
-  function previewDuo(ids, photos, owner, request) {
+  function previewDuo(ids, photos, owner, request, setName) {
     const urls = [];
     const dialog = root.naiCards.modal('Duo preview', () => urls.forEach(url => URL.revokeObjectURL(url)));
     dialog.wrap.classList.add('naiEvolution');
@@ -278,11 +282,11 @@
     let side = 0;
     const flip = button('', () => { side = 1 - side; display(); });
     dialog.body.append(label, turn, flip);
-    const faces = ids.map(id => {
+    const faces = ids.map((id, index) => {
       const face = make('div');
       face.className = 'naiDuoFace';
       turn.append(face);
-      showOriginal(face, photos.get(id), owner, request, urls);
+      showOriginal(face, photos.get(id), owner, request, urls, {setName, side:sides[index].toLowerCase()});
       return face;
     });
     function display() {
@@ -319,7 +323,7 @@
     const actions = make('div');
     actions.className = 'naiEvolutionActions';
     const swap = button('Swap sides', () => { ids.reverse(); render(); });
-    const preview = button('Preview flip', () => previewDuo(ids, photos, owner, request));
+    const preview = button('Preview flip', () => previewDuo(ids, photos, owner, request, group.name));
     const save = button('Save Duo', () => persist({version:1, media_ids:[...ids]}));
     actions.append(swap, preview, save);
     if (expected !== null) {

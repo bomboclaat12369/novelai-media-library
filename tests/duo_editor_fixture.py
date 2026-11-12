@@ -17,8 +17,8 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def seed(store):
-    owner = store.add_character('Duo fixture')['id']
+def seed(store, preview_dir=None):
+    owner = store.add_character('Mara Vale' if preview_dir else 'Duo fixture')['id']
     category = store.add_category(owner, 'Studio')['id']
     ids = []
     ranked = []
@@ -28,7 +28,11 @@ def seed(store):
         draw.ellipse((30, 55 + index * 5, 220, 255), fill=(90, 168, 192))
         draw.text((24, 360), f'Studio / {index + 1}', fill='white')
         buf = io.BytesIO()
-        image.save(buf, 'PNG')
+        if preview_dir and index in (0, 1):
+            side = 'back' if index == 0 else 'front'
+            buf.write((preview_dir / f'studio-{side}.png').read_bytes())
+        else:
+            image.save(buf, 'PNG')
         main = index not in (1, 3, 4)
         media, _ = store.import_bytes(buf.getvalue(), f'Studio {index + 1}.png', owner,
                                       [category] if main else [], {'kind':'fixture'}, 'image/png')
@@ -36,12 +40,14 @@ def seed(store):
         ids.append(media['id'])
         if main:
             ranked.append(media['id'])
-    group = store.create_set(owner, 'Studio', ids[:3], ids[0], cover_source='manual', preserve_placement=True)
+    group = store.create_set(owner, 'Nocturne' if preview_dir else 'Studio', ids[:3], ids[0],
+                             cover_source='manual', preserve_placement=True)
     store.create_set(owner, 'Set only', ids[3:5], preserve_placement=True)
     store.set_evolution(group['id'], {'expected':None, 'evolution':{'version':1, 'status':'ready', 'media_ids':ids[:3]}})
     for action, params in [('captain', {'set_id':group['id'], 'media_id':ids[0]}),
                            ('frame', {'media_id':ids[1], 'key':'image:'+ids[1],
-                                      'frame':{'x':8,'y':-6,'zoom':1.35,'fit':'fill'}})]:
+                                      'frame':{'x':1 if preview_dir else 8,'y':-1 if preview_dir else -6,
+                                               'zoom':1.02 if preview_dir else 1.35,'fit':'fill'}})]:
         revision = store.collection_request('state', {'character_id':owner})['collection']['revision']
         store.collection_request(action, {'character_id':owner, 'revision':revision, **params})
     def battle(action, **body):
@@ -55,13 +61,13 @@ def seed(store):
         store._thumbnail_worker.join()
 
 
-def exercise(directory, runtime_path, html_path, browser):
+def exercise(directory, runtime_path, html_path, browser, preview_dir=None):
     directory.mkdir(parents=True, exist_ok=True)
     if any(directory.iterdir()):
         raise ValueError('Choose an empty directory for the Duo fixture.')
     runtime = runpy.run_path(str(runtime_path))
     store = runtime['LibraryStore'](directory)
-    seed(store)
+    seed(store, preview_dir)
     before = copy.deepcopy(store.public_library())
     battles = store.battles.path.read_bytes()
     def hashes():
@@ -73,7 +79,8 @@ def exercise(directory, runtime_path, html_path, browser):
     worker.start()
     try:
         subprocess.run(['node', str(ROOT / 'tests/exercise-duo-editor.cjs'),
-                        f'http://127.0.0.1:{server.server_port}', browser], check=True, cwd=ROOT)
+                        f'http://127.0.0.1:{server.server_port}', browser,
+                        *([str(preview_dir)] if preview_dir else [])], check=True, cwd=ROOT)
     finally:
         server.shutdown()
         server.server_close()
@@ -97,9 +104,10 @@ if __name__ == '__main__':
     parser.add_argument('--runtime', type=Path, default=ROOT / 'runtime-src/companion-runtime.pyw')
     parser.add_argument('--html', type=Path, default=ROOT / 'payload' / f"standalone-{config['version']}.html")
     parser.add_argument('--browser', default='msedge', help='Installed Chromium browser channel')
+    parser.add_argument('--preview-dir', type=Path, help='Save front/back proof images beside studio-front.png and studio-back.png')
     args = parser.parse_args()
     if args.directory:
-        exercise(args.directory.resolve(), args.runtime.resolve(), args.html.resolve(), args.browser)
+        exercise(args.directory.resolve(), args.runtime.resolve(), args.html.resolve(), args.browser, args.preview_dir)
     else:
         with tempfile.TemporaryDirectory(prefix='duo-editor-') as directory:
-            exercise(Path(directory), args.runtime.resolve(), args.html.resolve(), args.browser)
+            exercise(Path(directory), args.runtime.resolve(), args.html.resolve(), args.browser, args.preview_dir)
