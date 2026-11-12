@@ -2391,6 +2391,10 @@ class LibraryStore:
                 return 'Restore this Set from Purgatory before marking it ready.'
             if len(ids) not in (3, 4):
                 return 'Choose three or four photos before marking the evolution ready.'
+        return LibraryStore._set_photo_problem(group, ids, media)
+
+    @staticmethod
+    def _set_photo_problem(group, ids, media):
         members = set(group.get('media_ids', []))
         for mid in ids:
             item = media.get(mid)
@@ -2398,6 +2402,13 @@ class LibraryStore:
                     or item.get('media_type', 'image') != 'image'
                     or any(item.get(key) for key in ('in_review', 'in_purgatory', 'flagged_for_removal'))):
                 return 'A selected photo is unavailable. Choose a current image from this Set.'
+
+    def _require_set_originals(self, ids, media):
+        root = self.root.resolve()
+        for mid in ids:
+            original = (root / (media[mid].get('stored_rel') or '')).resolve()
+            if not original.is_relative_to(root) or not original.is_file():
+                raise ValueError('An original photo is missing. Recover it or choose another photo.')
 
     def _refresh_set_metadata(self) -> bool:
         """Recheck derived Set state against current membership before committing it."""
@@ -3291,10 +3302,7 @@ class LibraryStore:
                 if problem:
                     raise ValueError(problem)
                 if value['status'] == 'ready':
-                    for mid in value['media_ids']:
-                        original = (self.root / (media[mid].get('stored_rel') or '')).resolve()
-                        if not original.is_relative_to(self.root.resolve()) or not original.is_file():
-                            raise ValueError('An original photo is missing. Recover it before marking this sequence ready.')
+                    self._require_set_originals(value['media_ids'], media)
             if previous == value:
                 return copy.deepcopy(group)
             if body['expected'] != previous:
@@ -3303,6 +3311,47 @@ class LibraryStore:
                 group.pop('after_hours_evolution', None)
             else:
                 group['after_hours_evolution'] = copy.deepcopy(value)
+            group['updated_at'] = now_iso()
+            self.save()
+            return copy.deepcopy(group)
+
+    @TrackingJournal.action('manual')
+    def set_duo(self, set_id, body):
+        """Keep the two side identities on the Set, including if a member later moves."""
+        with self.lock:
+            group = self.set_item(set_id)
+            if not group or group.get('kind', 'set') != 'set':
+                raise ValueError('Choose a library Set.')
+            if not isinstance(body, dict) or 'expected' not in body or 'duo' not in body:
+                raise ValueError('Reopen the Duo editor before saving.')
+            previous = group.get('after_hours_duo')
+            if previous is not None and (not isinstance(previous, dict)
+                    or type(previous.get('version')) is not int or previous['version'] != 1):
+                raise ValueError('Update the Library to edit this Duo format.')
+            duo = body['duo']
+            if duo is not None:
+                if (not isinstance(duo, dict) or set(duo) != {'version', 'media_ids'}
+                        or type(duo.get('version')) is not int or duo['version'] != 1):
+                    raise ValueError('Unsupported Duo format.')
+                ids = duo['media_ids']
+                if (not isinstance(ids, list) or len(ids) != 2
+                        or any(not isinstance(mid, str) or not mid for mid in ids) or ids[0] == ids[1]):
+                    raise ValueError('Choose two distinct photos for the front and back.')
+                if group.get('in_purgatory'):
+                    raise ValueError('Restore this Set from Purgatory before saving its Duo.')
+                media = {mid:self.media_item(mid) for mid in ids}
+                problem = self._set_photo_problem(group, ids, media)
+                if problem:
+                    raise ValueError(problem)
+                self._require_set_originals(ids, media)
+            if previous == duo:
+                return copy.deepcopy(group)
+            if previous != body['expected']:
+                raise ValueError('The saved Duo changed. Reopen the editor to see the current sides.')
+            if duo is None:
+                group.pop('after_hours_duo', None)
+            else:
+                group['after_hours_duo'] = copy.deepcopy(duo)
             group['updated_at'] = now_iso()
             self.save()
             return copy.deepcopy(group)
@@ -6216,6 +6265,10 @@ class MediaHandler(BaseHTTPRequestHandler):
             match = re.fullmatch(r"/api/sets/([0-9a-f]+)/evolution", path)
             if match:
                 self._send_json(200, self.store.set_evolution(match.group(1), self._read_json()))
+                return
+            match = re.fullmatch(r"/api/sets/([0-9a-f]+)/duo", path)
+            if match:
+                self._send_json(200, self.store.set_duo(match.group(1), self._read_json()))
                 return
             match = re.fullmatch(r"/api/sets/([0-9a-f]+)", path)
             if match:
