@@ -2103,7 +2103,7 @@ class LibraryStore:
         self._tracking_start()
         matching_deps=self.root/'.outfit-search'/('python-'+str(sys.version_info.major)+'.'+str(sys.version_info.minor))
         if matching_deps.is_dir() and str(matching_deps) not in sys.path:sys.path.insert(0,str(matching_deps))
-        if self._refresh_auto_set_covers():
+        if self._refresh_set_metadata():
             self.save()
         self._upload_lock = threading.RLock()
         self._uploads: dict[str, dict[str, Any]] = {}
@@ -2376,11 +2376,47 @@ class LibraryStore:
         os.replace(temp, self.db_path)
         self._encoded_media = encoded
 
-    def _refresh_auto_set_covers(self) -> bool:
-        """Prefer Main images without changing manual or unknown legacy covers."""
+    @staticmethod
+    def _evolution_problem(group, record, media):
+        if not isinstance(record, dict) or type(record.get('version')) is not int or record['version'] != 1:
+            return 'Unsupported evolution format.'
+        status = record.get('status')
+        ids = record.get('media_ids')
+        if status not in ('candidate', 'ready') or not isinstance(ids, list):
+            return 'Invalid evolution status or photo list.'
+        if len(ids) > 4 or any(not isinstance(mid, str) or not mid for mid in ids) or len(set(ids)) != len(ids):
+            return 'Choose up to four distinct photos.'
+        if status == 'ready':
+            if group.get('in_purgatory'):
+                return 'Restore this Set from Purgatory before marking it ready.'
+            if len(ids) not in (3, 4):
+                return 'Choose three or four photos before marking the evolution ready.'
+        members = set(group.get('media_ids', []))
+        for mid in ids:
+            item = media.get(mid)
+            if (mid not in members or not item or item.get('character_id') != group.get('character_id')
+                    or item.get('media_type', 'image') != 'image'
+                    or any(item.get(key) for key in ('in_review', 'in_purgatory', 'flagged_for_removal'))):
+                return 'A selected photo is unavailable. Choose a current image from this Set.'
+
+    def _refresh_set_metadata(self) -> bool:
+        """Recheck derived Set state against current membership before committing it."""
         media = {m["id"]: m for m in self.data.get("media", [])}
         changed = False
         for group in self.data.get("sets", []):
+            evolution = group.get('after_hours_evolution')
+            if isinstance(evolution, dict) and type(evolution.get('version')) is int and evolution['version'] == 1:
+                # Check before removing departed members: even a four-to-three change needs another review.
+                if evolution.get('status') == 'ready' and self._evolution_problem(group, evolution, media):
+                    evolution['status'] = 'candidate'
+                    changed = True
+                selected = evolution.get('media_ids')
+                if isinstance(selected, list):
+                    members = set(group.get('media_ids', []))
+                    remaining = [mid for mid in selected if isinstance(mid, str) and mid in members and mid in media]
+                    if remaining != selected:
+                        evolution['media_ids'] = remaining
+                        changed = True
             if group.get("cover_source") != "auto":
                 continue
             members = [mid for mid in group.get("media_ids", []) if mid in media]
@@ -2404,7 +2440,7 @@ class LibraryStore:
             self._save_media_ids=set(media_ids) if incremental else None
             try:
                 self._tracking_flush()
-                self._refresh_auto_set_covers()
+                self._refresh_set_metadata()
                 self.data['_tracking_pending'] = self._tracking_changes(self._save_media_ids)
                 self.data['_tracking_batch']=uuid.uuid4().hex
                 self.data["updated_at"] = now_iso()
@@ -3045,6 +3081,7 @@ class LibraryStore:
                 if 'tracking.jsonl' in files:self.tracking.ingest(TrackingJournal.decode(files['tracking.jsonl']))
                 library['_tracking_store']=self.data['_tracking_store']
                 self.data=library
+                self._refresh_set_metadata()
                 library['_tracking_pending']=self._tracking_changes()
                 library['_tracking_batch']=uuid.uuid4().hex
                 library['_tracking_pending'].append(self._tracking_event('checkpoint.restore',body['id'],{'actor':'manual','checkpoint':body['id']}))
@@ -3229,6 +3266,43 @@ class LibraryStore:
                 raise ValueError('Set contents changed. Reopen the Set before ordering its images.')
             group['media_ids'] = ids
             group['manual_order'] = True
+            group['updated_at'] = now_iso()
+            self.save()
+            return copy.deepcopy(group)
+
+    @TrackingJournal.action('manual')
+    def set_evolution(self, set_id, body):
+        """Commit a versioned, manually ordered selection without reassigning any media."""
+        with self.lock:
+            group = self.set_item(set_id)
+            if not group or group.get('kind', 'set') != 'set':
+                raise ValueError('Choose a library Set.')
+            if not isinstance(body, dict) or 'expected' not in body or 'evolution' not in body:
+                raise ValueError('Reopen the evolution editor before saving.')
+            previous = group.get('after_hours_evolution')
+            value = body['evolution']
+            if isinstance(previous, dict) and type(previous.get('version')) is int and previous['version'] > 1:
+                raise ValueError('Update the Library to edit this evolution format.')
+            if value is not None:
+                if not isinstance(value, dict) or set(value) != {'version', 'status', 'media_ids'}:
+                    raise ValueError('Invalid evolution record.')
+                media = {m['id']: m for m in self.data['media']}
+                problem = self._evolution_problem(group, value, media)
+                if problem:
+                    raise ValueError(problem)
+                if value['status'] == 'ready':
+                    for mid in value['media_ids']:
+                        original = (self.root / (media[mid].get('stored_rel') or '')).resolve()
+                        if not original.is_relative_to(self.root.resolve()) or not original.is_file():
+                            raise ValueError('An original photo is missing. Recover it before marking this sequence ready.')
+            if previous == value:
+                return copy.deepcopy(group)
+            if body['expected'] != previous:
+                raise ValueError('This evolution changed in another window. Reopen the editor to see the latest sequence.')
+            if value is None:
+                group.pop('after_hours_evolution', None)
+            else:
+                group['after_hours_evolution'] = copy.deepcopy(value)
             group['updated_at'] = now_iso()
             self.save()
             return copy.deepcopy(group)
@@ -6138,6 +6212,10 @@ class MediaHandler(BaseHTTPRequestHandler):
                     body.get("aliases"), body.get("colors"), body.get("notes"),
                 )
                 self._send_json(200, item)
+                return
+            match = re.fullmatch(r"/api/sets/([0-9a-f]+)/evolution", path)
+            if match:
+                self._send_json(200, self.store.set_evolution(match.group(1), self._read_json()))
                 return
             match = re.fullmatch(r"/api/sets/([0-9a-f]+)", path)
             if match:

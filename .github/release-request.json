@@ -1,10 +1,11 @@
 {
   "schema": 1,
-  "id": "2026-11-11-media-suite-background-import",
+  "id": "2026-11-12-curated-evolution-sets",
   "components": [
+    "standalone",
     "runtime",
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Companion 2.7.80 keeps a Workbench import preview valid when Battles updates card progress. You can switch tabs and finish the import without repeating the preview."
+  "workbench_notes": "The bundled companion preserves curated After Hours evolution sequences during Set transfers and returns affected sequences to the candidate shortlist when a selected photo moves."
 }
