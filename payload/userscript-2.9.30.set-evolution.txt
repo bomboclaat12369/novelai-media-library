@@ -20,6 +20,8 @@
     .naiEvolution h3{margin:16px 0 8px}
     .naiEvolutionForms,.naiEvolutionPreview{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(145px,100%),1fr));gap:12px}
     .naiEvolutionForms article,.naiEvolutionPreview article{min-width:0;display:flex;flex-direction:column;gap:6px}
+    .naiEvolutionForms article[draggable=true]{cursor:grab}
+    .naiEvolutionForms article[data-drop-target]{outline:2px solid #a89de6;outline-offset:3px}
     .naiEvolutionForms img{width:100%;height:110px;object-fit:contain;background:#101525;border-radius:6px}
     .naiEvolutionForms small,.naiEvolutionPicker span{overflow-wrap:anywhere}
     .naiEvolutionActions{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:8px 0}
@@ -80,7 +82,7 @@
     // An existing candidate, including an explicitly empty one, keeps Walker's choices.
     const savedIds = Array.isArray(expected?.media_ids) ? expected.media_ids.filter(id => typeof id === 'string') : [];
     const ids = expected ? [...savedIds] : (photos.has(captain) ? [captain] : []);
-    let replacing = null, page = 0, edited = false;
+    let replacing = null, page = 0, edited = false, dragged = null;
     const pageSize = 24;
     const state = make('span');
     state.className = 'naiEvolutionState';
@@ -129,7 +131,8 @@
       changed();
     }
     function move(index, to) {
-      [ids[index], ids[to]] = [ids[to], ids[index]];
+      if (index < 0 || to < 0 || to >= ids.length || index === to) return;
+      ids.splice(to, 0, ids.splice(index, 1)[0]);
       changed();
     }
     function renderPicker() {
@@ -167,10 +170,36 @@
       ids.forEach((id, index) => {
         const tile = make('article');
         tile.dataset.formId = id;
+        tile.draggable = true;
+        tile.ondragstart = event => {
+          if (event.target.closest('button')) { event.preventDefault(); return; }
+          dragged = id;
+          event.dataTransfer.setData('application/x-nai-evolution-form', id);
+          event.dataTransfer.effectAllowed = 'move';
+        };
+        tile.ondragover = event => {
+          if (dragged === null || dragged === id) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+          tile.dataset.dropTarget = '';
+        };
+        tile.ondragleave = () => { delete tile.dataset.dropTarget; };
+        tile.ondrop = event => {
+          if (dragged === null) return;
+          event.preventDefault();
+          const from = ids.indexOf(dragged);
+          dragged = null;
+          move(from, index);
+        };
+        tile.ondragend = () => {
+          dragged = null;
+          forms.querySelectorAll('[data-drop-target]').forEach(node => { delete node.dataset.dropTarget; });
+        };
         const final = index === ids.length - 1;
-        tile.append(make('strong', final ? 'Final form' : 'Form ' + (index + 1)));
+        tile.append(make('strong', 'Form ' + (index + 1) + (final ? ' · Final form' : '')));
         const item = photos.get(id);
         const image = make('img');
+        image.draggable = false;
         image.alt = item?.original_name || 'Photo unavailable';
         const controls = make('div');
         controls.className = 'naiEvolutionActions';

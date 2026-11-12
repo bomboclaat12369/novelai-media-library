@@ -59,7 +59,19 @@ async function run() {
       findButton(root.getElementById('naiSetToolsList'), 'Curate evolution').click();
       editor = await wait(() => root.querySelector('.naiEvolution'));
       for (let i = 0; i < count - 1; i++) choose(i);
-      if (count === 3) editor.querySelector('[aria-label="Move form 2 earlier"]').click();
+      if (count === 3) {
+        const [first, second] = editor.querySelectorAll('[data-form-id]');
+        const dataTransfer = {setData(type, id) { this[type] = id; }};
+        for (const [tile, type] of [[second,'dragstart'],[first,'dragover'],[first,'drop']]) {
+          const event = new w.Event(type, {bubbles:true, cancelable:true});
+          Object.defineProperty(event, 'dataTransfer', {value:dataTransfer});
+          tile.dispatchEvent(event);
+        }
+        assert.deepEqual(ids(), [choices[1], choices[0], choices[2]]);
+        // The same order is reachable by keyboard-accessible buttons.
+        editor.querySelector('[aria-label="Move form 2 earlier"]').click();
+        editor.querySelector('[aria-label="Move form 1 later"]').click();
+      }
       else {
         findButton(editor.querySelector('[data-form-id="' + choices[3] + '"]'), 'Change').click();
         choose(4);
