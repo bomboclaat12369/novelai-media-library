@@ -8,7 +8,7 @@ from . import management as m
 from . import flavor
 from . import meetings, stage_labels, bookings
 
-VERSION = '1.0.0-local'
+VERSION = '1.1.0-local'
 NIGHT_SPEEDS = (1, 2, 4, 8)
 PACKS = {'standard': {'name':'Standard','price':100,'count':5},
          'spotlight': {'name':'Girl spotlight','price':200,'count':5},
@@ -32,7 +32,7 @@ def available(catalog):
 
 
 def starter(catalog, owner):
-    pool = [c for c in available(catalog) if c['owner'] == owner]
+    pool = [c for c in available(catalog) if c['owner'] == owner and c.get('source') != 'evolution']
     if not pool:
         raise RuleError('This girl has no currently eligible cards.')
     return min(pool, key=lambda c: (c['rarity'], c['id']))['id']

@@ -321,7 +321,8 @@ def advance_wave(state, catalog, wave):
             n['revenue'] += payout; n['department_revenue'] += payout; n['earnings'][c['owner']] += payout
             if success: state['pack_vouchers'] += spec['packs']
             if success and spec['days'] >= 2 and rng.random() < .2:
-                pool = [x for x in catalog['cards'].values() if x['owner'] == c['owner'] and x.get('available')]
+                pool = [x for x in catalog['cards'].values() if x['owner'] == c['owner'] and x.get('available')
+                        and x.get('source') != 'evolution']
                 if pool:
                     special = draw(pool, rng)['id']
                     item = state['owned'].setdefault(special, {'copies': 0, 'mastery': 0, 'xp': 0, 'uses': 0, 'acquired_day': state['day']})

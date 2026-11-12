@@ -44,8 +44,10 @@
     for (const card of Object.values(catalog.cards)) {
       const entry = entryFor(card, Boolean(catalog.demo));
       entries.set(card.id, entry);
-      if (!rows.has(card.owner)) rows.set(card.owner, []);
-      rows.get(card.owner).push(entry);
+      if (card.source !== 'evolution') {
+        if (!rows.has(card.owner)) rows.set(card.owner, []);
+        rows.get(card.owner).push(entry);
+      }
     }
     if (!root) return;
     root.naiGetLibrary = () => ({
@@ -141,10 +143,11 @@
     return box;
   }
 
-  function originalURL(card) {
+  function originalURL(card, form) {
     // Never accept remote or arbitrary file URLs from catalog metadata.
     if (typeof card.image !== 'string' || !card.image.startsWith('/api/image/')) return null;
-    return '/game/api/image/' + encodeURIComponent(card.id) + '?original=1';
+    const url = '/game/api/image/' + encodeURIComponent(card.id) + '?original=1';
+    return form ? url + '&form=' + form.number : url;
   }
 
   function mount(container, nextCatalog, card, options = {}) {
@@ -155,13 +158,15 @@
     const owner = catalog.people[card.owner];
     const name = owner?.name || 'Collection';
     const owned = options.owned === true;
-    const url = owned && !catalog.demo && card.available !== false && card.original_available !== false ? originalURL(card) : null;
+    const form = options.form;
+    const available = form ? form.original_available : card.available !== false && card.original_available !== false;
+    const url = owned && !catalog.demo && available ? originalURL(card, form) : null;
     const label = !owned ? 'Not collected' : catalog.demo ? 'Demo portrait' : 'Artwork unavailable';
     let photo = placeholder(label, name);
     let node;
     if (url) {
       photo = document.createElement('img');
-      photo.alt = name + ' · ' + (card.name || 'Owned photograph');
+      photo.alt = name + ' · ' + (form?.name || card.name || 'Owned photograph');
       photo.loading = 'lazy';
       photo.decoding = 'async';
       photo.draggable = false;
@@ -171,7 +176,9 @@
       }, {once: true});
       photo.src = url;
     }
-    node = root.naiCards.lightCard(entries.get(card.id), rows.get(card.owner) || [], card.owner, photo, true, card.id);
+    const mediaID = form?.media_id || card.id;
+    const entry = entries.get(mediaID) || entryFor({id: mediaID, name: form?.name || card.name}, false);
+    node = root.naiCards.lightCard(entry, rows.get(card.owner) || [], card.owner, photo, true, mediaID);
     // Native artwork is 7:10; the approved aperture inside it is exactly 3:4.
     node.style.width = '100%';
     node.style.height = 'auto';

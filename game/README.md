@@ -101,17 +101,32 @@ $400 and Collector $600. Premium guarantees an Epic/Legendary when eligible;
 Collector guarantees an unowned card while one remains. Impossible guarantees
 are disabled. Earned vouchers open a Standard pack without spending cash.
 
+Each Set marked ready in Media Library adds one Rare evolution card to packs.
+Choose **Saves & catalog → Refresh catalog read-only** after preparing a Set.
+The first pull reveals Form 1. Three-form cards unlock at mastery 0, 2 and 5.
+Four-form cards unlock at 0, 1, 3 and 5. Equipped work earns XP and spending
+an extra copy of that evolution card gives 30 XP. In **Collection → View**,
+select any earned form to revisit its framed photo or open the original.
+The album lists the cards collected in this career. An ordinary captain
+or other eligible Main photo has its own ownership and mastery.
+
+An acquired card keeps its original form order. New careers and cards that
+have yet to drop use the latest ready order. Withdrawing a Set or removing
+a chosen photo from the ready selection preserves the career record and
+hides the withdrawn artwork on refresh. Set-only photos stay in their Set.
+
 Ordinary slots choose a character uniformly, then weight their available
 rarities 55/27/12/5/1. Missing tiers are removed and weights renormalized.
 Spotlight/category and guarantee pools restrict eligibility first. Gallery
 size alone does not dominate character odds. Multiple image cards of one
 character share that character's energy and career.
 
-The confidence-aware library ranking snapshot sets initial rarity. Unplaced
+The confidence-aware library ranking snapshot sets initial ordinary-card rarity. Unplaced
 cards remain Common. Existing rarity and specialty are frozen as votes or
 metadata change; newly eligible cards enter after refresh/restart. Main-library
-images qualify; videos, review/purgatory, removal-flagged and set-only images
-do not. Missing sources retain ownership and progress with an unavailable-art
+images qualify for ordinary cards. Ready evolution Sets can also use selected
+Set-only stills. Both pools exclude videos, review, purgatory and removal-flagged
+media. Missing sources retain ownership and progress with an unavailable-art
 message. Refresh never starts payroll or resets the business.
 
 Cards use the existing production renderer, fonts, artwork and saved Fit/Fill
@@ -199,8 +214,8 @@ pack transaction with 50,000 catalog cards. A save with 10,001 owned cards and
 ownership intact. These are server measurements, not browser frame rates.
 Large metadata catalogs load in full; collection pages show 24 at a time.
 Other operating systems and the installed production GUI were not visually
-tested. Optional video, story import/generation, narrative relationships,
-evolution and clothing-color detection remain deferred.
+tested. Optional video, story import/generation, narrative relationships
+and clothing-color detection remain deferred.
 
 ## Developer commands
 

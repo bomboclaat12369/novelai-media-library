@@ -10,7 +10,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from . import engine, migrations, stage_labels
+from . import engine, evolution, migrations, stage_labels
 
 
 class Conflict(engine.RuleError):
@@ -19,6 +19,36 @@ class Conflict(engine.RuleError):
 
 def encode(value):
     return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False)
+
+
+def merge_catalog(previous, current, owned):
+    """Keep career balance and acquired sequences. Only the live reader supplies artwork."""
+    if not isinstance(previous.get('cards'), dict) or not isinstance(previous.get('people'), dict):
+        raise engine.RuleError('The saved catalog is invalid.')
+    cards = dict(current['cards'])
+    for ident, old in previous['cards'].items():
+        if not isinstance(old, dict):
+            raise engine.RuleError('The saved card is invalid.')
+        live = current['cards'].get(ident)
+        card = dict(live or old)
+        if not live:
+            card.update(available=False, image=None, original=None)
+        for key in ('rarity', 'specialty', 'rarity_schema'):
+            if key in old:
+                card[key] = old[key]
+        if card.get('source') == 'evolution':
+            keys = evolution.form_keys(old.get('forms'))
+            if ident in owned and not keys:
+                raise engine.RuleError('The saved evolution sequence is invalid.')
+            if ident in owned or not live:
+                verified = {f['key']: f for f in (live or {}).get('forms', [])}
+                card['forms'] = [verified.get(key, {'key': key}) for key in keys]
+                if not all(f.get('original') for f in card['forms']):
+                    card['available'] = False
+        else:
+            card.pop('forms', None)
+        cards[ident] = card
+    return {**current, 'cards': cards, 'people': {**previous['people'], **current['people']}}
 
 
 class GameStore:
@@ -40,19 +70,12 @@ class GameStore:
                 if not before.exists():
                     with closing(sqlite3.connect(before)) as target: db.backup(target)
             old=db.execute("SELECT value FROM meta WHERE key='catalog'").fetchone()
+            self.source_catalog=catalog
             if old:
                 saved=json.loads(old[0])
                 if saved['source_id']!=catalog['source_id']:
                     raise engine.RuleError('This save belongs to a different catalog. Select its original source.')
-                for ident,card in saved['cards'].items():
-                    card['available']=False;card['image']=None;card['original']=None
-                    if ident in catalog['cards']:
-                        current=catalog['cards'][ident]
-                        card.update({k:v for k,v in current.items() if k not in ('rarity','specialty','rarity_schema')})
-                        card['source_categories']=current.get('source_categories',[])
-                for ident,card in catalog['cards'].items(): saved['cards'].setdefault(ident,card)
-                saved['people'].update(catalog['people'])
-                catalog=saved
+                catalog=merge_catalog(saved,catalog,state['owned'] if state else {})
             self.catalog=catalog
             db.execute("INSERT OR REPLACE INTO meta VALUES ('catalog',?)",(encode(catalog),))
             self.catalog_stamp=uuid.uuid4().hex
@@ -186,28 +209,19 @@ class GameStore:
         with self.lock,self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             self.sync_catalog(db)
-            row=db.execute('SELECT revision FROM save WHERE id=1').fetchone()
+            row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
             revision=row[0] if row else 0
             if revision!=expected_revision: raise Conflict('The game changed. Refresh before importing catalog additions.')
             if catalog['source_id']!=self.catalog['source_id']: raise engine.RuleError('The library identity changed; existing progress was preserved.')
-            merged=copy.deepcopy(self.catalog)
-            added=0
-            for ident,card in merged['cards'].items():
-                current=catalog['cards'].get(ident)
-                card.update(available=False,image=None,original=None)
-                if current:
-                    # Freeze rarity and specialty. Refresh presentation and verified paths only.
-                    card.update({k:v for k,v in current.items() if k not in ('rarity','specialty','rarity_schema')})
-            for ident,card in catalog['cards'].items():
-                if ident not in merged['cards']: merged['cards'][ident]=card;added+=1
-            merged['people'].update(catalog['people'])
+            added=len(catalog['cards'].keys() - self.catalog['cards'].keys())
+            merged=merge_catalog(self.catalog,catalog,json.loads(row[1])['owned'] if row else {})
             db.execute("UPDATE meta SET value=? WHERE key='catalog'",(encode(merged),))
             if row: db.execute('UPDATE save SET revision=? WHERE id=1',(revision+1,))
             db.execute('INSERT INTO events(at,body) VALUES (?,?)',(time.time(),encode({'kind':'catalog_refreshed','added':added})))
             stamp=uuid.uuid4().hex
             db.execute("INSERT OR REPLACE INTO meta VALUES ('catalog_stamp',?)",(stamp,))
             db.commit()
-            self.catalog=merged;self.catalog_stamp=stamp
+            self.catalog=merged;self.catalog_stamp=stamp;self.source_catalog=catalog
         return added
 
     def restore(self,payload=None,backup=None):
@@ -225,15 +239,9 @@ class GameStore:
             raise engine.RuleError('Select an After Hours JSON save export.')
         try:
             if payload['catalog']['source_id']!=self.catalog['source_id']: raise engine.RuleError('This export belongs to another library.')
-            cat=copy.deepcopy(self.catalog)
-            for ident,old in payload['catalog']['cards'].items():
-                # Imported paths are never trusted or served.
-                current=cat['cards'].get(ident)
-                old=copy.deepcopy(old);old.update(image=None,original=None,available=False)
-                if current: old.update({k:v for k,v in current.items() if k not in ('rarity','specialty','rarity_schema')})
-                cat['cards'][ident]=old
-            cat['people'].update(payload['catalog']['people'])
-            state=migrations.validate(migrations.migrate(payload['save']['state']),cat)
+            state=migrations.migrate(payload['save']['state'])
+            cat=merge_catalog(payload['catalog'],self.source_catalog,state['owned'])
+            migrations.validate(state,cat)
             if state.get('night'): state['night']['paused']=True
             history=payload.get('history',[])
             if not isinstance(history,list) or len(history)>2000000 or any(not isinstance(e,dict) for e in history): raise ValueError()
@@ -244,6 +252,7 @@ class GameStore:
         self.backup()
         path=self.path.with_name(f'{self.path.stem}-restored-{uuid.uuid4().hex[:10]}.sqlite3')
         restored=GameStore(path,cat)
+        restored.source_catalog=self.source_catalog
         with restored.connect() as db:
             db.execute('INSERT INTO save VALUES (1,1,?)',(encode(state),))
             db.executemany('INSERT INTO events(at,body) VALUES (?,?)',[(time.time(),encode(e)) for e in history])
@@ -258,6 +267,11 @@ class GameStore:
             row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
             result={'revision':row[0],'state':json.loads(row[1])} if row else {'revision':0,'state':None}
             public=copy.deepcopy(self.catalog)
-            for c in public['cards'].values(): c.pop('image',None);c.pop('original',None)
+            for ident,c in public['cards'].items():
+                c.pop('image',None);c.pop('original',None)
+                if 'forms' in c:
+                    forms=c.pop('forms')
+                    if row and ident in result['state']['owned']:
+                        c['forms']=[{'key':key} for key in evolution.form_keys(forms)]
             events=[json.loads(r[0]) for r in db.execute('SELECT body FROM events ORDER BY id')]
         return {'format':'after-hours-game','schema':migrations.SCHEMA,'catalog':public,'save':result,'history':events}

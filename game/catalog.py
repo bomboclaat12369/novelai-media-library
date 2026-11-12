@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+from . import evolution
 from .library_snapshot import rows as snapshot_rows
 
 RARITIES = ('Common', 'Uncommon', 'Rare', 'Epic', 'Legendary')
@@ -31,6 +32,23 @@ def demo_catalog():
                             'available': True, 'ranked': True, 'rating': 1800 - n * 3,
                             'image': None, 'original': None, 'source': 'demo'}
     return {'source_id': 'demo-v1', 'demo': True, 'people': people, 'cards': cards}
+
+
+def media_paths(root, media):
+    paths = {}
+    for field, key in [('image', 'thumb_rel'), ('original', 'stored_rel')]:
+        relative = media.get(key) or media.get('stored_rel')
+        path = None
+        if isinstance(relative, str) and relative and not Path(relative).anchor and '..' not in Path(relative).parts:
+            try:
+                resolved = (root / relative).resolve()
+                if root in resolved.parents and resolved.is_file():
+                    path = str(resolved)
+            except (OSError, ValueError, RuntimeError):
+                pass
+        paths[field] = path
+    paths['image'] = paths['image'] or paths['original']
+    return paths
 
 
 def read_library(root):
@@ -69,32 +87,30 @@ def read_library(root):
             if ranked and len(placed) >= 5 and len(ranks) > 1:
                 rarity = next((tier for fraction, tier in ((.02,4),(.08,3),(.20,2),(.45,1))
                                if ranks[rating] <= max(1, math.ceil(len(placed)*fraction))), 0)
-            paths = {}
-            for field, key in [('image', 'thumb_rel'), ('original', 'stored_rel')]:
-                relative = m.get(key) or m.get('stored_rel')
-                path = (root / relative).resolve() if isinstance(relative, str) else None
-                if path and root in path.parents and path.is_file():
-                    paths[field] = str(path)
-                else:
-                    paths[field] = None
-            if not paths['image']:
-                paths['image'] = paths['original']
             cards[ident] = {'id': ident, 'owner': owner,
                             'name': m.get('original_name') or m.get('filename') or ident,
                             'rarity': rarity, 'specialty': SPECIALTIES[stable(ident) % 4],
                             'categories': [category_names[owner].get(str(c), str(c)) for c in m.get('categories', [])],
                             'source_categories': list(m.get('categories', [])), 'rarity_schema': 2, 'available': True,
                             'presentation':presentation[ident], 'media_sha256':m.get('sha256'),
-                            'ranked': ranked, 'rating': rating, 'source': 'library', **paths}
-    people = {p: v for p, v in people.items() if any(c['owner'] == p for c in cards.values())}
-    if len(people) < 2:
+                            'ranked': ranked, 'rating': rating, 'source': 'library', **media_paths(root, m)}
+    if len({c['owner'] for c in cards.values()}) < 2:
         raise ValueError('The game needs eligible image cards for at least two girls.')
+    media = {m['id']: m for m in data['media']}
+    for card in evolution.ready_cards(data.get('sets', []), media, people, lambda m: media_paths(root, m),
+                                      lambda ident: SPECIALTIES[stable(ident) % len(SPECIALTIES)]):
+        cards[card['id']] = card
+    owners = {c['owner'] for c in cards.values()}
+    people = {p: v for p, v in people.items() if p in owners}
     return {'source_id': str(data.get('_tracking_store') or hashlib.sha256(str(root).encode()).hexdigest()),
             'demo': False, 'people': people, 'cards': cards}
 
 
 def public_catalog(catalog):
-    return {**catalog, 'cards': {key: {**{k:v for k,v in card.items() if k not in ('image','original')},
-                                      'image': '/api/image/' + key if card.get('image') else None,
-                                      'original_available': bool(card.get('original'))}
-                                for key, card in catalog['cards'].items()}}
+    cards = {}
+    for key, card in catalog['cards'].items():
+        public = {k: v for k, v in card.items() if k not in ('image', 'original', 'forms')}
+        public['image'] = '/api/image/' + key if card.get('image') or card.get('forms') else None
+        public['original_available'] = bool(card.get('original') or card.get('forms'))
+        cards[key] = public
+    return {**catalog, 'cards': cards}

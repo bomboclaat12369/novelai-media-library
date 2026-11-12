@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TOOLS = "tools/after-hours"
 FILE_LIST = "after-hours-files.json"
 GAME_MODULES = (
-    "__init__ booking_state bookings catalog companion engine flavor library_snapshot "
+    "__init__ booking_state bookings catalog companion engine evolution flavor library_snapshot "
     "management meeting_rules meetings migrations server stage_labels store"
 ).split()
 WEB_FILES = "index.html app.js management-ui.js renderer.js style.css favicon.svg".split()

@@ -22,7 +22,7 @@ if __package__ in (None,''):
 from game.catalog import demo_catalog,read_library,public_catalog
 from game.engine import PACKS,UPGRADES,NIGHT_SPEEDS,RuleError,forecast,upkeep,recurring_cost,hire_cost,upgrade_cost
 from game.store import GameStore,Conflict
-from game import bookings, management, meetings, stage_labels
+from game import bookings, evolution, management, meetings, stage_labels
 
 WEB=Path(__file__).resolve().parent/'web'
 PROJECT=WEB.parents[1]
@@ -65,7 +65,8 @@ class Handler(BaseHTTPRequestHandler):
         if s:
             result['derived']={'demand':forecast(s)[0],'recurring':recurring_cost(s),'upkeep':upkeep(s),
                                 'hire_cost':hire_cost(s),'upgrade_costs':{k:upgrade_cost(s,k) for k in UPGRADES},
-                                'meetings':meetings.views(s,self.server.store.catalog),**management.derived(s)}
+                                'meetings':meetings.views(s,self.server.store.catalog),
+                                'evolutions':evolution.progress(self.server.store.catalog,s['owned']),**management.derived(s)}
         result['stage_labels']=self.server.store.label_info()
         return result
 
@@ -122,12 +123,23 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200,self.server.store.export(),extra={'Content-Disposition':'attachment; filename="club-game-save.json"'})
         if path.startswith('/api/image/'):
             ident=path.removeprefix('/api/image/')
-            state=self.server.store.read()['state']
-            card=self.server.store.catalog['cards'].get(ident)
+            with self.server.operation_lock:
+                store=self.server.store
+                state=store.read()['state']
+                card=store.catalog['cards'].get(ident)
             if not state or ident not in state['owned']: return self.send(403,{'error':'Collect this card in the game before viewing its artwork.'})
-            if not card or not card.get('available') or not card.get('image'):
+            query=urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query,keep_blank_values=True)
+            if card and card.get('source')=='evolution':
+                earned=evolution.earned_forms(card,state['owned'][ident])
+                requested=query.get('form',[str(len(earned))])
+                indices={str(i):form for i,form in enumerate(earned,1)}
+                if len(requested)!=1 or requested[0] not in indices:
+                    return self.send(403,{'error':'Earn this form before viewing it.'})
+                card=indices[requested[0]]
+            elif 'form' in query:
+                return self.send(404,{'error':'This card has no evolution forms.'})
+            if not card or card.get('available') is False or not card.get('image'):
                 return self.send(404,{'error':'Artwork unavailable.'})
-            query=urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             if query.get('original')==['1'] and not card.get('original'): return self.send(404,{'error':'Original artwork unavailable.'})
             file=Path(card.get('original') if query.get('original')==['1'] and card.get('original') else card['image']).resolve()
             root=self.server.library_root
