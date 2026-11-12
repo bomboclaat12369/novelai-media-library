@@ -78,22 +78,35 @@ function restartGame(){
 const person=id=>boot.catalog.people[id];
 const card=id=>boot.catalog.cards[id];
 function evolutionOf(id){return derived.evolutions?.[id];}
-function hasStarter(owner){return Object.values(boot.catalog.cards).some(c=>c.owner===owner&&c.available&&c.source!=='evolution');}
+function duoSide(id){return save?.owned[id]?.duo_side||'front';}
+function displayedArt(id,side){
+ return derived.duos?.[id]?.[side||duoSide(id)] || evolutionOf(id)?.forms.at(-1);
+}
+function hasStarter(owner){return Object.values(boot.catalog.cards).some(c=>c.owner===owner&&c.available&&c.source!=='evolution'&&c.source!=='duo');}
 function ownedFor(owner){return Object.keys(save.owned).filter(id=>card(id)?.owner===owner);}
 function portrait(c,extra=''){
  const p=person(c.owner)||{name:'Unavailable',color:0};
- const available=evolutionOf(c.id)?.forms.at(-1)?.image_available??c.available;
+ const available=displayedArt(c.id)?.image_available??c.available;
  return `<div class="portrait">${save?.owned[c.id]&&available&&c.image?`<img loading="lazy" src="${escapeHTML('/game'+c.image)}" alt="${escapeHTML(p.name)}">`:`<span class="initial">${escapeHTML(p.name[0])}</span><span class="demo-label">${!save?.owned[c.id]?'COLLECT TO REVEAL':boot.catalog.demo?'DEMO PORTRAIT':'ARTWORK UNAVAILABLE'}</span>`}${extra}</div>`;
 }
 function brand(){return '<div class="brand"><img src="/game/favicon.svg" alt=""><div><strong>After Hours</strong><small>COLLECT · MANAGE · GROW</small></div></div>';}
-function cardHTML(c,{controls=false,isNew=null}={}){
+function flipButton(id,side,packIndex){
+ const next=side==='front'?'back':'front';
+ const slot=Number.isInteger(packIndex)?` data-index="${packIndex}"`:'';
+ return `<button data-action="flip-duo" data-card="${escapeHTML(id)}" data-side="${next}"${slot}>Flip to ${next}</button>`;
+}
+function cardHTML(c,{controls=false,isNew=null,packIndex,packSide}={}){
  const p=person(c.owner),o=save?.owned[c.id],line=evolutionOf(c.id);
- return `<article class="card rarity-${c.rarity}"><div class="approved-card" data-card-art="${escapeHTML(c.id)}"></div><div class="cardinfo">${isNew!==null?`<span class="new-label">${isNew?'NEW DISCOVERY':'EXTRA COPY'}</span>`:''}<strong>${escapeHTML(p.name)}</strong>${line?`<small class="evolution-label">${escapeHTML(c.name)} · Form ${line.forms.length}/${line.total}</small>`:''}<small>${rarities[c.rarity]} · ${escapeHTML(specialties[c.specialty])}</small><small>${o?`Mastery ${o.mastery}/5 · ${o.copies} copies${o.studio_award?' · Studio award':''}`:'Not collected yet'}</small>${!c.available?(line?'<small>Set unavailable for new pulls</small>':'<small>Source unavailable · progress retained</small>'):''}${controls?`<div class="card-actions"><button data-action="inspect" data-card="${escapeHTML(c.id)}" ${!o?'disabled':''}>View</button>${o&&save.people[c.owner]?`<button data-action="equip" data-owner="${escapeHTML(c.owner)}" data-card="${escapeHTML(c.id)}" ${save.phase!=='prepare'?'disabled':''}>${save.people[c.owner].card===c.id?'Equipped':'Equip'}</button>`:''}${o&&o.copies>1&&o.mastery<5?`<button data-action="mastery" data-card="${escapeHTML(c.id)}" ${save.phase!=='prepare'?'disabled':''}>Use extra · +30 XP</button>`:''}</div>`:''}</div></article>`;
+ const duo=c.source==='duo'&&o;
+ const side=duo?(packSide||duoSide(c.id)):null;
+ const duoLabel=duo?`<small class="evolution-label">Duo · ${escapeHTML(c.name)} · ${side==='front'?'Front':'Back'}</small>`:'';
+ const flip=duo?`<div class="card-actions">${flipButton(c.id,side,packIndex)}</div>`:'';
+ return `<article class="card rarity-${c.rarity}"><div class="approved-card" data-card-art="${escapeHTML(c.id)}"${side?` data-side="${side}"`: ''}></div><div class="cardinfo">${isNew!==null?`<span class="new-label">${isNew?'NEW DISCOVERY':'EXTRA COPY'}</span>`:''}<strong>${escapeHTML(p.name)}</strong>${duoLabel}${line?`<small class="evolution-label">${escapeHTML(c.name)} · Form ${line.forms.length}/${line.total}</small>`:''}<small>${rarities[c.rarity]} · ${escapeHTML(specialties[c.specialty])}</small><small>${o?`Mastery ${o.mastery}/5 · ${o.copies} copies${o.studio_award?' · Studio award':''}`:'Not collected yet'}</small>${!c.available?((line||duo)?'<small>Set unavailable for new pulls</small>':'<small>Source unavailable · progress retained</small>'):''}${flip}${controls?`<div class="card-actions"><button data-action="inspect" data-card="${escapeHTML(c.id)}" ${!o?'disabled':''}>View</button>${o&&save.people[c.owner]?`<button data-action="equip" data-owner="${escapeHTML(c.owner)}" data-card="${escapeHTML(c.id)}" ${save.phase!=='prepare'?'disabled':''}>${save.people[c.owner].card===c.id?'Equipped':'Equip'}</button>`:''}${o&&o.copies>1&&o.mastery<5?`<button data-action="mastery" data-card="${escapeHTML(c.id)}" ${save.phase!=='prepare'?'disabled':''}>Use extra · +30 XP</button>`:''}</div>`:''}</div></article>`;
 }
 function hydrateCards(parent=root){
  for(const slot of parent.querySelectorAll('[data-card-art]')){
   const id=slot.dataset.cardArt,forms=evolutionOf(id)?.forms;
-  const form=slot.dataset.form?forms?.[Number(slot.dataset.form)-1]:forms?.at(-1);
+  const form=slot.dataset.form?forms?.[Number(slot.dataset.form)-1]:displayedArt(id,slot.dataset.side);
   AfterHoursCards.mount(slot,boot.catalog,card(id),{owned:!!save?.owned[id],form});
  }
 }
@@ -105,7 +118,7 @@ const navigation=[['club','◇','The club'],['team','♧','Your team'],['packs',
 function layout(content){return `<div class="layout"><aside class="sidebar">${brand()}<nav class="nav" aria-label="Game sections">${navigation.map(([id,icon,title])=>`<button data-screen="${id}" class="${screen===id?'active':''}"><span class="symbol">${icon}</span>${title}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="save-dot">● Saved on this computer</div><p>${boot.catalog.demo?'Demo catalog · placeholder art':'Library catalog · read-only'}</p><a href="/game/api/export">Export game save ↗</a><p>Club · Studio · Resort</p></div></aside><div class="main"><header class="topbar"><div class="breadcrumb">Your business <span class="muted">/</span> ${navigation.find(n=>n[0]===screen)[2]}</div><div class="topstats"><span class="pill">${save.phase==='night'?'NIGHT IN PROGRESS':'PREPARATION'} · DAY ${save.day}</span><span class="amount">${money(save.cash)}</span><small>${Object.keys(save.people).length} girls · ${Object.keys(save.owned).length} cards</small><button class="ghost small" data-action="restart-game" ${boot.restartable?'':'disabled'} title="${boot.restartable?'Load local updates and reconnect automatically':'Reopen the updated Windows launcher once to enable game restarts'}">Restart game</button></div></header><main class="content">${content}</main></div></div>`;}
 function staffHTML(owner){
  const p=person(owner),w=save.people[owner],c=card(w.card);
- return `<article class="staff c${p.color}">${portrait(c,`<span class="badge">${rarities[c.rarity]}</span>`)}<div class="staffinfo"><h3>${escapeHTML(p.name)}</h3><small>Career level ${1+Math.floor(w.xp/100)} · ${escapeHTML(specialties[c.specialty])}</small><div class="energy"><span style="width:${w.energy}%"></span></div><small>Energy ${Math.round(w.energy)}/100</small><label for="role-${escapeHTML(owner)}">Tonight's assignment · ${escapeHTML(derived.assignments[owner])}</label><select id="role-${escapeHTML(owner)}" data-plan="${escapeHTML(owner)}" ${save.phase!=='prepare'||['studio','resort'].includes(derived.assignments[owner])?'disabled':''}>${[['room','Private room'],['lounge','Lounge'],['rest','Rest & recover'],['train','Training · $15']].map(([v,l])=>`<option value="${v}" ${w.role===v?'selected':''}>${l}</option>`).join('')}</select><label for="card-${escapeHTML(owner)}">Active card · ${ownedFor(owner).length} owned</label><select id="card-${escapeHTML(owner)}" data-equip="${escapeHTML(owner)}" ${save.phase!=='prepare'?'disabled':''}>${ownedFor(owner).map(id=>`<option value="${escapeHTML(id)}" ${id===w.card?'selected':''}>${escapeHTML(specialties[card(id).specialty])} · ${rarities[card(id).rarity]} · ${escapeHTML(card(id).name)}</option>`).join('')}</select><button class="ghost small full" style="margin-top:10px" data-action="inspect" data-card="${escapeHTML(c.id)}">View active card</button></div></article>`;
+ return `<article class="staff c${p.color}">${portrait(c,`<span class="badge">${rarities[c.rarity]}</span>`)}<div class="staffinfo"><h3>${escapeHTML(p.name)}</h3><small>Career level ${1+Math.floor(w.xp/100)} · ${escapeHTML(specialties[c.specialty])}</small><div class="energy"><span style="width:${w.energy}%"></span></div><small>Energy ${Math.round(w.energy)}/100</small><label for="role-${escapeHTML(owner)}">Tonight's assignment · ${escapeHTML(derived.assignments[owner])}</label><select id="role-${escapeHTML(owner)}" data-plan="${escapeHTML(owner)}" ${save.phase!=='prepare'||['studio','resort'].includes(derived.assignments[owner])?'disabled':''}>${[['room','Private room'],['lounge','Lounge'],['rest','Rest & recover'],['train','Training · $15']].map(([v,l])=>`<option value="${v}" ${w.role===v?'selected':''}>${l}</option>`).join('')}</select><label for="card-${escapeHTML(owner)}">Active card · ${ownedFor(owner).length} owned</label><select id="card-${escapeHTML(owner)}" data-equip="${escapeHTML(owner)}" ${save.phase!=='prepare'?'disabled':''}>${ownedFor(owner).map(id=>`<option value="${escapeHTML(id)}" ${id===w.card?'selected':''}>${escapeHTML(specialties[card(id).specialty])} · ${rarities[card(id).rarity]} · ${card(id).source==='duo'?'Duo · ':''}${escapeHTML(card(id).name)}</option>`).join('')}</select><button class="ghost small full" style="margin-top:10px" data-action="inspect" data-card="${escapeHTML(c.id)}">View active card</button></div></article>`;
 }
 function legacyClub(){
  const n=save.night,active=Object.keys(save.people).filter(p=>!['rest','train'].includes(n?.assignments[p]||derived.assignments[p])).length,last=save.reports.at(-1);
@@ -147,11 +160,20 @@ function showPack(){
  const p=save.pending_pack;
  shownPack=p.id;revealed=new Set(p.revealed||[]);
  const all=revealed.size===p.results.length;
- modal.innerHTML=`<div class="modal-head"><div><div class="eyebrow">${escapeHTML(boot.packs[p.type].name)} · opening ${p.id}</div><h2 style="margin-top:8px">Make room for something new.</h2></div><span class="pill">${all?p.results.filter(r=>r.new).length+' new discoveries':revealed.size+' / '+p.results.length+' revealed'}</span></div><div class="reveal-grid">${p.results.map((r,i)=>revealed.has(i)?cardHTML(card(r.id),{isNew:r.new}):`<button class="card-back" data-action="reveal-card" data-index="${i}" aria-label="Reveal card ${i+1}"><span>◇</span><strong>AFTER HOURS</strong><small>Tap to reveal</small></button>`).join('')}</div><div class="modal-footer"><p class="note">Your cards and purchase are already saved.<br>Extra copies can advance mastery. A new girl's card waives her hiring fee.</p>${all?'<button class="primary" data-action="reveal_done">Add to my collection →</button>':'<button class="primary" data-action="reveal-all">Reveal all five</button>'}</div>`;
+ modal.innerHTML=`<div class="modal-head"><div><div class="eyebrow">${escapeHTML(boot.packs[p.type].name)} · opening ${p.id}</div><h2 style="margin-top:8px">Make room for something new.</h2></div><span class="pill">${all?p.results.filter(r=>r.new).length+' new discoveries':revealed.size+' / '+p.results.length+' revealed'}</span></div><div class="reveal-grid">${p.results.map((r,i)=>revealed.has(i)?cardHTML(card(r.id),{isNew:r.new,packIndex:i,packSide:r.duo_side||'front'}):`<button class="card-back" data-action="reveal-card" data-index="${i}" aria-label="Reveal card ${i+1}"><span>◇</span><strong>AFTER HOURS</strong><small>Tap to reveal</small></button>`).join('')}</div><div class="modal-footer"><p class="note">Your cards and purchase are already saved.<br>Extra copies can advance mastery. A new girl's card waives her hiring fee.</p>${all?'<button class="primary" data-action="reveal_done">Add to my collection →</button>':'<button class="primary" data-action="reveal-all">Reveal all five</button>'}</div>`;
  hydrateCards(modal);if(!modal.open)modal.showModal();
 }
 function inspect(id,number){
  const c=card(id);if(!save.owned[id])return;
+ if(c.source==='duo'){
+  const side=duoSide(id),art=displayedArt(id,side);
+  modal.innerHTML=`<div class="modal-head"><div><h2>${escapeHTML(c.name)}</h2><p class="note">${escapeHTML(person(c.owner).name)} · Duo · ${rarities[c.rarity]}</p></div><button data-action="close-modal" aria-label="Close card">✕</button></div>
+   <div class="evolution-view duo-view"><div class="approved-card" data-card-art="${escapeHTML(id)}" data-side="${side}"></div>
+   <div><h3>${side==='front'?'Front':'Back'}</h3><p class="note">Your album and equipped card show this side.</p>
+   <div class="form-picker">${flipButton(id,side)}</div>
+   ${art?.original_available?`<a href="/game/api/image/${encodeURIComponent(id)}?original=1&amp;side=${side}" target="_blank" rel="noopener">View original ↗</a>`:''}</div></div>`;
+  hydrateCards(modal);if(!modal.open)modal.showModal();return;
+ }
  const line=evolutionOf(id);
  if(line){
   const form=number===undefined?line.forms.at(-1):line.forms[number-1];
@@ -178,6 +200,22 @@ root.addEventListener('click',async e=>{
  if(action==='reveal-all'){await act('reveal',{all:true});showPack();return;}
  if(action==='inspect'){inspect(b.dataset.card);return;}
  if(action==='view-form'){inspect(b.dataset.card,Number(b.dataset.form));return;}
+ if(action==='flip-duo'){
+  const {card:id,side,index}=b.dataset;
+  const inspecting=!!b.closest('.duo-view');
+  const packSlot=index!==undefined;
+  const body={card:id,side};
+  if(packSlot)body.index=Number(index);
+  await act('duo_side',body);
+  if(duoSide(id)!==side)return;
+  if(inspecting&&modal.open)inspect(id);
+  const view=inspecting||packSlot?modal:$('#app');
+  const selector=`[data-action="flip-duo"][data-card="${CSS.escape(id)}"]`+(packSlot?`[data-index="${index}"]`:'');
+  const button=view.querySelector(selector);
+  button?.closest('.card,.duo-view')?.querySelector('.approved-card')?.classList.add('duo-turn');
+  button?.focus({preventScroll:true});
+  return;
+ }
  if(action==='close-modal'){modal.close();return;}
  if(action==='reveal_done'){await act(action);if(!save.pending_pack){modal.close();shownPack=null;}return;}
  if(action==='new'){await act('new',{selected:[...selected]});return;}

@@ -66,7 +66,8 @@ class Handler(BaseHTTPRequestHandler):
             result['derived']={'demand':forecast(s)[0],'recurring':recurring_cost(s),'upkeep':upkeep(s),
                                 'hire_cost':hire_cost(s),'upgrade_costs':{k:upgrade_cost(s,k) for k in UPGRADES},
                                 'meetings':meetings.views(s,self.server.store.catalog),
-                                'evolutions':evolution.progress(self.server.store.catalog,s['owned']),**management.derived(s)}
+                                'evolutions':evolution.progress(self.server.store.catalog,s['owned']),
+                                'duos':evolution.duo_views(self.server.store.catalog,s['owned']),**management.derived(s)}
         result['stage_labels']=self.server.store.label_info()
         return result
 
@@ -129,7 +130,14 @@ class Handler(BaseHTTPRequestHandler):
                 card=store.catalog['cards'].get(ident)
             if not state or ident not in state['owned']: return self.send(403,{'error':'Collect this card in the game before viewing its artwork.'})
             query=urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query,keep_blank_values=True)
-            if card and card.get('source')=='evolution':
+            if card and card.get('source')=='duo':
+                side=query.get('side',[state['owned'][ident].get('duo_side','front')])
+                if len(side)!=1 or side[0] not in evolution.DUO_SIDES or 'form' in query:
+                    return self.send(404,{'error':'Choose the front or back of this Duo.'})
+                card=card['forms'][evolution.DUO_SIDES.index(side[0])]
+            elif 'side' in query:
+                return self.send(404,{'error':'This card has no Duo sides.'})
+            elif card and card.get('source')=='evolution':
                 earned=evolution.earned_forms(card,state['owned'][ident])
                 requested=query.get('form',[str(len(earned))])
                 indices={str(i):form for i,form in enumerate(earned,1)}

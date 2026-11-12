@@ -115,6 +115,14 @@ have yet to drop use the latest ready order. Withdrawing a Set or removing
 a chosen photo from the ready selection preserves the career record and
 hides the withdrawn artwork on refresh. Set-only photos stay in their Set.
 
+A Set can also have a **Duo** with two chosen photos. Refresh the catalog,
+then pull the Duo from a pack to reveal its front. Choose **Flip to back**
+in the pack opening or your collection to see the second photo immediately.
+Flipping also chooses the side displayed in the album and while equipped.
+Both sides share one card, specialty, copy count and mastery. Each new pack
+copy opens front-first. The Duo inherits its highest eligible Main photo's
+After Hours rarity in that career. A pair of Set-only photos enters as Common.
+
 Ordinary slots choose a character uniformly, then weight their available
 rarities 55/27/12/5/1. Missing tiers are removed and weights renormalized.
 Spotlight/category and guarantee pools restrict eligibility first. Gallery

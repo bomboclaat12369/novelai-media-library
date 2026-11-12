@@ -2,7 +2,7 @@
 from __future__ import annotations
 import copy
 import math
-from . import engine, management, meetings
+from . import engine, evolution, management, meetings
 
 SCHEMA = 2
 
@@ -45,6 +45,8 @@ def validate(state, catalog):
         if not isinstance(state['owned'], dict) or len(state['owned']) > 250000: raise ValueError()
         for ident, own in state['owned'].items():
             if ident not in catalog['cards'] or not integer(own['copies'], 1) or not integer(own['xp']) or not integer(own['uses']) or not integer(own['mastery'], 0, 5): raise ValueError()
+            if 'duo_side' in own and (catalog['cards'][ident].get('source') != 'duo' or own['duo_side'] not in evolution.DUO_SIDES):
+                raise ValueError()
         for owner, worker in state['people'].items():
             if owner not in catalog['people'] or worker['card'] not in state['owned']: raise ValueError()
             if catalog['cards'][worker['card']]['owner'] != owner or not finite(worker['energy'], 0, 100) or not integer(worker['xp']): raise ValueError()
@@ -93,6 +95,9 @@ def validate(state, catalog):
             pack=state['pending_pack']
             if pack['type'] not in engine.PACKS or len(pack['results'])!=5: raise ValueError()
             if any(c['id'] not in state['owned'] for c in pack['results']): raise ValueError()
+            for result in pack['results']:
+                if 'duo_side' in result and (catalog['cards'][result['id']].get('source') != 'duo' or result['duo_side'] not in evolution.DUO_SIDES):
+                    raise ValueError()
             if any(not integer(i,0,4) for i in pack.get('revealed',[])): raise ValueError()
     except (KeyError, TypeError, ValueError, AttributeError):
         raise engine.RuleError('The recovery file contains invalid or incomplete game data.') from None

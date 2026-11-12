@@ -3,6 +3,7 @@
 .card-back{aspect-ratio:3/4;min-height:260px;border:1px solid #8e789f;border-radius:12px;background:repeating-linear-gradient(45deg,#bca2d80b 0 1px,transparent 1px 9px),radial-gradient(ellipse at 50% 35%,#68516f,#242333);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:25px;box-shadow:inset 0 0 0 9px #1d1c2c,inset 0 0 0 10px #796583}.card-back span{font-size:60px;color:var(--gold)}.card-back strong{font-family:Georgia,serif;font-weight:400;letter-spacing:2px;font-size:12px}.card-back small{font-size:10px;letter-spacing:1px}.card-back:hover{transform:translateY(-4px)}
 /* Integrated venue, departments and recovery. Card artwork itself is unchanged. */
 .cardinfo .evolution-label{color:var(--gold)}
+@media(prefers-reduced-motion:no-preference){.duo-turn{animation:duo-flip .22s ease-out}@keyframes duo-flip{from{transform:perspective(700px) rotateY(70deg)}to{transform:perspective(700px) rotateY(0)}}}
 dialog:has(.evolution-view){width:min(740px,94vw)}
 .evolution-view{display:grid;grid-template-columns:minmax(160px,300px) minmax(155px,1fr);gap:24px;align-items:center}
 .evolution-view>.approved-card{width:100%;aspect-ratio:7/10}

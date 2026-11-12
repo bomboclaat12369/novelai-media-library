@@ -98,7 +98,7 @@ def read_library(root):
         raise ValueError('The game needs eligible image cards for at least two girls.')
     media = {m['id']: m for m in data['media']}
     for card in evolution.ready_cards(data.get('sets', []), media, people, lambda m: media_paths(root, m),
-                                      lambda ident: SPECIALTIES[stable(ident) % len(SPECIALTIES)]):
+                                      lambda ident: SPECIALTIES[stable(ident) % len(SPECIALTIES)], cards):
         cards[card['id']] = card
     owners = {c['owner'] for c in cards.values()}
     people = {p: v for p, v in people.items() if p in owners}

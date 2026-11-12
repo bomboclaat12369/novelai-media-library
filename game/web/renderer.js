@@ -44,7 +44,7 @@
     for (const card of Object.values(catalog.cards)) {
       const entry = entryFor(card, Boolean(catalog.demo));
       entries.set(card.id, entry);
-      if (card.source !== 'evolution') {
+      if (card.source !== 'evolution' && card.source !== 'duo') {
         if (!rows.has(card.owner)) rows.set(card.owner, []);
         rows.get(card.owner).push(entry);
       }
@@ -147,6 +147,7 @@
     // Never accept remote or arbitrary file URLs from catalog metadata.
     if (typeof card.image !== 'string' || !card.image.startsWith('/api/image/')) return null;
     const url = '/game/api/image/' + encodeURIComponent(card.id) + '?original=1';
+    if (form?.side) return url + '&side=' + form.side;
     return form ? url + '&form=' + form.number : url;
   }
 

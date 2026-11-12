@@ -36,10 +36,10 @@ def merge_catalog(previous, current, owned):
         for key in ('rarity', 'specialty', 'rarity_schema'):
             if key in old:
                 card[key] = old[key]
-        if card.get('source') == 'evolution':
-            keys = evolution.form_keys(old.get('forms'))
+        if card.get('source') in evolution.SET_CARDS:
+            keys = evolution.form_keys(old.get('forms'), card['source'])
             if ident in owned and not keys:
-                raise engine.RuleError('The saved evolution sequence is invalid.')
+                raise engine.RuleError('The saved Set card has an invalid photo selection.')
             if ident in owned or not live:
                 verified = {f['key']: f for f in (live or {}).get('forms', [])}
                 card['forms'] = [verified.get(key, {'key': key}) for key in keys]
@@ -48,6 +48,11 @@ def merge_catalog(previous, current, owned):
         else:
             card.pop('forms', None)
         cards[ident] = card
+    # A newly eligible Duo inherits this career's frozen ordinary photo rarities.
+    for ident in current['cards'].keys() - previous['cards'].keys():
+        card = cards[ident]
+        if card.get('source') == 'duo':
+            cards[ident] = {**card, 'rarity': evolution.duo_rarity(card['forms'], cards)}
     return {**current, 'cards': cards, 'people': {**previous['people'], **current['people']}}
 
 
@@ -272,6 +277,6 @@ class GameStore:
                 if 'forms' in c:
                     forms=c.pop('forms')
                     if row and ident in result['state']['owned']:
-                        c['forms']=[{'key':key} for key in evolution.form_keys(forms)]
+                        c['forms']=[{'key':key} for key in evolution.form_keys(forms,c['source'])]
             events=[json.loads(r[0]) for r in db.execute('SELECT body FROM events ORDER BY id')]
         return {'format':'after-hours-game','schema':migrations.SCHEMA,'catalog':public,'save':result,'history':events}

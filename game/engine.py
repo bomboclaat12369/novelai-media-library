@@ -5,10 +5,10 @@ import math
 import random
 from .catalog import stable
 from . import management as m
-from . import flavor
+from . import evolution, flavor
 from . import meetings, stage_labels, bookings
 
-VERSION = '1.1.0-local'
+VERSION = '1.2.0-local'
 NIGHT_SPEEDS = (1, 2, 4, 8)
 PACKS = {'standard': {'name':'Standard','price':100,'count':5},
          'spotlight': {'name':'Girl spotlight','price':200,'count':5},
@@ -32,7 +32,7 @@ def available(catalog):
 
 
 def starter(catalog, owner):
-    pool = [c for c in available(catalog) if c['owner'] == owner and c.get('source') != 'evolution']
+    pool = [c for c in available(catalog) if c['owner'] == owner and c.get('source') not in evolution.SET_CARDS]
     if not pool:
         raise RuleError('This girl has no currently eligible cards.')
     return min(pool, key=lambda c: (c['rarity'], c['id']))['id']
@@ -342,6 +342,18 @@ def command(original,catalog,action,body=None,labels=None):
             raise RuleError('Equip an owned card of this girl.')
         state['people'][owner]['card']=ident
         record(state,'card_equipped',owner=owner,card=ident)
+    elif action=='duo_side':
+        ident = body.get('card')
+        side = body.get('side')
+        if ident not in state['owned'] or catalog['cards'][ident].get('source') != 'duo' or side not in evolution.DUO_SIDES:
+            raise RuleError('Choose the front or back of an owned Duo.')
+        if 'index' in body:
+            index = body['index']
+            pack = state['pending_pack']
+            if not pack or type(index) is not int or index not in pack.get('revealed', []) or pack['results'][index]['id'] != ident:
+                raise RuleError('Reveal this Duo in the current pack before flipping it.')
+            pack['results'][index]['duo_side'] = side
+        state['owned'][ident]['duo_side'] = side
     elif action=='price':
         prep_only(state)
         if body.get('pricing') not in PRICES: raise RuleError('Unknown price policy.')
