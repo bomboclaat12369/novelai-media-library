@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "id": "2026-11-12-curated-evolution-sets",
+  "id": "2026-11-12-curated-evolution-sets-stage",
   "components": [
     "standalone",
     "runtime",
     "workbench"
   ],
-  "publish": true,
+  "publish": false,
   "workbench_notes": "The bundled companion preserves curated After Hours evolution sequences during Set transfers and returns affected sequences to the candidate shortlist when a selected photo moves."
 }
