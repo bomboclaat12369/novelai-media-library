@@ -2570,7 +2570,7 @@
       "rankColoredOverall": true
     },
     "valentines": {
-      "name": "Valentine\u2019s",
+      "name": "Valentine’s",
       "automatic": false,
       "art": "assets/cards/editions/refined/valentines.webp",
       "layout": {
@@ -4619,7 +4619,7 @@
       "rankColoredOverall": true
     },
     "whore-stage": {
-      "name": "Whore \u00b7 Stage",
+      "name": "Whore · Stage",
       "automatic": false,
       "art": "assets/cards/editions/refined/whore-stage.webp",
       "layout": {
@@ -5815,7 +5815,7 @@
       "rankColoredOverall": true
     },
     "ass-chrome": {
-      "name": "Ass \u00b7 Dark Chrome",
+      "name": "Ass · Dark Chrome",
       "automatic": false,
       "style": {
         "--mat": "#141414",
@@ -6244,7 +6244,6 @@
     "EditionNumeralsV2": "assets/cards/editions/EditionNumeralsV2.woff"
   },
   "sha256": {
-    "assets/cards/duo/duo-eclipse.webp": "50bded8c648b90975edea47ffc2349e1bd147b1674125c35342bbf80c7457f7c",
     "assets/cards/editions/number-one.webp": "c1b406f50e5423bf5ccb7e42b5b85bf3d32812637ca21446c82d0928401d9478",
     "assets/cards/editions/former-one.webp": "d85fe419c19396642de7d7b4f03ddae41ef2ac64e493ba574d793fc5c1e0f2c5",
     "assets/cards/editions/cosplay.webp": "2475f7e7deafa7dec3ba6fec1131c15eca063eb7a1f099d79dc50ed527e21bad",
@@ -6289,7 +6288,9 @@
     "assets/cards/editions/refined/hidden-gem.webp": "2dc969b11ac5f42cbe81c30b77717cb1377ac7c0abc7ac0536d3599f48b4e41c",
     "assets/cards/editions/refined/whore-stage.webp": "87e125b93ee747ffa5213fdcf6c747f1050bb1b99174ea33c4d5cf2aa312f631",
     "assets/cards/editions/refined/christmas.webp": "9a483e8265c5ffce669d0204e9e6f5d980277338fd04dcfce385d882a6a34325",
-    "assets/cards/editions/refined/ass-chrome.webp": "8a33405801dca3dc06b764de5b0ff652071f8f13e9f940998ff3930a964feaf8"
+    "assets/cards/editions/refined/ass-chrome.webp": "8a33405801dca3dc06b764de5b0ff652071f8f13e9f940998ff3930a964feaf8",
+    "assets/cards/duo/kiss-transfer-front.webp": "4fb12566b89fac3f64efc1a9166da3a39248b616ae99f475ddca53c3092a7fc6",
+    "assets/cards/duo/kiss-transfer-back.webp": "2513ebc705a2f94f2cd6cdb242c56dc0f5c3bc1bcf60cbe9b2114c4b8f563340"
   },
   "rankGeometry": {
     "Bronze": {
@@ -6365,198 +6366,41 @@
   },
   "duo": {
     "name": "Duo",
-    "art": "assets/cards/duo/duo-eclipse.webp",
-    "sourceSize": [
-      1036,
-      1518
-    ],
-    "sourceOpening": [
-      82,
-      243,
-      947,
-      1325
-    ],
+    "art": "assets/cards/duo/kiss-transfer-front.webp",
     "style": {
       "--window-left": "10%",
       "--window-right": "90%",
       "--window-top": "13%",
       "--window-bottom": "87.66666666666667%",
-      "--metal-light": "#fff3d4",
-      "--metal-mid": "#d6b276",
-      "--metal-low": "#59452e",
-      "--mat": "#10141c"
-    },
-    "guides": {
-      "set": {
-        "outline": [
-          [
-            110.83,
-            106.73
-          ],
-          [
-            143.84,
-            79.44
-          ],
-          [
-            337.09,
-            79.44
-          ],
-          [
-            365.25,
-            106.73
-          ],
-          [
-            336.12,
-            131.6
-          ],
-          [
-            144.82,
-            131.6
-          ]
-        ],
-        "anchor": [
-          238.04,
-          105.93
-        ],
-        "fit": [
-          206.84,
-          44.94
-        ],
-        "padding": 3,
-        "maxFontSize": 54,
-        "overflowPercent": 0
-      },
-      "seal": {
-        "outline": [
-          [
-            767.29,
-            79.44
-          ],
-          [
-            806.13,
-            48.15
-          ],
-          [
-            864.4,
-            48.15
-          ],
-          [
-            907.13,
-            80.25
-          ],
-          [
-            907.13,
-            132.41
-          ],
-          [
-            867.31,
-            165.31
-          ],
-          [
-            808.08,
-            165.31
-          ],
-          [
-            767.29,
-            132.41
-          ]
-        ],
-        "anchor": [
-          837.21,
-          106.73
-        ],
-        "fit": [
-          114.59,
-          95.5
-        ],
-        "padding": 3,
-        "maxFontSize": 0,
-        "overflowPercent": 0
-      },
-      "name": {
-        "outline": [
-          [
-            149.67,
-            1360.05
-          ],
-          [
-            188.51,
-            1317.88
-          ],
-          [
-            865.37,
-            1317.88
-          ],
-          [
-            905.18,
-            1360.05
-          ],
-          [
-            865.37,
-            1395.52
-          ],
-          [
-            187.54,
-            1395.52
-          ]
-        ],
-        "anchor": [
-          526.46,
-          1357.18
-        ],
-        "fit": [
-          666.17,
-          60.39
-        ],
-        "padding": 3,
-        "maxFontSize": 72,
-        "overflowPercent": 0
-      },
-      "side": {
-        "outline": [
-          [
-            420.61,
-            1441.53
-          ],
-          [
-            441.97,
-            1419.48
-          ],
-          [
-            608.03,
-            1419.48
-          ],
-          [
-            629.39,
-            1441.53
-          ],
-          [
-            607.06,
-            1464.53
-          ],
-          [
-            441.97,
-            1464.53
-          ]
-        ],
-        "anchor": [
-          525.49,
-          1441.53
-        ],
-        "fit": [
-          151.49,
-          35.46
-        ],
-        "padding": 3,
-        "maxFontSize": 45,
-        "overflowPercent": 0
-      }
+      "--metal-light": "#f7e1d6",
+      "--metal-mid": "#ae4256",
+      "--metal-low": "#571624",
+      "--mat": "#24191b"
     },
     "legacyWindow": {
       "left": 0.05,
       "top": 0.038,
       "width": 0.9,
       "height": 0.84
+    },
+    "backArt": "assets/cards/duo/kiss-transfer-back.webp",
+    "labels": {
+      "set": {
+        "x": 218,
+        "y": 101,
+        "width": 230,
+        "height": 27,
+        "fontSize": 30,
+        "tracking": 4
+      },
+      "name": {
+        "x": 450,
+        "y": 1398,
+        "width": 600,
+        "height": 84,
+        "fontSize": 108,
+        "tracking": 1
+      }
     }
   }
 }

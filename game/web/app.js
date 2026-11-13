@@ -168,7 +168,7 @@ function inspect(id,number){
  if(c.source==='duo'){
   const side=duoSide(id),art=displayedArt(id,side);
   modal.innerHTML=`<div class="modal-head"><div><h2>${escapeHTML(c.name)}</h2><p class="note">${escapeHTML(person(c.owner).name)} · Duo · ${rarities[c.rarity]}</p></div><button data-action="close-modal" aria-label="Close card">✕</button></div>
-   <div class="evolution-view duo-view"><div class="approved-card" data-card-art="${escapeHTML(id)}" data-side="${side}"></div>
+   <div class="evolution-view duo-view"><button type="button" class="duo-photo" data-action="flip-duo" data-card="${escapeHTML(id)}" data-side="${side==='front'?'back':'front'}" aria-label="Flip to ${side==='front'?'back':'front'} photo"><span class="approved-card" data-card-art="${escapeHTML(id)}" data-side="${side}"></span></button>
    <div><h3>${side==='front'?'Front':'Back'}</h3><p class="note">Your album and equipped card show this side.</p>
    <div class="form-picker">${flipButton(id,side)}</div>
    ${art?.original_available?`<a href="/game/api/image/${encodeURIComponent(id)}?original=1&amp;side=${side}" target="_blank" rel="noopener">View original ↗</a>`:''}</div></div>`;
@@ -211,7 +211,7 @@ root.addEventListener('click',async e=>{
   if(inspecting&&modal.open)inspect(id);
   const view=inspecting||packSlot?modal:$('#app');
   const selector=`[data-action="flip-duo"][data-card="${CSS.escape(id)}"]`+(packSlot?`[data-index="${index}"]`:'');
-  const button=view.querySelector(selector);
+  const button=view.querySelector(inspecting?(b.classList.contains('duo-photo')?'.duo-view .duo-photo':'.duo-view .form-picker button'):selector);
   button?.closest('.card,.duo-view')?.querySelector('.approved-card')?.classList.add('duo-turn');
   button?.focus({preventScroll:true});
   return;
