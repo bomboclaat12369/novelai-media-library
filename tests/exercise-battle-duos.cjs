@@ -41,6 +41,7 @@ async function run() {
       assert.equal(digest,library.media.find(i=>i.id===mid).sha256);
       const metrics = await card.evaluate(async node=>{
         const art=node.querySelector('.naiEditionFrame');await art.decode();
+        await Promise.all(node.getAnimations().map(animation=>animation.finished));
         const photo=node.querySelector('.naiFramedSource'),box=photo.parentElement.getBoundingClientRect(),outer=node.getBoundingClientRect();
         return {frame:[art.naturalWidth,art.naturalHeight], ratio:outer.width/outer.height,
           aperture:box.width/box.height, left:(box.x-outer.x)/outer.width, top:(box.y-outer.y)/outer.height,
@@ -79,6 +80,16 @@ async function run() {
     await button(tile,'View full image').click();
     const expanded=page.getByRole('dialog',{name:'Expanded card'});
     await verifyFace(expanded,'back');
+    const photo=expanded.locator('.naiExpandedCard');
+    const info=button(expanded,'Info');
+    await photo.click();await verifyFace(expanded,'front');
+    await photo.press('Space');await verifyFace(expanded,'back');
+    await info.click();
+    assert.equal(await info.getAttribute('aria-pressed'),'true');
+    assert.equal(await photo.evaluate(node=>node.inert),true);
+    await info.press('Enter');
+    assert.equal(await info.getAttribute('aria-pressed'),'false');
+    await verifyFace(expanded,'back');
     await button(expanded,'Flip to front').click();await verifyFace(expanded,'front');
     await button(expanded,'Close image').click();
     await page.setViewportSize({width:390,height:844});
@@ -95,6 +106,11 @@ async function run() {
     const gallery=page.locator('.naiBattleGallery'), row=gallery.locator('[data-entry-id="'+duo.id+'"]');
     await button(row,'Flip to back').click();await row.locator('[data-duo-side="back"] .naiFramedSource').waitFor();
     await button(row,'View '+group.name).click();await verifyFace(expanded,'back');
+    await photo.click();await verifyFace(expanded,'front');
+    await button(expanded,'Close image').click();
+    await button(row,'Inspect').click();
+    assert.equal(await info.getAttribute('aria-pressed'),'true');
+    await info.click();await verifyFace(expanded,'back');
     await button(expanded,'Close image').click();
     assert.equal((await summary()).votes,before.votes);
     await button(page,'Back to battles').click();

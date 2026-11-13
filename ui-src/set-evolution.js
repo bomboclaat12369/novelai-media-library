@@ -60,7 +60,7 @@
     .naiDuoViewer .naiCollectionHeader{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:8px}
     .naiDuoSideLabel{min-width:0;color:#b6c3d4}
     .naiDuoPreview{flex:1;min-height:0;display:grid;place-items:center;container-type:size;perspective:1200px}
-    .naiDuoTurn{position:relative;width:min(100cqw,70cqh);aspect-ratio:7/10;transform-style:preserve-3d;transition:transform .36s ease-in-out}
+    .naiDuoTurn{position:relative;width:min(100cqw,70cqh);aspect-ratio:7/10;transform-style:preserve-3d;transition:transform .36s ease-in-out;cursor:pointer}
     .naiDuoTurn[data-side=back]{transform:rotateY(180deg)}
     .naiDuoFace{position:absolute;inset:0;backface-visibility:hidden}
     .naiDuoFace:nth-child(2){transform:rotateY(180deg)}
@@ -314,8 +314,18 @@
     label.setAttribute('aria-live', 'polite');
     const turn = make('div');
     turn.className = 'naiDuoTurn';
+    turn.setAttribute('role', 'button');
+    turn.tabIndex = 0;
     let side = 0;
-    const flip = button('', () => { side = 1 - side; display(); });
+    function turnOver() { side = 1 - side; display(); }
+    const flip = button('', turnOver);
+    turn.onclick = turnOver;
+    turn.onkeydown = event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        if (!event.repeat) turnOver();
+      }
+    };
     dialog.head.lastElementChild.before(label, flip);
     dialog.body.append(turn);
     const faces = ids.map((id, index) => {
@@ -330,6 +340,7 @@
       turn.dataset.side = sides[side].toLowerCase();
       faces.forEach((face, index) => face.setAttribute('aria-hidden', String(index !== side)));
       flip.textContent = 'Flip to ' + sides[1 - side].toLowerCase();
+      turn.setAttribute('aria-label', flip.textContent + ' photo');
     }
     display();
     flip.focus();

@@ -30,7 +30,9 @@ if config.get('edition_catalog'):
         return 'data:'+mime+';base64,'+base64.b64encode(Path(path).read_bytes()).decode('ascii')
     for edition in catalog['editions'].values():edition['art']=embedded(edition['art'])
     if 'duo' in catalog:
-        catalog['duo']['art'] = embedded(catalog['duo']['art'], 'image/webp')
+        for field in ('art', 'backArt'):
+            if field in catalog['duo']:
+                catalog['duo'][field] = embedded(catalog['duo'][field], 'image/webp')
     for kind in ('ranks','fonts'):
         catalog[kind]={key:embedded(path) for key,path in catalog[kind].items()}
     asset_code+='const naiCardEditionAssets=Object.freeze('+json.dumps(catalog,separators=(',',':'))+');\n'

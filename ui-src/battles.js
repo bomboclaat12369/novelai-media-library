@@ -199,11 +199,17 @@
       if(light)return;light=make('div','naiBattleLight');light.setAttribute('role','dialog');light.setAttribute('aria-label','Expanded card');const im=make('img'),stage=make('div','naiCardLightStage'),nav=make('div','naiBattleBrowse'),label=make('span');let collectionIndex=collection?collection.findIndex(e=>e.id===entry.id):0,historySerial=0,titleChanged=false;
       const fit=()=>{const card=stage.firstElementChild;if(!card)return;const ratio=root.naiCards.photoCardRatio,width=Math.min(stage.clientWidth,stage.clientHeight*ratio);card.style.width=width+'px';card.style.height=width/ratio+'px';},sizing=new ResizeObserver(fit);sizing.observe(stage);
       const flag=removalButton(()=>entry.images[index]);
-      const flipSide=button('',()=>{index=1-index;show();flipSide.focus()});
+      function turnPhoto(focusCard=false){
+        index=1-index;
+        show();
+        if(focusCard)stage.querySelector('.naiExpandedCard').focus({preventScroll:true});
+      }
+      const flipSide=button('',()=>turnPhoto());
+      const info=button('Info');
       const show=()=>{
-        const generation=++historySerial;index=(index+entry.images.length)%entry.images.length;hint.textContent=entry.duo_side?'Click card for details':'Click card to flip';flipSide.hidden=!entry.duo_side;editEdition.hidden=!!entry.duo_side;flipSide.textContent=flipLabel(index);label.textContent=(entry.position?'#'+entry.position+' · ':'')+entry.name+' · '+(index+1)+' / '+entry.images.length;
+        const generation=++historySerial;index=(index+entry.images.length)%entry.images.length;flipSide.hidden=!entry.duo_side;editEdition.hidden=!!entry.duo_side;flipSide.textContent=flipLabel(index);label.textContent=(entry.position?'#'+entry.position+' · ':'')+entry.name+' · '+(index+1)+' / '+entry.images.length;
         const showRank=view==='board'||showRating.checked,flipper=make('div','naiFlipCard'),front=root.naiCards.lightCard(duoFace(entry,index),rows,owner,im,showRank,entry.images[index]),back=root.naiCards.backShell(showRank?entry:{tier:'Unranked'},owner),body=make('div','naiCardBackBody');flipper.dataset.flipped=String(!!options.flipped);options.flipped=false;
-        front.tabIndex=0;front.setAttribute('role','button');front.setAttribute('aria-label',entry.duo_side?'Show card details':'Flip card to its back');back.tabIndex=-1;back.setAttribute('aria-label','Card back. Click to return to front');
+        front.tabIndex=0;front.setAttribute('role','button');front.setAttribute('aria-label',entry.duo_side?flipLabel(index)+' photo':'Show card details');back.tabIndex=-1;back.setAttribute('aria-label','Card info. Return to photo');
         body.append(root.naiCards.archiveEmblem(owner),make('div','naiCardBackKicker','COLLECTION ARCHIVE'),make('h2','',entry.name),make('p','',options.setOnly?'Set-only image · not eligible for individual battles':!showRank?'Ratings hidden for this matchup':entry.tier+' · '+Math.round(entry.rating)+' MMR · '+entry.rating_status));
         const stats=make('div','naiCardBackStats');for(const [key,title]of [['wins','Wins'],['losses','Losses'],['ties','Ties']]){const box=make('div');box.append(make('strong','',String(entry[key]||0)),make('small','',title));stats.append(box)}if(!options.setOnly&&showRank)body.append(stats,make('p','',`${entry.played||0} comparisons · ${entry.opponent_count||0} distinct opponents`));
         if(showRank&&entry.best_recorded)body.append(make('p','',`Best recorded: #${entry.best_recorded.position||'—'} · ${Math.round(entry.best_recorded.rating)} MMR`));
@@ -213,13 +219,34 @@
         const honors=make('div','naiBackHonors'),utilities=make('details','naiCardUtilities');utilities.append(make('summary','','Card customization'));for(const title of showRank?entry.titles||[]:[]){const block=make('div','naiBackTitle');block.append(make('strong','',title.name),make('p','',title.detail));honors.append(block)}body.append(honors);
         if(showRank&&!options.setOnly){const advanced=make('details','naiTitleCorrections');advanced.append(make('summary','','Advanced · Title corrections'),make('p','','Restore a missed title or suppress an incorrect one. This does not change MMR, battle history or set captain assignments.'));const selections={};for(const [id,name]of [['former_number_one','Former #1']]){const field=make('label','',name),select=make('select');select.setAttribute('aria-label',name+' correction');for(const [value,text]of [['auto','Automatic'],['grant','Grant title'],['suppress','Suppress title']]){const option=make('option','',text);option.value=value;select.append(option)}select.value=entry.title_overrides?.[id]||'auto';selections[id]=select;field.append(select);advanced.append(field);}const result=make('p'),save=button('Save title corrections',async()=>{save.disabled=true;result.textContent='Saving…';try{const current=await root.naiCards.load(owner),saved=await root.naiOutfitRequest('/api/collection/title-correction',{character_id:owner,revision:current.collection.revision,kind:contextKind,entry_id:entry.id,overrides:Object.fromEntries(Object.entries(selections).map(([id,select])=>[id,select.value]))});root.naiCards.cache.set(owner,saved);const board=await request('summary',{character_id:owner,kind:contextKind}),updated=board.entries.find(e=>e.id===entry.id);Object.assign(entry,updated);root.naiRankingsChanged?.(board);titleChanged=true;options.flipped=true;show();}catch(e){result.textContent=e.message;save.disabled=false;}});advanced.append(save,result);utilities.append(advanced);}
         if(showRank&&!options.setOnly&&!entry.duo_side)utilities.append(button('Edit edition traits',()=>root.naiCards.editEdition(entry,owner,contextKind,()=>{titleChanged=true;options.flipped=true;show();})));
-        if(utilities.children.length>1)body.append(utilities);body.append(make('p','naiCardFlipHint',entry.duo_side?'Click to return to the photo.':'Click the card to flip back.'));back.append(body);flipper.append(front,back);stage.replaceChildren(flipper);
-        const flip=()=>{const flipped=flipper.dataset.flipped!=='true';flipper.dataset.flipped=String(flipped);front.inert=flipped;back.inert=!flipped;front.tabIndex=flipped?-1:0;back.tabIndex=flipped?0:-1;if(flipped)history();};flipper.onclick=e=>{if(!e.target.closest('button,select,input,a,label,summary,details'))flip()};flipper.onkeydown=e=>{if((e.key==='Enter'||e.key===' ')&&!e.target.closest('button,select,input')){e.preventDefault();e.stopPropagation();flip()}};front.inert=flipper.dataset.flipped==='true';back.inert=!front.inert;if(front.inert){back.tabIndex=0;front.tabIndex=-1;history();}fit();picture(im,entry.images[index]);if(isVideo(entry.images[index]))front.querySelector('.naiCardPhotoWindow').append(make('span','naiMediaVideoMark','VIDEO'));if(contextKind==='sets'&&!options.setOnly&&!entry.captain_id){const warning=make('span','naiMissingCaptain');warning.append(make('b','','⚠'),make('small','','Choose a captain'));front.querySelector('.naiCardPhotoWindow').append(warning);}flag.refresh();
+        if(utilities.children.length>1)body.append(utilities);back.append(body);flipper.append(front,back);stage.replaceChildren(flipper);
+        function showInfo(open){
+          flipper.dataset.flipped=String(open);
+          info.setAttribute('aria-pressed',String(open));
+          front.inert=open;back.inert=!open;
+          front.tabIndex=open?-1:0;back.tabIndex=open?0:-1;
+          hint.textContent=open?'Click to return to the photo':entry.duo_side?'Click card to flip':'Click card for info';
+          if(open)history();
+        }
+        function activateFace(){
+          if(!front.inert&&entry.duo_side){turnPhoto(true);return;}
+          showInfo(!front.inert);
+          (front.inert?back:front).focus({preventScroll:true});
+        }
+        info.onclick=()=>showInfo(!front.inert);
+        const controls='button,select,input,a,label,summary,details,textarea';
+        flipper.onclick=e=>{if(!e.target.closest(controls))activateFace()};
+        flipper.onkeydown=e=>{
+          if((e.key==='Enter'||e.key===' ')&&!e.target.closest(controls)){
+            e.preventDefault();e.stopPropagation();if(!e.repeat)activateFace();
+          }
+        };
+        showInfo(flipper.dataset.flipped==='true');fit();picture(im,entry.images[index]);if(isVideo(entry.images[index]))front.querySelector('.naiCardPhotoWindow').append(make('span','naiMediaVideoMark','VIDEO'));if(contextKind==='sets'&&!options.setOnly&&!entry.captain_id){const warning=make('span','naiMissingCaptain');warning.append(make('b','','⚠'),make('small','','Choose a captain'));front.querySelector('.naiCardPhotoWindow').append(warning);}flag.refresh();
       };
       const adjacent=step=>{collectionIndex=(collectionIndex+step+collection.length)%collection.length;entry=collection[collectionIndex];index=0;show()};
       const done=(restore=true)=>{historySerial++;sizing.disconnect();light.remove();light=null;lightNavigate=null;lightClose=null;if(titleChanged&&kind.value===contextKind)paint();if(restore&&options.returnTo)options.returnTo();else (view==='board'?board:arena).focus({preventScroll:true})};lightClose=done;
       lightNavigate=step=>{if(collection&&contextKind==='images')adjacent(step);else{index+=step;show()}};
-      const header=make('div','naiLightHeader'),browseGroup=make('div','naiLightToolsGroup'),compareGroup=make('div','naiLightToolsGroup'),editGroup=make('div','naiLightToolsGroup');header.append(label);browseGroup.append(flipSide,button('←',()=>lightNavigate(-1)),button('→',()=>lightNavigate(1)));nav.append(browseGroup,compareGroup,editGroup);
+      const header=make('div','naiLightHeader'),browseGroup=make('div','naiLightToolsGroup'),compareGroup=make('div','naiLightToolsGroup'),editGroup=make('div','naiLightToolsGroup');header.append(label);browseGroup.append(info,flipSide,button('←',()=>lightNavigate(-1)),button('→',()=>lightNavigate(1)));nav.append(browseGroup,compareGroup,editGroup);
       const battleEntry=()=>options.battleEntry||entry;
       compareGroup.append(button('Focus comparisons',()=>{const target=battleEntry();done(false);startSpecific(contextKind,'place',{entry_id:target.id})}),button('Challenge…',()=>{const target=battleEntry();done(false);openChallenge(target,contextKind,options.setOnly?state.entries:rows,()=>openLight(entry,index,collection,contextKind,rows,options))}));
       const editEdition=button('Edit edition',()=>root.naiCards.editEdition(entry,owner,contextKind,()=>{titleChanged=true;show();}));

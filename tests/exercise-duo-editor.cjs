@@ -134,10 +134,12 @@ async function run() {
         const zoom = owner.collection.frames['image:' + b].zoom;
         assert((await original.evaluate(image => image.style.transform)).includes('scale(' + zoom + ')'));
       }
+      await action(preview, 'Flip to back photo').click();
+      await verifySide(a, 'back');
+      await action(preview, 'Flip to front photo').press('Enter');
+      await verifySide(b, 'front');
       await action(preview, 'Flip to back').click();
       await verifySide(a, 'back');
-      await action(preview, 'Flip to front').click();
-      await verifySide(b, 'front');
       await action(preview, 'Close').click();
       assert.equal(writes.length, i === 0 ? 0 : 2, 'choosing and previewing are read-only');
       if (i === 0) {

@@ -1,11 +1,8 @@
 {
   "schema": 1,
-  "id": "battles-duos-refine-50-2-9-34",
+  "id": "kiss-transfer-fullscreen-2-9-35",
   "components": [
-    "standalone",
-    "runtime",
-    "workbench"
+    "standalone"
   ],
-  "publish": true,
-  "workbench_notes": "Includes companion 2.7.83. Saved Duos now share one Image Battles ranking, start at the higher MMR of their two photos, and can be flipped during a matchup. Battles also adds Refine top 50."
+  "publish": true
 }
