@@ -22,11 +22,16 @@ async function run() {
     page.on('pageerror', e => errors.push(e.message));
     page.on('request', r => {if(r.url().endsWith('/api/battles/vote'))votes.push(r.postDataJSON());});
     const button = (scope,name) => scope.getByRole('button',{name,exact:true});
-    async function verifyFace(scope, side) {
+    let overall;
+    async function verifyFace(scope, side, ratingsVisible=true) {
       const card = scope.locator('.naiEdition[data-duo-side="'+side+'"]');
       const mid = duo.images[side==='front'?0:1];
       const im = card.locator('img.naiFramedSource');
       await card.waitFor({state:'visible'});
+      const letters=await card.locator('.naiEditionLetters').getAttribute('aria-label');
+      assert.equal(letters.endsWith(' · '+overall+' OVR'),ratingsVisible);
+      assert.equal(letters.includes(' OVR'),ratingsVisible);
+      assert.equal(await card.locator('.naiEditionRank').count(),0);
       await page.waitForFunction(({mid,side}) => {
         const root = document.getElementById('nai-media-host').shadowRoot;
         return [...root.querySelectorAll('.naiEdition[data-duo-side="'+side+'"] .naiFramedSource')]
@@ -66,6 +71,9 @@ async function run() {
     await page.goto(base+'/library/');
     await page.locator('#characterSelect').selectOption(owner);
     await page.locator('#naiBattlesBtn').click();
+    overall=await page.evaluate(({entry,rows})=>document.getElementById('nai-media-host').shadowRoot.naiCards.ovr(entry,rows),
+      {entry:duo,rows:before.entries});
+    assert(Number.isFinite(overall),'The ranked fixture must have a real shared overall');
     const arena=page.locator('.naiBattleArena'), tile=arena.locator('[data-entry-id="'+duo.id+'"]');
     const mode=page.getByLabel('Mode',{exact:true});
     assert.deepEqual(await mode.locator('option').allTextContents().then(v=>v.slice(-3)),['Refine top 10','Refine top 25','Refine top 50']);
@@ -99,8 +107,8 @@ async function run() {
     assert.equal(votes.length,0);
     assert.equal((await summary()).revision,before.revision);
     const showMMR=page.getByRole('checkbox',{name:'Show MMR',exact:true});
-    await showMMR.uncheck();await verifyFace(tile,'front');assert.equal(await tile.locator('.naiBattleMmr').count(),0);
-    await button(tile,'Flip to back').press('Enter');await verifyFace(tile,'back');
+    await showMMR.uncheck();await verifyFace(tile,'front',false);assert.equal(await tile.locator('.naiBattleMmr').count(),0);
+    await button(tile,'Flip to back').press('Enter');await verifyFace(tile,'back',false);
     await showMMR.check();await verifyFace(tile,'front');
     await button(page,'Leaderboard').click();
     const gallery=page.locator('.naiBattleGallery'), row=gallery.locator('[data-entry-id="'+duo.id+'"]');

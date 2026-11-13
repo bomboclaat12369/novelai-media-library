@@ -109,7 +109,7 @@ async function run() {
         const front = side === 'front';
         const person = initial.characters.find(row => row.id === group.character_id).name;
         assert.equal(await card.locator('.naiEditionLetters').getAttribute('aria-label'),
-          [person,group.name,'Duo',front?'Front':'Back'].join(' · '));
+          [person,group.name,'Duo',front?'Front':'Back','— OVR'].join(' · '));
         assert.equal(await original.getAttribute('alt'), initial.media.find(row => row.id === id).original_name);
         const rotation = await preview.locator('.naiDuoTurn').evaluate(async node => {
           await Promise.all(node.getAnimations().map(animation => animation.finished));
@@ -158,6 +158,20 @@ async function run() {
       assert.deepEqual(saved, {version:1, media_ids:[b,a]});
       await page.getByRole('button', {name:'Edit Duo', exact:true}).click();
       assert((await action(editor, 'Choose front photo').innerText()).includes(initial.media.find(row => row.id === b).original_name));
+      const boardRequest=page.waitForResponse(response=>response.url().endsWith('/api/battles/summary'));
+      await action(editor,'Preview flip').click();
+      const snapshot=await (await boardRequest).json();
+      const overall=await page.evaluate(({snapshot,id})=>{
+        const row=snapshot.entries.find(e=>e.duo_side&&e.sets.some(set=>set.id===id));
+        return document.getElementById('nai-media-host').shadowRoot.naiCards.ovr(row,snapshot.entries);
+      },{snapshot,id:group.id});
+      if(i===0)assert(Number.isFinite(overall));
+      else assert.equal(overall,null);
+      for(const side of ['front','back']){
+        const label=await preview.locator('[data-duo-side="'+side+'"] .naiEditionLetters').getAttribute('aria-label');
+        assert(label.endsWith(' · '+(overall??'—')+' OVR'));
+      }
+      await action(preview,'Close').click();
       await action(editor, 'Close').click();
     }
     await page.evaluate(() => document.getElementById('nai-media-host').shadowRoot.naiCards.openEditionGallery());

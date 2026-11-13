@@ -53,9 +53,10 @@ def seed(store, preview_dir=None):
     def battle(action, **body):
         return store.battles.request(action, {'character_id':owner, 'kind':'images', **body})
     state = battle('summary')
-    for left, right in itertools.combinations(ranked, 2):
-        state = battle('challenge', revision=state['revision'], entry_id=left, opponent_id=right)
-        state = battle('vote', revision=state['revision'], pair_id=state['session']['pair']['id'], outcome='left')
+    for outcome in ('left', 'tie'):
+        for left, right in itertools.combinations(ranked, 2):
+            state = battle('challenge', revision=state['revision'], entry_id=left, opponent_id=right)
+            state = battle('vote', revision=state['revision'], pair_id=state['session']['pair']['id'], outcome=outcome)
     if store._thumbnail_worker is not None:
         store._thumbnail_queue.put(None)
         store._thumbnail_worker.join()

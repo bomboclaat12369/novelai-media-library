@@ -96,10 +96,7 @@
     image.alt = item.original_name || 'Set photo';
     const id = item.id;
     const entry = {id, images:[id], count:1, name:image.alt, tier:'Unranked', titles:[]};
-    if (duo) {
-      entry.name = duo.setName;
-      entry.duo_side = duo.side;
-    }
+    if (duo) Object.assign(entry, {name:duo.setName, duo_side:duo.side, preview_ovr:duo.overall});
     tile.append(root.naiCards.lightCard(entry, [entry], owner.id, image, !!duo, id));
     root.naiCards.applyFrame(image, owner.collection?.frames?.['image:' + id]);
     try {
@@ -304,7 +301,7 @@
   };
 
   const sides = ['Front', 'Back'];
-  function previewDuo(ids, photos, owner, request, setName) {
+  function previewDuo(ids, photos, owner, request, setName, overall) {
     const urls = [];
     const dialog = root.naiCards.modal('Duo preview', () => urls.forEach(url => URL.revokeObjectURL(url)));
     dialog.wrap.classList.add('naiDuoViewer');
@@ -332,7 +329,7 @@
       const face = make('div');
       face.className = 'naiDuoFace';
       turn.append(face);
-      showOriginal(face, photos.get(id), owner, request, urls, {setName, side:sides[index].toLowerCase()});
+      showOriginal(face, photos.get(id), owner, request, urls, {setName, overall, side:sides[index].toLowerCase()});
       return face;
     });
     function display() {
@@ -377,7 +374,19 @@
     const actions = make('div');
     actions.className = 'naiEvolutionActions';
     const swap = button('Swap sides', () => { ids.reverse(); render(); });
-    const preview = button('Preview flip', () => previewDuo(ids, photos, owner, request, group.name));
+    const preview = button('Preview flip', async () => {
+      const pair = [...ids];
+      let overall = null;
+      if (expected?.media_ids?.length === 2 && pair.every(id => expected.media_ids.includes(id))) {
+        await dialog.run(async () => {
+          const board = await request({method:'POST', path:'/api/battles/summary',
+            headers:{'Content-Type':'application/json'}, data:JSON.stringify({character_id:owner.id, kind:'images'})});
+          const entry = board.entries.find(row => row.duo_side && pair.every(id => row.images.includes(id)));
+          if (entry) overall = root.naiCards.ovr(entry, board.entries);
+        });
+      }
+      if (dialog.wrap.isConnected) previewDuo(pair, photos, owner, request, group.name, overall);
+    });
     const save = button('Save Duo', () => persist({version:1, media_ids:[...ids]}));
     save.dataset.primary = 'true';
     actions.append(swap, preview, save);

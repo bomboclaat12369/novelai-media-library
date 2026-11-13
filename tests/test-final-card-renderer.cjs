@@ -53,9 +53,15 @@ vm.runInNewContext(fs.readFileSync('payload/userscript-2.9.15.ranks.txt','utf8')
   assert.equal(card.dataset.edition,'duo');assert.equal(card.dataset.duoSide,side);
   assert.equal(card.querySelector('.naiEditionFrame').src,asset);
   const letters=card.querySelector('.naiEditionLetters');
-  for(const name of ['NOCTURNE','ALEXANDRIA MONTGOMERY'])assert(letters.log.includes(name));
+  for(const name of ['95','OVR','ALEXANDRIA MONTGOMERY'])assert(letters.log.includes(name));
+  assert(!letters.log.includes('NOCTURNE'));
+  assert.equal(card.querySelector('.naiEditionRank'),null);
   assert(card.title.endsWith(side==='front'?'Duo · Front':'Duo · Back'));
-  assert(!letters.log.includes('OVR'));
+  assert(letters.attrs['aria-label'].endsWith('95 OVR'));
+  const pending=root.naiCards.lightCard({...entry,rating:null},[],'owner',null,true).querySelector('.naiEditionLetters');
+  assert(pending.log.includes('—')&&pending.log.includes('OVR'));
+  const blind=root.naiCards.lightCard(entry,[],'owner',null,false).querySelector('.naiEditionLetters');
+  assert(!blind.log.includes('OVR')&&!blind.log.includes('95')&&!blind.attrs['aria-label'].includes('OVR'));
   return bytes;
  }));
  assert(!faces[0].equals(faces[1]));
