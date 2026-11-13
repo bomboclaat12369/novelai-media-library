@@ -3,13 +3,34 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const {chromium} = require('playwright');
 
+async function checkEditorSize(editor, view) {
+  const workspace = await editor.locator('.naiDuoWorkspace').boundingBox();
+  assert(workspace.width >= view.width * .94 && workspace.height >= view.height * .85,
+    'the editor should fill the viewport');
+  const first = await editor.locator('.naiDuoSlotPhoto img').first().boundingBox();
+  const tile = await editor.locator('[data-photo-id] img').first().boundingBox();
+  const heading = await editor.locator('.naiDuoLibrary h3').boundingBox();
+  const search = await editor.getByLabel('Find a Set photo', {exact:true}).boundingBox();
+  assert(search.y - (heading.y + heading.height) < 24 && tile.y - (search.y + search.height) < 24,
+    'search and photos should sit immediately below the picker heading');
+  assert(first.width >= Math.min(275, view.width * .42) && first.height >= Math.min(255, view.height * .23),
+    'selected photo at ' + view.width + ' × ' + view.height + ' measured ' + first.width + ' × ' + first.height);
+  assert(tile.width >= Math.min(150, view.width * .40) && tile.height >= 150,
+    'the eligible photos should have large thumbnails');
+  for (const label of ['Preview flip','Save Duo']) {
+    const box = await editor.getByRole('button', {name:label, exact:true}).boundingBox();
+    assert(box.y >= 0 && box.y + box.height <= view.height + 1, label + ' should stay in view');
+  }
+  assert(await editor.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+}
+
 async function run() {
   const [, , base, channel, previewDir] = process.argv;
   const library = () => fetch(base + '/api/library').then(response => response.json());
   const initial = await library();
   const browser = await chromium.launch({channel, headless:true});
   try {
-    const page = await browser.newPage({viewport:{width:1120, height:840},deviceScaleFactor:previewDir ? 3 : 1});
+    const page = await browser.newPage({viewport:{width:1440, height:900},deviceScaleFactor:previewDir ? 3 : 1});
     page.setDefaultTimeout(10000);
     const writes = [];
     page.on('request', request => {
@@ -28,14 +49,38 @@ async function run() {
       const action = (inside, name) => inside.getByRole('button', {name, exact:true});
       const [a,b] = group.media_ids;
       const pick = id => editor.locator('[data-photo-id="' + id + '"]');
+      if (i === 1) {
+        await page.setViewportSize({width:390,height:720});
+        await page.emulateMedia({reducedMotion:'reduce'});
+      }
       assert(await action(editor, 'Save Duo').isDisabled());
+      if (group.media_ids.length > 24) {
+        const grid = editor.locator('.naiEvolutionPicker');
+        assert(await grid.evaluate(el => el.scrollHeight > el.clientHeight));
+        await action(editor, 'Next').click();
+        await pick(group.media_ids[24]).waitFor();
+        await action(editor, 'Previous').click();
+        await editor.getByLabel('Find a Set photo', {exact:true}).fill(initial.media.find(item => item.id === a).original_name);
+        assert.equal(await grid.locator('button').count(), 1);
+        await action(editor, 'Clear search').click();
+        assert(await grid.evaluate(node => {
+          const boxes = [...node.children].map(tile => tile.getBoundingClientRect());
+          const nextRow = boxes.find(box => box.top > boxes[0].top + 1);
+          return nextRow && nextRow.top >= boxes[0].bottom;
+        }), 'scrollable rows must not overlap the photos above them');
+      }
       await pick(a).click();
       assert(await pick(a).isDisabled(), 'the second side must use a different photo');
       await pick(b).click();
       await action(editor, 'Swap sides').click();
-      if (i === 1) {
-        await page.setViewportSize({width:390,height:720});
-        await page.emulateMedia({reducedMotion:'reduce'});
+      await checkEditorSize(editor, page.viewportSize());
+      if (previewDir) await editor.screenshot({scale:'css', path:path.join(previewDir, i === 0 ? 'Duo-editor.png' : 'Duo-editor-phone.png')});
+      for (const [slot, id] of [[0, b], [1, a]]) {
+        const src = await editor.locator('.naiDuoSlotPhoto img').nth(slot).evaluate(async image => {
+          await image.decode();
+          return new URL(image.src).pathname;
+        });
+        assert.equal(src, '/api/media/' + id + '/original');
       }
       await action(editor, 'Preview flip').click();
       const preview = page.getByRole('dialog', {name:'Duo preview', exact:true});
@@ -72,10 +117,16 @@ async function run() {
           return new DOMMatrixReadOnly(style === 'none' ? undefined : style).m11;
         });
         assert.equal(Math.round(rotation), side === 'front' ? 1 : -1);
-        const box = await face.boundingBox(), view = page.viewportSize();
-        assert(box.width > 150 && box.height > 200 && box.x >= 0 && box.x + box.width <= view.width + 1);
+        const box = await card.boundingBox(), view = page.viewportSize();
+        assert(box.width >= .90 * Math.min(view.width, (view.height - 44) * .7),
+          'the visible artwork should fill the space below its controls');
+        assert(box.x >= 0 && box.x + box.width <= view.width + 1 && box.y >= 0 && box.y + box.height <= view.height + 1);
         assert(Math.abs(box.width / box.height - .7) < .005);
+        assert(await preview.evaluate(node => node.scrollHeight <= node.clientHeight + 1 && node.scrollWidth <= node.clientWidth + 1));
         if (previewDir && i === 0) await card.screenshot({path:path.join(previewDir,'Duo-'+side+'.png')});
+        if (previewDir && side === 'front') await preview.screenshot({
+          scale:'css', path:path.join(previewDir, i === 0 ? 'Duo-preview.png' : 'Duo-preview-phone.png')
+        });
       }
       await verifySide(b, 'front');
       if (i === 0) {
@@ -88,7 +139,17 @@ async function run() {
       await action(preview, 'Flip to front').click();
       await verifySide(b, 'front');
       await action(preview, 'Close').click();
-      assert.equal(writes.length, i, 'choosing and previewing are read-only');
+      assert.equal(writes.length, i === 0 ? 0 : 2, 'choosing and previewing are read-only');
+      if (i === 0) {
+        // An independently updated Library page can still be connected to the previous companion.
+        await page.route('**/api/sets/' + group.id + '/duo', route => route.fulfill({
+          status:404, contentType:'application/json', body:JSON.stringify({error:'Not found'})
+        }), {times:1});
+        await action(editor, 'Save Duo').click();
+        await editor.getByRole('alert').filter({hasText:'companion 2.7.82 or later'}).waitFor();
+        assert.equal((await library()).sets.find(row => row.id === group.id).after_hours_duo, undefined);
+        assert(await action(editor, 'Save Duo').isEnabled());
+      }
       await action(editor, 'Save Duo').click();
       await editor.waitFor({state:'detached'});
       const saved = (await library()).sets.find(row => row.id === group.id).after_hours_duo;
@@ -103,7 +164,8 @@ async function run() {
       await image.decode();
       return image.naturalWidth;
     }),1050);
-    assert.equal(writes.length, 2);
+    assert.equal(writes.length, 3);
+    assert.deepEqual(writes[0], writes[1], 'retry must keep both original choices');
     assert.deepEqual(errors, []);
     console.log('Browser picked, swapped, flipped, saved and reopened two Duos at desktop and phone widths.');
   } finally {

@@ -22,7 +22,7 @@ def seed(store, preview_dir=None):
     category = store.add_category(owner, 'Studio')['id']
     ids = []
     ranked = []
-    for index in range(9):
+    for index in range(29):
         image = Image.new('RGB', (360, 440), (32 + index * 18, 48, 120))
         draw = ImageDraw.Draw(image)
         draw.ellipse((30, 55 + index * 5, 220, 255), fill=(90, 168, 192))
@@ -33,14 +33,14 @@ def seed(store, preview_dir=None):
             buf.write((preview_dir / f'studio-{side}.png').read_bytes())
         else:
             image.save(buf, 'PNG')
-        main = index not in (1, 3, 4)
+        main = index < 9 and index not in (1, 3, 4)
         media, _ = store.import_bytes(buf.getvalue(), f'Studio {index + 1}.png', owner,
                                       [category] if main else [], {'kind':'fixture'}, 'image/png')
         store.set_categories(media['id'], [category] if main else [], in_all=main)
         ids.append(media['id'])
         if main:
             ranked.append(media['id'])
-    group = store.create_set(owner, 'Nocturne' if preview_dir else 'Studio', ids[:3], ids[0],
+    group = store.create_set(owner, 'Nocturne' if preview_dir else 'Studio', ids[:3] + ids[5:], ids[0],
                              cover_source='manual', preserve_placement=True)
     store.create_set(owner, 'Set only', ids[3:5], preserve_placement=True)
     store.set_evolution(group['id'], {'expected':None, 'evolution':{'version':1, 'status':'ready', 'media_ids':ids[:3]}})

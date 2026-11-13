@@ -30,21 +30,55 @@
     .naiEvolutionPicker img{width:100%;height:75px;object-fit:contain}
     .naiEvolutionPreview .naiTradingCard{width:100%;aspect-ratio:3/4}
     .naiEvolution .naiEvolutionState{display:block;margin:4px 0;font-weight:600}
-    .naiDuoSides{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-    .naiDuoSides button{display:grid;grid-template-columns:minmax(40px,74px) minmax(0,1fr);grid-template-rows:auto auto;column-gap:10px;align-items:center;text-align:left;min-height:90px}
-    .naiDuoSides button[aria-pressed=true]{outline:2px solid #ae9ff1;outline-offset:-2px}
-    .naiDuoSides img{grid-row:1/3;width:100%;height:72px;object-fit:contain}
-    .naiDuoSides strong,.naiDuoSides small{grid-column:2;overflow-wrap:anywhere}
-    .naiDuoSides strong{align-self:end}.naiDuoSides small{align-self:start}
-    .naiDuoPreview{display:grid;justify-items:center;gap:12px;perspective:1200px}
-    .naiDuoTurn{position:relative;width:min(350px,80vw,46vh);aspect-ratio:7/10;transform-style:preserve-3d;transition:transform .36s ease-in-out}
+    .naiCollectionOverlay:is(.naiDuoEditor,.naiDuoViewer){padding:clamp(8px,1.25vmin,20px);font-size:clamp(15px,1vw,19px)}
+    :is(.naiDuoEditor,.naiDuoViewer) .naiCollectionInner{width:100%;height:100%;display:flex;flex-direction:column;gap:clamp(6px,1vmin,14px)}
+    :is(.naiDuoEditor,.naiDuoViewer) .naiCollectionHeader{flex:none;margin:0}
+    :is(.naiDuoEditor,.naiDuoViewer) .naiCollectionHeader h2{min-width:0;font-size:clamp(18px,2.5vmin,30px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    :is(.naiDuoEditor,.naiDuoViewer) .naiCollectionError:empty,.naiDuoLibrary .naiEvolutionActions:empty{display:none}
+    :is(.naiDuoEditor,.naiDuoViewer) button,.naiDuoEditor input{min-height:44px}
+    .naiDuoWorkspace{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:clamp(12px,1.6vw,32px)}
+    .naiDuoSelection,.naiDuoLibrary{min-width:0;min-height:0;display:flex;flex-direction:column;gap:clamp(6px,1vmin,14px)}
+    .naiDuoSides{flex:1;min-height:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:clamp(6px,1vw,18px)}
+    .naiDuoEditor .naiDuoSides button{display:grid;grid-template-rows:minmax(0,1fr) auto;min-width:0;min-height:0;padding:0;text-align:left;overflow:hidden;background:#101927}
+    .naiDuoSides button[aria-pressed=true]{border-color:#d9ba7a;box-shadow:inset 0 0 0 1px #d9ba7a}
+    .naiDuoSlotPhoto{display:grid;place-items:center;min-height:0;margin:3px;background:#0a101b}
+    .naiDuoSlotPhoto:empty::before{content:'+';color:#a9b7cb;font-size:clamp(26px,4vmin,46px);font-weight:300}
+    .naiDuoSlotPhoto img{display:block;width:100%;height:100%;min-height:0;object-fit:contain}
+    .naiDuoSlotCaption{display:grid;padding:6px clamp(8px,1vw,16px)}
+    .naiDuoSlotCaption strong{font-size:clamp(16px,1.35vw,23px)}
+    .naiDuoSlotCaption small,.naiDuoLibrary .naiEvolutionPicker span,.naiDuoSideLabel{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+    .naiDuoSlotCaption small{font:inherit;font-size:.9em;color:#b6c3d4}
+    .naiDuoWorkspace .naiEvolutionActions{flex:none;margin:0}
+    .naiDuoLibrary h3{font-size:1.1em;margin:0}
+    .naiDuoLibrary>.naiSearchField{flex:none!important}
+    .naiDuoEditor .naiDuoLibrary input{width:100%}
+    .naiDuoLibrary .naiEvolutionPicker{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;align-content:start;grid-auto-rows:max-content;
+      grid-template-columns:repeat(auto-fill,minmax(min(100%,clamp(174px,14vw,280px)),1fr));gap:clamp(6px,1vmin,14px);padding:3px}
+    .naiDuoLibrary .naiEvolutionPicker button{grid-template-rows:auto auto;padding:4px;gap:4px;align-self:start}
+    .naiDuoLibrary .naiEvolutionPicker img{display:block;width:100%;height:auto;aspect-ratio:4/5;background:#0a101b}
+    .naiDuoLibrary .naiEvolutionPicker span{font-size:.92em;padding:0 4px 3px}
+    .naiDuoViewer .naiCollectionHeader{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:8px}
+    .naiDuoSideLabel{min-width:0;color:#b6c3d4}
+    .naiDuoPreview{flex:1;min-height:0;display:grid;place-items:center;container-type:size;perspective:1200px}
+    .naiDuoTurn{position:relative;width:min(100cqw,70cqh);aspect-ratio:7/10;transform-style:preserve-3d;transition:transform .36s ease-in-out}
     .naiDuoTurn[data-side=back]{transform:rotateY(180deg)}
     .naiDuoFace{position:absolute;inset:0;backface-visibility:hidden}
     .naiDuoFace:nth-child(2){transform:rotateY(180deg)}
     .naiDuoFace .naiTradingCard{width:100%;height:100%;aspect-ratio:7/10}
     .naiDuoFace p{position:absolute;inset:38% 0 auto;text-align:center;background:#151a29}
     @media(prefers-reduced-motion:reduce){.naiDuoTurn{transition:none}}
-    @media(max-width:520px){.naiDuoSides button{display:flex;flex-direction:column;align-items:stretch}.naiDuoSides strong,.naiDuoSides small{align-self:auto}}
+    @media(orientation:portrait),(max-width:800px) and (min-height:500px){
+      .naiDuoWorkspace{display:flex;flex-direction:column;gap:10px}
+      .naiDuoSides{flex:none;height:clamp(148px,34dvh,350px)}
+      .naiDuoLibrary{flex:1}
+      .naiDuoLibrary .naiEvolutionPicker{grid-template-columns:repeat(auto-fill,minmax(min(42%,190px),1fr))}
+    }
+    @media(max-width:600px){
+      .naiDuoViewer .naiCollectionHeader{grid-template-columns:minmax(0,1fr) auto auto;gap:2px 6px}
+      .naiDuoSideLabel{grid-column:1/-1;grid-row:2;font-size:.9em}
+      .naiDuoEditor .naiCollectionHeader{flex-wrap:nowrap}
+      .naiDuoEditor .naiEvolutionActions button{padding:6px 9px}
+    }
   `;
   root.append(style);
 
@@ -273,15 +307,17 @@
   function previewDuo(ids, photos, owner, request, setName) {
     const urls = [];
     const dialog = root.naiCards.modal('Duo preview', () => urls.forEach(url => URL.revokeObjectURL(url)));
-    dialog.wrap.classList.add('naiEvolution');
+    dialog.wrap.classList.add('naiDuoViewer');
     dialog.body.className = 'naiDuoPreview';
     const label = make('strong');
+    label.className = 'naiDuoSideLabel';
     label.setAttribute('aria-live', 'polite');
     const turn = make('div');
     turn.className = 'naiDuoTurn';
     let side = 0;
     const flip = button('', () => { side = 1 - side; display(); });
-    dialog.body.append(label, turn, flip);
+    dialog.head.lastElementChild.before(label, flip);
+    dialog.body.append(turn);
     const faces = ids.map((id, index) => {
       const face = make('div');
       face.className = 'naiDuoFace';
@@ -304,7 +340,7 @@
     if (!owner || (group.kind || 'set') !== 'set' || root.naiViewerOnly) return;
     const expected = group.after_hours_duo ?? null;
     const dialog = root.naiCards.modal('Duo · ' + group.name);
-    dialog.wrap.classList.add('naiEvolution', 'naiDuoEditor');
+    dialog.wrap.classList.add('naiDuoEditor');
     if (expected !== null && expected.version !== 1) {
       dialog.error.textContent = 'Update the Library to edit this Duo format.';
       return;
@@ -314,17 +350,25 @@
     let side = 0;
     const slots = make('div');
     slots.className = 'naiDuoSides';
-    const slotButtons = sides.map((name, i) => {
+    const sideSlots = sides.map((name, i) => {
       const slot = button('', () => { side = i; render(); });
       slot.setAttribute('aria-label', 'Choose ' + name.toLowerCase() + ' photo');
+      const photo = make('span');
+      photo.className = 'naiDuoSlotPhoto';
+      const caption = make('span');
+      caption.className = 'naiDuoSlotCaption';
+      const filename = make('small');
+      caption.append(make('strong', name), filename);
+      slot.append(photo, caption);
       slots.append(slot);
-      return slot;
+      return {slot, photo, filename};
     });
     const actions = make('div');
     actions.className = 'naiEvolutionActions';
     const swap = button('Swap sides', () => { ids.reverse(); render(); });
     const preview = button('Preview flip', () => previewDuo(ids, photos, owner, request, group.name));
     const save = button('Save Duo', () => persist({version:1, media_ids:[...ids]}));
+    save.dataset.primary = 'true';
     actions.append(swap, preview, save);
     if (expected !== null) {
       actions.append(button('Remove Duo', () => {
@@ -338,16 +382,31 @@
       if (!photos.has(ids[1 - side])) side = 1 - side;
       dialog.error.textContent = '';
       render();
-      slotButtons[side].focus();
+      sideSlots[side].slot.focus({preventScroll:true});
     }, id => ids.includes(id));
-    dialog.body.append(slots, actions, heading, ...picker.nodes);
+    const selection = make('div');
+    selection.className = 'naiDuoSelection';
+    selection.append(slots, actions);
+    const choices = make('div');
+    choices.className = 'naiDuoLibrary';
+    choices.append(heading, ...picker.nodes);
+    dialog.body.className = 'naiDuoWorkspace';
+    dialog.body.append(selection, choices);
     if (group.in_purgatory) dialog.error.textContent = 'Restore this Set from Purgatory before saving its Duo.';
 
     async function persist(duo) {
       let saved;
       await dialog.run(async () => {
-        saved = await request({method:'POST', path:'/api/sets/' + encodeURIComponent(group.id) + '/duo',
-          headers:{'Content-Type':'application/json'}, data:JSON.stringify({expected, duo})});
+        try {
+          saved = await request({method:'POST', path:'/api/sets/' + encodeURIComponent(group.id) + '/duo',
+            headers:{'Content-Type':'application/json'}, data:JSON.stringify({expected, duo})});
+        } catch (error) {
+          // Older companions serve the updated editor but have no Duo endpoint.
+          if (error.message === 'Not found' || error.message === 'Request failed (404)') {
+            throw new Error('Duo saves need Media Library companion 2.7.82 or later. Update and restart the companion, then try again.');
+          }
+          throw error;
+        }
       });
       if (!saved) { render(); return; }
       dialog.close();
@@ -356,18 +415,20 @@
     }
 
     function render() {
-      slotButtons.forEach((slot, i) => {
+      sideSlots.forEach(({slot, photo, filename}, i) => {
         const item = photos.get(ids[i]);
         slot.setAttribute('aria-pressed', String(i === side));
-        slot.replaceChildren();
-        if (item) {
+        if (item && photo.dataset.selectedId !== item.id) {
           const image = make('img');
           image.alt = '';
-          slot.append(image);
-          root.naiLoadThumbnail(item.id, image);
+          const url = new URL('/api/media/' + encodeURIComponent(item.id) + '/original', location.href);
+          image.src = root.naiVersionMediaUrl(url);
+          photo.replaceChildren(image);
+          photo.dataset.selectedId = item.id;
         }
-        slot.append(make('strong', sides[i]), make('small', item ? item.original_name || 'Set photo'
-          : ids[i] ? 'Photo unavailable · choose a replacement' : 'Choose a photo'));
+        filename.textContent = item ? item.original_name || 'Set photo'
+          : ids[i] ? 'Photo unavailable · choose a replacement' : 'Choose a photo';
+        filename.title = filename.textContent;
       });
       const complete = ids[0] !== ids[1] && ids.every(id => photos.has(id));
       swap.disabled = !complete;

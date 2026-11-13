@@ -1,11 +1,8 @@
 {
   "schema": 1,
-  "id": "2026-11-12-duo-cards",
+  "id": "duo-layout-2-9-33",
   "components": [
-    "standalone",
-    "runtime",
-    "workbench"
+    "standalone"
   ],
-  "publish": true,
-  "workbench_notes": "The bundled companion preserves a Duo's chosen front and back when Workbench moves photos between Sets."
+  "publish": true
 }
