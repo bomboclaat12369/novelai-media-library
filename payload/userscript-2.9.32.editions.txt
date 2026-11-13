@@ -226,7 +226,8 @@ function drawDuoSeal(ctx,zone,front){
 }
 function draw(card,info,width){
  const {entry,rows,owner,edition}=info,layout=edition.layout,canvas=card.querySelector('.naiEditionLetters');if(!canvas)return;
- const pixels=Math.min(1575,Math.max(1,Math.ceil((width||420)*2)));canvas.width=pixels;canvas.height=Math.round(pixels*10/7);
+ const pixelRatio=card.dataset.duoSide?Math.max(2,globalThis.devicePixelRatio||1):2;
+ const pixels=Math.min(1575,Math.max(1,Math.ceil((width||420)*pixelRatio)));canvas.width=pixels;canvas.height=Math.round(pixels*10/7);
  const ctx=canvas.getContext('2d');ctx.setTransform(pixels/1050,0,0,canvas.height/1500,0,0);
  const colors=['--metal-light','--metal-mid','--metal-low'].map(p=>edition.style[p]);
  if(card.dataset.duoSide){
