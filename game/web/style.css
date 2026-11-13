@@ -10,6 +10,7 @@ dialog:has(.evolution-view){width:min(740px,94vw)}
 .duo-view>.duo-photo{width:100%;display:block;padding:0;border:0;border-radius:0;background:transparent;line-height:normal;cursor:pointer}
 .duo-photo>.approved-card{display:block;width:100%;aspect-ratio:7/10}
 .duo-photo:focus-visible{outline:2px solid var(--gold);outline-offset:3px}
+.duo-info summary{width:fit-content;cursor:pointer;color:var(--gold)}
 .form-picker{display:flex;flex-wrap:wrap;gap:7px;margin:14px 0}
 .form-picker button[aria-pressed=true]{border-color:var(--gold);color:var(--gold)}
 @media(max-width:540px){.evolution-view{grid-template-columns:1fr;gap:12px}.evolution-view>.approved-card{max-width:230px;margin:auto}}

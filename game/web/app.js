@@ -169,9 +169,10 @@ function inspect(id,number){
   const side=duoSide(id),art=displayedArt(id,side);
   modal.innerHTML=`<div class="modal-head"><div><h2>${escapeHTML(c.name)}</h2><p class="note">${escapeHTML(person(c.owner).name)} · Duo · ${rarities[c.rarity]}</p></div><button data-action="close-modal" aria-label="Close card">✕</button></div>
    <div class="evolution-view duo-view"><button type="button" class="duo-photo" data-action="flip-duo" data-card="${escapeHTML(id)}" data-side="${side==='front'?'back':'front'}" aria-label="Flip to ${side==='front'?'back':'front'} photo"><span class="approved-card" data-card-art="${escapeHTML(id)}" data-side="${side}"></span></button>
-   <div><h3>${side==='front'?'Front':'Back'}</h3><p class="note">Your album and equipped card show this side.</p>
+   <div><h3>${side==='front'?'Front':'Back'}</h3>
    <div class="form-picker">${flipButton(id,side)}</div>
-   ${art?.original_available?`<a href="/game/api/image/${encodeURIComponent(id)}?original=1&amp;side=${side}" target="_blank" rel="noopener">View original ↗</a>`:''}</div></div>`;
+   <details class="duo-info"><summary>Info</summary><p class="note">${escapeHTML(specialties[c.specialty])} · Mastery ${save.owned[id].mastery}/5 · Copies ${save.owned[id].copies}</p><p class="note">Your album and equipped card show this side.</p>
+   ${art?.original_available?`<a href="/game/api/image/${encodeURIComponent(id)}?original=1&amp;side=${side}" target="_blank" rel="noopener">View original ↗</a>`:''}</details></div></div>`;
   hydrateCards(modal);if(!modal.open)modal.showModal();return;
  }
  const line=evolutionOf(id);
@@ -203,12 +204,13 @@ root.addEventListener('click',async e=>{
  if(action==='flip-duo'){
   const {card:id,side,index}=b.dataset;
   const inspecting=!!b.closest('.duo-view');
+  const infoOpen=inspecting&&modal.querySelector('.duo-info').open;
   const packSlot=index!==undefined;
   const body={card:id,side};
   if(packSlot)body.index=Number(index);
   await act('duo_side',body);
   if(duoSide(id)!==side)return;
-  if(inspecting&&modal.open)inspect(id);
+  if(inspecting&&modal.open){inspect(id);modal.querySelector('.duo-info').open=infoOpen;}
   const view=inspecting||packSlot?modal:$('#app');
   const selector=`[data-action="flip-duo"][data-card="${CSS.escape(id)}"]`+(packSlot?`[data-index="${index}"]`:'');
   const button=view.querySelector(inspecting?(b.classList.contains('duo-photo')?'.duo-view .duo-photo':'.duo-view .form-picker button'):selector);
