@@ -1,8 +1,11 @@
 {
   "schema": 1,
-  "id": "duo-layout-2-9-33",
+  "id": "battles-duos-refine-50-2-9-34",
   "components": [
-    "standalone"
+    "standalone",
+    "runtime",
+    "workbench"
   ],
-  "publish": true
+  "publish": true,
+  "workbench_notes": "Includes companion 2.7.83. Saved Duos now share one Image Battles ranking, start at the higher MMR of their two photos, and can be flipped during a matchup. Battles also adds Refine top 50."
 }

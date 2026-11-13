@@ -22,6 +22,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import webbrowser
+from contextlib import closing
 from datetime import datetime, timezone
 from email.parser import BytesParser
 from email.policy import default as email_policy
@@ -663,12 +664,14 @@ class BattleRankings:
     """Personal rankings, atomic vote persistence and resumable per-character rounds."""
     MODEL = 'joint-history-v1'
     FAVORITE_START = 1360.
+    REFINE_MODES = ('refine10', 'refine25', 'refine50')
     STARTER_SIZE = 12
     STARTER_PLACED = 8
     def __init__(self, store):
         self.store = store
         self.path = store.root / 'battles.json'
         self.data = None
+        self._tracked_batch = None
         self.rng = random.SystemRandom()
 
     def _load(self):
@@ -689,7 +692,14 @@ class BattleRankings:
                 except Exception:
                     self.data = None
                     raise
+        self._flush_tracking(self.data)
         return self.data
+
+    def _flush_tracking(self, data):
+        batch = data.get('_tracking_batch')
+        if batch and batch != self._tracked_batch:
+            self.store.tracking.ingest(data['_tracking_pending'])
+            self._tracked_batch = batch
 
     def _save(self, data):
         temporary = self.path.with_suffix('.json.tmp')
@@ -712,6 +722,12 @@ class BattleRankings:
         finally:
             temporary.unlink(missing_ok=True)
         self.data = data
+        try:
+            self._flush_tracking(data)
+        except Exception as error:
+            # The battle already committed. Replay its outbox before the next board write.
+            self.store.recent_errors = (self.store.recent_errors + [
+                {'operation':'battle_tracking_replay', 'error':str(error), 'at':now_iso()}])[-20:]
 
     @staticmethod
     def _active_history(board):
@@ -758,7 +774,7 @@ class BattleRankings:
         changes = {}
         at = now_iso()
         for ident, entry in entries.items():
-            if ident in observed:
+            if ident in observed or entry.get('duo_side'):
                 continue
             score = self._score(board, ident)
             prior = priors.get(ident, {'rating':1200., 'rd':350.})
@@ -1049,11 +1065,36 @@ class BattleRankings:
                 for ident in group.get('media_ids',[]):memberships.setdefault(ident,[]).append(label)
                 captain=self._captain(owner,group,media)
                 if captain:captains.setdefault(captain,[]).append(label)
-            return {ident:{'id':ident, 'name':m.get('original_name',m.get('filename','Image')), 'images':[ident], 'count':1,
+            entries = {ident:{'id':ident, 'name':m.get('original_name',m.get('filename','Image')), 'images':[ident], 'count':1,
                            'favorite':bool(m.get('favorite')),
                            'categories':list(m.get('categories',[])), 'flagged_for_removal':bool(m.get('flagged_for_removal')),
                            'sets':memberships.get(ident,[]),'captain_sets':captains.get(ident,[])}
                     for ident,m in media.items() if self.store._in_main(m)}
+            for group in groups:
+                duo = group.get('after_hours_duo')
+                if (group.get('in_purgatory') or not isinstance(duo, dict)
+                        or type(duo.get('version')) is not int or duo['version'] != 1):
+                    continue
+                sides = duo.get('media_ids')
+                if (not isinstance(sides, list) or len(sides) != 2
+                        or any(not isinstance(mid, str) or not mid for mid in sides)
+                        or sides[0] == sides[1] or self.store._set_photo_problem(group, sides, media)):
+                    continue
+                # The same two originals keep one identity when their front and back swap.
+                ident = 'duo:' + uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(sorted(sides))).hex
+                if ident in entries:
+                    continue
+                for mid in sides:
+                    entries.pop(mid, None)
+                entries[ident] = {
+                    'id':ident, 'name':group.get('name', 'Set'), 'duo_side':'front',
+                    'images':list(sides), 'count':2, 'preview_id':sides[0],
+                    'favorite':any(media[mid].get('favorite') for mid in sides),
+                    'categories':list(dict.fromkeys(c for mid in sides for c in media[mid].get('categories', []))),
+                    'flagged_for_removal':False, 'sets':[{'id':group['id'], 'name':group.get('name', 'Set')}],
+                    'captain_sets':[label for mid in sides for label in captains.get(mid, [])],
+                }
+            return entries
         entries = {}
         for group in groups:
             if group.get('in_purgatory'):continue
@@ -1068,6 +1109,57 @@ class BattleRankings:
             entries[group['id']]['video_count']=len(entries[group['id']]['video_ids'])
             entries[group['id']]['image_count']=len(images)-entries[group['id']]['video_count']
         return entries
+
+    def _seed_duos(self, board, entries, owner):
+        """Freeze the stronger side once. Its original votes keep their original identities."""
+        events = []
+        for ident, entry in entries.items():
+            if not entry.get('duo_side') or ident in board['ratings']:
+                continue
+            priors = self._priors(board)
+            sides = entry['images']
+            scores = {mid:self._score(board, mid) for mid in sides}
+            source = max(sorted(sides), key=lambda mid:(scores[mid]['rating'], scores[mid]['played'], -scores[mid]['rd']))
+            seed = copy.deepcopy(scores[source])
+            board['ratings'][ident] = seed
+            priors[ident] = {k:seed[k] for k in ('rating', 'rd')}
+            at = now_iso()
+            origin = {
+                'type':'duo_seed', 'version':1, 'at':at, 'character_id':owner, 'entry_id':ident, 'set_id':entry['sets'][0]['id'],
+                'media_ids':list(sides), 'source_id':source,
+                'sources':{mid:{k:s[k] for k in ('rating','rd','played')} for mid,s in scores.items()},
+                'inherited':copy.deepcopy(seed),
+            }
+            board.setdefault('history', []).append(origin)
+            events.append(self.store._tracking_event('battle.duo_seed', ident, {
+                **origin, 'actor':'system', 'provenance':'derived', 'model':self.MODEL}))
+            board.setdefault('rating_paths', {})[ident] = [[board.get('path_clock', 0), at,
+                round(seed['rating'], 1), round(seed['rd'], 1), seed['played'], 'Duo formed']]
+        return events
+
+    def _refresh_duo_pair(self, board, entries, aliases):
+        """Replace obsolete opponents on refresh, never while accepting a vote."""
+        session = board.get('session') or {}
+        pair = session.get('pair')
+        if not pair:
+            return False
+        missing = [pair[k] for k in ('left','right') if pair[k] not in entries]
+        if not any(mid in aliases or mid.startswith('duo:') for mid in missing):
+            return False
+        if 'challenge_return' in session:
+            left, right = (aliases.get(pair[k], pair[k]) for k in ('left','right'))
+            if left != right and all(mid in entries and self._in_scope(entries[mid],session,True) for mid in (left,right)):
+                session['pair'] = {**pair, 'left':left, 'right':right, 'id':uuid.uuid4().hex}
+                return True
+            session = board['session'] = session['challenge_return']
+        target = session.get('target_id')
+        if target and target not in entries:
+            if target in aliases:
+                session['target_id'] = aliases[target]
+            else:
+                self._finish_focus(session)
+        session['pair'] = self._pair(board,entries) if not session['limit'] or session['done'] < session['limit'] else None
+        return True
 
     def _captain(self, owner, group, media):
         collection=self.store.character(owner).get('collection') or {}
@@ -1215,7 +1307,7 @@ class BattleRankings:
         rng = rng or self.rng
         session = board['session']
         pool = [e for e in entries.values() if self._in_scope(e,session,scheduling=True)]
-        refining = session['mode'] in ('refine10', 'refine25')
+        refining = session['mode'] in self.REFINE_MODES
         if refining:
             pool = sorted((e for e in pool if self._score(board,e['id'])['played']),
                           key=lambda e:(-self._score(board,e['id'])['rating'],e['id']))[:int(session['mode'][6:])]
@@ -1498,11 +1590,21 @@ class BattleRankings:
             board=copy.deepcopy(data['boards'].get(key,{'revision':uuid.uuid4().hex,'ratings':{},'recent':[],'undo':[],'votes':0,'session':None}))
             data['boards'][key]=board
             entries=self._entries(owner,kind)
+            seeded = self._seed_duos(board, entries, owner) if kind == 'images' else []
+            if seeded:
+                # Commit ranking and journal outbox together. Read-only views use the private board.
+                data['_tracking_batch'] = uuid.uuid4().hex
+                data['_tracking_pending'] = seeded
+            # A Library action may start from either original photo.
+            aliases = {mid:entry['id'] for entry in entries.values() if entry.get('duo_side') for mid in entry['images']}
+            if action in ('history', 'place', 'challenge') and aliases:
+                body = {**body, **{k:aliases.get(body[k], body[k]) for k in ('entry_id','opponent_id') if isinstance(body.get(k), str)}}
             if action=='cards':
                 data.setdefault('rating_model',self.MODEL)
+                refreshed = kind == 'images' and self._refresh_duo_pair(board, entries, aliases)
                 before=copy.deepcopy(board.get('cards'))
                 self._sync_cards(board,entries)
-                if board['cards']!=before:
+                if seeded or refreshed or board['cards']!=before:
                     board['revision']=uuid.uuid4().hex
                     self._save(data)
                 return self._view(board,entries,owner,kind)
@@ -1539,14 +1641,14 @@ class BattleRankings:
             elif action in ('start','place'):
                 target = str(body.get('entry_id','')) if action=='place' else None
                 if action=='place' and target not in entries:
-                    raise ValueError('This entry is not eligible for battles. Images must be in Main; Review, Purgatory and videos are excluded.')
+                    raise ValueError('Choose a Main image or an available saved Duo for Image Battles, or a current Set for Set Battles.')
                 mode = 'rank' if target else body.get('mode','rank')
                 previous = board.get('session') or {}
                 return_settings={k:previous.get(k,v) for k,v in {'mode':'rank','limit':0,'minimum':1 if kind=='images' else min(5,entries[target]['count']) if target else 5,'similar':False,'category':''}.items()}
                 if previous.get('target_id'):return_settings=copy.deepcopy(previous.get('return_settings',return_settings))
                 limit = 10 if target else body.get('limit',0)
                 minimum = min(5,entries[target]['count']) if target and kind=='sets' else body.get('minimum',5) if kind=='sets' else 1
-                if mode not in ('rank','placements','winner','refine10','refine25') or type(limit) is not int or limit not in (0,10,25,50):
+                if mode not in ('rank','placements','winner',*self.REFINE_MODES) or type(limit) is not int or limit not in (0,10,25,50):
                     raise ValueError('Choose a valid mode and round length.')
                 if type(minimum) is not int or not 1<=minimum<=10000:
                     raise ValueError('Minimum set size must be between 1 and 10,000 images.')
@@ -2014,14 +2116,14 @@ class TrackingJournal:
     def __init__(self, path, store=None):
         import sqlite3
         self.path = Path(path)
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             self.schema(db, store)
 
     def ingest(self, events):
         import sqlite3
         if not events:
             return
-        with sqlite3.connect(self.path, timeout=30) as db:
+        with closing(sqlite3.connect(self.path, timeout=30)) as db, db:
             for e in events:
                 self.event(db, e['kind'], e['entity'], e['payload'], e['id'], e['at'], e['store'])
                 if e['kind']=='source.appearance':
@@ -2046,7 +2148,7 @@ class TrackingJournal:
 
     def export(self):
         import sqlite3
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             return ('\n'.join(self.encode(e) for e in self.rows(db)) + '\n').encode()
 
     @staticmethod
@@ -2060,14 +2162,14 @@ class TrackingJournal:
     def coverage(self, records):
         import sqlite3
         if not records:return
-        with sqlite3.connect(self.path, timeout=30) as db:
+        with closing(sqlite3.connect(self.path, timeout=30)) as db, db:
             for record in records:
                 key = hashlib.sha256(self.encode([record.get('media_id'),record.get('sha256'),record.get('stamp'),record.get('recipes')]).encode()).hexdigest()
                 self.observe(db,'analysis.library',key,record)
 
     def diagnostics(self):
         import sqlite3
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             return {'schema': self.SCHEMA, 'instance':db.execute("SELECT value FROM tracking_meta WHERE key='instance'").fetchone()[0], 'events': db.execute('SELECT count(*) FROM tracking_events').fetchone()[0],
                     'bytes': self.path.stat().st_size}
 
@@ -2118,7 +2220,7 @@ class LibraryStore:
         ident = self.data.setdefault('_tracking_store', uuid.uuid4().hex)
         self.tracking = TrackingJournal(self.root / 'tracking.sqlite3', ident)
         self._tracking_flush()
-        with sqlite3.connect(self.tracking.path) as db:
+        with closing(sqlite3.connect(self.tracking.path)) as db, db:
             TrackingJournal.identity(db,'library.root',str(self.root.resolve()),ident)
             if not db.execute("SELECT 1 FROM tracking_meta WHERE key='library_backfill'").fetchone():
                 for table in ('media', 'rapid_queue', 'sets', 'characters'):

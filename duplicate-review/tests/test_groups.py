@@ -42,7 +42,7 @@ class GroupTests(unittest.TestCase):
         self.assertNotEqual(a['sha'],b['sha']);self.assertEqual(a['pixel'],b['pixel'])
         plan=self.engine.preview_exact(include_pixels=True)
         self.assertEqual(plan['count'],3) # two PNG copies and one other exact copy
-        self.assertTrue(all('/2025-08-03/' in r['keep'] for r in plan['moves']))
+        self.assertTrue(all('2025-08-03' in Path(r['keep']).parts for r in plan['moves']))
         selection=[{k:r[k] for k in ('target','keeper','proof')} for r in plan['moves']]
         self.engine.move_selection(selection,self.engine.revision);self.engine.thread.join(20)
         self.assertTrue((new/'newest.png').exists());self.assertTrue((old/'smaller.jpg').exists())

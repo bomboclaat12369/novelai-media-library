@@ -14,7 +14,7 @@ class BattleGalleryTests(unittest.TestCase):
     def test_likely_lookahead_is_bounded_deterministic_and_read_only(self):
         for i in range(12):self.import_image(i)
         state=self.call('start',limit=0)
-        for mode in ('rank','winner','refine10','refine25'):
+        for mode in ('rank','winner','refine10','refine25','refine50'):
             if mode!='rank':state=self.call('start',mode=mode,limit=0,revision=state['revision'])
             for outcome in ('left','right','tie','skip'):
                 persisted=self.store.battles.path.read_bytes()

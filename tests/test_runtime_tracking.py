@@ -1,5 +1,6 @@
 """Durable metadata history: failures, repeated imports, restores and provenance."""
 import copy,hashlib,json,os,sqlite3,tempfile,unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 import test_runtime_stability as fixtures
@@ -12,7 +13,7 @@ class TrackingTests(unittest.TestCase):
     post=fixtures.RuntimeStabilityTests.post
 
     def events(self,kind=None):
-        with sqlite3.connect(self.store.tracking.path) as db:
+        with closing(sqlite3.connect(self.store.tracking.path)) as db:
             rows=R['TrackingJournal'].rows(db)
         return [r for r in rows if kind is None or r['kind']==kind]
 
@@ -138,7 +139,7 @@ class TrackingTests(unittest.TestCase):
         code,result=self.post('/api/tracking/import',{'events':[event]})
         self.assertEqual(code,200);self.assertEqual(result['received'],1)
         self.assertTrue(any(r['id']=='legacy-source' for r in self.events()))
-        with sqlite3.connect(self.store.tracking.path) as db:
+        with closing(sqlite3.connect(self.store.tracking.path)) as db:
             self.assertTrue(db.execute("SELECT 1 FROM tracking_identities WHERE kind='folder' AND alias=?",('C:\\Archive',)).fetchone())
 
     def test_stable_library_identity_survives_moving_the_whole_library(self):
@@ -148,6 +149,6 @@ class TrackingTests(unittest.TestCase):
             moved=Path(elsewhere)/'moved';shutil.copytree(self.store.root,moved)
             reopened=R['LibraryStore'](moved)
             self.assertEqual(reopened.duplicate_catalog()['stable_library_id'],original)
-            with sqlite3.connect(reopened.tracking.path) as db:
+            with closing(sqlite3.connect(reopened.tracking.path)) as db:
                 roots=db.execute("SELECT alias FROM tracking_identities WHERE kind='library.root' AND identity=?",(original,)).fetchall()
             self.assertEqual({r[0] for r in roots},{str(self.store.root.resolve()),str(moved.resolve())})

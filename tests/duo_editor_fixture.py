@@ -61,15 +61,23 @@ def seed(store, preview_dir=None):
         store._thumbnail_worker.join()
 
 
-def exercise(directory, runtime_path, html_path, browser, preview_dir=None):
+def exercise(directory, runtime_path, html_path, browser, preview_dir=None, battles=False):
     directory.mkdir(parents=True, exist_ok=True)
     if any(directory.iterdir()):
         raise ValueError('Choose an empty directory for the Duo fixture.')
     runtime = runpy.run_path(str(runtime_path))
     store = runtime['LibraryStore'](directory)
     seed(store, preview_dir)
+    if battles:
+        for group in store.data['sets']:
+            store.set_duo(group['id'], {'expected':None, 'duo':{'version':1,'media_ids':group['media_ids'][:2][::-1]}})
+        group = store.data['sets'][0]
+        owner = group['character_id']
+        state = store.battles.request('cards', {'character_id':owner})
+        store.battles.request('challenge', {'character_id':owner, 'revision':state['revision'],
+            'entry_id':group['media_ids'][1], 'opponent_id':group['media_ids'][2]})
     before = copy.deepcopy(store.public_library())
-    battles = store.battles.path.read_bytes()
+    original_rankings = store.battles.path.read_bytes()
     def hashes():
         return [hashlib.sha256((directory / item['stored_rel']).read_bytes()).hexdigest() for item in store.data['media']]
     originals = hashes()
@@ -78,7 +86,8 @@ def exercise(directory, runtime_path, html_path, browser, preview_dir=None):
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     try:
-        subprocess.run(['node', str(ROOT / 'tests/exercise-duo-editor.cjs'),
+        script = 'exercise-battle-duos.cjs' if battles else 'exercise-duo-editor.cjs'
+        subprocess.run(['node', str(ROOT / 'tests' / script),
                         f'http://127.0.0.1:{server.server_port}', browser,
                         *([str(preview_dir)] if preview_dir else [])], check=True, cwd=ROOT)
     finally:
@@ -86,8 +95,12 @@ def exercise(directory, runtime_path, html_path, browser, preview_dir=None):
         server.server_close()
         worker.join()
     after = store.public_library()
+    if battles:
+        assert originals == hashes()
+        gc.collect()
+        return
     assert before['characters'] == after['characters'] and before['media'] == after['media']
-    assert originals == hashes() and store.battles.path.read_bytes() == battles
+    assert originals == hashes() and store.battles.path.read_bytes() == original_rankings
     for old, new in zip(before['sets'], after['sets']):
         expected = list(reversed(old['media_ids'][:2]))
         assert new['after_hours_duo'] == {'version':1, 'media_ids':expected}
@@ -104,10 +117,11 @@ if __name__ == '__main__':
     parser.add_argument('--runtime', type=Path, default=ROOT / 'runtime-src/companion-runtime.pyw')
     parser.add_argument('--html', type=Path, default=ROOT / 'payload' / f"standalone-{config['version']}.html")
     parser.add_argument('--browser', default='msedge', help='Installed Chromium browser channel')
+    parser.add_argument('--battles', action='store_true', help='Exercise saved Duos in Image Battles')
     parser.add_argument('--preview-dir', type=Path, help='Save front/back proof images beside studio-front.png and studio-back.png')
     args = parser.parse_args()
     if args.directory:
-        exercise(args.directory.resolve(), args.runtime.resolve(), args.html.resolve(), args.browser, args.preview_dir)
+        exercise(args.directory.resolve(), args.runtime.resolve(), args.html.resolve(), args.browser, args.preview_dir, args.battles)
     else:
         with tempfile.TemporaryDirectory(prefix='duo-editor-') as directory:
-            exercise(Path(directory), args.runtime.resolve(), args.html.resolve(), args.browser, args.preview_dir)
+            exercise(Path(directory), args.runtime.resolve(), args.html.resolve(), args.browser, args.preview_dir, args.battles)

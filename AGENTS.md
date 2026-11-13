@@ -1,9 +1,11 @@
 # Working on Media Library and Media Workbench
 
-- Standing user authorization (2026-11-10): requested updates should be tested
-  and published as part of the same task, without another push confirmation.
-  Honor an explicit "do not push" instruction. A feasibility question alone
-  still does not authorize making or publishing an update.
+- Walker’s standing instruction (2026-11-13) is to test, push, publish and
+  verify requested updates in the same task. Honor an explicit instruction
+  to hold publication. For new or revised card artwork, show the draft in
+  Media Library & Battles and wait for Walker to approve the final design.
+  A feature using already approved artwork follows the ordinary update rule.
+  Follow Walker’s directions about sending work to other chats.
 - For any publishing work, read `tools/PUBLISHING.md` first. Use the source
   release workflow or authenticated Git from disk. Never copy generated HTML,
   encoded artwork, ZIPs or Base64 release payloads into chat/tool arguments.
