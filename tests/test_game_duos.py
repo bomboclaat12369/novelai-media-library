@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import uuid
 
 from game import engine, migrations
 from game.catalog import public_catalog, read_library
@@ -24,6 +25,38 @@ class Duos(unittest.TestCase):
     def read(self):
         (self.root / 'library.json').write_text(json.dumps(self.data), encoding='utf-8')
         return read_library(self.root)
+
+    def test_overall_uses_one_live_battle_competitor_for_either_side(self):
+        self.group['after_hours_duo'] = self.pair
+        sides = self.pair['media_ids']
+        pair_id = 'duo:' + uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(sorted(sides))).hex
+        def score(rating):
+            return dict(rating=rating, played=8, rd=90, opponents={'x':1,'y':1,'z':1})
+        ratings = {sides[0]:score(1730), sides[1]:score(1400)}
+        for n in range(5):
+            ident = 'peer-' + str(n)
+            self.data['media'].append(dict(self.data['media'][0], id=ident, in_all=True))
+            ratings[ident] = score(1100 + 60*n)
+        battles = self.root / 'battles.json'
+        def save_board():
+            battles.write_text(json.dumps({'boards':{'a:images':{'ratings':ratings}}}))
+            return battles.read_bytes()
+        seed_board = save_board()
+        initial = self.read()
+        self.assertEqual(initial['cards'][self.key]['presentation']['rating'],1730)
+        self.assertEqual(battles.read_bytes(),seed_board)
+        ratings[pair_id] = score(1300)
+        live_board = save_board()
+        self.group['after_hours_duo']['media_ids'] = list(reversed(sides))
+        live = self.read()
+        self.assertEqual(live['cards'][self.key]['presentation']['rating'],1300)
+        self.assertEqual(sorted(r['rating'] for r in live['people']['a']['duo_rating_rows']),[1100,1160,1220,1280,1300,1340])
+        self.assertEqual(battles.read_bytes(),live_board)
+        self.assertNotIn('images',public_catalog(live)['cards'][self.key]['presentation'])
+        owned = {self.key:{'duo_side':'front'}}
+        self.assertEqual(merge_catalog(initial,live,owned)['cards'][self.key]['presentation']['rating'],1300)
+        self.group['after_hours_duo']['media_ids'] = ['a-photo-1','a-photo-2']
+        self.assertNotIn('presentation',merge_catalog(live,self.read(),owned)['cards'][self.key])
 
     def test_eligibility_and_frozen_career_rarity(self):
         prior = self.read()

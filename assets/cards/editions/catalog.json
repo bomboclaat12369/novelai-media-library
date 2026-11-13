@@ -6385,13 +6385,14 @@
     },
     "backArt": "assets/cards/duo/kiss-transfer-back.webp",
     "labels": {
-      "set": {
+      "overall": {
         "x": 218,
-        "y": 101,
-        "width": 230,
-        "height": 27,
-        "fontSize": 30,
-        "tracking": 4
+        "y": 88,
+        "width": 216,
+        "height": 75,
+        "fontSize": 92,
+        "labelSize": 32,
+        "colors": ["#321c21", "#211619", "#171012"]
       },
       "name": {
         "x": 450,

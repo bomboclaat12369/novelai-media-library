@@ -183,7 +183,8 @@
     const entry = isDuoSide
       ? {...entries.get(card.id), duo_side: form.side}
       : entries.get(mediaID) || entryFor({id: mediaID, name: form?.name || card.name}, false);
-    node = root.naiCards.lightCard(entry, rows.get(card.owner) || [], card.owner, photo, true, mediaID);
+    const ratingRows = isDuoSide ? catalog.people[card.owner]?.duo_rating_rows : rows.get(card.owner);
+    node = root.naiCards.lightCard(entry, ratingRows || [], card.owner, photo, true, mediaID);
     // Native artwork is 7:10; the approved aperture inside it is exactly 3:4.
     node.style.width = '100%';
     node.style.height = 'auto';

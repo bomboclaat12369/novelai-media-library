@@ -58,13 +58,15 @@ def read_library(root):
     battles = json.loads(battle_file.read_text(encoding='utf-8')) if battle_file.exists() else {'boards': {}}
     if not isinstance(data.get('media'), list) or not isinstance(data.get('characters'), list):
         raise ValueError('Select a media-library folder containing library.json.')
-    presentation=snapshot_rows(data,battles)
+    presentation, duo_presentation, duo_boards = snapshot_rows(data,battles)
     people = {str(p['id']): {'id': str(p['id']), 'name': p['name'], 'color': i % 8,
                             'collection': {'finish':p.get('collection',{}).get('finish','obsidian'),
                                            'frames':p.get('collection',{}).get('frames',{})}}
               for i, p in enumerate(data['characters'])}
     category_names = {str(p['id']): {str(c['id']): c.get('name', str(c['id']))
                       for c in p.get('categories', [])} for p in data['characters']}
+    for owner, rows in duo_boards.items():
+        people[owner]['duo_rating_rows'] = rows
     eligible = [m for m in data['media'] if m.get('character_id') in people
                 and m.get('media_type') != 'video' and m.get('in_all', True)
                 and not any(m.get(k) for k in ('in_review', 'in_purgatory', 'flagged_for_removal'))]
@@ -99,6 +101,8 @@ def read_library(root):
     media = {m['id']: m for m in data['media']}
     for card in evolution.ready_cards(data.get('sets', []), media, people, lambda m: media_paths(root, m),
                                       lambda ident: SPECIALTIES[stable(ident) % len(SPECIALTIES)], cards):
+        if card['id'] in duo_presentation:
+            card['presentation'] = duo_presentation[card['id']]
         cards[card['id']] = card
     owners = {c['owner'] for c in cards.values()}
     people = {p: v for p, v in people.items() if p in owners}

@@ -43,6 +43,8 @@ def merge_catalog(previous, current, owned):
             if ident in owned or not live:
                 verified = {f['key']: f for f in (live or {}).get('forms', [])}
                 card['forms'] = [verified.get(key, {'key': key}) for key in keys]
+                if card['source'] == 'duo' and (not live or set(keys) != set(verified)):
+                    card.pop('presentation', None)
                 if not all(f.get('original') for f in card['forms']):
                     card['available'] = False
         else:

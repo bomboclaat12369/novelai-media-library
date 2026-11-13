@@ -7,7 +7,7 @@ DUO_SIDES = ('front', 'back')
 SET_CARDS = ('evolution', 'duo')
 
 
-def selected_forms(group, kind, ident, media, paths_for):
+def selected_ids(group, kind, media):
     recipe = group.get('after_hours_' + kind)
     if not isinstance(recipe, dict) or type(recipe.get('version')) is not int or recipe['version'] != 1:
         return []
@@ -20,13 +20,19 @@ def selected_forms(group, kind, ident, media, paths_for):
     members = group.get('media_ids')
     if not isinstance(members, list) or len(set(ids)) != len(ids) or not all(i in members for i in ids):
         return []
-    forms = []
     for mid in ids:
         item = media.get(mid, {})
         if item.get('character_id') != group['character_id'] or item.get('media_type', 'image') != 'image':
             return []
         if any(item.get(flag) for flag in ('in_review', 'in_purgatory', 'flagged_for_removal')):
             return []
+    return ids
+
+
+def selected_forms(group, kind, ident, media, paths_for):
+    forms = []
+    for mid in selected_ids(group, kind, media):
+        item = media[mid]
         paths = paths_for(item)
         if kind == 'duo' and not paths['original']:
             return []
