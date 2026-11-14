@@ -42,6 +42,7 @@
     "payload/userscript-2.9.29.collection.txt",
     "payload/userscript-2.9.36.editions.txt",
     "payload/userscript-2.9.20.base-layout.txt",
+    "payload/userscript-2.9.37.encore.txt",
     "payload/userscript-2.9.17.card-debug.txt",
     "payload/userscript-2.9.17.battles.txt",
     "payload/userscript-2.9.12.profiles.txt",
@@ -65,6 +66,7 @@
   "base_catalog": "assets/cards/base/catalog.json",
   "minify_javascript": true,
   "module_sources": {
+    "payload/userscript-2.9.37.encore.txt": "ui-src/encore-card.js",
     "payload/userscript-2.9.23.video-workflow.txt": "ui-src/video-workflow.js",
     "payload/userscript-2.9.24.project-tools.txt": "ui-src/project-tools.js",
     "payload/userscript-2.9.24.missing-files.txt": "duplicate-review/missing-files.js",

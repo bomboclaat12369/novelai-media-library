@@ -29,7 +29,7 @@ PROJECT=WEB.parents[1]
 RESTART_EXIT_CODE=75
 HANDOFF_QUIET_SECONDS=3
 RENDERER={key:next(p for p in json.loads((PROJECT/'release-standalone.json').read_text())['parts'] if p.endswith('.'+suffix+'.txt'))
-          for key,suffix in [('ranks','ranks'),('collection','collection'),('editions','editions'),('base','base-layout')]}
+          for key,suffix in [('ranks','ranks'),('collection','collection'),('editions','editions'),('base','base-layout'),('encore','encore')]}
 
 
 def renderer_assets():

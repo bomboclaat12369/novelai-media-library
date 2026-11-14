@@ -6364,6 +6364,10 @@
       ]
     }
   },
+  "evolution": {
+    "regular": "assets/cards/evolution/encore-regular.webp",
+    "finale": "assets/cards/evolution/encore-finale.webp"
+  },
   "duo": {
     "name": "Duo",
     "art": "assets/cards/duo/kiss-transfer-front.webp",

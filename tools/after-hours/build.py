@@ -54,7 +54,7 @@ def contents(rev):
              "game/stage-data/catalog.json", "game/stage-data/stage-labels.json"}
     names.update(f"game/{name}.py" for name in GAME_MODULES)
     names.update(f"game/web/{name}" for name in WEB_FILES)
-    for suffix in ("ranks", "collection", "editions", "base-layout"):
+    for suffix in ("ranks", "collection", "editions", "base-layout", "encore"):
         part, = (p for p in config["parts"] if p.endswith(f".{suffix}.txt"))
         if not re.fullmatch(r"payload/userscript-[0-9.]+\.[a-z-]+\.txt", part):
             raise ValueError(f"Invalid renderer part {part!r}")

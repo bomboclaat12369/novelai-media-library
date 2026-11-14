@@ -105,9 +105,9 @@ function cardHTML(c,{controls=false,isNew=null,packIndex,packSide}={}){
 }
 function hydrateCards(parent=root){
  for(const slot of parent.querySelectorAll('[data-card-art]')){
-  const id=slot.dataset.cardArt,forms=evolutionOf(id)?.forms;
-  const form=slot.dataset.form?forms?.[Number(slot.dataset.form)-1]:displayedArt(id,slot.dataset.side);
-  AfterHoursCards.mount(slot,boot.catalog,card(id),{owned:!!save?.owned[id],form});
+  const id=slot.dataset.cardArt,line=evolutionOf(id);
+  const form=slot.dataset.form?line?.forms[Number(slot.dataset.form)-1]:displayedArt(id,slot.dataset.side);
+  AfterHoursCards.mount(slot,boot.catalog,card(id),{owned:!!save?.owned[id],form,total:line?.total});
  }
 }
 function setup(){

@@ -3,7 +3,7 @@
   'use strict';
   if (globalThis.AfterHoursCards) return;
 
-  const modules = ['ranks', 'collection', 'editions', 'base'];
+  const modules = ['ranks', 'collection', 'editions', 'base', 'encore'];
   const demoTiers = ['Bronze', 'Silver', 'Gold', 'Master', 'Grandmaster'];
   let root = null;
   let catalog = null;
@@ -103,7 +103,7 @@
       globalThis.naiCardBaseAssets = assets.base;
       globalThis.naiCardTitleAssets = assets.titles || {};
       for (const name of modules) await loadModule(name);
-      if (!root.naiCards?.lightCard || !root.naiCards.baseReady || !root.naiCards.frameTypography) {
+      if (!root.naiCards?.lightCard || !root.naiCards.evolutionCard || !root.naiCards.baseReady || !root.naiCards.frameTypography) {
         throw new Error('The approved card renderer did not initialize.');
       }
       update(catalog);
@@ -178,13 +178,17 @@
       photo.src = url;
     }
     const mediaID = form?.media_id || card.id;
-    // Duo identity and stats belong to the pair. The photo ID selects the side's saved crop.
-    const isDuoSide = owned && card.source === 'duo' && (form?.side === 'front' || form?.side === 'back');
-    const entry = isDuoSide
-      ? {...entries.get(card.id), duo_side: form.side}
-      : entries.get(mediaID) || entryFor({id: mediaID, name: form?.name || card.name}, false);
-    const ratingRows = isDuoSide ? catalog.people[card.owner]?.duo_rating_rows : rows.get(card.owner);
-    node = root.naiCards.lightCard(entry, ratingRows || [], card.owner, photo, true, mediaID);
+    if (owned && card.source === 'evolution' && form) {
+      node = root.naiCards.evolutionCard(photo, name, owner?.collection?.frames?.['image:' + mediaID], form.number, options.total);
+    } else {
+      // Duo identity and stats belong to the pair. The photo ID selects the side's saved crop.
+      const isDuoSide = owned && card.source === 'duo' && (form?.side === 'front' || form?.side === 'back');
+      const entry = isDuoSide
+        ? {...entries.get(card.id), duo_side: form.side}
+        : entries.get(mediaID) || entryFor({id: mediaID, name: form?.name || card.name}, false);
+      const ratingRows = isDuoSide ? owner?.duo_rating_rows : rows.get(card.owner);
+      node = root.naiCards.lightCard(entry, ratingRows || [], card.owner, photo, true, mediaID);
+    }
     // Native artwork is 7:10; the approved aperture inside it is exactly 3:4.
     node.style.width = '100%';
     node.style.height = 'auto';
