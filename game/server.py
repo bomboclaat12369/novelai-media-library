@@ -194,7 +194,7 @@ class Handler(BaseHTTPRequestHandler):
     def post_game(self):
         path=urllib.parse.urlparse(self.path).path
         if path.startswith('/game/'): path=path[5:]
-        if path not in ('/api/action','/api/refresh','/api/restore','/api/backup','/api/restart','/api/stage-labels'): return self.send(404,{'error':'Not found.'})
+        if path not in ('/api/action','/api/refresh','/api/restore','/api/new-career','/api/backup','/api/restart','/api/stage-labels'): return self.send(404,{'error':'Not found.'})
         origin=self.headers.get('Origin')
         if origin and origin not in {f'http://127.0.0.1:{self.server.server_port}',f'http://localhost:{self.server.server_port}'}:
             return self.send(403,{'error':'Origin not allowed.'})
@@ -230,13 +230,18 @@ class Handler(BaseHTTPRequestHandler):
                     finally:
                         threading.Thread(target=self.server.shutdown,daemon=True).start()
                     return
-                if path=='/api/restore':
-                    if self.server.store.read()['revision']!=request.get('revision'): raise Conflict('The game changed before restore. Refresh and try again.')
-                    restored=self.server.store.restore(request.get('export'),request.get('backup'))
+                if path in ('/api/restore','/api/new-career'):
+                    if self.server.store.read()['revision']!=request.get('revision'): raise Conflict('The game changed. Refresh and try again.')
+                    if path=='/api/new-career':
+                        cat=read_library(self.server.library_root) if self.server.library_root else demo_catalog()
+                        restored=self.server.store.new_career(cat)
+                    else:
+                        restored=self.server.store.restore(request.get('export'),request.get('backup'))
                     pointer=self.server.save_origin.with_suffix('.active.json')
                     temp=pointer.with_suffix('.tmp');temp.write_text(json.dumps({'file':restored.path.name}),encoding='utf-8');os.replace(temp,pointer)
                     self.server.store=restored;self.server.token=secrets.token_urlsafe(32)
-                    return self.send(200,{'restored':True,'token':self.server.token,**self.state_payload()})
+                    return self.send(200,{'restored':path=='/api/restore','new_career':path=='/api/new-career',
+                                          'token':self.server.token,**self.state_payload()})
                 if path=='/api/backup':
                     self.server.store.backup()
                     return self.send(200,{'backups':self.server.store.backups()})

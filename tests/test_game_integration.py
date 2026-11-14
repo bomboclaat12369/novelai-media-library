@@ -11,6 +11,7 @@ from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 from PIL import Image
 from game.library_snapshot import runtime
+from game.server import build_server
 
 
 class CompanionRoutes(unittest.TestCase):
@@ -78,6 +79,77 @@ class CompanionRoutes(unittest.TestCase):
         result=json.loads(body);self.assertIn('d',result['catalog']['people']);self.assertNotIn('d',result['state']['people'])
         self.assertEqual(self.req('GET','/game/api/image/a?original=1')[0],404)
         self.assertEqual(self.req('GET','/game/api/image/a')[0],200)
+
+    def test_new_career_preserves_paid_pack_and_reopens_fresh_catalog(self):
+        self.boot();self.action('new',{'selected':['a','b']},0,'choose-founders')
+        original=self.action('pack',{'pack':'standard'},1,'buy-one-pack')['state']
+        service=self.server.after_hours
+        previous=service.store;origin=service.save_origin
+        self.data['characters'].append({'id':'d','name':'D'})
+        self.data['media'].append({'id':'d','character_id':'d','in_all':True,'stored_rel':'photo.png'})
+        (self.lib/'library.json').write_text(json.dumps(self.data))
+        status,body=self.req('POST','/game/api/new-career',{'revision':2})
+        self.assertEqual(status,200,body)
+        self.assertTrue(json.loads(body)['new_career']);self.assertIsNone(json.loads(body)['state'])
+        self.assertEqual(previous.read()['state'],original)
+        self.assertNotEqual(service.store.path,previous.path)
+        # Both a queued action and a repeated reset from the old session fail.
+        self.assertEqual(self.req('POST','/game/api/new-career',{'revision':0})[0],403)
+        self.assertEqual(self.req('POST','/game/api/action',{'revision':0,'action':'new','body':{'selected':['a','b']},'id':'old-tab-new'})[0],403)
+        boot=self.boot();self.assertIn('d',boot['catalog']['people'])
+        self.assertEqual(boot['revision'],0)
+        service.store.backup()
+        self.assertEqual([b['id'] for b in service.store.backups()],['previous-career.sqlite3'])
+        # A restart before choosing founders must retain the new empty save and recovery.
+        reopened=build_server(0,save=origin,library=self.lib)
+        try:
+            self.assertEqual(reopened.store.path,service.store.path)
+            self.assertIsNone(reopened.store.read()['state'])
+            self.assertEqual(reopened.store.backups()[0]['label'],'Previous career')
+        finally:reopened.server_close()
+        fresh=self.action('new',{'selected':['b','d']},0,'new-founders')['state']
+        self.assertEqual((fresh['day'],fresh['cash'],fresh['totals']['packs']),(1,600,0))
+        self.assertEqual(set(fresh['people']),{'b','d'});self.assertEqual(len(fresh['owned']),2)
+        self.assertIsNone(fresh['pending_pack'])
+        reopened=build_server(0,save=origin,library=self.lib)
+        try:self.assertEqual(reopened.store.read()['state'],fresh)
+        finally:reopened.server_close()
+        status,body=self.req('POST','/game/api/restore',{'revision':1,'backup':'previous-career.sqlite3'})
+        self.assertEqual(status,200,body);self.assertEqual(json.loads(body)['state'],original)
+
+    def test_new_career_failure_keeps_active_career(self):
+        self.boot()
+        self.assertEqual(self.req('POST','/game/api/new-career',{'revision':0})[0],400)
+        self.action('new',{'selected':['a','b']},0,'choose-founders')
+        service=self.server.after_hours;previous=service.store
+        original=previous.read();token=service.token
+        self.assertEqual(self.req('POST','/game/api/new-career',{'revision':0})[0],409)
+        with patch.object(previous,'backup',side_effect=OSError('disk full')):
+            self.assertEqual(self.req('POST','/game/api/new-career',{'revision':1})[0],500)
+        with patch('game.server.os.replace',side_effect=OSError('pointer unavailable')):
+            self.assertEqual(self.req('POST','/game/api/new-career',{'revision':1})[0],500)
+        self.assertIs(service.store,previous);self.assertEqual(service.token,token)
+        self.assertEqual(previous.read(),original)
+        self.assertFalse(service.save_origin.with_suffix('.active.json').exists())
+        # The normal retry still creates exactly one active fresh career.
+        self.assertEqual(self.req('POST','/game/api/new-career',{'revision':1})[0],200)
+        self.assertIsNone(service.store.read()['state'])
+
+    def test_previous_career_survives_backup_rotation(self):
+        self.boot();self.action('new',{'selected':['a','b']},0,'choose-founders')
+        original=self.action('start',{},1,'open-old-night')['state']
+        self.assertEqual(self.req('POST','/game/api/new-career',{'revision':2})[0],200)
+        self.boot();self.action('new',{'selected':['b','c']},0,'new-founders')
+        for revision in range(1,15):
+            self.action('price',{'pricing':'standard'},revision,'price-change-'+str(revision))
+            self.server.after_hours.store.backup()
+        backups=self.server.after_hours.store.backups()
+        self.assertEqual(len(backups),13);self.assertEqual(backups[0]['id'],'previous-career.sqlite3')
+        status,body=self.req('POST','/game/api/restore',{'revision':15,'backup':'previous-career.sqlite3'})
+        self.assertEqual(status,200,body)
+        original['night']['paused']=True
+        self.assertEqual(json.loads(body)['state'],original)
+        self.assertEqual(self.before,{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in self.lib.iterdir()})
 
     def test_queued_old_session_cannot_mutate_a_switched_save(self):
         self.boot();self.action('new',{'selected':['a','b']},0,'choose-founders')

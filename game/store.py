@@ -5,6 +5,7 @@ from contextlib import contextmanager, closing
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import threading
 import time
@@ -198,19 +199,38 @@ class GameStore:
         return result
 
     def backup(self):
+        current=self.read()
+        if current['state'] is None:
+            return
         with self.lock,self.connect() as source,closing(sqlite3.connect(str(self.path)+'.backup')) as target:
             source.backup(target)
         folder=self.path.parent/(self.path.name+'.backups');folder.mkdir(exist_ok=True)
-        revision=self.read()['revision']
+        revision=current['revision']
         snapshot=folder/f'{revision:010d}.sqlite3'
         if not snapshot.exists():
             with self.lock,self.connect() as source,closing(sqlite3.connect(snapshot)) as target: source.backup(target)
-        snapshots=sorted(folder.glob('*.sqlite3'))
+        snapshots=sorted(folder.glob('[0-9]*.sqlite3'))
         for old in snapshots[:-12]: old.unlink()
 
     def backups(self):
         folder=self.path.parent/(self.path.name+'.backups')
-        return [{'id':p.name,'bytes':p.stat().st_size} for p in sorted(folder.glob('*.sqlite3'),reverse=True)]
+        return [{'id':p.name,'bytes':p.stat().st_size,
+                 'label':'Previous career' if p.name=='previous-career.sqlite3' else 'Revision '+(p.stem.lstrip('0') or '0')}
+                for p in sorted(folder.glob('*.sqlite3'),reverse=True)]
+
+    def new_career(self,catalog):
+        """Keep the old career recoverable while preparing a fresh founder selection."""
+        with self.lock:
+            if self.read()['state'] is None:
+                raise engine.RuleError('Choose two founders to begin this new career.')
+            if catalog['source_id']!=self.catalog['source_id']:
+                raise engine.RuleError('Choose the current library before starting a new career.')
+            self.backup()
+            path=self.path.parent/f'career-{uuid.uuid4().hex[:12]}.sqlite3'
+            fresh=GameStore(path,catalog)
+            folder=path.parent/(path.name+'.backups');folder.mkdir()
+            shutil.copyfile(str(self.path)+'.backup',folder/'previous-career.sqlite3')
+            return fresh
 
     def refresh_catalog(self,catalog,expected_revision):
         with self.lock,self.connect() as db:

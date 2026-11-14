@@ -157,6 +157,12 @@ reroll a paid pack. Settlement applies once. Conflicting windows refresh
 instead of charging twice. If another tab restores a different save, reload
 older tabs before using them again.
 
+**Saves & catalog → Start new career** begins again with two founders, $600
+and night 1. Confirming backs up the current career, opens a separate save and
+returns to founder selection. **Restore previous career** is available on that
+screen. The **Previous career** backup also stays in Saves & catalog after
+beginning the new club, alongside its twelve rotating backups.
+
 **Saves & catalog** provides JSON export/import, an explicit backup button,
 the twelve latest rotating backups and read-only catalog refresh. A latest
 `.sqlite3.backup` is also maintained. **Restore creates a new sibling save**
