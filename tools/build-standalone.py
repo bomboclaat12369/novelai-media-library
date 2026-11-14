@@ -29,6 +29,8 @@ if config.get('edition_catalog'):
         mime=mime or mimetypes.guess_type(path)[0] or 'application/octet-stream'
         return 'data:'+mime+';base64,'+base64.b64encode(Path(path).read_bytes()).decode('ascii')
     for edition in catalog['editions'].values():edition['art']=embedded(edition['art'])
+    if 'evolution' in catalog:
+        catalog['evolution'] = {key: embedded(path, 'image/webp') for key, path in catalog['evolution'].items()}
     if 'duo' in catalog:
         for field in ('art', 'backArt'):
             if field in catalog['duo']:

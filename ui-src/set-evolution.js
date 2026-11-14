@@ -16,7 +16,7 @@
   }
   const style = make('style');
   style.textContent = `
-    .naiEvolution .naiCollectionInner{width:min(960px,96vw);box-sizing:border-box}
+    .naiEvolution .naiCollectionInner{width:min(960px,100%);box-sizing:border-box}
     .naiEvolution h3{margin:16px 0 8px}
     .naiEvolutionForms,.naiEvolutionPreview{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(145px,100%),1fr));gap:12px}
     .naiEvolutionForms article,.naiEvolutionPreview article{min-width:0;display:flex;flex-direction:column;gap:6px}
@@ -28,7 +28,7 @@
     .naiEvolutionPicker{display:grid;grid-template-columns:repeat(auto-fill,minmax(95px,1fr));gap:7px}
     .naiEvolutionPicker button{display:grid;grid-template-rows:75px auto;gap:4px;align-items:center;text-align:center;min-width:0}
     .naiEvolutionPicker img{width:100%;height:75px;object-fit:contain}
-    .naiEvolutionPreview .naiTradingCard{width:100%;aspect-ratio:3/4}
+    .naiEvolutionPreview .naiTradingCard{width:100%;aspect-ratio:7/10}
     .naiEvolution .naiEvolutionState{display:block;margin:4px 0;font-weight:600}
     .naiCollectionOverlay:is(.naiDuoEditor,.naiDuoViewer){padding:clamp(8px,1.25vmin,20px);font-size:clamp(15px,1vw,19px)}
     :is(.naiDuoEditor,.naiDuoViewer) .naiCollectionInner{width:100%;height:100%;display:flex;flex-direction:column;gap:clamp(6px,1vmin,14px)}
@@ -90,15 +90,20 @@
     ).map(item => [item.id, item]));
   }
 
-  async function showOriginal(tile, item, owner, request, urls, duo) {
+  async function showOriginal(tile, item, owner, request, urls, face) {
     if (!item) { tile.append(make('p', 'Photo unavailable')); return; }
     const image = make('img');
     image.alt = item.original_name || 'Set photo';
     const id = item.id;
-    const entry = {id, images:[id], count:1, name:image.alt, tier:'Unranked', titles:[]};
-    if (duo) Object.assign(entry, {name:duo.setName, duo_side:duo.side, preview_ovr:duo.overall});
-    tile.append(root.naiCards.lightCard(entry, [entry], owner.id, image, !!duo, id));
-    root.naiCards.applyFrame(image, owner.collection?.frames?.['image:' + id]);
+    const frame = owner.collection?.frames?.['image:' + id];
+    if (face.side) {
+      const entry = {id, images:[id], count:1, name:face.setName, tier:'Unranked', titles:[],
+        duo_side:face.side, preview_ovr:face.overall};
+      tile.append(root.naiCards.lightCard(entry, [entry], owner.id, image, true, id));
+      root.naiCards.applyFrame(image, frame);
+    } else {
+      tile.append(root.naiCards.evolutionCard(image, owner.name, frame, face.current, face.total));
+    }
     try {
       const blob = await request({path:'/api/media/' + encodeURIComponent(id) + '/original', responseType:'blob'});
       if (!tile.isConnected) return;
@@ -120,7 +125,7 @@
       const tile = make('article');
       tile.append(make('strong', index === ids.length - 1 ? 'Final form' : 'Form ' + (index + 1)));
       dialog.body.append(tile);
-      showOriginal(tile, photos.get(id), owner, request, urls);
+      showOriginal(tile, photos.get(id), owner, request, urls, {current:index+1, total:ids.length});
     });
   }
 

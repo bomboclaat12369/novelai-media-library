@@ -82,6 +82,15 @@ async function run() {
       findButton(editor, 'Preview forms').click();
       const preview = await wait(() => root.querySelector('[aria-label="Evolution preview"]'));
       await wait(() => [...preview.querySelectorAll('.naiFramedSource')].filter(image => image.src.startsWith('blob:')).length === count);
+      const faces = [...preview.querySelectorAll('.naiEncoreCard')];
+      assert.equal(faces.length, count);
+      for (const [index, face] of faces.entries()) {
+        assert.equal(face.querySelector('[data-current]').getAttribute('data-form-number'), String(index + 1));
+        assert.match(face.title, new RegExp('Form ' + (index + 1) + ' of ' + count + '$'));
+        const stage = index + 1 === count ? 'finale' : 'regular';
+        assert(face.querySelector('.naiEncoreFrame').src.endsWith('/encore-' + stage + '.webp'));
+        assert(!face.querySelector('.naiCardRail,.naiEditionRank,.naiBaseRank'));
+      }
       assert.deepEqual(originals.slice(-count).sort(), [...expected].sort());
       assert.equal(writes.length, beforePreview);
       findButton(preview, 'Close').click();

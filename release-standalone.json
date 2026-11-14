@@ -22,7 +22,7 @@
     "payload/userscript-2.8.95.set-scan.txt",
     "payload/userscript-2.8.96.set-picker.txt",
     "payload/userscript-2.9.31.sets.txt",
-    "payload/userscript-2.9.36.set-cards.txt",
+    "payload/userscript-2.9.37.set-cards.txt",
     "payload/userscript-2.8.76.set-import.txt",
     "payload/userscript-2.8.82.crop-bridge.txt",
     "payload/userscript-2.8.4.drag-safety.txt",
@@ -43,6 +43,7 @@
     "payload/userscript-2.9.34.collection.txt",
     "payload/userscript-2.9.36.editions.txt",
     "payload/userscript-2.9.20.base-layout.txt",
+    "payload/userscript-2.9.37.encore.txt",
     "payload/userscript-2.9.29.card-debug.txt",
     "payload/userscript-2.9.35.battles.txt",
     "payload/userscript-2.9.12.profiles.txt",
@@ -55,8 +56,8 @@
     "payload/userscript-2.9.24.project-tools.txt",
     "payload/userscript-2.8.3.transport-end.txt"
   ],
-  "release_build": 190,
-  "version": "2.9.36",
+  "release_build": 191,
+  "version": "2.9.37",
   "title_artwork": {
     "team_captain": "assets/cards/captain-royal-ink.webp",
     "former_number_one": "assets/cards/former-number-one-legacy-gold.webp"
@@ -65,7 +66,8 @@
   "base_catalog": "assets/cards/base/catalog.json",
   "minify_javascript": true,
   "module_sources": {
-    "payload/userscript-2.9.36.set-cards.txt": "ui-src/set-evolution.js",
+    "payload/userscript-2.9.37.set-cards.txt": "ui-src/set-evolution.js",
+    "payload/userscript-2.9.37.encore.txt": "ui-src/encore-card.js",
     "payload/userscript-2.9.23.video-workflow.txt": "ui-src/video-workflow.js",
     "payload/userscript-2.9.24.project-tools.txt": "ui-src/project-tools.js",
     "payload/userscript-2.9.24.missing-files.txt": "duplicate-review/missing-files.js",
