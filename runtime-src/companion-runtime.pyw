@@ -5101,8 +5101,14 @@ class LibraryStore:
             return item
 
     @TrackingJournal.action("manual")
-    def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None, cover_source: Any = None, favorite: Any = None, categories: Any = None, remove_media_ids: Any = None, aliases: Any = None, colors: Any = None, notes: Any = None, in_purgatory: Any = None) -> dict[str, Any]:
+    def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None, cover_source: Any = None, favorite: Any = None, categories: Any = None, remove_media_ids: Any = None, aliases: Any = None, colors: Any = None, notes: Any = None, in_purgatory: Any = None, possible_duo: Any = None, possible_evolution: Any = None) -> dict[str, Any]:
         if in_purgatory is not None and not isinstance(in_purgatory,bool):raise ValueError("Invalid Set Purgatory status")
+        reminders = {}
+        for field, value in (("possible_duo", possible_duo), ("possible_evolution", possible_evolution)):
+            if value is not None:
+                if not isinstance(value, bool):
+                    raise ValueError("Set reminders must be true or false.")
+                reminders[field] = value
         details = self._set_details(aliases, colors, notes)
         with self.lock:
             item = self.set_item(set_id)
@@ -5161,6 +5167,7 @@ class LibraryStore:
             elif cover_media_id is not None and (cover != item.get("cover_media_id") or media_ids is None):
                 source = "manual"
             item.update(details)
+            item.update(reminders)
             if in_purgatory is not None:item["in_purgatory"] = in_purgatory
             item["categories"] = next_categories
             item["cover_source"] = source
@@ -6387,6 +6394,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     body.get("categories"),
                     body.get("remove_media_ids"),
                     body.get("aliases"), body.get("colors"), body.get("notes"), body.get("in_purgatory"),
+                    possible_duo=body.get("possible_duo"), possible_evolution=body.get("possible_evolution"),
                 )
                 self._send_json(200, item)
                 return

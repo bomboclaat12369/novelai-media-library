@@ -1,8 +1,11 @@
 {
   "schema": 1,
-  "id": "encore-evolution-2-9-37",
+  "id": "set-card-reminders-2026-11-14",
   "components": [
-    "standalone"
+    "standalone",
+    "runtime",
+    "workbench"
   ],
-  "publish": true
+  "publish": true,
+  "workbench_notes": "Includes the updated companion with Possible Duo and Possible Evolution reminders on library Sets."
 }

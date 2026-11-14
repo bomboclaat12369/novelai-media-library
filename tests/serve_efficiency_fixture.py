@@ -33,11 +33,11 @@ with tempfile.TemporaryDirectory() as directory:
         data=io.BytesIO();Image.new('RGB',size,['#4182be','#f29463','#7a97bf'][i]).save(data,'PNG')
         items.append(store.import_bytes(data.getvalue(),f'Image {i}.png',owner['id'],[],{},'image/png')[0])
     store.create_set(owner['id'],'Blue dress',[items[0]['id'],items[1]['id']],preserve_placement=True)
-    server=runtime['MediaHTTPServer'](('127.0.0.1',8765),store);server.RequestHandlerClass=Handler
+    server=runtime['MediaHTTPServer'](('127.0.0.1',int(os.environ.get('NAI_TEST_PORT','8765'))),store);server.RequestHandlerClass=Handler
     def download(url,*args):
         current_html=html.replace(f'data-nai-media-payload-version="{base_version}"'.encode(),f'data-nai-media-payload-version="{release["version"]}"'.encode())
         if 'manifest.json' in url:
             return json.dumps({'userscript_payload_version':release['version'],'userscript_sha256':hashlib.sha256(code).hexdigest(),'userscript_parts':[server.standalone.BASE+'payload/code'], 'standalone_url':server.standalone.BASE+'html','standalone_sha256':hashlib.sha256(current_html).hexdigest()}).encode()
         return code if url.endswith('code') else current_html
     server.standalone._download=download
-    print('READY',flush=True);server.serve_forever()
+    print('READY',server.server_port,flush=True);server.serve_forever()
