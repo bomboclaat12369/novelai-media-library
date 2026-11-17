@@ -245,3 +245,18 @@ expansion. Very large catalogs still load all metadata, although only 24 cards
 render per collection page. Benchmark timings do not measure browser FPS.
 Other operating systems and the installed production GUI were not visually
 tested. No main-game completion criterion remains blocked.
+# Illustrated venue local review — 17 November 2026
+
+- Built on released 1.2.4 in isolated `game-illustrated-venue-20261117`.
+- Integrated approved Patricia/Alice figures and simultaneous illustrated
+  room tiles into the real game. Retained the large earned-photo viewer,
+  added enlargement, and placed saved booking stages beside it.
+- Kept game rules, ownership, equipped cards and real saves unchanged.
+  Exact Library IDs select figure art; other identities have explicit
+  illustration placeholders while retaining their owned photo viewer.
+- Local-only preview: `OPEN-ILLUSTRATED-PREVIEW.bat` in the outer workspace.
+  Separate review career; no publication, video playback or unlock changes.
+- Passed 23 focused browser assertions, five existing browser-control cases,
+  seven HTTP/save integration tests and actual-Library original-photo checks.
+  Source Library/Battles hashes and both approved PNG hashes were unchanged.
+- Details, limits and launch behavior: `game/ILLUSTRATED-PREVIEW.md`.

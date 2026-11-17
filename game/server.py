@@ -162,7 +162,7 @@ class Handler(BaseHTTPRequestHandler):
             if root not in file.parents or not file.is_file(): return self.send(404,{'error':'Asset not found.'})
             return self.send(200,file.read_bytes(),mimetypes.guess_type(file.name)[0] or 'application/octet-stream')
         name='index.html' if path in ('/','/game','/game/') else path.lstrip('/')
-        if name not in ('index.html','app.js','style.css','favicon.svg','renderer.js','management-ui.js'): return self.send(404,{'error':'Not found.'})
+        if name not in ('index.html','app.js','style.css','favicon.svg','renderer.js','management-ui.js','venue.js','venue.css','illustrations/characters.json','illustrations/patricia-front.png','illustrations/alice-front.png'): return self.send(404,{'error':'Not found.'})
         file=WEB/name
         return self.send(200,file.read_bytes(),mimetypes.guess_type(file.name)[0] or 'text/plain')
 

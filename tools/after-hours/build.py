@@ -17,7 +17,7 @@ GAME_MODULES = (
     "__init__ booking_state bookings catalog companion engine evolution flavor library_snapshot "
     "management meeting_rules meetings migrations server stage_labels store"
 ).split()
-WEB_FILES = "index.html app.js management-ui.js renderer.js style.css favicon.svg".split()
+WEB_FILES = "index.html app.js management-ui.js renderer.js style.css favicon.svg venue.js venue.css illustrations/characters.json illustrations/patricia-front.png illustrations/alice-front.png".split()
 VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 
 

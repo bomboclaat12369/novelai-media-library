@@ -1,7 +1,7 @@
 'use strict';
 const root=document.getElementById('nai-media-host').attachShadow({mode:'open'});
 globalThis.gameRoot=root;document.documentElement.dataset.naiStandalone='1';
-root.innerHTML='<link rel="stylesheet" href="/game/style.css"><div id="app"></div><dialog id="modal"></dialog><div id="toast" role="status"></div>';
+root.innerHTML='<link rel="stylesheet" href="/game/style.css"><link rel="stylesheet" href="/game/venue.css"><div id="app"></div><dialog id="modal"></dialog><div id="toast" role="status"></div>';
 const $=s=>root.querySelector(s);
 const escapeHTML=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>'$'+Math.round(n).toLocaleString();
@@ -13,7 +13,7 @@ const announcedDecisions=new Set();
 const modal=$('#modal');
 root.addEventListener('error',e=>{
  const img=e.target;
- if(img.tagName==='IMG'&&(img.classList.contains('inspect-image')||img.parentElement?.classList.contains('activity-photo'))){
+ if(img.tagName==='IMG'&&(img.classList.contains('inspect-image')||img.classList.contains('booking-photo')||img.parentElement?.classList.contains('activity-photo'))){
   const message=document.createElement('div');message.className='empty';
   message.textContent='Original artwork unavailable. Your card and progress are preserved.';img.replaceWith(message);
  }
@@ -117,7 +117,7 @@ function setup(){
  return `<main class="setup">${brand()}<div class="eyebrow">A new beginning</div><h1>Every great club starts<br>with the right two.</h1><p class="muted">Choose your founding team. Open the doors, build your collection, and grow together.</p>${previous}${boot.catalog.demo?'<div class="source-banner">Demo mode · 576 sample cards and placeholder artwork. Your media library is not connected.</div>':'<div class="source-banner">Your eligible battle-card catalog · Source images and rankings are read-only.</div>'}<div class="staff-grid">${people.map(p=>{const c=Object.values(boot.catalog.cards).find(c=>c.owner===p.id&&c.available);return `<button class="starter c${p.color} ${selected.has(p.id)?'selected':''}" data-action="select-starter" data-owner="${escapeHTML(p.id)}" aria-pressed="${selected.has(p.id)}">${portrait(c)}<div class="info"><strong>${escapeHTML(p.name)}</strong><small>${selected.has(p.id)?'✓ Selected':'Choose as founder'}</small></div></button>`;}).join('')}</div><div class="setup-footer"><div><strong>${selected.size} of 2 selected</strong><p class="muted">One lounge, one private room, and $600 to begin.</p></div><button class="primary" data-action="new" ${selected.size!==2?'disabled':''}>Open your club →</button></div><p class="source-detail">After Hours · All earnings and cards are part of this local game. Two is your starting team; the club has room to grow.</p></main>`;
 }
 const navigation=[['club','◇','The club'],['team','♧','Your team'],['packs','▣','Pack shop'],['collection','▤','Collection'],['expansion','⌂','Expansion'],['reports','≋','Night reports']];
-function layout(content){return `<div class="layout"><aside class="sidebar">${brand()}<nav class="nav" aria-label="Game sections">${navigation.map(([id,icon,title])=>`<button data-screen="${id}" class="${screen===id?'active':''}"><span class="symbol">${icon}</span>${title}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="save-dot">● Saved on this computer</div><p>${boot.catalog.demo?'Demo catalog · placeholder art':'Library catalog · read-only'}</p><a href="/game/api/export">Export game save ↗</a><p>Club · Studio · Resort</p></div></aside><div class="main"><header class="topbar"><div class="breadcrumb">Your business <span class="muted">/</span> ${navigation.find(n=>n[0]===screen)[2]}</div><div class="topstats"><span class="pill">${save.phase==='night'?'NIGHT IN PROGRESS':'PREPARATION'} · DAY ${save.day}</span><span class="amount">${money(save.cash)}</span><small>${Object.keys(save.people).length} girls · ${Object.keys(save.owned).length} cards</small><button class="ghost small" data-action="restart-game" ${boot.restartable?'':'disabled'} title="${boot.restartable?'Load local updates and reconnect automatically':'Reopen the updated Windows launcher once to enable game restarts'}">Restart game</button></div></header><main class="content">${content}</main></div></div>`;}
+function layout(content){return `<div class="layout ${screen==='club'?'illustrated-layout':''}"><aside class="sidebar">${brand()}<nav class="nav" aria-label="Game sections">${navigation.map(([id,icon,title])=>`<button data-screen="${id}" class="${screen===id?'active':''}"><span class="symbol">${icon}</span>${title}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="save-dot">● Saved on this computer</div><p>${boot.catalog.demo?'Demo catalog · placeholder art':'Library catalog · read-only'}</p><a href="/game/api/export">Export game save ↗</a><p>Club · Studio · Resort</p></div></aside><div class="main"><header class="topbar"><div class="breadcrumb">Your business <span class="muted">/</span> ${navigation.find(n=>n[0]===screen)[2]}</div><div class="topstats"><span class="pill">${save.phase==='night'?'NIGHT IN PROGRESS':'PREPARATION'} · DAY ${save.day}</span><span class="amount">${money(save.cash)}</span><small>${Object.keys(save.people).length} girls · ${Object.keys(save.owned).length} cards</small><button class="ghost small" data-action="restart-game" ${boot.restartable?'':'disabled'} title="${boot.restartable?'Load local updates and reconnect automatically':'Reopen the updated Windows launcher once to enable game restarts'}">Restart game</button></div></header><main class="content">${content}</main></div></div>`;}
 function staffHTML(owner){
  const p=person(owner),w=save.people[owner],c=card(w.card);
  return `<article class="staff c${p.color}">${portrait(c,`<span class="badge">${rarities[c.rarity]}</span>`)}<div class="staffinfo"><h3>${escapeHTML(p.name)}</h3><small>Career level ${1+Math.floor(w.xp/100)} · ${escapeHTML(specialties[c.specialty])}</small><div class="energy"><span style="width:${w.energy}%"></span></div><small>Energy ${Math.round(w.energy)}/100</small><label for="role-${escapeHTML(owner)}">Tonight's assignment · ${escapeHTML(derived.assignments[owner])}</label><select id="role-${escapeHTML(owner)}" data-plan="${escapeHTML(owner)}" ${save.phase!=='prepare'||['studio','resort'].includes(derived.assignments[owner])?'disabled':''}>${[['room','Private room'],['lounge','Lounge'],['rest','Rest & recover'],['train','Training · $15']].map(([v,l])=>`<option value="${v}" ${w.role===v?'selected':''}>${l}</option>`).join('')}</select><label for="card-${escapeHTML(owner)}">Active card · ${ownedFor(owner).length} owned</label><select id="card-${escapeHTML(owner)}" data-equip="${escapeHTML(owner)}" ${save.phase!=='prepare'?'disabled':''}>${ownedFor(owner).map(id=>`<option value="${escapeHTML(id)}" ${id===w.card?'selected':''}>${escapeHTML(specialties[card(id).specialty])} · ${rarities[card(id).rarity]} · ${card(id).source==='duo'?'Duo · ':''}${escapeHTML(card(id).name)}</option>`).join('')}</select><button class="ghost small full" style="margin-top:10px" data-action="inspect" data-card="${escapeHTML(c.id)}">View active card</button></div></article>`;
@@ -154,8 +154,10 @@ function render(){
  if(hasOpenSelect()){renderDeferred=true;return;}
  renderDeferred=false;
  const focusId=root.activeElement?.id,selection=root.activeElement?.selectionStart;
+ const venueView=typeof captureVenuePresentation==='function'?captureVenuePresentation():null;
  $('#app').innerHTML=save?layout(({club,team,packs,collection,expansion,reports,studio,resort,saves})[screen]()):setup();
  if(focusId){const el=root.getElementById(focusId);if(el){el.focus({preventScroll:true});if(typeof el.setSelectionRange==='function'&&selection!==null)el.setSelectionRange(selection,selection);}}
+ if(typeof restoreVenuePresentation==='function')restoreVenuePresentation(venueView);
  hydrateCards();if(save?.pending_pack)showPack();
 }
 function showPack(){
@@ -248,7 +250,7 @@ function connectPlayerPresence(){
 window.addEventListener('pagehide',()=>{playerPresence?.close();playerPresence=null;});
 window.addEventListener('pageshow',connectPlayerPresence);
 async function start(){
- try{const response=await fetch('/game/api/bootstrap');if(!response.ok)throw new Error('The game server is unavailable.');boot=await response.json();connectPlayerPresence();await AfterHoursCards.init(boot.catalog);initManagementUI();accept(boot);if(!save)await loadBackups();render();announceDecision();interval=setInterval(pollGame,1000);}
+ try{const response=await fetch('/game/api/bootstrap');if(!response.ok)throw new Error('The game server is unavailable.');boot=await response.json();connectPlayerPresence();await AfterHoursCards.init(boot.catalog);initManagementUI();await initVenue();accept(boot);if(!save)await loadBackups();render();announceDecision();interval=setInterval(pollGame,1000);}
  catch(e){$('#app').innerHTML=`<main class="panel error-panel"><h1>Unable to open the club.</h1><p>${escapeHTML(e.message)}</p><p class="note">Your saved game has not been replaced. Restart the local game launcher and reload this page.</p></main>`;}
 }
 document.addEventListener('DOMContentLoaded',start,{once:true});

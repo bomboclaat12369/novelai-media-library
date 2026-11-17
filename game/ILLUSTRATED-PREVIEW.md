@@ -1,0 +1,77 @@
+# Illustrated venue — local review
+
+17 November 2026. Based on the released After Hours 1.2.4 source at
+`001f7de`, with the approved Character Game lounge as the visual reference.
+This branch is a local review, not a published update.
+
+Open `C:\Codex\After-Hours-Codex\OPEN-ILLUSTRATED-PREVIEW.bat`.
+It reads the existing Media Library and keeps a separate review career under
+`game/test-data/illustrated-preview/`. The first launch selects Patricia and
+Alice, buys the second private room using the usual $350 upgrade, and assigns
+both to private rooms. The lounge remains available; the review starts with
+$250. Later launches retain only that review career. The installed game and
+its saves are not selected or changed. Reopening the launcher reuses its own
+running preview when available.
+
+The Club view has approved full-body illustrations, simultaneous cutaway
+rooms, a large earned-photo viewer, an enlarge control, and the existing
+booking stage history with the current stage highlighted. Planning, saved
+plans and the venue log expand below. Club navigation moves across the top
+to preserve room for the artwork and media. Other sections retain their
+existing layout and card renderer. Booking timing, events, equipment,
+ownership and save rules are unchanged. Events are venue-wide regardless of
+the room being viewed. Clock repaints retain the decoded photo and the
+tracker's reading position.
+
+Only Patricia and Alice currently have approved figure art. Other identities
+keep their owned photo viewer and show a clearly labeled illustration
+placeholder. Mapping uses exact Library IDs, never display-name guesses.
+Appearance metadata is independent of career state, leaving room for later
+approved outfits. No wardrobe, walking animation or new character art is
+claimed.
+
+Videos remain deferred. The main media area is reserved for photo/video
+presentation, but this change does not add playback, unlock rules, rewards,
+or video cards. The existing original-photo endpoints continue enforcing
+owned cards and earned Evolution forms / Duo sides.
+
+## Artwork provenance
+
+Native PNG copies match the approved reference bytes:
+
+- Patricia: `50c0b49d449e30f1fa2e7be04d4c2122a6c2508aefe4d44a0e94e419c3f3eaab`
+- Alice: `bfe2134dddd3387f0dd09c6af7ce6073e7a2fb9533ed0b94956e09a36fdf67df`
+
+Authoritative approval inventory:
+`C:/Codex/Media-Suite/assets/cards/concepts/approved-character-finals-2026-11-16/presentation-record.json`.
+Room scenery is code-drawn presentation adapted from the reviewed lounge.
+Full images fit without cropping or distortion. Approximate working heights
+remain presentation hints, not anatomical measurements.
+
+## Focused verification
+
+`tests/test_game_illustrated_venue.cjs` exercises the actual browser against
+`tests/serve_illustrated_fixture.py` with disposable data. It checks real room
+capacity, two concurrent assignments, stable identity mapping, current/past
+stage display, selection without career mutation, original-photo enlargement,
+card inspection, decoded-image retention, ownership denial, missing art,
+empty rooms, desktop/narrow layout and a real clock-driven event resolving
+while another room is selected. Screenshots use labeled neutral photo fixtures.
+
+The existing browser-control checks and HTTP/ownership/save integration
+checks also run. No unrelated economy simulation or release build is needed.
+Results and screenshots are retained under `.release-output/illustrated-venue/`.
+The final run passed 23 focused browser assertions, five existing browser-control
+cases and seven existing HTTP/save integration tests. Desktop checks at
+1600 × 1000 and 1280 × 800 keep the character, room overview, media and tracker
+inside the window. Layout checks also cover 760- and 390-pixel widths.
+
+The actual read-only Library check found four eligible identities and 374
+cards. Both review founders' original photographs decoded (682 × 800 and
+2560 × 1920); an unowned photo still returned 403. The Library and Battles JSON
+hashes were identical before and after that check. The preview launcher
+successfully reused its own server without starting another career.
+
+The ordinary restricted test environment denied localhost connections; the
+same scoped checks run with approved local access. No reference art or
+requested feature was substituted because of that environment restriction.

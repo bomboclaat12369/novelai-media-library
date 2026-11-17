@@ -61,22 +61,9 @@ function importStageLabels(file){
  return actionQueue;
 }
 function opportunities(){const n=save.night;if(!n)return '';return n.decisions.filter(d=>!d.choice&&n.elapsed>=d.at&&n.elapsed<d.until).map(d=>{const rule=boot.decisions[d.kind],copy=d.copy||rule;return `<section class="panel decision" aria-label="Business opportunity"><div class="eyebrow">${esc(decisionContext(d))} · A business decision</div><h2>${esc(copy.title)}</h2><p>${esc(copy.detail)}</p><div class="actions">${rule.options.map(o=>`<button class="${o.id==='decline'?'ghost':'primary'}" data-action="decision" data-decision="${d.id}" data-choice="${o.id}">${esc(o.label)}</button>`).join('')}</div><small>Pick an option and operations carry on automatically.</small></section>`;}).join('');}
-function venue(){
- const nightSeconds=save.night ? (save.night.duration ?? 300) : boot.night_duration;
- const nightLength=nightSeconds ? `${nightSeconds/60}-minute night · ` : '';
- const slots=[];
- for(const [role,label,count] of [['room','Private room',save.facilities.rooms],['lounge','Lounge',save.facilities.lounge],['studio','Studio',save.departments.studio],['resort','Guest suite',save.departments.resort]]){
-  const staff=Object.keys(save.people).filter(p=>(save.night?.assignments[p]||derived.assignments[p])===role);
-  for(let i=0;i<count;i++)slots.push({id:role+'-'+i,label:label+' '+(i+1),owner:staff[i],role});
- }
- const chosen=slots.find(r=>r.id===selectedRoom)||slots[0];selectedRoom=chosen.id;
- const worker=save.people[chosen.owner],c=worker?card(worker.card):null,activity=save.night?.activities[chosen.owner];
- const variants=chosen.owner?ownedFor(chosen.owner).filter(id=>(displayedArt(id)?.image_available??card(id).available)&&card(id).image):[];
- const photo=variants.length?card(variants[(save.night?.wave||0)%variants.length]):c;
- return `<section class="venue"><div class="venue-map panel"><div class="sectionhead"><div><h2>Your venue</h2><p>Select a room to follow its evening.</p></div><span class="pill">${slots.length} positions</span></div><div class="room-grid">${slots.map(r=>`<button class="room-tile ${r.id===chosen.id?'selected':''} ${r.owner?'staffed':''}" data-action="select-room" data-room="${r.id}" aria-pressed="${r.id===chosen.id}"><span>${r.role==='studio'?'◈':r.role==='resort'?'☼':'◇'}</span><strong>${r.label}</strong><small>${r.owner?esc(person(r.owner).name):'Unstaffed'}</small><em>${r.owner?(save.night?esc(derived.meetings?.[r.owner]?.phase||'In operation'):'Prepared'):'No bookings'}</em></button>`).join('')}</div><p class="venue-key">● Staffed · ○ Available · ${nightLength}Rooms keep their own booking times</p></div><article class="activity-panel"><div class="activity-photo">${photo?.image&&(displayedArt(photo.id)?.image_available??photo.available)&&save.owned[photo.id]?`<img src="${esc('/game'+photo.image+'?original=1')}" alt="${esc(person(photo.owner).name)} · owned photograph">`:`<div class="activity-placeholder"><span>${worker?esc(person(chosen.owner).name[0]):'◇'}</span><p>${worker?(boot.catalog.demo?'Demo portrait':'Artwork unavailable'):'Ready for the next booking'}</p></div>`}</div><div class="activity-caption"><div class="eyebrow">${chosen.label}</div><h2>${worker?esc(person(chosen.owner).name):'An open possibility'}</h2>${meetingCaption(derived.meetings?.[chosen.owner],activity,worker)}${worker?`<small>Energy ${Math.round(worker.energy)} · Equipped: ${esc(specialties[c.specialty])}</small><button class="ghost small" data-action="inspect" data-card="${esc(c.id)}">Inspect equipped card</button>`:''}</div></article></section>`;
-}
+function venue(){return illustratedVenue();}
 function savedPlans(){return `<section class="panel plan-panel"><h3>Keep a useful plan</h3><div class="form-grid"><label>Plan name<input id="plan-name" maxlength="40" placeholder="e.g. Weekend rotation"></label><button data-action="save-plan" ${dis(save.phase!=='prepare')}>Save current plan</button><label>Retained plans<select id="plan-choice"><option value="">Choose a plan</option>${Object.keys(save.saved_plans).map(n=>`<option>${esc(n)}</option>`).join('')}</select></label><button data-action="load-plan" ${dis(save.phase!=='prepare')}>Load plan</button><button data-action="delete-plan" ${dis(save.phase!=='prepare')}>Remove plan</button></div><small>Retains pricing, assignments, equipment and training. Reservations always take priority. Card changes never restore energy.</small></section>`;}
-function club(){return legacyClub().replace('<div class="two-col">',opportunities()+venue()+savedPlans()+'<div class="two-col">');}
+function club(){return illustratedClub();}
 function development(){return `<section class="panel"><h2>Career development</h2><div class="development-grid">${Object.entries(save.people).map(([p,w])=>`<div><h3>${esc(person(p).name)}</h3><p class="note">Club ${w.skills.club} · Studio ${w.skills.studio} · Resort ${w.skills.resort} skill XP</p><label>Starting game strength<select data-profile="${esc(p)}" ${dis(save.phase!=='prepare')}>${Object.entries(boot.profiles).map(([k,v])=>`<option value="${k}" ${w.profile===k?'selected':''}>${v.name} · +4% ${v.focus}</option>`).join('')}</select></label><label>Training focus<select data-training="${esc(p)}" ${dis(save.phase!=='prepare')}>${['club','studio','resort'].map(k=>`<option ${w.training===k?'selected':''}>${k}</option>`).join('')}</select></label></div>`).join('')}</div><p class="note">These configurable traits are game rules, not claims about the people in your photographs. Changing a focus preserves earned progress.</p></section>`;}
 function studio(){return departmentUI('studio');}function resort(){return departmentUI('resort');}
 function departmentUI(dept){
@@ -140,6 +127,7 @@ async function managementClick(b,a){
   modal.showModal();return true;
  }
  if(a==='confirm-new-career'){b.disabled=true;await managementRequest('new-career');b.disabled=false;return true;}
+ if(a==='enlarge-booking-media'){enlargeBookingMedia();return true;}
  if(a==='select-room'){selectedRoom=b.dataset.room;render();return true;}
  if(a==='voucher'){await act('pack',{pack:'standard',voucher:true});return true;}
  if(a==='save-plan'){await act('save_plan',{name:$('#plan-name').value});return true;}
