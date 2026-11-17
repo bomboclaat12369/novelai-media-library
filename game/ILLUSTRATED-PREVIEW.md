@@ -37,6 +37,11 @@ Appearance metadata is independent of career state, leaving room for later
 approved outfits. No wardrobe, walking animation or new character art is
 claimed.
 
+Future feature requested by Walker on 17 November 2026: character outfits
+should be unlockable through gameplay. Retain this as deferred work. The
+outfits, unlock requirements, costs, selection interface and any gameplay
+effects remain undecided; no wardrobe implementation is requested yet.
+
 Videos remain deferred. The main media area is reserved for photo/video
 presentation, but this change does not add playback, unlock rules, rewards,
 or video cards. The existing original-photo endpoints continue enforcing
