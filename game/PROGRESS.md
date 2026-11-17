@@ -260,3 +260,19 @@ tested. No main-game completion criterion remains blocked.
   seven HTTP/save integration tests and actual-Library original-photo checks.
   Source Library/Battles hashes and both approved PNG hashes were unchanged.
 - Details, limits and launch behavior: `game/ILLUSTRATED-PREVIEW.md`.
+
+## Approved portrait layout and profile toggle — 17 November 2026
+
+- Implemented Walker's chosen layout: rooms at the left, a large unframed
+  character, a viewer fitted to the photo's proportions, and full-width
+  horizontal booking history. Current stages remain highlighted.
+- Clicking Patricia or Alice toggles approved front/side artwork. Views are
+  independent per character and survive room switches and clock repaints;
+  keyboard activation keeps focus. These are presentation-only tab choices.
+- Copied the two approved side PNGs without changing their bytes; provenance
+  and hashes are in `ILLUSTRATED-PREVIEW.md` and `characters.json`.
+- Passed the 36 focused illustrated-venue browser checks, JavaScript syntax
+  and diff checks. This includes portrait/landscape fit, responsive layout,
+  no save changes from viewing, owned-only media and event continuation.
+- Local review only, using the same isolated preview career and launcher.
+  No release or change to installed game saves, media or video rules.

@@ -14,8 +14,15 @@ its saves are not selected or changed. Reopening the launcher reuses its own
 running preview when available.
 
 The Club view has approved full-body illustrations, simultaneous cutaway
-rooms, a large earned-photo viewer, an enlarge control, and the existing
-booking stage history with the current stage highlighted. Planning, saved
+rooms in a left rail, a portrait-proportioned earned-photo viewer, an enlarge
+control, and full-width horizontal booking history with the current stage
+highlighted. The photo area fits the original image's natural proportions,
+including landscape media, without stretching or cropping. The large figure
+has an open background. Clicking Patricia or Alice switches between the
+approved front and side views; click again to return. Keyboard Enter/Space
+also works. Each character's view is retained while switching rooms and
+through clock repaints in that tab; reloading starts with front views.
+Planning, saved
 plans and the venue log expand below. Club navigation moves across the top
 to preserve room for the artwork and media. Other sections retain their
 existing layout and card renderer. Booking timing, events, equipment,
@@ -39,8 +46,10 @@ owned cards and earned Evolution forms / Duo sides.
 
 Native PNG copies match the approved reference bytes:
 
-- Patricia: `50c0b49d449e30f1fa2e7be04d4c2122a6c2508aefe4d44a0e94e419c3f3eaab`
-- Alice: `bfe2134dddd3387f0dd09c6af7ce6073e7a2fb9533ed0b94956e09a36fdf67df`
+- Patricia front: `50c0b49d449e30f1fa2e7be04d4c2122a6c2508aefe4d44a0e94e419c3f3eaab`
+- Patricia side: `fbe655474056afd848a6f42b8e76c4c7461260f5188a669011ffd907799467a8`
+- Alice front: `bfe2134dddd3387f0dd09c6af7ce6073e7a2fb9533ed0b94956e09a36fdf67df`
+- Alice side: `ac192c10d12046640e21bf22c3dbcf9f8135e7db77dfb611d56a128a8e35f558`
 
 Authoritative approval inventory:
 `C:/Codex/Media-Suite/assets/cards/concepts/approved-character-finals-2026-11-16/presentation-record.json`.
@@ -61,10 +70,16 @@ while another room is selected. Screenshots use labeled neutral photo fixtures.
 The existing browser-control checks and HTTP/ownership/save integration
 checks also run. No unrelated economy simulation or release build is needed.
 Results and screenshots are retained under `.release-output/illustrated-venue/`.
-The final run passed 23 focused browser assertions, five existing browser-control
-cases and seven existing HTTP/save integration tests. Desktop checks at
-1600 × 1000 and 1280 × 800 keep the character, room overview, media and tracker
-inside the window. Layout checks also cover 760- and 390-pixel widths.
+The initial integration passed 23 focused browser assertions, five existing
+browser-control cases and seven existing HTTP/save integration tests.
+The portrait-layout/profile follow-up passed 36 focused browser assertions,
+covering both approved side views, keyboard/focus retention, independent view
+choices, no career mutations, natural portrait/landscape proportions and
+horizontal history. Layout checks cover 1600-, 1280-, 760- and 390-pixel widths.
+At smaller heights, scroll down for the history; narrow screens retain the
+two portraits together and put rooms in a horizontally scrollable row.
+Only the focused illustrated-venue suite and syntax/diff checks were rerun
+for this presentation change; no balance simulations or release build.
 
 The actual read-only Library check found four eligible identities and 374
 cards. Both review founders' original photographs decoded (682 × 800 and

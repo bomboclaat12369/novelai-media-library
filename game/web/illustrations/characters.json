@@ -5,13 +5,21 @@
       "appearance_id": "patricia-approved-front-gym",
       "image": "/game/illustrations/patricia-front.png",
       "working_height_cm": 165.1,
-      "sha256": "50c0b49d449e30f1fa2e7be04d4c2122a6c2508aefe4d44a0e94e419c3f3eaab"
+      "sha256": "50c0b49d449e30f1fa2e7be04d4c2122a6c2508aefe4d44a0e94e419c3f3eaab",
+      "side": {
+        "image": "/game/illustrations/patricia-side.png",
+        "sha256": "fbe655474056afd848a6f42b8e76c4c7461260f5188a669011ffd907799467a8"
+      }
     },
     "744a53a2ad5b4aa59696ea97e7c645f4": {
       "appearance_id": "alice-approved-front-gym",
       "image": "/game/illustrations/alice-front.png",
       "working_height_cm": 157.48,
-      "sha256": "bfe2134dddd3387f0dd09c6af7ce6073e7a2fb9533ed0b94956e09a36fdf67df"
+      "sha256": "bfe2134dddd3387f0dd09c6af7ce6073e7a2fb9533ed0b94956e09a36fdf67df",
+      "side": {
+        "image": "/game/illustrations/alice-side.png",
+        "sha256": "ac192c10d12046640e21bf22c3dbcf9f8135e7db77dfb611d56a128a8e35f558"
+      }
     }
   }
 }

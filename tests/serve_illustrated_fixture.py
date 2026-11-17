@@ -19,7 +19,7 @@ names = ['Patricia', 'Alice', 'Unillustrated guest']
 media = []
 for index, (owner, name) in enumerate(zip(owners, names)):
     for photo in range(2):
-        image = Image.new('RGB', (600, 900) if photo == 0 else (1000, 600), ['#4c5f62', '#686348', '#665363'][index])
+        image = Image.new('RGB', ((675, 900) if index == 0 else (720, 900)) if photo == 0 else (1000, 600), ['#4c5f62', '#686348', '#665363'][index])
         draw = ImageDraw.Draw(image)
         draw.rectangle((30, 30, image.width-30, image.height-30), outline='#cbb68a', width=2)
         font = ImageFont.truetype('C:/Windows/Fonts/georgia.ttf', 38)

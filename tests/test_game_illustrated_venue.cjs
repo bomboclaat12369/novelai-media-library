@@ -34,9 +34,24 @@ function check(name,condition){assert.ok(condition,name);checks.push(name);}
  check('Real capacity appears as two private rooms and one lounge',await page.locator('.illustrated-room').count()===3);
  check('Two workers are assigned concurrently',await page.locator('.illustrated-room.is-staffed').count()===2);
  check('Current booking stage is marked separately from earlier stages',await page.locator('.booking-tracker [aria-current="step"]').count()===1&&await page.locator('.booking-tracker .is-done').count()>0);
+ await page.getByRole('button',{name:'Show Patricia’s side profile'}).click();
+ await page.locator('.character-figure').evaluate(img=>img.decode());
+ check('Clicking Patricia shows her approved side profile',(await page.locator('.character-figure').getAttribute('src')).endsWith('/patricia-side.png'));
+ await page.getByRole('button',{name:'Show Patricia’s front view'}).press('Enter');
+ check('Keyboard activation turns the figure back',(await page.locator('.character-figure').getAttribute('src')).endsWith('/patricia-front.png'));
  await page.locator('.illustrated-room[data-room="room-1"]').click();
  check('Room selection switches to Alice’s own approved illustration',(await page.locator('.character-figure').getAttribute('src')).endsWith('/alice-front.png'));
+ await page.getByRole('button',{name:'Show Alice’s side profile'}).click();
+ await page.locator('.character-figure').evaluate(img=>img.decode());
+ check('Alice has her own approved side profile',(await page.locator('.character-figure').getAttribute('src')).endsWith('/alice-side.png'));
+ await page.evaluate(()=>render());
+ check('Clock repaint retains the selected view and keyboard focus',await page.evaluate(()=>gameRoot.activeElement?.dataset.action==='turn-character'&&gameRoot.querySelector('.character-figure').src.endsWith('/alice-side.png')));
+ await page.locator('.illustrated-room[data-room="room-0"]').click();
+ check('Turning one character does not turn another',(await page.locator('.character-figure').getAttribute('src')).endsWith('/patricia-front.png'));
+ await page.locator('.illustrated-room[data-room="room-1"]').click();
+ check('Returning to a room remembers that character’s view',(await page.locator('.character-figure').getAttribute('src')).endsWith('/alice-side.png'));
  check('Selecting another room leaves the entire career unchanged',JSON.stringify(await read())===JSON.stringify(before));
+ check('Turning characters sends no gameplay changes',JSON.stringify(await read())===JSON.stringify(before));
  const expected=await page.locator('.booking-photo').getAttribute('src');
  await page.getByRole('button',{name:'Enlarge booking photograph'}).click();
  check('Enlarge shows the same earned original',await page.locator('.enlarged-booking-media img').getAttribute('src')===expected);
@@ -54,6 +69,7 @@ function check(name,condition){assert.ok(condition,name);checks.push(name);}
  check('Illustration routes do not expose source paths',traversal.status()===404);
  await page.evaluate(()=>{window.savedIllustrations=venueIllustrations;venueIllustrations={};render();});
  check('Missing character art keeps the earned photo and a readable fallback',await page.locator('.figure-fallback').count()===1&&await page.locator('.booking-photo').getAttribute('src')===expected);
+ check('Missing art never offers a non-working turn control',await page.locator('.figure-turn').count()===0);
  await page.evaluate(()=>{venueIllustrations=window.savedIllustrations;render();});
  await page.locator('.illustrated-room[data-room="lounge-0"]').click();
  check('An empty room never inherits the previous worker’s photo',await page.locator('.booking-photo').count()===0);
@@ -62,18 +78,25 @@ function check(name,condition){assert.ok(condition,name);checks.push(name);}
  await page.locator('.booking-photo').evaluate(img=>img.decode());
  for(const [width,height] of [[1600,1000],[1280,800],[760,1000],[390,844]]){
   await page.setViewportSize({width,height});
+  await page.waitForTimeout(80);
   const geometry=await page.evaluate(()=>{
-   const figure=gameRoot.querySelector('.character-figure'),media=gameRoot.querySelector('.venue-media'),rooms=gameRoot.querySelector('.illustrated-rooms'),layout=gameRoot.querySelector('.layout');
-   return {overflow:layout.scrollWidth>innerWidth+1,fit:getComputedStyle(figure).objectFit,figure:figure.getBoundingClientRect().toJSON(),media:media.getBoundingClientRect().toJSON(),rooms:rooms.getBoundingClientRect().toJSON()};
+   const figure=gameRoot.querySelector('.character-figure'),media=gameRoot.querySelector('.venue-media'),photo=gameRoot.querySelector('.booking-photo'),surface=gameRoot.querySelector('.venue-media-surface'),rooms=gameRoot.querySelector('.illustrated-rooms'),layout=gameRoot.querySelector('.layout'),tracker=gameRoot.querySelector('.booking-tracker'),venue=gameRoot.querySelector('.illustrated-venue'),steps=[...tracker.querySelectorAll('.booking-scroll>.booking-timeline>li')];
+   const bounds=surface.getBoundingClientRect();
+   return {overflow:layout.scrollWidth>innerWidth+1,fit:getComputedStyle(figure).objectFit,figure:figure.getBoundingClientRect().toJSON(),media:media.getBoundingClientRect().toJSON(),rooms:rooms.getBoundingClientRect().toJSON(),ratioError:Math.abs(bounds.width/bounds.height-photo.naturalWidth/photo.naturalHeight),horizontal:steps.every(step=>Math.abs(step.getBoundingClientRect().top-steps[0].getBoundingClientRect().top)<1),fullHistory:Math.abs(tracker.clientWidth-venue.clientWidth)<2};
   });
   check(`No horizontal clipping and complete figure at ${width}×${height}`,!geometry.overflow&&geometry.fit==='contain'&&geometry.figure.x>=0&&geometry.figure.right<=width+1&&geometry.media.right<=width+1);
-  if(width>=1280)check(`Photo viewer has useful desktop space at ${width}`,geometry.media.width>=360&&geometry.media.height>=350&&geometry.media.bottom<=height);
+  check(`Photo follows its proportions and history stays horizontal at ${width}`,geometry.ratioError<.01&&geometry.horizontal&&geometry.fullHistory);
+  if(width>=1280)check(`Photo viewer has useful desktop space at ${width}`,geometry.media.width>=280&&geometry.media.height>=350&&geometry.media.bottom<=height);
   await page.screenshot({path:path.join(output,`lounge-${width}.png`),fullPage:true});
  }
  await page.setViewportSize({width:1600,height:1000});
  await page.locator('.illustrated-room[data-room="room-1"]').click();
  await page.locator('.character-figure').evaluate(img=>img.decode());
  await page.screenshot({path:path.join(output,'alice.png'),fullPage:true});
+ // Verify a landscape original also fits without wasting a portrait frame.
+ await page.evaluate(async()=>{const img=gameRoot.querySelector('.booking-photo');window.originalFixtureSrc=img.src;img.src=URL.createObjectURL(new Blob(['<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600"><rect width="1000" height="600" fill="#4c5f62"/></svg>'],{type:'image/svg+xml'}));await img.decode();fitVenuePresentation();});
+ check('Landscape media uses its actual proportions',await page.locator('.venue-media-surface').evaluate(el=>{const b=el.getBoundingClientRect();return Math.abs(b.width/b.height-5/3)<.01;}));
+ await page.evaluate(async()=>{const img=gameRoot.querySelector('.booking-photo');URL.revokeObjectURL(img.src);img.src=window.originalFixtureSrc;await img.decode();fitVenuePresentation();});
  // Advance only through the actual server clock; check one pending decision
  // while viewing a different room, then resolve it through the real control.
  await page.evaluate(async()=>{if(save.night.paused&&!pendingDecision())await act('pause');await act('speed',{speed:8});});
