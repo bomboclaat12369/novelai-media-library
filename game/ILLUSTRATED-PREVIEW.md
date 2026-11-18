@@ -51,6 +51,13 @@ presentation, but this change does not add playback, unlock rules, rewards,
 or video cards. The existing original-photo endpoints continue enforcing
 owned cards and earned Evolution forms / Duo sides.
 
+Pending layout refinement from Walker's 17 November review: changing a photo's
+aspect ratio must not move or resize the surrounding layout, and event choices
+must not push the venue down. Proposed treatment: a fixed portrait media frame
+with whole-image fitting, and an event overlay over the room-list area. The
+exact frame ratio and overlay placement are recommendations, not selected
+implementation details. This review note does not change the running preview.
+
 ## Artwork provenance
 
 Native PNG copies match the approved reference bytes:
