@@ -3,8 +3,8 @@
 18 November 2026. Based on After Hours 1.2.4 at `001f7de`, with the approved
 Character Game lounge as the visual reference. Walker authorized publication
 of the illustrated layout, profile toggle, fixed photo frame and floating
-events as 1.3.0. Release completion is recorded in `PROGRESS.md` after the
-public feed and downloadable package are verified.
+events as 1.3.0. It is published and verified: both public feed routes and
+downloaded assets match the tested build. Evidence is in `PROGRESS.md`.
 
 Open `C:\Codex\After-Hours-Codex\OPEN-ILLUSTRATED-PREVIEW.bat`.
 It reads the existing Media Library and keeps a separate review career under

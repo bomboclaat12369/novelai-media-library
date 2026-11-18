@@ -292,3 +292,18 @@ tested. No main-game completion criterion remains blocked.
   Windows process broker (hidden, independent of the agent's process tree).
 - Version 1.3.0 prepared. Publication is complete only after verifying the
   hosted feed and download; the final result will be appended here.
+
+### Published and verified — After Hours 1.3.0
+
+- Published the authorized update on 18 November 2026. GitHub run
+  https://github.com/bomboclaat12369/novelai-media-library/actions/runs/44258662496
+  passed both verification and publication, including Windows installation,
+  browser lifecycle and two consecutive idle update handoffs.
+- Local Windows adapter verification passed with disposable saves. Both
+  public feed routes matched version 1.3.0, and the downloaded ZIP and updater
+  matched the locally tested build byte for byte.
+- ZIP: 40,137,221 bytes; SHA-256
+  `25c7320c27a50458335f1400307c0c775f0a3fa6585da911a0b5dd2f5fbbcd46`.
+  Receipt: `.release-output/after-hours/published/release-receipt.json`.
+- Test preview remains separate at http://127.0.0.1:62412/game/.
+  The three extra conveniences and unlockable outfits remain deferred.
