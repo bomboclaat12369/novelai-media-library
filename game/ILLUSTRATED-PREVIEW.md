@@ -1,8 +1,10 @@
-# Illustrated venue — local review
+# Illustrated venue — preview and release
 
-17 November 2026. Based on the released After Hours 1.2.4 source at
-`001f7de`, with the approved Character Game lounge as the visual reference.
-This branch is a local review, not a published update.
+18 November 2026. Based on After Hours 1.2.4 at `001f7de`, with the approved
+Character Game lounge as the visual reference. Walker authorized publication
+of the illustrated layout, profile toggle, fixed photo frame and floating
+events as 1.3.0. Release completion is recorded in `PROGRESS.md` after the
+public feed and downloadable package are verified.
 
 Open `C:\Codex\After-Hours-Codex\OPEN-ILLUSTRATED-PREVIEW.bat`.
 It reads the existing Media Library and keeps a separate review career under
@@ -20,8 +22,11 @@ launcher above to start its local server, then refresh the page.
 The Club view has approved full-body illustrations, simultaneous cutaway
 rooms in a left rail, a portrait-proportioned earned-photo viewer, an enlarge
 control, and full-width horizontal booking history with the current stage
-highlighted. The photo area fits the original image's natural proportions,
-including landscape media, without stretching or cropping. The large figure
+highlighted. The fixed 4:5 photo area contains each original without stretching
+or cropping; changing image shapes does not change the layout. Events float
+over the room column on desktop and above the page on narrow screens, without
+pushing the venue down. Choices retain the existing automatic continuation.
+The large figure
 has an open background. Clicking Patricia or Alice switches between the
 approved front and side views; click again to return. Keyboard Enter/Space
 also works. Each character's view is retained while switching rooms and
@@ -51,12 +56,10 @@ presentation, but this change does not add playback, unlock rules, rewards,
 or video cards. The existing original-photo endpoints continue enforcing
 owned cards and earned Evolution forms / Duo sides.
 
-Pending layout refinement from Walker's 17 November review: changing a photo's
-aspect ratio must not move or resize the surrounding layout, and event choices
-must not push the venue down. Proposed treatment: a fixed portrait media frame
-with whole-image fitting, and an event overlay over the room-list area. The
-exact frame ratio and overlay placement are recommendations, not selected
-implementation details. This review note does not change the running preview.
+Walker explicitly excluded the three suggested extras from this update:
+remembering the view across restarts, clicking the whole photo to enlarge,
+and a Jump to current history control. Existing Enlarge and tab-local profile
+choices remain. Unlockable outfits stay deferred.
 
 ## Artwork provenance
 
@@ -96,6 +99,13 @@ At smaller heights, scroll down for the history; narrow screens retain the
 two portraits together and put rooms in a horizontally scrollable row.
 Only the focused illustrated-venue suite and syntax/diff checks were rerun
 for this presentation change; no balance simulations or release build.
+
+The 18 November fixed-frame and floating-event update passed 41 focused
+browser assertions. Portrait/landscape swaps keep the frame, character, rooms
+and tracker in the same positions; showing an event adds no layout space;
+desktop events stay over the rooms, phone choices fit the viewport, and the
+overlay clears when a choice resumes operations. Release packaging and
+Windows adapter checks are recorded separately from the earlier local review.
 
 The actual read-only Library check found four eligible identities and 374
 cards. Both review founders' original photographs decoded (682 × 800 and

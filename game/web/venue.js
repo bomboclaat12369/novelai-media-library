@@ -81,6 +81,7 @@ function illustratedVenue(){
   <div class="venue-stage"><section class="venue-overview" aria-label="Room overview"><div class="venue-section-head"><h2>Your venue</h2><span>${slots.length} positions</span></div>
    <div class="illustrated-rooms" data-scroll-key="rooms">${slots.map(slot=>`<button class="illustrated-room ${slot.owner?'is-staffed':''}" data-action="select-room" data-room="${esc(slot.id)}" aria-pressed="${slot.id===chosen.id}"><div class="room-title"><strong>${esc(slot.label)}</strong><span>${esc(roomStatus(slot))}</span></div>${roomScene(slot)}<div class="room-name">${slot.owner?esc(person(slot.owner).name):'No team assigned'}<span>${slot.id===chosen.id?'Viewing':'View room →'}</span></div></button>`).join('')}</div>
    <p class="venue-footnote">All rooms run together. ${((save.night?.duration??boot.night_duration)/60).toLocaleString()}-minute nights at 1×.</p>
+   <div class="venue-event-overlay" aria-live="polite">${opportunities()}</div>
   </section>
   ${characterPanel(context)}
    <article class="venue-media" aria-label="Booking photograph"><div class="venue-section-head"><div><span class="eyebrow">${esc(chosen.label)}</span><h2>${esc(name)}</h2></div><button class="ghost small" data-action="enlarge-booking-media" ${url?'':'disabled'} aria-label="Enlarge booking photograph">Enlarge ↗</button></div>
@@ -99,7 +100,7 @@ function illustratedClub(){
  const n=save.night,last=save.reports.at(-1),clock=seconds=>Math.floor(seconds/60)+':'+String(Math.floor(seconds%60)).padStart(2,'0');
  return `<div class="lounge-heading"><div><div class="eyebrow">The club / Night ${save.day}</div><h1>${n?'An evening at After Hours':'Make tonight your own.'}</h1></div><div class="actions">${nightControls()}${boot.restartable?'<button class="ghost small" data-action="restart-game">Restart game</button>':''}</div></div>
   <div class="lounge-summary"><span>Cash <strong>${money(save.cash)}</strong></span><span>${n?`${clock(n.elapsed)} / ${clock(n.duration||boot.night_duration)} · ${n.paused?'Paused':'Doors open'}`:`${esc(derived.demand)} demand`}</span><span>${n?`${n.served} paid bookings · <strong>${money(n.revenue)}</strong> earned`:`<strong>${money(derived.recurring)}</strong> recurring costs`}</span><span>Last night ${last?`<strong class="${last.profit<0?'negative':'positive'}">${money(last.profit)}</strong> net`:'—'}</span></div>
-  ${opportunities()}${illustratedVenue()}
+  ${illustratedVenue()}
   <details class="venue-planning panel" data-venue-section="planning" ${venueSections.has('planning')?'open':''}><summary>Tonight’s plan <span>Assignments, cards & prices</span></summary><div class="venue-plan-body"><div class="sectionhead"><p>Each girl keeps her career and energy across cards.</p><button class="ghost small" data-screen="team">Team & recruitment →</button></div><div class="staff-grid">${Object.keys(save.people).map(staffHTML).join('')}</div><label class="policy-label" for="pricing">Price policy</label><select id="pricing" ${n?'disabled':''}>${[['accessible','Accessible · more bookings'],['standard','Standard · balanced'],['premium','Premium · higher price, fewer bookings']].map(([value,label])=>`<option value="${value}" ${save.pricing===value?'selected':''}>${label}</option>`).join('')}</select>${savedPlans()}</div></details>
   <details class="venue-log panel" data-venue-section="activity" ${venueSections.has('activity')?'open':''}><summary>Across the venue <span>${n?'Live activity & results':'Recent results'}</span></summary>${n?`<ul class="timeline">${(n.log.length?n.log:['Guests will arrive throughout the night.']).map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`:`<p>${last?`Last night earned ${money(last.profit)} after costs.`:'Your first evening’s results will appear here.'}</p><button class="ghost small" data-screen="reports">View reports →</button>`}</details>
   ${save.cash<derived.recurring&&!n?'<section class="panel"><h3>Time to regroup</h3><p>Take a two-day recovery break to restore energy and receive an operating reserve.</p><button data-action="recovery">Take recovery break</button></section>':''}`;
@@ -116,20 +117,27 @@ function captureVenuePresentation(){
  const panel=$('.illustrated-venue');if(!panel)return null;
  return {media:panel.querySelector('[data-venue-media-key]'),art:[...panel.querySelectorAll('[data-venue-art-key]')],scroll:[...panel.querySelectorAll('[data-scroll-key]')].map(el=>({key:el.dataset.scrollKey,top:el.scrollTop,left:el.scrollLeft,atEnd:el.scrollWidth-el.clientWidth-el.scrollLeft<12})),focus:root.activeElement?.dataset?.room,turnFocus:root.activeElement?.dataset?.action==='turn-character'?root.activeElement.dataset.owner:null};
 }
-// Size both portraits by their height. The photo supplies its true aspect
-// ratio, including landscape originals, without cropping or stretching it.
+// A fixed 4:5 frame keeps the scene still when photographs change. Only the
+// browser size controls layout; the entire photo fits inside the same frame.
 function fitVenuePresentation(){
  const panel=$('.illustrated-venue');if(!panel)return;
- const photo=panel.querySelector('.booking-photo');
- const ratio=photo?.naturalHeight?photo.naturalWidth/photo.naturalHeight:.75;
+ const ratio=.8;
  const narrow=innerWidth<=760,gap=narrow?14:24,rail=narrow?0:210;
  const available=panel.clientWidth-rail-gap*(narrow?1:2);
  const height=Math.max(120,Math.min(Math.max(380,Math.min(700,innerHeight-390)),available/(2/3+ratio)));
  panel.style.setProperty('--portrait-height',height+'px');
  panel.style.setProperty('--media-ratio',ratio);
+ positionVenueEvents();
 }
-root.addEventListener('load',event=>{if(event.target.classList?.contains('booking-photo'))fitVenuePresentation();},true);
+function positionVenueEvents(){
+ const overview=$('.venue-overview');if(!overview)return;
+ const bounds=overview.getBoundingClientRect();
+ overview.style.setProperty('--event-left',bounds.left+'px');
+ overview.style.setProperty('--event-width',bounds.width+'px');
+ overview.style.setProperty('--event-top',Math.max(12,Math.min(bounds.top+54,innerHeight-260))+'px');
+}
 window.addEventListener('resize',fitVenuePresentation);
+window.addEventListener('scroll',positionVenueEvents,{passive:true});
 function restoreVenuePresentation(previous){
  previous=previous||{art:[],scroll:[]};
  venueResizeObserver?.disconnect();

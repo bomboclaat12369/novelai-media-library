@@ -276,3 +276,19 @@ tested. No main-game completion criterion remains blocked.
   no save changes from viewing, owned-only media and event continuation.
 - Local review only, using the same isolated preview career and launcher.
   No release or change to installed game saves, media or video rules.
+
+## Illustrated venue release preparation — 18 November 2026
+
+- Walker explicitly requested publication of the earlier illustrated layout
+  and profile toggle plus a fixed 4:5 photo frame and floating event cards.
+  Excluded view persistence across restarts, photo-click enlargement and
+  Jump to current. Unlockable outfits remain deferred.
+- The media frame is now independent of image dimensions. Club event choices
+  overlay the room column, with a viewport-contained overlay on narrow
+  screens; neither shifts the venue. Existing choice/clock rules are retained.
+- Passed 41 focused browser assertions. Geometry checks cover photo shape
+  changes and event insertion; choices still resume the night automatically.
+- Restarted the isolated preview at http://127.0.0.1:62412/game/ through the
+  Windows process broker (hidden, independent of the agent's process tree).
+- Version 1.3.0 prepared. Publication is complete only after verifying the
+  hosted feed and download; the final result will be appended here.

@@ -31,6 +31,7 @@ function check(name,condition){assert.ok(condition,name);checks.push(name);}
  await page.locator('.character-figure').evaluate(img=>img.decode());
  const read=()=>page.evaluate(()=>({state:save,revision}));
  const before=await read();
+ const layoutBounds=()=>page.evaluate(()=>['.venue-stage','.venue-character','.venue-media-surface','.booking-tracker'].map(selector=>{const box=gameRoot.querySelector(selector).getBoundingClientRect();return [box.x,box.y+scrollY,box.width,box.height].map(value=>Math.round(value*100)/100);}));
  check('Real capacity appears as two private rooms and one lounge',await page.locator('.illustrated-room').count()===3);
  check('Two workers are assigned concurrently',await page.locator('.illustrated-room.is-staffed').count()===2);
  check('Current booking stage is marked separately from earlier stages',await page.locator('.booking-tracker [aria-current="step"]').count()===1&&await page.locator('.booking-tracker .is-done').count()>0);
@@ -82,10 +83,10 @@ function check(name,condition){assert.ok(condition,name);checks.push(name);}
   const geometry=await page.evaluate(()=>{
    const figure=gameRoot.querySelector('.character-figure'),media=gameRoot.querySelector('.venue-media'),photo=gameRoot.querySelector('.booking-photo'),surface=gameRoot.querySelector('.venue-media-surface'),rooms=gameRoot.querySelector('.illustrated-rooms'),layout=gameRoot.querySelector('.layout'),tracker=gameRoot.querySelector('.booking-tracker'),venue=gameRoot.querySelector('.illustrated-venue'),steps=[...tracker.querySelectorAll('.booking-scroll>.booking-timeline>li')];
    const bounds=surface.getBoundingClientRect();
-   return {overflow:layout.scrollWidth>innerWidth+1,fit:getComputedStyle(figure).objectFit,figure:figure.getBoundingClientRect().toJSON(),media:media.getBoundingClientRect().toJSON(),rooms:rooms.getBoundingClientRect().toJSON(),ratioError:Math.abs(bounds.width/bounds.height-photo.naturalWidth/photo.naturalHeight),horizontal:steps.every(step=>Math.abs(step.getBoundingClientRect().top-steps[0].getBoundingClientRect().top)<1),fullHistory:Math.abs(tracker.clientWidth-venue.clientWidth)<2};
+   return {overflow:layout.scrollWidth>innerWidth+1,fit:getComputedStyle(figure).objectFit,photoFit:getComputedStyle(photo).objectFit,figure:figure.getBoundingClientRect().toJSON(),media:media.getBoundingClientRect().toJSON(),rooms:rooms.getBoundingClientRect().toJSON(),ratioError:Math.abs(bounds.width/bounds.height-.8),horizontal:steps.every(step=>Math.abs(step.getBoundingClientRect().top-steps[0].getBoundingClientRect().top)<1),fullHistory:Math.abs(tracker.clientWidth-venue.clientWidth)<2};
   });
   check(`No horizontal clipping and complete figure at ${width}×${height}`,!geometry.overflow&&geometry.fit==='contain'&&geometry.figure.x>=0&&geometry.figure.right<=width+1&&geometry.media.right<=width+1);
-  check(`Photo follows its proportions and history stays horizontal at ${width}`,geometry.ratioError<.01&&geometry.horizontal&&geometry.fullHistory);
+  check(`Fixed 4:5 frame fits whole photos and history stays horizontal at ${width}`,geometry.ratioError<.01&&geometry.photoFit==='contain'&&geometry.horizontal&&geometry.fullHistory);
   if(width>=1280)check(`Photo viewer has useful desktop space at ${width}`,geometry.media.width>=280&&geometry.media.height>=350&&geometry.media.bottom<=height);
   await page.screenshot({path:path.join(output,`lounge-${width}.png`),fullPage:true});
  }
@@ -93,10 +94,12 @@ function check(name,condition){assert.ok(condition,name);checks.push(name);}
  await page.locator('.illustrated-room[data-room="room-1"]').click();
  await page.locator('.character-figure').evaluate(img=>img.decode());
  await page.screenshot({path:path.join(output,'alice.png'),fullPage:true});
- // Verify a landscape original also fits without wasting a portrait frame.
+ // A landscape photo must not move the frame, figure, rooms or history.
+ const portraitBounds=await layoutBounds();
  await page.evaluate(async()=>{const img=gameRoot.querySelector('.booking-photo');window.originalFixtureSrc=img.src;img.src=URL.createObjectURL(new Blob(['<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600"><rect width="1000" height="600" fill="#4c5f62"/></svg>'],{type:'image/svg+xml'}));await img.decode();fitVenuePresentation();});
- check('Landscape media uses its actual proportions',await page.locator('.venue-media-surface').evaluate(el=>{const b=el.getBoundingClientRect();return Math.abs(b.width/b.height-5/3)<.01;}));
+ check('Changing a portrait to landscape leaves the whole layout in place',JSON.stringify(await layoutBounds())===JSON.stringify(portraitBounds));
  await page.evaluate(async()=>{const img=gameRoot.querySelector('.booking-photo');URL.revokeObjectURL(img.src);img.src=window.originalFixtureSrc;await img.decode();fitVenuePresentation();});
+ check('Returning to a portrait keeps the same frame position',JSON.stringify(await layoutBounds())===JSON.stringify(portraitBounds));
  // Advance only through the actual server clock; check one pending decision
  // while viewing a different room, then resolve it through the real control.
  await page.evaluate(async()=>{if(save.night.paused&&!pendingDecision())await act('pause');await act('speed',{speed:8});});
@@ -106,11 +109,23 @@ function check(name,condition){assert.ok(condition,name);checks.push(name);}
   await page.evaluate(()=>act('tick',{},true));
  }
  check('An ordinary game event arrives through the shared clock',await page.evaluate(()=>!!pendingDecision()));
- await page.locator('.illustrated-room[data-room="lounge-0"]').click();
+ const eventBounds=await layoutBounds();
+ await page.locator('.venue-event-overlay').evaluate(el=>{el.style.display='none';});
+ check('Showing an event does not move the figure, photo or booking history',JSON.stringify(await layoutBounds())===JSON.stringify(eventBounds));
+ await page.locator('.venue-event-overlay').evaluate(el=>{el.style.display='';});
+ check('Desktop events float entirely over the room column',await page.evaluate(()=>{const event=gameRoot.querySelector('.venue-event-overlay').getBoundingClientRect(),room=gameRoot.querySelector('.venue-overview').getBoundingClientRect(),media=gameRoot.querySelector('.venue-media').getBoundingClientRect();return event.left>=room.left-1&&event.right<=room.right+1&&event.right<media.left&&event.bottom<=innerHeight;}));
+ await page.screenshot({path:path.join(output,'event-desktop.png'),fullPage:true});
+ // Room selection is still presentation-only even while the event overlays it.
+ await page.evaluate(()=>{selectedRoom='lounge-0';render();});
  check('Event choices remain visible while another room is selected',await page.locator('[aria-label="Business opportunity"]').count()>=1);
+ await page.setViewportSize({width:390,height:844});
+ await page.waitForTimeout(80);
+ check('Phone event choices remain within the screen',await page.locator('.venue-event-overlay').evaluate(el=>{const b=el.getBoundingClientRect();return b.left>=0&&b.right<=innerWidth&&b.top>=0&&b.bottom<=innerHeight;}));
+ await page.screenshot({path:path.join(output,'event-phone.png'),fullPage:true});
  await page.locator('[data-action="decision"][data-choice="decline"]').first().click();
  await page.waitForFunction(()=>!save.night.paused);
  check('Choosing an event resumes the night automatically',await page.evaluate(()=>save.phase==='night'&&!save.night.paused));
+ check('Resolved events leave no overlay behind',await page.locator('.venue-event-overlay').evaluate(el=>getComputedStyle(el).display==='none'));
  await page.evaluate(()=>act('pause'));
  check('No browser errors',errors.length===0);
  const report={checks,errors,fixture,source_media:'Synthetic photo fixtures; native approved illustrations. No personal saves used.'};
