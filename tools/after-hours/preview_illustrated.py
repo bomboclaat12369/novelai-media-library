@@ -17,7 +17,7 @@ FOUNDERS = ['4759bed86a2645f8a1589d5ef6770918', '744a53a2ad5b4aa59696ea97e7c645f
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--library', default=str(Path.home()/'Documents'/'NovelAI Media Library'))
-    parser.add_argument('--port', type=int, default=0)
+    parser.add_argument('--port', type=int, default=62412)
     parser.add_argument('--open', action='store_true')
     args = parser.parse_args()
     folder = ROOT/'game'/'test-data'/'illustrated-preview'

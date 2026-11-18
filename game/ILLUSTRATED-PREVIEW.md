@@ -13,6 +13,10 @@ $250. Later launches retain only that review career. The installed game and
 its saves are not selected or changed. Reopening the launcher reuses its own
 running preview when available.
 
+The preview now uses `http://127.0.0.1:62412/game/` on new starts so its link
+remains stable. If the page says it cannot be reached, open the preview
+launcher above to start its local server, then refresh the page.
+
 The Club view has approved full-body illustrations, simultaneous cutaway
 rooms in a left rail, a portrait-proportioned earned-photo viewer, an enlarge
 control, and full-width horizontal booking history with the current stage
