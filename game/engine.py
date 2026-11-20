@@ -15,10 +15,10 @@ PACKS = {'standard': {'name':'Standard','price':100,'count':5},
          'themed': {'name':'Themed','price':200,'count':5},
          'premium': {'name':'Premium','price':400,'count':5},
          'collector': {'name':'Collector','price':600,'count':5}}
-UPGRADES = {'rooms': {'name':'Private room','base':350,'step':180,'max':6},
-            'lounge': {'name':'Lounge position','base':300,'step':220,'max':3},
-            'recovery': {'name':'Recovery suite','base':300,'step':280,'max':3},
-            'reception': {'name':'Reception','base':400,'step':320,'max':3}}
+UPGRADES = {'rooms': {'name':'Private room','base':350,'step':180,'max':6,'upkeep':8},
+            'lounge': {'name':'Lounge position','base':300,'step':220,'max':3,'upkeep':8},
+            'recovery': {'name':'Recovery suite','base':300,'step':280,'max':3,'upkeep':6},
+            'reception': {'name':'Reception','base':400,'step':320,'max':3,'upkeep':6}}
 ROLES = ('room', 'lounge', 'rest', 'train')
 PRICES = {'accessible': (.9, .99), 'standard': (1, .92), 'premium': (1.25, .68)}
 
@@ -71,8 +71,7 @@ def upgrade_cost(state, kind):
 
 
 def upkeep(state):
-    f = state['facilities']
-    return 20 + f['rooms']*8 + f['lounge']*8 + (f['recovery']+f['reception'])*6
+    return 20 + sum(state['facilities'][kind] * rule['upkeep'] for kind, rule in UPGRADES.items())
 
 
 def recurring_cost(state):

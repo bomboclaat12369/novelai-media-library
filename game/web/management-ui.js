@@ -12,7 +12,7 @@ function initManagementUI(){
  navigation.splice(1,0,['studio','◈','Studio'],['resort','☼','Resort']);navigation.push(['saves','↺','Saves & catalog']);
  const oldPacks=packs;packs=()=>`<section class="panel voucher"><div><h3>Earned pack rewards</h3><p>${save.pack_vouchers} Standard voucher(s) from deliveries and milestones.</p></div><button data-action="voucher" ${dis(save.phase!=='prepare'||!save.pack_vouchers)}>Redeem a voucher</button></section>`+oldPacks();
  const oldTeam=team;team=()=>oldTeam()+development();
- const oldReports=reports;reports=()=>oldReports()+`<section class="panel"><h2>Department results</h2><p>${save.totals.studio_completed} Studio deliveries · ${save.totals.resort_completed} Resort checkouts · ${money(save.totals.contract_revenue)} department revenue.</p><p class="note">Night reports include department earnings, wages, upkeep and business decisions. Deposits are recorded separately when scheduling; capital purchases are in the full history.</p></section>`+save.reports.slice(-3).reverse().map(r=>`<details class="panel"><summary>Night ${r.day} · planning and decisions</summary><p>Department revenue ${money(r.department_revenue)} · training ${money(r.training_cost)} · business choices ${money(r.decision_costs)}.</p><ul>${(r.activity||[]).map(t=>`<li>${esc(t)}</li>`).join('')}</ul></details>`).join('');
+ const oldReports=reports;reports=()=>oldReports()+`<section class="panel"><h2>Department results</h2><p>${save.totals.studio_completed} Studio deliveries · ${save.totals.resort_completed} Resort checkouts · ${money(save.totals.contract_revenue)} department revenue.</p><p class="note">Night reports include department earnings, wages, upkeep and business decisions. Deposits are recorded separately when scheduling; capital purchases are in the full history.</p></section>`+save.reports.slice(-3).reverse().map(r=>`<details class="panel"><summary>Night ${r.day} · planning and decisions</summary><p>Department revenue ${money(r.department_revenue)} · training ${money(r.training_cost)} · business choices ${money(r.decision_costs)}.</p>${contractReceipts(r, contractsEndingOn(r.day))}<ul>${(r.activity||[]).map(t=>`<li>${esc(t)}</li>`).join('')}</ul></details>`).join('');
 }
 function head(kicker,title,text){return `<div class="pagehead"><div><div class="eyebrow">${kicker}</div><h1>${title}</h1><p>${text}</p></div></div>`;}
 function meetingCaption(meeting,activity,worker){
@@ -26,6 +26,39 @@ function bookingTimeline(rows){
 function bookingHistory(meeting){
  return (meeting?.history||[]).map(past=>`<details class="booking-history" data-booking-history="${esc(past.id)}" ${openBookingHistory.has(past.id)?'open':''}><summary>Booking ${past.number} · ${past.duration}s · ${past.finish_count} finish${past.finish_count===1?'':'es'} · +${money(past.value)}</summary>${bookingTimeline(past.timeline)}</details>`).join('');
 }
+function contractsEndingOn(day){
+ return (save.contracts||[]).filter(c=>c.end===day && c.status==='completed');
+}
+
+function contractReceipts(report, contracts, showTonight=false){
+ if(!contracts.length)return '';
+ const roles = {room:'Private room', lounge:'Lounge', rest:'Rest', train:'Training', studio:'Studio', resort:'Resort'};
+ const rows = contracts.map(c=>{
+  const studio = c.department==='studio';
+  const outcome = studio ? (c.success===false?'Studio rework':'Studio delivery') : 'Resort checkout';
+  const name = person(c.owner).name;
+  const title = c.spec.name || (studio?'Studio project':'Resort stay');
+  const lines = [[studio?'Delivery payout':'Entire stay', money(c.revenue)]];
+  const nightlyPay = report.earnings?.[c.owner];
+  if(!studio && Number.isFinite(nightlyPay))lines.push(['Checkout night', money(nightlyPay)]);
+  if(Number.isFinite(c.spec.fee))lines.push(['After '+money(c.spec.fee)+' deposit', money(c.revenue-c.spec.fee)]);
+  const rewards = [];
+  if(studio && c.success && Number.isSafeInteger(c.spec.packs) && c.spec.packs>0)
+   rewards.push(c.spec.packs+' Standard '+(c.spec.packs===1?'voucher':'vouchers'));
+  if(c.special_card)rewards.push('Card awarded · '+esc(card(c.special_card)?.name||'Studio card'));
+  const role = derived.assignments?.[c.owner];
+  let plan = '';
+  if(showTonight && roles[role] && save.people[c.owner]){
+   const booked = role==='studio'||role==='resort';
+   plan = `<p class="receipt-plan"><strong>Tonight</strong> · ${roles[role]} · ${booked?'Reserved':'Can reassign'} · ${Math.round(save.people[c.owner].energy)} energy</p>`;
+  }
+  return `<li><strong>${esc(name)} · ${esc(title)}</strong><small>${outcome}</small>
+   <dl>${lines.map(([label,value])=>`<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}</dl>
+   ${rewards.length?`<p>${rewards.join(' · ')}</p>`:''}${plan}</li>`;
+ });
+ return `<ul class="contract-receipts" aria-label="Completed contracts">${rows.join('')}</ul>`;
+}
+
 function bookingReports(){
  const available=save.reports.filter(r=>Array.isArray(r.booking_history));
  if(!available.length)return '';

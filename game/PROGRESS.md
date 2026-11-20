@@ -307,3 +307,24 @@ tested. No main-game completion criterion remains blocked.
   Receipt: `.release-output/after-hours/published/release-receipt.json`.
 - Test preview remains separate at http://127.0.0.1:62412/game/.
   The three extra conveniences and unlockable outfits remain deferred.
+
+## Opening purchases and contract receipts — 19 November 2026
+
+Compared a $100 Standard pack with a $350 second room in three paired
+Patricia/Alice starts. With two nights of wages and upkeep held in reserve,
+all six clubs bought the other item on night two. With Auto assign, opening
+the room first earned $22–$48 more operating profit on night one. The Studio
+opened on the same night within each pair. Prices and payouts stay as tested.
+
+The Pack shop now shows cash left after each affordable pack and one night's
+wages and upkeep. A club with one room also sees its balance if it buys room
+two. Expansion includes the added upkeep in its forecast. The nightly charge
+and the forecasts use the same facility rates.
+
+After settlement, the Club's results section names the Studio projects and
+Resort checkouts that finished. Receipts show the whole contract, its deposit
+and the worker's plan for tonight. A Resort receipt distinguishes earnings
+on checkout night from revenue over the full stay. Recent reports keep
+the financial detail. A focused browser walkthrough used actual purchases,
+a simultaneous Studio delivery and two-night Resort checkout, a subsequent
+reservation and a narrow screen. It passed on a disposable career.

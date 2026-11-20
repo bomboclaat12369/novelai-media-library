@@ -96,13 +96,29 @@ function nightControls(){
  const n=save.night;
  return n?`<button class="primary" data-action="pause" ${pendingDecision()?'disabled':''}>${pendingDecision()?'Choose an option':n.paused?'Resume':'Pause'}</button><select aria-label="Night speed" id="speed">${(boot.night_speeds||[1,2,4,8]).map(value=>`<option value="${value}" ${n.speed===value?'selected':''}>${value}× speed</option>`).join('')}</select><button class="ghost" data-action="finish">Finish night</button>`:'<button class="ghost" data-action="auto">Auto assign team</button><button class="primary" data-action="start">Open for the night →</button>';
 }
+function venueActivity(night, last){
+ const contracts = !night && last ? contractsEndingOn(last.day) : [];
+ const studio = contracts.filter(c=>c.department==='studio').length;
+ const resort = contracts.length - studio;
+ const counts = [];
+ if(studio)counts.push(studio+' Studio '+(studio===1?'project':'projects'));
+ if(resort)counts.push(resort+' Resort '+(resort===1?'checkout':'checkouts'));
+ const heading = counts.length ? 'Night '+last.day+' · '+counts.join(' · ') : 'Across the venue';
+ const caption = night ? 'Live activity & results' : (counts.length?'Payouts & tonight’s team':'Recent results');
+ const body = night
+  ? `<ul class="timeline">${(night.log.length?night.log:['Guests will arrive throughout the night.']).map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`
+  : `<p>${last?`Night ${last.day} finished at ${money(last.profit)} after costs.`:'Your first evening’s results will appear here.'}</p>
+     ${contractReceipts(last, contracts, true)}<button class="ghost small" data-screen="reports">View reports →</button>`;
+ return `<details class="venue-log panel" data-venue-section="activity" ${venueSections.has('activity')?'open':''}>
+  <summary>${heading} <span>${caption}</span></summary>${body}</details>`;
+}
 function illustratedClub(){
  const n=save.night,last=save.reports.at(-1),clock=seconds=>Math.floor(seconds/60)+':'+String(Math.floor(seconds%60)).padStart(2,'0');
  return `<div class="lounge-heading"><div><div class="eyebrow">The club / Night ${save.day}</div><h1>${n?'An evening at After Hours':'Make tonight your own.'}</h1></div><div class="actions">${nightControls()}${boot.restartable?'<button class="ghost small" data-action="restart-game">Restart game</button>':''}</div></div>
   <div class="lounge-summary"><span>Cash <strong>${money(save.cash)}</strong></span><span>${n?`${clock(n.elapsed)} / ${clock(n.duration||boot.night_duration)} · ${n.paused?'Paused':'Doors open'}`:`${esc(derived.demand)} demand`}</span><span>${n?`${n.served} paid bookings · <strong>${money(n.revenue)}</strong> earned`:`<strong>${money(derived.recurring)}</strong> recurring costs`}</span><span>Last night ${last?`<strong class="${last.profit<0?'negative':'positive'}">${money(last.profit)}</strong> net`:'—'}</span></div>
   ${illustratedVenue()}
   <details class="venue-planning panel" data-venue-section="planning" ${venueSections.has('planning')?'open':''}><summary>Tonight’s plan <span>Assignments, cards & prices</span></summary><div class="venue-plan-body"><div class="sectionhead"><p>Each girl keeps her career and energy across cards.</p><button class="ghost small" data-screen="team">Team & recruitment →</button></div><div class="staff-grid">${Object.keys(save.people).map(staffHTML).join('')}</div><label class="policy-label" for="pricing">Price policy</label><select id="pricing" ${n?'disabled':''}>${[['accessible','Accessible · more bookings'],['standard','Standard · balanced'],['premium','Premium · higher price, fewer bookings']].map(([value,label])=>`<option value="${value}" ${save.pricing===value?'selected':''}>${label}</option>`).join('')}</select>${savedPlans()}</div></details>
-  <details class="venue-log panel" data-venue-section="activity" ${venueSections.has('activity')?'open':''}><summary>Across the venue <span>${n?'Live activity & results':'Recent results'}</span></summary>${n?`<ul class="timeline">${(n.log.length?n.log:['Guests will arrive throughout the night.']).map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`:`<p>${last?`Last night earned ${money(last.profit)} after costs.`:'Your first evening’s results will appear here.'}</p><button class="ghost small" data-screen="reports">View reports →</button>`}</details>
+  ${venueActivity(n,last)}
   ${save.cash<derived.recurring&&!n?'<section class="panel"><h3>Time to regroup</h3><p>Take a two-day recovery break to restore energy and receive an operating reserve.</p><button data-action="recovery">Take recovery break</button></section>':''}`;
 }
 function enlargeBookingMedia(){
