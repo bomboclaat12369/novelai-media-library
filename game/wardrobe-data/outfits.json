@@ -1,0 +1,12 @@
+{
+  "patricia-red-gingham": {
+    "name": "Red gingham",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "photo_id": "bd4237e174d94b3193ce15bcc7412e61",
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "photo_level": 10,
+    "career_level": 20,
+    "front": "patricia-red-gingham-front.png",
+    "sha256": "9dc6503b231675792dad1ea0e6065042b70f2cbb67927e1aa7393bb9fe2bca16"
+  }
+}

@@ -15,7 +15,7 @@ TOOLS = "tools/after-hours"
 FILE_LIST = "after-hours-files.json"
 GAME_MODULES = (
     "__init__ booking_state bookings catalog companion engine evolution flavor library_snapshot "
-    "management meeting_rules meetings migrations server stage_labels store"
+    "management meeting_rules meetings migrations server stage_labels store wardrobe"
 ).split()
 WEB_FILES = "index.html app.js management-ui.js renderer.js style.css favicon.svg venue.js venue.css illustrations/characters.json illustrations/patricia-front.png illustrations/alice-front.png illustrations/patricia-side.png illustrations/alice-side.png".split()
 VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
@@ -53,6 +53,7 @@ def contents(rev):
     names = {"runtime-src/companion-runtime.pyw", "game/Launch.ps1", config_path,
              "game/stage-data/catalog.json", "game/stage-data/stage-labels.json"}
     names.update(f"game/{name}.py" for name in GAME_MODULES)
+    names.update({"game/wardrobe-data/outfits.json", "game/wardrobe-data/patricia-red-gingham-front.png"})
     names.update(f"game/web/{name}" for name in WEB_FILES)
     for suffix in ("ranks", "collection", "editions", "base-layout", "encore"):
         part, = (p for p in config["parts"] if p.endswith(f".{suffix}.txt"))

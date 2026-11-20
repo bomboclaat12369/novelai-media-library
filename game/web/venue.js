@@ -41,7 +41,60 @@ function venueContext(){
  const url=available?'/game'+photo.image+(query.length?'?'+query.join('&'):''):null;
  return {slots,chosen,worker,equipped,photo,url,meeting:derived.meetings?.[chosen.owner],activity:save.night?.activities[chosen.owner]};
 }
-function illustration(owner){return venueIllustrations[owner];}
+function illustration(owner){
+ const base=venueIllustrations[owner],closet=derived.wardrobe?.[owner];
+ const selected=closet?.outfits.find(outfit=>outfit.unlocked&&outfit.id===closet.equipped);
+ if(!selected?.art)return base;
+ return {...selected.art,working_height_cm:base?.working_height_cm||165.1};
+}
+function wardrobeButton(owner){
+ return derived.wardrobe?.[owner]?.outfits.length
+  ? `<button class="ghost small" data-action="wardrobe" data-owner="${esc(owner)}">Wardrobe</button>` : '';
+}
+function wardrobeChoice(owner,id,label,equipped){
+ return `<button class="${equipped?'ghost':'primary'} small" data-action="wear-outfit" data-owner="${esc(owner)}" data-outfit="${esc(id)}" ${equipped?'disabled':''}>${equipped?'Wearing':esc('Wear '+label)}</button>`;
+}
+function outfitGoal(title,level,target,detail){
+ const count=Math.min(level,target);
+ return `<div class="outfit-goal"><div><strong>${esc(title)}</strong><span>${count} / ${target}</span></div><progress aria-label="${esc(title)}" value="${count}" max="${target}"></progress><small>${esc(detail)}</small></div>`;
+}
+function showWardrobe(owner){
+ const closet=derived.wardrobe?.[owner];
+ if(!closet)return;
+ const name=person(owner).name,stamp=JSON.stringify(closet);
+ const existing=modal.querySelector('[data-wardrobe-owner]');
+ if(modal.open&&existing?.dataset.wardrobeOwner===owner&&existing.dataset.stamp===stamp)return;
+ const focused=modal.contains(root.activeElement)?root.activeElement?.dataset.action:null;
+ const entries=closet.outfits.map(outfit=>{
+  const goals=outfitGoal('Level '+outfit.photo_level+' + matching photo',closet.level,outfit.photo_level,outfit.has_photo?'Matching photo collected':'Matching photo still needed')
+   +'<div class="outfit-or">or</div>'+outfitGoal('Reach level '+outfit.career_level,closet.level,outfit.career_level,'Any collection qualifies');
+  return `<article class="wardrobe-outfit"><div class="wardrobe-row"><h3>${esc(outfit.name)}</h3><span>${outfit.unlocked?'Unlocked':'Locked'}</span></div>
+   ${outfit.unlocked?`<img class="wardrobe-art" src="${esc(outfit.art.image)}" alt="${esc(name+' in '+outfit.name)}">${wardrobeChoice(owner,outfit.id,outfit.name.toLowerCase(),closet.equipped===outfit.id)}`:goals}</article>`;
+ }).join('');
+ modal.innerHTML=`<div data-wardrobe-owner="${esc(owner)}"><div class="modal-head"><div><h2>${esc(name)}’s wardrobe</h2><p class="note">Career level ${closet.level}</p></div><button data-action="close-modal" aria-label="Close wardrobe">✕</button></div>
+  <div class="wardrobe-row gym-outfit"><h3>Gym outfit</h3>${wardrobeChoice(owner,'default','gym outfit',closet.equipped==='default')}</div>${entries}</div>`;
+ modal.firstElementChild.dataset.stamp=stamp;
+ if(!modal.open)modal.showModal();
+ else if(focused)modal.querySelector('[data-action="close-modal"]')?.focus({preventScroll:true});
+}
+function refreshOpenWardrobe(){
+ const panel=modal.open&&modal.querySelector('[data-wardrobe-owner]');
+ if(!panel)return;
+ const owner=panel.dataset.wardrobeOwner;
+ if(derived.wardrobe?.[owner])showWardrobe(owner);
+ else modal.close();
+}
+function announceOutfit(previous){
+ for(const [owner,closet] of Object.entries(derived.wardrobe||{})){
+  const earned=closet.outfits.find(outfit=>outfit.unlocked&&previous?.[owner]?.outfits.some(old=>old.id===outfit.id&&!old.unlocked));
+  if(!earned)continue;
+  notify(person(owner).name+' unlocked '+earned.name+'.');
+  const image=document.createElement('img');
+  image.className='outfit-toast-art';image.alt='';image.src=earned.art.image;
+  $('#toast').prepend(image);
+  break;
+ }
+}
 function turnCharacter(owner){
  if(!illustration(owner)?.side)return;
  venueViews.set(owner,venueViews.get(owner)==='side'?'front':'side');
@@ -70,7 +123,7 @@ function characterPanel(context){
  return `<aside class="venue-character" aria-label="Selected character">
   <div class="character-heading"><h2>${esc(name)}</h2>${art?.side?`<span>${side?'Side profile':'Front view'} · Click to turn</span>`:''}</div>
   ${art?.side?`<button type="button" class="figure-stage figure-turn" data-action="turn-character" data-owner="${esc(chosen.owner)}" aria-label="Show ${esc(name)}’s ${side?'front view':'side profile'}">${figure}</button>`:`<div class="figure-stage">${figure}</div>`}
-  <div class="character-caption">${worker?`<div class="character-energy"><span>Energy</span><strong>${Math.round(worker.energy)} / 100</strong></div><div class="energy"><span style="width:${Math.max(0,Math.min(100,worker.energy))}%"></span></div><button class="ghost small full" data-action="inspect" data-card="${esc(equipped.id)}">View equipped card</button><small>${esc(specialties[equipped.specialty])} · Career level ${1+Math.floor(worker.xp/100)}</small>`:`<p>${esc(roomStatus(chosen))}</p>`}</div>
+  <div class="character-caption">${worker?`<div class="character-energy"><span>Energy</span><strong>${Math.round(worker.energy)} / 100</strong></div><div class="energy"><span style="width:${Math.max(0,Math.min(100,worker.energy))}%"></span></div><div class="character-actions">${wardrobeButton(chosen.owner)}<button class="ghost small" data-action="inspect" data-card="${esc(equipped.id)}">View equipped card</button></div><small>${esc(specialties[equipped.specialty])} · Career level ${1+Math.floor(worker.xp/100)}</small>`:`<p>${esc(roomStatus(chosen))}</p>`}</div>
  </aside>`;
 }
 function illustratedVenue(){

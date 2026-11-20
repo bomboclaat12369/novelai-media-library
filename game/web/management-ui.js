@@ -162,6 +162,13 @@ async function managementClick(b,a){
  if(a==='confirm-new-career'){b.disabled=true;await managementRequest('new-career');b.disabled=false;return true;}
  if(a==='enlarge-booking-media'){enlargeBookingMedia();return true;}
  if(a==='turn-character'){turnCharacter(b.dataset.owner);return true;}
+ if(a==='wardrobe'){showWardrobe(b.dataset.owner);return true;}
+ if(a==='wear-outfit'){
+  b.disabled=true;venueViews.delete(b.dataset.owner);
+  await act('wear_outfit',{owner:b.dataset.owner,outfit:b.dataset.outfit});
+  if(b.isConnected)b.disabled=false;
+  return true;
+ }
  if(a==='select-room'){selectedRoom=b.dataset.room;render();return true;}
  if(a==='voucher'){await act('pack',{pack:'standard',voucher:true});return true;}
  if(a==='save-plan'){await act('save_plan',{name:$('#plan-name').value});return true;}

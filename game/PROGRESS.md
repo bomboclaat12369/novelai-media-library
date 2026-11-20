@@ -328,3 +328,25 @@ on checkout night from revenue over the full stay. Recent reports keep
 the financial detail. A focused browser walkthrough used actual purchases,
 a simultaneous Studio delivery and two-night Resort checkout, a subsequent
 reservation and a narrow screen. It passed on a disposable career.
+
+## Patricia’s red gingham wardrobe preview — 19 November 2026
+
+The Wardrobe button appears under Patricia’s figure and on her team card.
+While red gingham is locked, the wardrobe shows its name and progress
+toward both routes. Reach career level 10 and own the matching photo,
+or reach level 20 with any collection. An ordinary card, either face of
+an owned Duo, or an earned Evolution form can provide the photo.
+The career saves the unlock and the outfit Patricia chooses to wear.
+Equipping the approved gingham front changes her figure and room tile.
+The gym outfit retains its front and side views.
+
+The separate wardrobe review opens on port 62413. Its own career starts
+at 896 XP with the matching photo. Opening for the night triggers the
+first booking and awards the four XP needed for level 10. The original
+illustrated review uses port 62412. Launch the wardrobe review with
+`tools/after-hours/Start-Illustrated-Preview.ps1 -Wardrobe`.
+
+Focused rules checks covered both routes, acquired Set photos and save
+recovery. A browser walkthrough checked the locked goals on desktop and
+mobile, the protected artwork, the nonblocking reveal and both figures
+after equipping, reloading and changing back to gym.

@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from . import engine, evolution, migrations, stage_labels
+from . import engine, evolution, migrations, stage_labels, wardrobe
 
 
 class Conflict(engine.RuleError):
@@ -90,6 +90,7 @@ class GameStore:
             db.execute("INSERT OR REPLACE INTO meta VALUES ('catalog_stamp',?)",(self.catalog_stamp,))
             if row:
                 migrations.validate(state,catalog)
+                wardrobe.reconcile(state,catalog)
                 events=state.pop('journal',[]);state['journal']=[]
                 db.executemany('INSERT INTO events(at,body) VALUES (?,?)',[(time.time(),encode(e)) for e in events])
                 if encode(state)!=row[1]:
@@ -241,9 +242,14 @@ class GameStore:
             if revision!=expected_revision: raise Conflict('The game changed. Refresh before importing catalog additions.')
             if catalog['source_id']!=self.catalog['source_id']: raise engine.RuleError('The library identity changed; existing progress was preserved.')
             added=len(catalog['cards'].keys() - self.catalog['cards'].keys())
-            merged=merge_catalog(self.catalog,catalog,json.loads(row[1])['owned'] if row else {})
+            state=json.loads(row[1]) if row else None
+            merged=merge_catalog(self.catalog,catalog,state['owned'] if row else {})
             db.execute("UPDATE meta SET value=? WHERE key='catalog'",(encode(merged),))
-            if row: db.execute('UPDATE save SET revision=? WHERE id=1',(revision+1,))
+            if row:
+                wardrobe.reconcile(state,merged)
+                events=state.pop('journal',[]);state['journal']=[]
+                db.executemany('INSERT INTO events(at,body) VALUES (?,?)',[(time.time(),encode(e)) for e in events])
+                db.execute('UPDATE save SET revision=?,body=? WHERE id=1',(revision+1,encode(state)))
             db.execute('INSERT INTO events(at,body) VALUES (?,?)',(time.time(),encode({'kind':'catalog_refreshed','added':added})))
             stamp=uuid.uuid4().hex
             db.execute("INSERT OR REPLACE INTO meta VALUES ('catalog_stamp',?)",(stamp,))
@@ -269,6 +275,7 @@ class GameStore:
             state=migrations.migrate(payload['save']['state'])
             cat=merge_catalog(payload['catalog'],self.source_catalog,state['owned'])
             migrations.validate(state,cat)
+            wardrobe.reconcile(state,cat)
             if state.get('night'): state['night']['paused']=True
             history=payload.get('history',[])
             if not isinstance(history,list) or len(history)>2000000 or any(not isinstance(e,dict) for e in history): raise ValueError()

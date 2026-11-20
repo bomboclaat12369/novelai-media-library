@@ -31,13 +31,14 @@ async function performAct(action,body={},quiet=false){
  const id=crypto.randomUUID();
  try{
   const r=await fetch('/game/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Game-Token':boot.token},body:JSON.stringify({action,body,id,revision})});
-  const before=derived.evolutions||{};
+  const before=derived.evolutions||{},oldWardrobe=derived.wardrobe;
   const result=await r.json();accept(result);
   if(!r.ok)throw new Error(result.error||'The action could not be completed.');
   render();if(!quiet&&action==='upgrade')notify('Facility upgraded. Your new capacity is ready.');
   const gained=Object.entries(derived.evolutions||{}).filter(([id,line])=>before[id]&&line.forms.length>before[id].forms.length);
   if(gained.length)notify(gained.map(([id,line])=>card(id).name+' · Form '+line.forms.length+'/'+line.total+' earned').join(' · '));
   announceDecision();
+  if(typeof announceOutfit==='function')announceOutfit(oldWardrobe);
  }catch(e){notify(e.message);const r=await fetch('/game/api/bootstrap');if(r.ok){boot=await r.json();accept(boot);render();}}
  finally{busy=false;}
 }
@@ -47,7 +48,7 @@ function pollGame(){
  if(save?.phase==='night'&&!save.night.paused){act('tick',{},true);return;}
  actionQueue=actionQueue.then(async()=>{
   busy=true;
-  try{const r=await fetch('/game/api/state');if(r.ok){const current=await r.json();if(current.revision!==revision){accept(current);render();announceDecision();}}}
+  try{const r=await fetch('/game/api/state');if(r.ok){const current=await r.json();if(current.revision!==revision){const oldWardrobe=derived.wardrobe;accept(current);render();announceDecision();if(typeof announceOutfit==='function')announceOutfit(oldWardrobe);}}}
   catch{}finally{busy=false;}
  });
 }
@@ -120,7 +121,7 @@ const navigation=[['club','◇','The club'],['team','♧','Your team'],['packs',
 function layout(content){return `<div class="layout ${screen==='club'?'illustrated-layout':''}"><aside class="sidebar">${brand()}<nav class="nav" aria-label="Game sections">${navigation.map(([id,icon,title])=>`<button data-screen="${id}" class="${screen===id?'active':''}"><span class="symbol">${icon}</span>${title}</button>`).join('')}</nav><div class="sidebar-bottom"><div class="save-dot">● Saved on this computer</div><p>${boot.catalog.demo?'Demo catalog · placeholder art':'Library catalog · read-only'}</p><a href="/game/api/export">Export game save ↗</a><p>Club · Studio · Resort</p></div></aside><div class="main"><header class="topbar"><div class="breadcrumb">Your business <span class="muted">/</span> ${navigation.find(n=>n[0]===screen)[2]}</div><div class="topstats"><span class="pill">${save.phase==='night'?'NIGHT IN PROGRESS':'PREPARATION'} · DAY ${save.day}</span><span class="amount">${money(save.cash)}</span><small>${Object.keys(save.people).length} girls · ${Object.keys(save.owned).length} cards</small><button class="ghost small" data-action="restart-game" ${boot.restartable?'':'disabled'} title="${boot.restartable?'Load local updates and reconnect automatically':'Reopen the updated Windows launcher once to enable game restarts'}">Restart game</button></div></header><main class="content">${content}</main></div></div>`;}
 function staffHTML(owner){
  const p=person(owner),w=save.people[owner],c=card(w.card);
- return `<article class="staff c${p.color}">${portrait(c,`<span class="badge">${rarities[c.rarity]}</span>`)}<div class="staffinfo"><h3>${escapeHTML(p.name)}</h3><small>Career level ${1+Math.floor(w.xp/100)} · ${escapeHTML(specialties[c.specialty])}</small><div class="energy"><span style="width:${w.energy}%"></span></div><small>Energy ${Math.round(w.energy)}/100</small><label for="role-${escapeHTML(owner)}">Tonight's assignment · ${escapeHTML(derived.assignments[owner])}</label><select id="role-${escapeHTML(owner)}" data-plan="${escapeHTML(owner)}" ${save.phase!=='prepare'||['studio','resort'].includes(derived.assignments[owner])?'disabled':''}>${[['room','Private room'],['lounge','Lounge'],['rest','Rest & recover'],['train','Training · $15']].map(([v,l])=>`<option value="${v}" ${w.role===v?'selected':''}>${l}</option>`).join('')}</select><label for="card-${escapeHTML(owner)}">Active card · ${ownedFor(owner).length} owned</label><select id="card-${escapeHTML(owner)}" data-equip="${escapeHTML(owner)}" ${save.phase!=='prepare'?'disabled':''}>${ownedFor(owner).map(id=>`<option value="${escapeHTML(id)}" ${id===w.card?'selected':''}>${escapeHTML(specialties[card(id).specialty])} · ${rarities[card(id).rarity]} · ${card(id).source==='duo'?'Duo · ':''}${escapeHTML(card(id).name)}</option>`).join('')}</select><button class="ghost small full" style="margin-top:10px" data-action="inspect" data-card="${escapeHTML(c.id)}">View active card</button></div></article>`;
+ return `<article class="staff c${p.color}">${portrait(c,`<span class="badge">${rarities[c.rarity]}</span>`)}<div class="staffinfo"><h3>${escapeHTML(p.name)}</h3><small>Career level ${1+Math.floor(w.xp/100)} · ${escapeHTML(specialties[c.specialty])}</small><div class="energy"><span style="width:${w.energy}%"></span></div><small>Energy ${Math.round(w.energy)}/100</small><label for="role-${escapeHTML(owner)}">Tonight's assignment · ${escapeHTML(derived.assignments[owner])}</label><select id="role-${escapeHTML(owner)}" data-plan="${escapeHTML(owner)}" ${save.phase!=='prepare'||['studio','resort'].includes(derived.assignments[owner])?'disabled':''}>${[['room','Private room'],['lounge','Lounge'],['rest','Rest & recover'],['train','Training · $15']].map(([v,l])=>`<option value="${v}" ${w.role===v?'selected':''}>${l}</option>`).join('')}</select><label for="card-${escapeHTML(owner)}">Active card · ${ownedFor(owner).length} owned</label><select id="card-${escapeHTML(owner)}" data-equip="${escapeHTML(owner)}" ${save.phase!=='prepare'?'disabled':''}>${ownedFor(owner).map(id=>`<option value="${escapeHTML(id)}" ${id===w.card?'selected':''}>${escapeHTML(specialties[card(id).specialty])} · ${rarities[card(id).rarity]} · ${card(id).source==='duo'?'Duo · ':''}${escapeHTML(card(id).name)}</option>`).join('')}</select><button class="ghost small full" style="margin-top:10px" data-action="inspect" data-card="${escapeHTML(c.id)}">View active card</button>${typeof wardrobeButton==='function'?wardrobeButton(owner):''}</div></article>`;
 }
 function legacyClub(){
  const n=save.night,active=Object.keys(save.people).filter(p=>!['rest','train'].includes(n?.assignments[p]||derived.assignments[p])).length,last=save.reports.at(-1);
@@ -176,6 +177,7 @@ function render(){
  if(focusId){const el=root.getElementById(focusId);if(el){el.focus({preventScroll:true});if(typeof el.setSelectionRange==='function'&&selection!==null)el.setSelectionRange(selection,selection);}}
  if(typeof restoreVenuePresentation==='function')restoreVenuePresentation(venueView);
  hydrateCards();if(save?.pending_pack)showPack();
+ else if(typeof refreshOpenWardrobe==='function')refreshOpenWardrobe();
 }
 function showPack(){
  const p=save.pending_pack;

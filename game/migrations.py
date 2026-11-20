@@ -2,7 +2,7 @@
 from __future__ import annotations
 import copy
 import math
-from . import engine, evolution, management, meetings
+from . import engine, evolution, management, meetings, wardrobe
 
 SCHEMA = 2
 
@@ -24,6 +24,7 @@ def migrate(original):
         state['version'] = engine.VERSION
         state.setdefault('journal', []).append({'day': state['day'], 'kind': 'save_migrated', 'from_schema': 1, 'to_schema': SCHEMA})
     management.ensure(state)
+    state.setdefault('wardrobe', wardrobe.empty())
     return state
 
 
@@ -36,6 +37,7 @@ def validate(state, catalog):
         return type(value) in (int, float) and math.isfinite(value) and low <= value <= high
 
     try:
+        wardrobe.validate(state)
         if not integer(state['day'], 1) or not finite(state['cash'], -10**12): raise ValueError()
         if state['phase'] not in ('prepare', 'night'): raise ValueError()
         if type(state['preferred_night_speed']) is not int or state['preferred_night_speed'] not in engine.NIGHT_SPEEDS:

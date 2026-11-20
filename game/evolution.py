@@ -29,6 +29,10 @@ def selected_ids(group, kind, media):
     return ids
 
 
+def form_key(ident, media_id):
+    return hashlib.sha256((ident + '\0' + media_id).encode()).hexdigest()
+
+
 def selected_forms(group, kind, ident, media, paths_for):
     forms = []
     for mid in selected_ids(group, kind, media):
@@ -37,7 +41,7 @@ def selected_forms(group, kind, ident, media, paths_for):
         if kind == 'duo' and not paths['original']:
             return []
         # Exports keep acquisition order without disclosing source filenames or trusting imported paths.
-        key = hashlib.sha256((ident + '\0' + mid).encode()).hexdigest()
+        key = form_key(ident, mid)
         forms.append({'key': key, 'media_id': mid, 'name': item.get('original_name') or item.get('filename') or mid,
                       **paths})
     return forms

@@ -22,7 +22,7 @@ if __package__ in (None,''):
 from game.catalog import demo_catalog,read_library,public_catalog
 from game.engine import PACKS,UPGRADES,NIGHT_SPEEDS,RuleError,forecast,upkeep,recurring_cost,hire_cost,upgrade_cost
 from game.store import GameStore,Conflict
-from game import bookings, evolution, management, meetings, stage_labels
+from game import bookings, evolution, management, meetings, stage_labels, wardrobe
 
 WEB=Path(__file__).resolve().parent/'web'
 PROJECT=WEB.parents[1]
@@ -67,6 +67,7 @@ class Handler(BaseHTTPRequestHandler):
                                 'hire_cost':hire_cost(s),'upgrade_costs':{k:upgrade_cost(s,k) for k in UPGRADES},
                                 'meetings':meetings.views(s,self.server.store.catalog),
                                 'evolutions':evolution.progress(self.server.store.catalog,s['owned']),
+                                'wardrobe':wardrobe.views(s,self.server.store.catalog),
                                 'duos':evolution.duo_views(self.server.store.catalog,s['owned']),**management.derived(s)}
         result['stage_labels']=self.server.store.label_info()
         return result
@@ -122,6 +123,15 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/renderer': return self.send(200,renderer_assets())
         if path=='/api/export':
             return self.send(200,self.server.store.export(),extra={'Content-Disposition':'attachment; filename="club-game-save.json"'})
+        if path.startswith('/api/outfit/'):
+            key=path.removeprefix('/api/outfit/')
+            outfit=wardrobe.OUTFITS.get(key)
+            if not outfit: return self.send(404,{'error':'Unknown outfit.'})
+            with self.server.operation_lock:
+                state=self.server.store.read()['state']
+                if not state or key not in state['wardrobe']['unlocked']:
+                    return self.send(403,{'error':'Earn this outfit to see its artwork.'})
+                return self.send(200,(wardrobe.ART_DIR/outfit['front']).read_bytes(),'image/png')
         if path.startswith('/api/image/'):
             ident=path.removeprefix('/api/image/')
             with self.server.operation_lock:

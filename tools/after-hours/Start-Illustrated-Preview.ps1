@@ -1,4 +1,4 @@
-param([switch]$NoBrowser)
+param([switch]$NoBrowser, [switch]$Wardrobe)
 $ErrorActionPreference = 'Stop'
 $reviewRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $pythonCandidates = @()
@@ -20,7 +20,9 @@ foreach ($candidate in ($pythonCandidates | Select-Object -Unique)) {
 if (!$reviewPython) { throw 'Python 3.10 or newer is needed to open this local preview.' }
 $reviewScript = Join-Path $PSScriptRoot 'preview_illustrated.py'
 $reviewArguments = @('"' + $reviewScript + '"')
+if ($Wardrobe) { $reviewArguments += '--wardrobe' }
 if (!$NoBrowser) { $reviewArguments += '--open' }
 $reviewLogs = Join-Path $reviewRoot '.release-output\illustrated-preview'
+if ($Wardrobe) { $reviewLogs = Join-Path $reviewRoot '.release-output\wardrobe-preview' }
 New-Item -ItemType Directory -Path $reviewLogs -Force | Out-Null
 Start-Process -FilePath $reviewPython -ArgumentList $reviewArguments -WorkingDirectory $reviewRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $reviewLogs 'launcher.log') -RedirectStandardError (Join-Path $reviewLogs 'launcher-error.log')

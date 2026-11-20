@@ -5,7 +5,7 @@ import math
 import random
 from .catalog import stable
 from . import management as m
-from . import evolution, flavor
+from . import evolution, flavor, wardrobe
 from . import meetings, stage_labels, bookings
 
 VERSION = '1.2.0-local'
@@ -53,7 +53,7 @@ def new_game(catalog, selected, seed=1):
             'facilities':{'rooms':1,'lounge':1,'recovery':0,'reception':0},
             'pricing':'standard', 'pending_pack':None, 'pack_counter':0, 'night':None,
             'reports':[], 'totals':{'revenue':0,'expenses':0,'packs':0,'services':0,'recovery_grants':0},
-            'journal':[]})
+            'wardrobe':wardrobe.empty(), 'journal':[]})
 
 
 def record(state, kind, **details):
@@ -335,6 +335,9 @@ def command(original,catalog,action,body=None,labels=None):
         if m.reservations(state,owner): raise RuleError('This worker is reserved by a department tonight. Cancel that reservation to reassign her.')
         state['people'][owner]['role']=role
         record(state,'assignment_changed',owner=owner,role=role)
+    elif action=='wear_outfit':
+        wardrobe.reconcile(state,catalog)
+        wardrobe.wear(state,body.get('owner'),body.get('outfit'))
     elif action=='equip':
         prep_only(state);ident=body.get('card');owner=body.get('owner')
         if owner not in state['people'] or ident not in state['owned'] or catalog['cards'][ident]['owner']!=owner:
@@ -426,4 +429,5 @@ def command(original,catalog,action,body=None,labels=None):
     else: raise RuleError('Unknown game action.')
     if action in ('start', 'decision') and state['phase'] == 'night':
         prepare_meetings(state, catalog, labels or stage_labels.bundled())
+    wardrobe.reconcile(state,catalog)
     return m.ensure(state)

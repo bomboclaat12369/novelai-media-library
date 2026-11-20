@@ -65,3 +65,11 @@
  .venue-stage{grid-template-columns:calc(var(--portrait-height) * .666667) calc(var(--portrait-height) * var(--media-ratio));gap:14px;justify-content:center}.venue-overview{grid-column:1/-1;height:auto}.venue-overview>.venue-section-head{height:38px}.illustrated-rooms{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:minmax(155px,1fr);grid-template-rows:165px;overflow-x:auto;overflow-y:hidden;flex:none}.venue-footnote{margin-top:6px}.character-heading h2{font-size:22px}.character-heading>span{font-size:11px}.venue-media h2{font-size:17px}.venue-media>.venue-section-head{gap:5px}.venue-media>.venue-section-head button{padding:7px;font-size:11px}.venue-media-footer{font-size:11px}.character-caption>small{font-size:11px}.booking-scroll{grid-template-columns:minmax(0,1fr)}.booking-scroll>.meeting-meta{grid-column:1;margin:0}.booking-tracker h2{font-size:18px}.booking-tracker .booking-timeline li{flex-basis:200px}
 }
 @media(max-width:680px){.illustrated-layout>.sidebar{padding:12px 16px}.illustrated-layout .content{padding:18px 16px}.lounge-heading h1{font-size:27px}.lounge-summary{gap:10px;flex-wrap:wrap;font-size:11px}.venue-planning summary>span,.venue-log summary>span{display:none}.lounge-heading .actions{flex-wrap:wrap}.room-name{font-size:11px}.character-caption button{font-size:11px;padding:8px 4px}}
+.character-actions{display:flex;gap:5px;flex-wrap:wrap}.character-actions button{flex:1 1 auto}
+.wardrobe-row,.outfit-goal>div{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.wardrobe-row h3{margin:0}.wardrobe-row>span,.outfit-goal small,.outfit-or{color:var(--muted);font-size:13px}
+.gym-outfit{padding:12px 0 16px}.wardrobe-outfit{padding:18px;border:1px solid var(--line);border-radius:12px}
+.wardrobe-outfit>.wardrobe-row{margin-bottom:14px}.outfit-goal progress{display:block;width:100%;height:7px;margin:8px 0;accent-color:#b9cf99}
+.outfit-goal>div>span{white-space:nowrap;font-variant-numeric:tabular-nums}.outfit-or{margin:12px 0}
+.wardrobe-art{display:block;width:100%;height:clamp(160px,41dvh,340px);object-fit:contain;margin:0 auto 12px;background:#222821;border-radius:8px}
+#toast:has(.outfit-toast-art){display:flex;align-items:center;gap:12px}.outfit-toast-art{height:56px;width:40px;object-fit:contain}
