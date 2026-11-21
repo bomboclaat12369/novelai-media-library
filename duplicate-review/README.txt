@@ -1,4 +1,16 @@
-LOCAL DUPLICATE REVIEW 2.0.40
+LOCAL DUPLICATE REVIEW 2.0.41
+
+NEW IN 2.0.41 — MATCH SHOOTS ACROSS CHANGES IN FRAMING
+- Match photos can recognize one shoot across wide views and tight crops in
+  a compact post. Several views must establish the same scene. Each crop
+  also needs matching appearance and lighting in multiple verified views,
+  consistent export settings and a numbered series or corroborating post.
+- Run Folder Organizer → Auto-match Sets → Match photos again to fill an
+  earlier partial draft when the whole shoot qualifies. Review matched photos
+  shows the added images under their destination Set.
+- For photos that still need a decision, open Review likely groups and choose
+  Finish partial Sets. Compare them with photos already in the Set, uncheck
+  any exceptions and approve the rest together.
 
 NEW IN 2.0.40 — SPLIT SHOOTS AND MATCH HISTORY
 - Go to Folder Organizer → Auto-match Sets → Review split Sets. Compare both

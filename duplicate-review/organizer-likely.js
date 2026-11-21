@@ -37,8 +37,10 @@ async function openLikelyGroups(){
  const close=button('Close',()=>likelyDialog.close());
  const tier=el('select');tier.setAttribute('aria-label','Suggestion range');
  tier.add(new Option('Closest matches','closest'));tier.add(new Option('More from post order','broader'));
+ tier.add(new Option('Finish partial Sets','partial'));
  tier.onchange=()=>task(async()=>{breadth=tier.value;session='';choices.clear();await load()});
- header.append(el('h2','Likely groups across posts'),tier,prev,next,close);
+ const heading=el('h2','Likely groups across posts');
+ header.append(heading,tier,prev,next,close);
  prev.disabled=next.disabled=true;
  likelyDialog.replaceChildren(header,body,footer);
  footer.append(status);
@@ -63,7 +65,9 @@ async function openLikelyGroups(){
   return b;
  }
  async function load(at=0, destination){
-  status.textContent='Finding cross-post groups…';
+  heading.textContent=breadth==='partial'?'Finish partial Sets':'Likely groups across posts';
+  likelyDialog.setAttribute('aria-label',heading.textContent);
+  status.textContent=breadth==='partial'?'Looking for photos from the same post…':'Finding cross-post groups…';
   try{
    const result=await api('likely-groups',{job,session,breadth,offset:at,...(destination===undefined?{}:{destination})});
    if(closed||!likelyDialog.open)return;
@@ -109,7 +113,7 @@ async function openLikelyGroups(){
    footer.append(button('Undo last review',()=>task(async()=>{await mutate('undo');dirty=true;await restart()})));
   }
   if(!page.total){
-   status.textContent='No pending cross-post groups.';
+   status.textContent=breadth==='partial'?'No partial Sets with suggested photos.':'No pending cross-post groups.';
    body.append(el('p',breadth==='closest'?'Choose More from post order to look for additional groups.':'Other unmatched photos are available in Review unmatched photos.'));
    return;
   }
@@ -170,7 +174,7 @@ async function openLikelyGroups(){
   updateApprove();
   const explanation=el('details'),cal=page.training;
   explanation.append(el('summary','How suggestions are ranked'));
-  const wording=cal.adapted?'Workbench tuned outfit and setting weights using confirmed Sets. On '+cal.held_out_sets+
+  const wording=breadth==='partial'?'Suggestions come from a single post with photos already in the same Set. Each suggested photo has at least two visual matches in that Set.':cal.adapted?'Workbench tuned outfit and setting weights using confirmed Sets. On '+cal.held_out_sets+
    ' separate Sets, the first cross-post reference matched the shoot '+Math.round(100*cal.baseline)+'% before tuning and '+
    Math.round(100*cal.candidate)+'% after tuning, averaged per Set.':'Workbench is using the standard outfit and setting weights. It checks possible adjustments using confirmed Sets from different posts.';
   explanation.append(el('p',wording));body.append(explanation);

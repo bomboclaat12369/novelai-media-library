@@ -27,6 +27,9 @@ class ControlledScene:
     def feature(self, ident):
         return None, None, None, np.array([1., 0.])
 
+    def style(self, ident):
+        return None
+
     def pair(self, a, b):
         if self.views.get(a, a) == self.views.get(b, b):
             return {'inliers': 48, 'area': .31}

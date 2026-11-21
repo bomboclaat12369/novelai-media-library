@@ -11,16 +11,60 @@ from PIL import Image, ImageOps
 
 from engine import linked, stat_key
 
-RECIPE = 'shoot-scene-rootsift-v3'
+RECIPE = 'shoot-scene-rootsift-v4'
 SIZE = 720
 
 
-def describe(path):
+def tone_profile(pixels):
+    """Compare lighting and color in shadows, midtones and highlights across crops."""
+    rgb = cv2.resize(pixels, (32, 32), interpolation=cv2.INTER_AREA)[2:29, 2:30]
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2Lab).reshape(-1, 3)
+    light = lab[:, 0]
+    low, high = np.quantile(light, [.25, .70])
+    if high - low < 10:
+        return None
+    bins = np.clip((lab[:, 1:].astype(np.int32) - 64) * 24 // 128, 0, 23)
+    index = bins[:, 0] * 24 + bins[:, 1]
+    result = []
+    for band, weight in ((light <= low, .20), ((light >= low) & (light <= high), .35), (light >= high, .45)):
+        hist = np.bincount(index[band], minlength=576).reshape(24, 24).astype(np.float32)
+        hist = cv2.GaussianBlur(hist, (5, 5), .9)
+        result.append(np.sqrt(hist * (weight / hist.sum())).ravel())
+    return np.concatenate(result)
+
+
+def preview(path):
     with Image.open(path) as source:
+        # The same export settings can corroborate a numbered source. They do
+        # not establish that the photos were captured by the same camera.
+        tables = getattr(source, 'quantization', None)
+        export = (tuple(sorted(source.size)), tuple(tuple(tables[k]) for k in sorted(tables))) if tables else None
         source.draft('RGB',(SIZE,SIZE))
         image = ImageOps.exif_transpose(source)
         image.thumbnail((SIZE,SIZE),Image.Resampling.LANCZOS)
         pixels = np.asarray(image.convert('RGB'))
+    return pixels, export
+
+
+def photo_style(pixels, export):
+    h, w = pixels.shape[:2]
+    hsv = cv2.cvtColor(pixels, cv2.COLOR_RGB2HSV)[round(h*.07):round(h*.89), round(w*.06):round(w*.94)]
+    chroma = (hsv[:,:,1] > 55) & (hsv[:,:,2] > 40)
+    hue = hsv[:,:,0].astype(np.int32) * 18 // 180
+    bins = np.bincount(hue[chroma], minlength=18).astype(np.float32)
+    bins = (2*bins + np.roll(bins,1) + np.roll(bins,-1)) / 4
+    palette = np.sqrt(bins/bins.sum()) if bins.sum() >= .035*h*w else None
+    small = cv2.resize(pixels, (128, 128), interpolation=cv2.INTER_AREA)[5:-9,5:-5].reshape(-1,3)
+    light = small @ np.array([.299,.587,.114], dtype=np.float32)
+    lo, hi = np.percentile(light, [98, 99.5])
+    # The color of bright surfaces distinguishes a shared lighting treatment
+    # from two unrelated photographs dominated by the same midtones.
+    highlight = np.median(small[(light >= lo) & (light <= hi)], axis=0)
+    return palette, tone_profile(pixels), export, highlight
+
+
+def describe(path):
+    pixels, export = preview(path)
     h,w = pixels.shape[:2]
     if min(h,w)<70:
         return None
@@ -32,21 +76,14 @@ def describe(path):
         return None
     desc = np.sqrt(desc/np.maximum(desc.sum(axis=1,keepdims=True),1e-8))
     points = np.array([k.pt for k in keys],np.float32)
-    # Color composition complements static keypoints on close crops or a reverse view.
-    hsv=cv2.cvtColor(pixels,cv2.COLOR_RGB2HSV)
-    hbin=hsv[:,:,0].astype(np.int32)*18//180
-    chroma=(hsv[:,:,1]>55)&(hsv[:,:,2]>40)&(mask!=0)
-    bins=np.bincount(hbin[chroma],minlength=18).astype(np.float32)
-    bins=(2*bins+np.roll(bins,1)+np.roll(bins,-1))/4
-    palette=np.sqrt(bins/bins.sum()) if bins.sum()>=.035*h*w else None
-    return points,desc,(w,h),palette
+    return points, desc, (w,h), *photo_style(pixels, export)
 
 
 def geometric_support(left,right):
     if left is None or right is None:
         return None
-    lp,ld,ls,_=left
-    rp,rd,rs,_=right
+    lp,ld,ls=left[:3]
+    rp,rd,rs=right[:3]
     matcher=cv2.BFMatcher(cv2.NORM_L2)
     def distinctive(x,y):
         return {(a.queryIdx,a.trainIdx) for a,b in matcher.knnMatch(x,y,k=2) if a.distance<.80*b.distance}
@@ -82,6 +119,7 @@ class SceneEvidence:
         self.analysis_recipe=analysis_recipe
         self.recovered=recovered
         self.features=OrderedDict()
+        self.styles=OrderedDict()
         self.pairs={}
         self.cache_path=cache_path
         self.cache=None
@@ -130,7 +168,26 @@ class SceneEvidence:
     def close(self):
         if self.cache is not None:self.cache.close()
         self.features.clear()
+        self.styles.clear()
         self.pairs.clear()
+
+    def style(self, ident):
+        stamp = self.stamp(ident)
+        known = self.features.get(ident)
+        if known is not None and known[0] == stamp:
+            return known[1][3:] if known[1] is not None else None
+        cached = self.styles.get(ident)
+        if cached is None or cached[0] != stamp:
+            try:
+                value = photo_style(*preview(self.items[ident]['path'])) if stamp else None
+            except (OSError, ValueError, KeyError, cv2.error, Image.DecompressionBombError):
+                self.unreadable.add(ident)
+                value = None
+            self.styles[ident] = (stamp, value)
+        self.styles.move_to_end(ident)
+        if len(self.styles) > 1024:
+            self.styles.popitem(last=False)
+        return self.styles[ident][1]
 
     def feature(self,ident):
         stamp = self.stamp(ident)

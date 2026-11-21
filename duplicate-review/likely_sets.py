@@ -1,4 +1,4 @@
-"""Read-only cross-post shoot proposals for explicit human review."""
+"""Read-only shoot proposals for explicit human review."""
 from collections import Counter, defaultdict
 import hashlib
 import json
@@ -7,6 +7,7 @@ import numpy as np
 
 from bulk.sources import original_sequence
 from set_matching import WEIGHTS, evidence_vectors, independent_photos, post_ids
+from source_shoots import source_orders
 
 RULE = 'cross-post-review-v1'
 MAX_PHOTOS = 12
@@ -151,7 +152,49 @@ def proposal_key(items, members, target):
     return 'likely:' + hashlib.sha256(payload.encode()).hexdigest()
 
 
-def propose(items, vectors, sets, excluded, mixed, broader=False):
+def partial_posts(items, valid, owners, free, refs, mixed, dismissed):
+    """Offer unassigned companions to one known Set in a compact source post."""
+    available, references = set(free), set(refs)
+    offers = []
+    orders = source_orders(items, mixed)
+    for post, order in sorted(orders.items(), key=lambda row: (len(row[1]), row[0])):
+        if len(order) > 24 or not available.intersection(order):
+            continue
+        targets = {gid for i in order for gid in owners.get(i, ())}
+        anchors = [i for i in order if i in references]
+        if len(targets) != 1 or len(anchors) < 2 or not independent_photos(items, anchors):
+            continue
+        target = next(iter(targets))
+        matrix = np.stack([valid[i] for i in anchors]).reshape(-1, 3, 768)
+        evidence = {}
+        for i in order:
+            if i not in available or not independent_photos(items, [i, *anchors]):
+                continue
+            channels = np.einsum('jkd,kd->jk', matrix, valid[i].reshape(3,768)) / WEIGHTS
+            scores = channels @ WEIGHTS
+            witnesses = np.flatnonzero((channels[:,0] >= .65) & (scores >= .57))
+            if len(witnesses) >= 2:
+                top = sorted(witnesses, key=lambda k: -scores[k])[:3]
+                evidence[i] = [{'id':anchors[k], 'post':post, 'score':round(float(scores[k]),4)} for k in top]
+        members = list(evidence)
+        if not members:
+            continue
+        key = proposal_key(items, members, target)
+        if key in dismissed:
+            continue
+        used = {w['id'] for ws in evidence.values() for w in ws}
+        shown = sorted(used, key=lambda a:(-sum(w['id']==a for ws in evidence.values() for w in ws), order.index(a)))[:4]
+        involved = used | set(members)
+        offers.append({'key':key, 'members':members, 'target':target, 'references':shown,
+                       'posts':dict.fromkeys(involved, post), 'positions':{i:n for n,i in enumerate(order,1) if i in involved},
+                       'reference_evidence':evidence, 'alternatives':[], 'source_links':[],
+                       'partial_post':post, 'rule_version':'partial-post-review-v1',
+                       'strength':min(ws[1]['score'] for ws in evidence.values())})
+        available.difference_update(members)
+    return sorted(offers, key=lambda row:(-row['strength'], -len(row['members']), row['key']))
+
+
+def propose(items, vectors, sets, excluded, mixed, broader=False, partial=False, dismissed=()):
     valid = evidence_vectors(items, vectors)
     home, positions, near = source_layout(items, mixed)
     owners = defaultdict(set)
@@ -176,6 +219,8 @@ def propose(items, vectors, sets, excluded, mixed, broader=False):
                   and len(owners[i]) == 1 and not sets[next(iter(owners[i]))].get('in_purgatory'))
     ids = free + refs
     default = {'adapted': False, 'weights': [.45,.35,.20]}
+    if partial:
+        return partial_posts(items, valid, owners, free, refs, mixed, dismissed), default
     if not free or len({home[i] for i in ids}) < 2:
         return [], default
     nfree = len(free)
@@ -326,6 +371,8 @@ def propose(items, vectors, sets, excluded, mixed, broader=False):
 
 
 def review_queue(items, vectors, sets, excluded, mixed, dismissed=(), breadth='closest'):
+    if breadth == 'partial':
+        return propose(items, vectors, sets, excluded, mixed, partial=True, dismissed=dismissed)
     rows, training = propose(items, vectors, sets, excluded, mixed)
     rows = [r for r in rows if r['key'] not in dismissed]
     if breadth == 'broader':

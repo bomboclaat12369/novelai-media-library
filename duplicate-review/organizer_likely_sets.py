@@ -52,7 +52,7 @@ def load_page(organizer, body):
             return page(organizer, session(organizer, body, state), body)
         organizer.refresh_library_placement(force=True)
         breadth = body.get('breadth','closest')
-        if breadth not in ('closest','broader'):
+        if breadth not in ('closest','broader','partial'):
             raise ValueError('Choose a group review list.')
         review = Review(organizer, state, breadth)
         with organizer.db() as db:
@@ -92,6 +92,11 @@ def page(organizer, review, body):
                     source_position=row['positions'].get(ident))
     refs = row['references'] if chosen == row['target'] else groups.get(chosen,{}).get('members',())[:4]
     reason = ''
+    if row.get('partial_post'):
+        post = row['partial_post']
+        label = organizer.posts.get(post, {}).get('label', post)
+        name = groups[row['target']]['name']
+        reason = f'Each suggested photo resembles at least two photos from {label} already in {name}.'
     if row['source_links']:
         link = next((p for p in row['source_links'] if 'source' in p),row['source_links'][0])
         if 'source' in link:
@@ -147,7 +152,7 @@ def validate(organizer, action, body, state, db):
 
 def record(organizer, db, review, row, action, selected, target=None):
     identities = set(row['posts']) | {w['id'] for values in row['reference_evidence'].values() for w in values}
-    evidence = {**row, 'rule': RULE, 'breadth':review.breadth, 'analysis_recipe': review.recipe, 'ranking': review.training,
+    evidence = {**row, 'rule': row.get('rule_version', RULE), 'breadth':review.breadth, 'analysis_recipe': review.recipe, 'ranking': review.training,
                 'inventory': organizer.bound[0], 'collection': organizer.collection_id,
                 'source_hashes': {i: organizer.catalog[i]['sha'] for i in identities},
                 'selected': list(selected), 'destination': target}

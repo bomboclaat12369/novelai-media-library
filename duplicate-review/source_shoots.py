@@ -5,6 +5,7 @@ import numpy as np
 
 from bulk.sources import original_sequence
 from set_matching import WEIGHTS, channel_agreement, independent_photos, post_ids
+from shoot_context import complete_shoot, numbered_series
 from shoot_scene import RECIPE
 
 MAX_GROUP = 32
@@ -48,11 +49,19 @@ def repeated_blocks(ids,post,items,positions):
     return blocks
 
 
-def verify_span(ids,vectors,scene,whole,corroborated=False):
+def verify_span(ids,vectors,scene,whole,corroborated=False,numbered=False):
     n=len(ids)
     mat=np.stack([vectors[i] for i in ids]).reshape(n,3,768)
     values=np.stack([mat[:,k]@mat[:,k].T/WEIGHTS[k] for k in range(3)],axis=-1)
     values[np.arange(n),np.arange(n)]=np.nan
+    proof = verify_visible_scene(ids, values, scene, whole, corroborated)
+    if proof is None and whole:
+        return complete_shoot(ids, values, scene, numbered, corroborated)
+    return proof
+
+
+def verify_visible_scene(ids, values, scene, whole, corroborated):
+    n = len(ids)
     if (np.any(np.nanmin(values,axis=(0,1)) < [.57,.33,.57])
             or np.any(np.nanmedian(values,axis=1).min(axis=0)<[.68,.53,.68])):
         return None
@@ -151,7 +160,9 @@ def source_matches(items,vectors,groups,excluded,mixed,scene,progress=None):
             hits[key]['posts'].add(post)
             continue
         blocks=repeated_blocks(ids,post,items,positions)
-        evidence=scene.check_group(ids,(whole,bool(blocks)),lambda:verify_span(ids,vectors,scene,whole,bool(blocks)))
+        numbered = whole and numbered_series(items, ids, post)
+        options = (whole, bool(blocks), numbered)
+        evidence = scene.check_group(ids, options, lambda: verify_span(ids, vectors, scene, *options))
         if evidence:
             window = [positions[post][ids[0]] + 1, positions[post][ids[-1]] + 1]
             hits[key] = {'members': list(ids), 'posts': {post, *blocks}, 'target': target,
@@ -186,6 +197,10 @@ def combine(original,hits,items,vectors,groups):
                     for gid in ref_owner[refs[j]]:
                         if gid!=target:
                             plausible[gid].add((n,j))
+            crops = hit['scene'].get('crop_witnesses', {})
+            if any(any(sum(hit['members'][n] == crop for n, j in pairs) >= 2 for crop in crops)
+                   for pairs in plausible.values()):
+                continue
             if any(len({n for n,j in pairs})>=2 and len({j for n,j in pairs})>=2 for pairs in plausible.values()):
                 continue
         accepted.append(hit)

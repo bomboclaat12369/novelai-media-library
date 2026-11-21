@@ -65,7 +65,12 @@ const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/play
     await dialog.getByRole('combobox',{name:'Suggestion range'}).selectOption('broader');
     await page.waitForFunction(()=>!busy);
     assert.match(await status.textContent(),/No pending cross-post groups/);
-    await dialog.getByRole('combobox',{name:'Suggestion range'}).selectOption('closest');
+    await dialog.getByRole('combobox',{name:'Suggestion range'}).selectOption('partial');
+    const partial=page.getByRole('dialog',{name:'Finish partial Sets',exact:true});
+    await partial.getByRole('heading',{name:'Finish partial Sets',exact:true}).waitFor();
+    await page.waitForFunction(()=>!busy);
+    assert.match(await partial.getByRole('status').textContent(),/No partial Sets|suggested photos left/);
+    await partial.getByRole('combobox',{name:'Suggestion range'}).selectOption('closest');
     await page.waitForFunction(()=>!busy);
     await picker.selectOption('library:existing');
     await page.waitForFunction(()=>document.querySelector('#likelyGroupsDialog .match-examples img')&&!busy);

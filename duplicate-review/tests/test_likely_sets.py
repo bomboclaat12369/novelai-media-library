@@ -162,6 +162,22 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(self.org.sets(),baseline)
         self.assertEqual(self.org.state()['selection'],[self.ids[2]])
 
+    def test_finish_partial_sets_uses_one_destination_and_approval_with_undo(self):
+        with self.org.db() as db:
+            group = {'id':'partial', 'name':'Partial', 'members':self.ids[9:11], 'auto_members':self.ids[9:11]}
+            db.execute('INSERT INTO sets VALUES (?,?,?)', (self.org.scope, 'partial', json.dumps(group)))
+        before = self.org.sets()
+        page = self.get(breadth='partial')
+        self.assertEqual(self.org.sets(), before)
+        self.assertEqual(page['destination'], 'partial')
+        self.assertEqual([p['id'] for p in page['photos']], self.ids[11:12])
+        self.assertEqual({p['id'] for p in page['references']}, set(self.ids[9:11]))
+        self.act('approve_likely', session=page['session'], key=page['key'], ids=self.ids[11:12], target='partial')
+        self.assertEqual(set(self.org.sets()['partial']['members']), set(self.ids[9:12]))
+        self.assertEqual(set(self.org.sets()['partial']['auto_members']), set(self.ids[9:11]))
+        self.act('undo')
+        self.assertEqual(self.org.sets(), before)
+
     def test_dismiss_survives_restart_and_undo_and_does_not_reject_photos(self):
         page=self.get()
         self.act('dismiss_likely',session=page['session'],key=page['key'])

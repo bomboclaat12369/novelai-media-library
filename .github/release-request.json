@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "id": "workbench-split-sets-match-history-2026-11-21",
+  "id": "workbench-whole-shoot-framing-2026-11-21",
   "components": [
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Review possible split shoots side by side, combine drafts or keep them separate. Matching holds likely second fragments for review. Match history can find automatically created Sets and automatically placed photos after a rename, move, or merge."
+  "workbench_notes": "Auto-match Sets recognizes shoots across changes in framing and fills qualifying partial Sets. When the remaining photos need your input, Review likely groups → Finish partial Sets lets you compare and approve same-post companions together."
 }
