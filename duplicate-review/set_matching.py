@@ -168,7 +168,7 @@ def match_sets(items, vectors, groups, excluded, mixed_posts, ordered_posts=None
                 runs[frozenset(run)][post] = [positions[run[0]],positions[run[-1]]]
     references = sorted(i for i in owners if i in vectors)
     reference_groups = [next(iter(owners[i])) if len(owners[i]) == 1 else None for i in references]
-    auto = {i for g in groups.values() for i in g.get('auto_members', [])}
+    auto = {i for g in groups.values() for i in set(g.get('auto_members', []))-set(g.get('auto_reviewed', []))}
     eligible_anchors = defaultdict(list)
     for j, ident in enumerate(references):
         gid = reference_groups[j]

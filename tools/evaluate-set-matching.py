@@ -70,7 +70,7 @@ def inventories(workbench, library, label_source='library'):
                 if not sha or aliases & discarded or entry.get('quarantine_only') or entry.get('media_type','image') != 'image':
                     continue
                 # Hide Library membership, Library paths, and any previous proposals from the matcher.
-                items[ident] = {k:entry[k] for k in ('sha','analysis_sha','sources','origins','path','copies') if k in entry}
+                items[ident] = {k:entry[k] for k in ('sha','analysis_sha','sources','origins','path','stamp','copies') if k in entry}
                 digests[ident] = entry.get('analysis_sha', sha)
                 known = labels[owner].get(sha, set()) if label_source=='library' else draft_labels[scope].get(ident,set())
                 if len(known) == 1:
@@ -220,12 +220,59 @@ def lookalikes(items, vectors, truth):
     return dict(counts)
 
 
+def scene_lookalikes(items, vectors, truth, mixed_posts):
+    """Deliberately insert a similar photo or a second shoot with a different known Set."""
+    from set_matching import evidence_vectors, independent_photos
+    from shoot_scene import SceneEvidence
+    from source_shoots import source_spans, verify_span
+
+    vectors = evidence_vectors(items, vectors)
+    known = [i for i in vectors if i in truth]
+    if not known:
+        return {}
+    matrix = np.stack([vectors[i] for i in known])
+    scene = SceneEvidence(items)
+    counts = Counter()
+    try:
+        candidates = [ids for _, ids, _ in source_spans(items, vectors, mixed_posts)
+                      if all(i in truth and i in vectors for i in ids)
+                      and len({truth[i] for i in ids}) == 1 and independent_photos(items, ids)]
+        seen, shoots = set(), []
+        for ids in sorted(candidates, key=lambda group: (-len(group), group[0])):
+            gid = truth[ids[0]]
+            if gid not in seen and verify_span(ids, vectors, scene, True, True):
+                seen.add(gid)
+                shoots.append(ids)
+        counts['verified_origin_shoots'] = len(shoots)
+        for ids in shoots:
+            gid = truth[ids[0]]
+            mean = np.mean([vectors[i] for i in ids], axis=0)
+            ranked = np.argsort(-(matrix @ mean))
+            other = next((known[k] for k in ranked if truth[known[k]] != gid), None)
+            cases = {}
+            if other is not None:
+                cases['intruder'] = ids[:12] + [other]
+            rivals = [r for r in shoots if truth[r[0]] != gid]
+            if rivals:
+                nearest = max(rivals, key=lambda r: np.mean([vectors[i] @ mean for i in r]))
+                cases['two_shoots'] = ids[:6] + nearest[:6]
+            for name, group in cases.items():
+                counts[name] += 1
+                for repeated in (False, True):
+                    key = 'false_' + name + ('_repeated' if repeated else '_single_post')
+                    counts[key] += int(verify_span(group, vectors, scene, True, repeated) is not None)
+    finally:
+        scene.close()
+    return dict(counts)
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--workbench',required=True,type=Path)
     p.add_argument('--library',required=True,type=Path,help='library.json to read')
     p.add_argument('--split',choices=('inventory','development','validation'),required=True)
     p.add_argument('--lookalikes',action='store_true')
+    p.add_argument('--source-scenes',action='store_true',help='Check original photos locally with the multi-angle matcher')
     p.add_argument('--labels',choices=('library','workbench'),default='library')
     args=p.parse_args()
     for pos, items, vectors, truth, sequences in inventories(args.workbench,args.library,args.labels):
@@ -234,12 +281,25 @@ def main():
             continue
         if (pos%2 == 0) != (args.split=='development'):
             continue
+        mixed={'forum:smg:603571'}
         if args.lookalikes:
-            print(json.dumps({'profile':pos,'lookalikes':lookalikes(items,vectors,truth)}),flush=True)
+            results = scene_lookalikes(items, vectors, truth, mixed) if args.source_scenes else lookalikes(items, vectors, truth)
+            print(json.dumps({'profile':pos,'lookalikes':results}),flush=True)
             continue
         from set_matching import match_sets
         for mode,groups in [('new',{}),('new_and_started',seeded_sets(truth))]:
-            plan=match_sets(items,vectors,groups,set(),{'forum:smg:603571'},sequences)
+            plan=match_sets(items,vectors,groups,set(),mixed,sequences)
+            if args.source_scenes:
+                from shoot_scene import SceneEvidence
+                from source_shoots import combine,source_matches
+                from set_matching import evidence_vectors
+                scene=SceneEvidence(items)
+                try:
+                    valid=evidence_vectors(items,vectors)
+                    hits=source_matches(items,valid,groups,set(),mixed,scene)
+                    plan=combine(plan,hits,items,valid,groups)
+                finally:
+                    scene.close()
             print(json.dumps({'profile':pos,'mode':mode,**score(plan,truth,groups)}),flush=True)
 
 if __name__=='__main__':

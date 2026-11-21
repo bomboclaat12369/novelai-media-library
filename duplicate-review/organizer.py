@@ -32,6 +32,7 @@ class Organizer:
         self.lock=threading.RLock();self.cancel=threading.Event();self.thread=None
         self.job={'running':False,'phase':'Saved inventory ready','done':0,'total':0,'eta_seconds':None}
         self.library_placement=None
+        self.match_preparation=None
         self.bound=None;self.catalog={};self.posts={};self.order_cache={};self.vector_by_id={};self.quick={}
         self.encoder_type=None;self.recipe=None;self.scope='';self.revision=0;self.discarded=set();self.parked={}
         with self.db() as db:
@@ -66,6 +67,9 @@ class Organizer:
         key=(current.get('id'),len(cat))
         if self.bound==key:return
         if self.job['running']:return
+        if self.match_preparation:
+            self.match_preparation.cancel.set()
+            self.match_preparation=None
         self.bound=key;self.catalog=dict(cat);self.posts={};self.order_cache={}
         alias='section:'+current['section_id'] if current.get('section_id') else hashlib.sha256(json.dumps(current.get('config',{}).get('roots',[]),sort_keys=True).encode()).hexdigest()
         with self.db() as db:
@@ -717,6 +721,14 @@ class Organizer:
             if action=='auto_sets':
                 self.check_collection_idle(body)
                 self.refresh_library_placement(force=True)
+                if body.get('match_token'):
+                    prepared=self.match_preparation
+                    if not prepared or prepared.token!=body['match_token'] or prepared.cancel.is_set() or prepared.plan is None:
+                        raise ValueError('This analysis is no longer current. Reopen Auto-match Sets.')
+                else:
+                    with self.db() as db:prepared=organizer_auto_sets.MatchPreparation(self,state,db)
+                    prepared.collect()
+                    if prepared.plan is None:raise ValueError(prepared.status.get('error','Matching stopped.'))
             with self.db() as db:
                 if action=='auto_sets':
                     db.execute('BEGIN IMMEDIATE')
@@ -725,7 +737,9 @@ class Organizer:
                     if int(body.get('revision',-1))!=state.get('revision',0):
                         raise ValueError('Review changed in another window. Reopen Auto-match Sets.')
                     previous_undo=copy.deepcopy(state.get('undo'))
-                    match_result=organizer_auto_sets.apply_matches(self,state,db)
+                    if not prepared.compatible(self,state,db):
+                        raise ValueError('The collection or its selection changed. Run matching again to use your latest choices.')
+                    match_result=organizer_auto_sets.apply_matches(self,state,db,prepared)
                     if not match_result['matched']:
                         db.commit()
                         return dict(self.summary(), auto_result=match_result)
@@ -789,7 +803,7 @@ class Organizer:
                         moved[sid]=old_other[0] if old_other else None
                         other=dict(other,members=[i for i in other['members'] if i not in adding],
                             removed_members=list(set(other.get('removed_members',[]))|adding.intersection(other['members'])),updated=time.time())
-                        for field in ('auto_members','auto_pending'):
+                        for field in ('auto_members','auto_pending','auto_reviewed'):
                             if field in other:other[field]=[i for i in other[field] if i not in adding]
                         db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,sid,json.dumps(other)))
                     state['undo']['moved']=moved
@@ -800,7 +814,7 @@ class Organizer:
                     favorite=self.favorite(body.get('favorite',(previous or {}).get('favorite',state.get('new_favorite',False))))
                     group=dict(previous or {},id=ident,name=name,colors=set_name_colors(name,colors),categories=categories,favorite=favorite,members=members,updated=stamp,library_id=(previous or {}).get('library_id'))
                     group['removed_members']=[i for i in group.get('removed_members',[]) if i not in ids]
-                    for field in ('auto_members','auto_pending'):
+                    for field in ('auto_members','auto_pending','auto_reviewed'):
                         if field in group:group[field]=[i for i in group[field] if i not in ids]
                     if previous is None:group['created']=stamp
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,ident,json.dumps(group)))
@@ -818,6 +832,17 @@ class Organizer:
                     if 'in_purgatory' in body and self.favorite(body['in_purgatory'])!=bool(group.get('in_purgatory')):group['purgatory_edited']=True
                     group.update(name=name,colors=set_name_colors(name,colors),categories=categories,favorite=favorite,in_purgatory=self.favorite(body.get('in_purgatory',group.get('in_purgatory',False))),updated=time.time())
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)))
+                elif action=='confirm_matches':
+                    target=str(body.get('target',''))
+                    old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
+                    if not old:raise ValueError('This Set has changed. Reopen match review.')
+                    group=json.loads(old[0]);ids=self.valid_ids(body.get('ids',[]))
+                    if not ids or not set(ids)<=set(group.get('auto_members',[])).intersection(group['members']):
+                        raise ValueError('Choose current automatic matches in this Set.')
+                    state['undo']={'action':'set','id':target,'previous':old[0],'selection':state.get('selection',[]),'match_review':True}
+                    group['auto_reviewed']=list(dict.fromkeys(group.get('auto_reviewed',[])+ids))
+                    db.execute('UPDATE sets SET data=? WHERE scope=? AND id=?',(json.dumps(group),self.scope,target))
+                    tracking.journal().event(db,'decision.confirm_automatic_matches',self.scope,{'set':target,'members':ids})
                 elif action=='remove':
                     target=str(body.get('target',''));old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
                     if not old:raise ValueError('Only locally saved drafts can be edited here.')
@@ -826,15 +851,23 @@ class Organizer:
                     if not ids or not set(ids)<=set(group['members']):raise ValueError('Select current members of this Set.')
                     if group.get('library_id') and not set(ids)<=set(group.get('auto_pending',[])):
                         raise ValueError('Existing library membership is preserved; edit removals in the media library.')
-                    state['undo']={'action':'set','id':target,'previous':old[0],'selection':ids}
+                    reviewing=bool(body.get('match_review'))
+                    if reviewing and not set(ids)<=set(group.get('auto_pending',[])):
+                        raise ValueError('Only pending draft matches can be returned to unmatched.')
+                    if reviewing and group.get('library_id'):
+                        self.refresh_library_placement(force=True)
+                        if any(group['library_id'] in organizer_auto_sets.live_memberships(self,i) for i in ids):
+                            raise ValueError('This photo is already in this Library Set. Use the Library to change its membership.')
+                    state['undo']={'action':'set','id':target,'previous':old[0],'selection':state.get('selection',[]) if reviewing else ids,'match_review':reviewing}
                     holds={'auto-hold:'+h for i in ids for h in self.hashes(i)}
                     old_holds={r[0] for r in db.execute("SELECT id FROM rejected WHERE scope=? AND context='auto-hold'",(self.scope,))}
                     state['undo']['new_auto_holds']=sorted(holds-old_holds)
                     db.executemany('INSERT OR IGNORE INTO rejected VALUES (?,?,?)',((self.scope,'auto-hold',v) for v in holds))
-                    for key in ('auto_pending','auto_members'):
+                    for key in ('auto_pending','auto_members','auto_reviewed'):
                         if key in group:group[key]=[i for i in group[key] if i not in ids]
                     group['members']=[i for i in group['members'] if i not in ids];group['updated']=time.time()
-                    db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)));state['selection']=[]
+                    db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)))
+                    if not reviewing:state['selection']=[]
                 elif action in ('discard','restore_discard','unsort','restore_unsorted'):
                     ids=body.get('ids',[])
                     if action=='unsort' and body.get('remaining'):
@@ -933,6 +966,37 @@ class Organizer:
             summary=self.summary()
             if match_result is not None:summary['auto_result']=match_result
             return summary
+
+    def prepare_matches(self,body):
+        with self.lock,self.bulk.lock:
+            self.bind();self.check_collection_idle(body)
+            state=self.state()
+            if state.get('revision',0)!=body.get('revision'):raise ValueError('Review changed. Reopen Auto-match Sets.')
+            self.refresh_library_placement(force=True)
+            prior=self.match_preparation
+            with self.db() as db:
+                if prior and not prior.cancel.is_set() and not prior.status.get('error') and prior.compatible(self,state,db):
+                    return dict(prior.status,token=prior.token)
+                prep=organizer_auto_sets.MatchPreparation(self,state,db)
+            if prior:prior.cancel.set()
+            def collect():
+                if prior and prior.thread and prior.thread.is_alive():prior.thread.join()
+                prep.collect()
+            self.match_preparation=prep
+            prep.thread=threading.Thread(target=collect,daemon=True);prep.thread.start()
+            return dict(prep.status,token=prep.token)
+
+    def match_progress(self,token,cancel=False):
+        prep=self.match_preparation
+        if not prep or prep.token!=token:raise ValueError('This matching session has ended.')
+        if cancel:prep.cancel.set()
+        return dict(prep.status)
+
+    def review_matches(self,body):
+        with self.lock,self.bulk.lock:
+            self.bind()
+            if body.get('job')!=self.bound[0]:raise ValueError('Collection changed. Reopen match review.')
+            return organizer_auto_sets.review_page(self,body)
 
     def index(self,only=None,match_request=None):
         with self.lock,self.bulk.lock:

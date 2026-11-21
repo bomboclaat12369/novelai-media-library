@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -174,3 +175,48 @@ class OrganizerAutoSetTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=2) as pool:
             self.assertEqual(sorted(pool.map(match,[self.org,other])),[0,2])
         self.assertEqual(len(self.org.sets()),3)
+
+    def test_review_reopens_old_matches_and_preserves_the_manual_selection(self):
+        with self.org.db() as db:
+            group={'id':'old','name':'Old draft','members':self.ids[4:8],
+                   'auto_members':self.ids[5:8],'auto_pending':self.ids[5:8]}
+            db.execute('INSERT INTO sets VALUES (?,?,?)',(self.org.scope,'old',json.dumps(group)))
+            tracking.journal().event(db,'decision.automatic_set_match',self.org.scope,
+                {'sets':[{'id':'old','kind':'new','members':self.ids[5:8]}]})
+        self.act('draft',ids=[self.ids[3]],new_name='Unfinished')
+        body={'job':'fixture-job','period':'latest','target':'old'}
+        page=self.org.review_matches(body)
+        self.assertEqual((page['total'],page['sets'][0]['name']),(3,'Old draft'))
+        self.assertEqual([r['id'] for r in page['examples']],[self.ids[4]])
+        self.act('confirm_matches',target='old',ids=[self.ids[5]])
+        self.assertTrue(self.org.review_matches(body)['photos'][0]['reviewed'])
+        self.act('remove',target='old',ids=[self.ids[6]],match_review=True)
+        self.assertEqual(self.org.state()['selection'],[self.ids[3]])
+        self.assertEqual(self.org.state()['new_name'],'Unfinished')
+        self.assertIn(self.ids[6],self.org.page('unmatched','unmatched')['ids'])
+        self.assertEqual(self.org.review_matches(body)['total'],2)
+        self.act('undo')
+        self.assertEqual(self.org.review_matches(body)['total'],3)
+        self.assertEqual(self.org.state()['selection'],[self.ids[3]])
+        with self.assertRaises(ValueError):
+            self.act('remove',target='old',ids=[self.ids[4]],match_review=True)
+        with self.assertRaises(ValueError):self.org.review_matches({'job':'another'})
+
+    def test_preparation_cannot_commit_after_cancellation_or_another_edit(self):
+        body={'job':'fixture-job','revision':0}
+        first=self.org.prepare_matches(body)
+        self.org.match_preparation.thread.join(10)
+        self.org.match_progress(first['token'],cancel=True)
+        with self.assertRaises(ValueError):self.act('auto_sets',match_token=first['token'])
+        self.assertEqual(len(self.org.sets()),1)
+        second=self.org.prepare_matches(body)
+        self.org.match_preparation.thread.join(10)
+        self.act('draft',ids=[self.ids[8]])
+        with self.assertRaisesRegex(ValueError,'selection changed'):self.act('auto_sets',match_token=second['token'])
+        self.assertEqual(len(self.org.sets()),1)
+        self.act('draft',ids=[])
+        third=self.org.prepare_matches(body)
+        self.org.match_preparation.thread.join(10)
+        self.org.load_vectors()
+        with self.assertRaises(ValueError):self.act('auto_sets',match_token=third['token'])
+        self.assertEqual(len(self.org.sets()),1)

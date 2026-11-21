@@ -25,6 +25,22 @@ const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/play
     await dialog.getByRole('button',{name:'Review unmatched photos'}).waitFor();
     assert.match(await dialog.getByRole('status').textContent(),/12 photos in 2 new Sets.*4 unmatched/);
     assert.equal(await page.evaluate(()=>currentId),original);
+    await dialog.getByRole('button',{name:'Review matched photos',exact:true}).click();
+    const review=page.getByRole('dialog',{name:'Review matched photos',exact:true});
+    await review.getByRole('heading',{name:'Shoot 001'}).waitFor();
+    assert.equal(await review.locator('.match-photo').count(),6);
+    await review.locator('.match-photo img').first().click();
+    await page.locator('#viewerClose').click();
+    await review.getByRole('button',{name:'Keep',exact:true}).first().click();
+    await page.waitForFunction(()=>document.querySelector('#matchedDialog [role=status]').textContent.startsWith('1 of 6'));
+    await review.getByRole('button',{name:'Return to unmatched',exact:true}).first().click();
+    await page.waitForFunction(()=>document.querySelectorAll('.match-photo').length===5);
+    await review.getByRole('button',{name:'Undo last review'}).click();
+    await page.waitForFunction(()=>document.querySelectorAll('.match-photo').length===6 && !busy);
+    await review.getByRole('button',{name:'Undo last review'}).click();
+    await page.waitForFunction(()=>document.querySelector('#matchedDialog [role=status]').textContent.startsWith('0 of 6') && !busy);
+    await review.getByRole('button',{name:'Close',exact:true}).click();
+    await page.getByRole('button',{name:'Auto-match Sets',exact:true}).click();
     await dialog.getByRole('button',{name:'Review unmatched photos'}).click();
     await page.waitForFunction(()=>currentKind==='unmatched' && view.total===4 && !busy);
     await page.waitForLoadState('networkidle');
@@ -34,7 +50,7 @@ const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/play
     await page.waitForFunction(()=>view?.total===16 && !busy);
     await page.waitForLoadState('networkidle');
     assert.deepEqual(errors,[]);
-    console.log('Browser verified auto-matching, keeping the current post, unmatched review, restart and Undo.');
+    console.log('Browser verified destination Sets, photo inspection, Keep, Return, Undo, and unmatched review after restart.');
   } finally {
     if(browser) await browser.close();
     server.kill();

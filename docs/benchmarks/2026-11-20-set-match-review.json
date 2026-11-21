@@ -1,0 +1,52 @@
+{
+  "date": "2026-11-20",
+  "component": "Workbench 2.0.38",
+  "scene_rule": "shoot-scene-rootsift-v3",
+  "current_inventory": {
+    "method": "Read-only replay using the same saved collection, active draft memberships, original post order, current exclusions and previously analyzed local originals. The prior batch had already assigned three photos.",
+    "remaining_before": 2180,
+    "new_draft_sets": 25,
+    "photos_in_new_drafts": 131,
+    "additions_to_existing_sets": 7,
+    "existing_sets_extended": 1,
+    "remaining_after": 2042,
+    "user_confirmed_shoot": {
+      "photos_in_post": 10,
+      "previously_assigned": 3,
+      "missing_recovered_in_existing_set": 7,
+      "verified_geometric_pairs": 13,
+      "distinct_camera_groups": 2,
+      "repeated_contiguous_photos_in_another_post": 10
+    },
+    "limits": "Only the ten-photo example has an explicit user confirmation for every member. Other previously unassigned draft photos remain available for inspection."
+  },
+  "hidden_memberships": {
+    "method": "Fresh start on one separate benchmark pass with previously saved memberships hidden from the matcher. Workbench and Library labels overlap and are counted separately. Partially labeled drafts cannot establish precision.",
+    "fresh_drafts": 55,
+    "workbench": {
+      "fully_labeled_drafts": 25,
+      "photos_in_fully_labeled_drafts": 99,
+      "drafts_with_two_known_sets": 0
+    },
+    "library": {
+      "fully_labeled_drafts": 21,
+      "photos_in_fully_labeled_drafts": 83,
+      "drafts_with_two_known_sets": 0
+    }
+  },
+  "mixed_post_challenges": {
+    "method": "For each verified source shoot, insert its nearest photo belonging to another known Set, then also combine it with the most visually similar other verified shoot. Run each case as an ordinary post and again as if its block were independently repeated. Labels are drawn separately from Workbench and Library.",
+    "workbench": {
+      "shoots": 11,
+      "constructed_mixed_groups": 22,
+      "decisions": 44,
+      "false_acceptances": 0
+    },
+    "library": {
+      "shoots": 10,
+      "constructed_mixed_groups": 20,
+      "decisions": 40,
+      "false_acceptances": 0
+    }
+  }
+}

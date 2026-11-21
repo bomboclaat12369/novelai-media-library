@@ -56,7 +56,7 @@ def make_server(engine, port=0, token=None):
     bulk_html = bulk_html.replace('</body>',update_tag+'</body>')
     organizer_html = organizer_html.replace('__UPDATER__',update_js)
     organizer_html = organizer_html.replace('__ORGANIZER_WORKFLOW__',(Path(__file__).parent/'missing-files.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-workflow.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-search.js').read_text(encoding='utf-8'))
-    organizer_html = organizer_html.replace('__ORGANIZER_SESSION__',(Path(__file__).parent/'organizer-session.js').read_text(encoding='utf-8'))
+    organizer_html = organizer_html.replace('__ORGANIZER_SESSION__',(Path(__file__).parent/'organizer-session.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-match-review.js').read_text(encoding='utf-8'))
 
     autofill_js=(Path(__file__).parent/'no-autofill.js').read_text(encoding='utf-8')
     def no_autofill(page):
@@ -150,6 +150,8 @@ def make_server(engine, port=0, token=None):
                 if url.path == '/api/organizer/progress':
                     with organizer.lock:progress=dict(organizer.job)
                     return self.send(200, progress)
+                if url.path == '/api/organizer/match-progress':
+                    return self.send(200,organizer.match_progress(params.get('token_id',[''])[0]))
                 if url.path == '/api/organizer/export':
                     return self.send(200, organizer.export())
                 if url.path == '/api/organizer/image':
@@ -254,6 +256,12 @@ def make_server(engine, port=0, token=None):
                     result=library_editor.read(body) if path.endswith('-read') else library_editor.save(body)
                 elif path == '/api/organizer/manual-search':
                     result=organizer.manual_search(body)
+                elif path == '/api/organizer/match-review':
+                    result=organizer.review_matches(body)
+                elif path == '/api/organizer/prepare-matches':
+                    result=organizer.prepare_matches(body)
+                elif path == '/api/organizer/cancel-matching':
+                    result=organizer.match_progress(body.get('match_token'),cancel=True)
                 elif path == '/api/organizer/attach-library':
                     result=organizer.attach_library(body)
                 elif path == '/api/organizer/comparison-source':

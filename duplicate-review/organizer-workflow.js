@@ -189,7 +189,7 @@ matchDialog.setAttribute('aria-label','Auto-match Sets');
 document.body.append(matchDialog);
 const autoSetsButton=button('Auto-match Sets',()=>task(openAutoSets));
 autoSetsButton.id='autoSets';
-$('index').before(autoSetsButton);
+$('unsorted').before(autoSetsButton);
 
 async function reviewUnmatched(){
  matchDialog.close();
@@ -203,9 +203,11 @@ async function openAutoSets(){
  const status=el('p');
  status.setAttribute('role','status');
  const actions=el('div',undefined,'row');actions.style.flexWrap='wrap';
+ let token=null,closed=false;
+ matchDialog.onclose=()=>{closed=true;if(token)api('cancel-matching',{match_token:token}).catch(()=>{})};
  const close=button('Close',()=>matchDialog.close());
  matchDialog.replaceChildren(el('h2','Auto-match Sets'),
-  el('p','Create draft Sets and fill Sets you’ve started. In large posts, Workbench also checks consecutive photos in Original post order. Uncertain matches stay in Unmatched photos.'),
+  el('p','Match photos by outfit, scene details, and original post order. Workbench creates draft Sets and fills existing Sets. You can review each match under its destination Set.'),
   status,actions);
  status.textContent=missing?data.match_analyzed+' photos have saved analysis. '+missing+' still need analysis.':'The saved visual analysis is ready.';
  async function run(analyze){
@@ -214,33 +216,51 @@ async function openAutoSets(){
    await saveDraft();
    if(analyze){
     let progress=await api('index',{job:sourceJob,revision,for_set_matching:true});
-    while(progress.running&&matchDialog.open){
+    while(progress.running&&matchDialog.open&&!closed){
      status.textContent=progress.phase+' · '+progress.done+' / '+progress.total;
      await new Promise(resolve=>setTimeout(resolve,1000));
-     if(!matchDialog.open)return;
+     if(!matchDialog.open||closed)return;
      progress=await api('progress');
     }
-    if(!matchDialog.open)return;
+    if(!matchDialog.open||closed)return;
     if(progress.phase!=='Visual analysis saved'&&!progress.phase.startsWith('All saved images already indexed')){
      throw Error(progress.phase+' Reopen Auto-match Sets to use the finished analysis.');
     }
    }
-   status.textContent='Matching photos…';
-   const result=await api('auto_sets',{job:sourceJob,revision});
+   if(!matchDialog.open||closed)return;
+   status.textContent='Comparing saved analysis…';
+   let progress=await api('prepare-matches',{job:sourceJob,revision});
+   token=progress.token;
+   if(!matchDialog.open||closed){await api('cancel-matching',{match_token:token});return}
+   close.textContent='Stop';
+   while(progress.running&&matchDialog.open&&!closed){
+    status.textContent=progress.phase+(progress.total?' · '+progress.done+' / '+progress.total+' groups':'…');
+    await new Promise(resolve=>setTimeout(resolve,600));
+    if(!matchDialog.open||closed)return;
+    progress=await api('match-progress?token_id='+encodeURIComponent(token));
+   }
+   if(!matchDialog.open||closed)return;
+   if(progress.error)throw Error(progress.error);
+   const matchToken=token;token=null;close.textContent='Close';
+   status.textContent='Saving draft matches…';
+   const result=await api('auto_sets',{job:sourceJob,revision,match_token:matchToken});
    const counts=result.auto_result;
    const position=captureSession();
    await refresh();
    if(view){await open(currentKind,currentId,offset,false);await related();await restoreScroll(position);scheduleSession()}
-   if(!matchDialog.open)return;
-   status.textContent=counts.new_members+' photos in '+counts.created_sets+' new Sets · '+counts.added_members+
-    ' added to '+counts.extended_sets+' existing Sets · '+counts.remaining+' unmatched.';
-   const review=button('Review unmatched photos',()=>task(reviewUnmatched),'primary');
+   if(!matchDialog.open||closed)return;
+   status.textContent=counts.new_members+' photos in '+counts.created_sets+' new '+(counts.created_sets===1?'Set':'Sets')+' · '+
+    counts.added_members+' added to '+counts.extended_sets+' existing '+(counts.extended_sets===1?'Set':'Sets')+' · '+counts.remaining+' unmatched.';
+   const matches=button('Review matched photos',()=>task(()=>openMatchReview('latest')),'primary');
+   matches.disabled=!data.sets.some(g=>g.auto_members?.length);
+   const review=button('Review unmatched photos',()=>task(reviewUnmatched));
    review.disabled=!counts.remaining;
-   actions.replaceChildren(review,close);
-  }catch(error){status.textContent=error.message;actions.replaceChildren(close)}
+   actions.replaceChildren(matches,review,close);
+  }catch(error){token=null;close.textContent='Close';status.textContent=error.message;actions.replaceChildren(close)}
  }
  if(missing)actions.append(button('Analyze and match',()=>task(()=>run(true)),'primary'));
  if(data.match_analyzed)actions.append(button(missing?'Match analyzed photos':'Match photos',()=>task(()=>run(false)),missing?'small':'primary'));
+ if(data.sets.some(g=>g.auto_members?.length))actions.append(button('Review matched photos',()=>task(()=>openMatchReview('all'))));
  actions.append(button('Review unmatched photos',()=>task(reviewUnmatched)),close);
  matchDialog.showModal();
 }

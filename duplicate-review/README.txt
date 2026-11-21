@@ -1,4 +1,16 @@
-LOCAL DUPLICATE REVIEW 2.0.37
+LOCAL DUPLICATE REVIEW 2.0.38
+
+NEW IN 2.0.38 — REVIEW MATCHED PHOTOS
+- In Folder Organizer, open Auto-match Sets in the left sidebar. Review matched
+  photos opens the matches you already have, even from version 2.0.37. Choose a
+  destination Set, click a photo to enlarge it, and choose Keep or Return to
+  unmatched. Undo last review reverses the last decision. A removed photo is
+  held for manual placement. Keep confirms a reference for future matching.
+- Match photos compares recognizable details in the clothes and the setting,
+  as well as the original order of photos in a post. A continuous block in a
+  second post can support grouping distinct camera angles from one shoot.
+  The first pass reads local originals. Later runs reuse saved comparisons.
+  Stop during matching to leave drafts as they were before the run.
 
 NEW IN 2.0.37 — AUTOMATIC SET MATCHING
 - In Folder Organizer, choose a collection and click Auto-match Sets. Choose

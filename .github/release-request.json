@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "id": "workbench-original-order-auto-sets-2026-11-20",
+  "id": "workbench-review-multi-angle-sets-2026-11-20",
   "components": [
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Adds Auto-match Sets in the Workbench Organizer. It creates draft Sets, fills Sets you have started, and checks consecutive photos in original post order. Uncertain photos stay available for manual review."
+  "workbench_notes": "Review automatically matched photos by destination Set, including earlier matches. Keep a photo or return it to unmatched. Workbench checks shared scene details and original post order to recognize more photos from the same shoot across poses and camera angles."
 }
