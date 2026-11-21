@@ -1,4 +1,5 @@
 import hashlib
+import gzip
 import http.client
 import json
 import os
@@ -32,7 +33,9 @@ class CompanionRoutes(unittest.TestCase):
     def req(self,method,path,data=None,headers=None):
         connection=http.client.HTTPConnection('127.0.0.1',self.server.server_port,timeout=10)
         headers=dict(headers or {})
-        if data is not None:
+        if isinstance(data,bytes):
+            headers.setdefault('Content-Type','application/octet-stream');headers['X-Game-Token']=self.token or ''
+        elif data is not None:
             headers.update({'Content-Type':'application/json','X-Game-Token':self.token or ''});data=json.dumps(data)
         connection.request(method,path,data,headers);r=connection.getresponse();body=r.read();status=r.status;connection.close()
         return status,body
@@ -69,6 +72,17 @@ class CompanionRoutes(unittest.TestCase):
         status,_=self.req('POST','/game/api/action',{'revision':restored['revision'],'action':'start','body':{},'id':'stale-token'})
         self.assertEqual(status,403)
         self.assertTrue(self.server.after_hours.save_origin.with_suffix('.active.json').exists())
+
+    def test_restore_downloaded_compressed_career_as_new(self):
+        self.boot();self.action('new',{'selected':['a','b']},0,'start-file-restore')
+        status,raw=self.req('GET','/game/api/export?download=1')
+        self.assertEqual(status,200);original=self.server.after_hours.store.path
+        headers={'X-Game-Revision':'1'}
+        status,_=self.req('POST','/game/api/restore',b'\x1f\x8bbroken',headers)
+        self.assertEqual(status,400);self.assertEqual(self.server.after_hours.store.path,original)
+        status,data=self.req('POST','/game/api/restore',gzip.compress(raw),headers)
+        self.assertEqual(status,200,data);self.assertNotEqual(self.server.after_hours.store.path,original)
+        self.assertEqual(json.loads(data)['state']['cash'],json.loads(raw)['save']['state']['cash'])
 
     def test_catalog_refresh_new_character_and_missing_original(self):
         self.boot();self.action('new',{'selected':['a','b']},0,'choose-founders')

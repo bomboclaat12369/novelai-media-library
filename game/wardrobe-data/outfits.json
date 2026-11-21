@@ -2,11 +2,213 @@
   "patricia-red-gingham": {
     "name": "Red gingham",
     "owner": "4759bed86a2645f8a1589d5ef6770918",
-    "photo_id": "bd4237e174d94b3193ce15bcc7412e61",
-    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
-    "photo_level": 10,
     "career_level": 20,
+    "photo_level": 10,
+    "photo_ids": [
+      "bd4237e174d94b3193ce15bcc7412e61"
+    ],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "photo_id": "bd4237e174d94b3193ce15bcc7412e61",
     "front": "patricia-red-gingham-front.png",
     "sha256": "9dc6503b231675792dad1ea0e6065042b70f2cbb67927e1aa7393bb9fe2bca16"
+  },
+  "patricia-white-tank-pink-shorts": {
+    "name": "White tank and pink shorts",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 22,
+    "photo_level": null,
+    "photo_ids": [],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "front": "patricia-white-tank-pink-shorts-front.png",
+    "sha256": "a74bf67687922b4c65db548240cbf2b8991d4bb3beb8fd57c58fcd8c7eadd456"
+  },
+  "patricia-sporty-black-white": {
+    "name": "White-and-black sporty set",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 24,
+    "photo_level": null,
+    "photo_ids": [],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "front": "patricia-sporty-black-white-front.png",
+    "sha256": "cfcfa8e4081e1a876c89893a5486b192f6cb8a90d7c0486b9b2969493b494c01"
+  },
+  "patricia-pink-floral-long-dress": {
+    "name": "Pink floral long dress",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 26,
+    "photo_level": 17,
+    "photo_ids": [
+      "70afbb262cb3484b8ee82a5d6a94500b"
+    ],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "photo_id": "70afbb262cb3484b8ee82a5d6a94500b",
+    "front": "patricia-pink-floral-long-dress-front.png",
+    "sha256": "e5e0586d2785f501515998068de459953b9b823d7e1e579c1215be57668c6f70"
+  },
+  "patricia-emerald-bikini": {
+    "name": "Emerald bikini",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 28,
+    "photo_level": null,
+    "photo_ids": [],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "front": "patricia-emerald-bikini-front.png",
+    "sha256": "50f864b2261b0830dd4b99314620125cb0d01b1a74712f81518ba2f0b08ba144"
+  },
+  "patricia-red-nordic-lounge": {
+    "name": "Red Nordic lounge set",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 30,
+    "photo_level": null,
+    "photo_ids": [],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "front": "patricia-red-nordic-lounge-front.png",
+    "sha256": "da7c90185f944d285338aa212ce5129bc5ffcfc79cd4fbdd086794b45c7c6cf9"
+  },
+  "patricia-dark-string-bikini": {
+    "name": "Dark string bikini",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 32,
+    "photo_level": null,
+    "photo_ids": [],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "front": "patricia-dark-string-bikini-front.png",
+    "sha256": "5b74f7ab1099bcfe854cef37b6f754811242d06dc392dc500e8622316fb51f5f"
+  },
+  "patricia-taupe-ribbed-lace-dress": {
+    "name": "Taupe lace-up minidress",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 34,
+    "photo_level": 24,
+    "photo_ids": [
+      "8547c41c22e94912bb95e12f18100d4c"
+    ],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "photo_id": "8547c41c22e94912bb95e12f18100d4c",
+    "front": "patricia-taupe-ribbed-lace-dress-front.png",
+    "sha256": "4642a4e7086551fb06e264d73cccb8ba46bffd96a03fa802cf43ec679fd50cda"
+  },
+  "patricia-pink-polka-dot-khaki": {
+    "name": "Pink polka-dot bikini and khaki miniskirt",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 36,
+    "photo_level": null,
+    "photo_ids": [],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "front": "patricia-pink-polka-dot-khaki-front.png",
+    "sha256": "7dada80532fe412811f9150988b8a41ee540d6fc4b1ca4c68b661c7e6e609069"
+  },
+  "patricia-charcoal-knit-leopard": {
+    "name": "Charcoal knit and leopard set",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 38,
+    "photo_level": null,
+    "photo_ids": [],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "front": "patricia-charcoal-knit-leopard-front.png",
+    "sha256": "c1b9112a19645d7389891f88ab962e768ee9615030dddefdcefcb5d918c70d20"
+  },
+  "patricia-taupe-bodysuit-denim": {
+    "name": "Taupe bodysuit and denim",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 40,
+    "photo_level": 29,
+    "photo_ids": [
+      "02891a36d8f4458bb0f0c12bbe7c9c00",
+      "73749245828443b789d8dd613191de4e",
+      "f98f576d490a4d13a5ac409620fc998e"
+    ],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "photo_id": "02891a36d8f4458bb0f0c12bbe7c9c00",
+    "front": "patricia-taupe-bodysuit-denim-front.png",
+    "sha256": "5c7042c5eed7ddab3df470b822c314f9531be9d16c9e69757f8713226798795a"
+  },
+  "patricia-white-fur-hat-knit": {
+    "name": "White fluffy hat and knit outfit",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 42,
+    "photo_level": null,
+    "photo_ids": [],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "front": "patricia-white-fur-hat-knit-front.png",
+    "sha256": "9635660327d8b8d2bf7bd0e7812348e8d76493fa31745bde3809f364c72fe1e5"
+  },
+  "patricia-brown-leather-western": {
+    "name": "Brown leather western set",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 44,
+    "photo_level": null,
+    "photo_ids": [],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "front": "patricia-brown-leather-western-front.png",
+    "sha256": "84e4cedb8d50f6129b6f52075f3a4877c79a1740053a6008b6d7ffb313d5b6e5"
+  },
+  "patricia-blue-gingham-costume": {
+    "name": "Blue gingham costume",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 46,
+    "photo_level": null,
+    "photo_ids": [],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "front": "patricia-blue-gingham-costume-front.png",
+    "sha256": "8aec6f57ac9b8c3192e7212285eb91b8de25598607f662e6f408dd2f18ad90a6"
+  },
+  "patricia-black-winter": {
+    "name": "Black winter outfit",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 48,
+    "photo_level": 36,
+    "photo_ids": [
+      "f083f274e5e44dd1a006b984a1f48a4e",
+      "9a9a4be56f0b41188e5d9bb5d635b147"
+    ],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "photo_id": "f083f274e5e44dd1a006b984a1f48a4e",
+    "front": "patricia-black-winter-front.png",
+    "sha256": "044b5dc2b8001e7abccba7e3c94e59aca3551fce56e9b73147c0ca17272d58dc"
+  },
+  "patricia-stars-stripes-cowboy": {
+    "name": "Stars-and-stripes bikini and cowboy hat",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 50,
+    "photo_level": null,
+    "photo_ids": [],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "front": "patricia-stars-stripes-cowboy-front.png",
+    "sha256": "bbf956626e5c787366f7381567485ea02f1d31da7f560836d5315243a9201458"
+  },
+  "patricia-red-hood-costume": {
+    "name": "Red hood costume",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 52,
+    "photo_level": null,
+    "photo_ids": [],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "front": "patricia-red-hood-costume-front.png",
+    "sha256": "484e934512b74941cffe6d23b34c4becdb74d7b670df43c6307dbe9ba3176b4b"
+  },
+  "patricia-blue-playing-card-costume": {
+    "name": "Blue playing-card costume",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 54,
+    "photo_level": null,
+    "photo_ids": [],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "front": "patricia-blue-playing-card-costume-front.png",
+    "sha256": "3635a24e6e603295695431eb154b32dec8a8bf7239e822a27e8165c379c73d4d"
+  },
+  "patricia-pastel-floral-bikini": {
+    "name": "Pastel floral bikini",
+    "owner": "4759bed86a2645f8a1589d5ef6770918",
+    "career_level": 56,
+    "photo_level": null,
+    "photo_ids": [],
+    "library_sha256": "7c89a742768206f9cb0e9fc3caebbd707905ad04b9142aa925e07c46408af90d",
+    "front": "patricia-pastel-floral-bikini-front.png",
+    "sha256": "84899bb725b836ef4949208ccf87adc7e148ca20075c233f94366b7f60268d20",
+    "side": "patricia-pastel-floral-bikini-side.png",
+    "side_sha256": "f3ceb3bf8549d09fc4441032e2669ce9c9e784855dfe1a7aced7d0098921a49f",
+    "back": "patricia-pastel-floral-bikini-back.png",
+    "back_sha256": "707ce309b97dc6c6d18d8137c46bc92322cef9b80ed47aace6f26ab28b16583f"
   }
 }

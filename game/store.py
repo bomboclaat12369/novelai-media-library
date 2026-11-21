@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from . import engine, evolution, migrations, stage_labels, wardrobe
+from . import engine, evolution, migrations, stage_labels, videos, wardrobe, writing
 
 
 class Conflict(engine.RuleError):
@@ -51,17 +51,19 @@ def merge_catalog(previous, current, owned):
         else:
             card.pop('forms', None)
         cards[ident] = card
-    # A newly eligible Duo inherits this career's frozen ordinary photo rarities.
+    # New Set cards inherit this career's frozen ordinary photo rarities.
     for ident in current['cards'].keys() - previous['cards'].keys():
         card = cards[ident]
-        if card.get('source') == 'duo':
-            cards[ident] = {**card, 'rarity': evolution.duo_rarity(card['forms'], cards)}
+        if card.get('source') in evolution.SET_CARDS:
+            cards[ident] = {**card, 'rarity': evolution.set_rarity(card['forms'], cards, card['source'])}
     return {**current, 'cards': cards, 'people': {**previous['people'], **current['people']}}
 
 
 class GameStore:
     def __init__(self,path,catalog):
         self.path=Path(path);self.path.parent.mkdir(parents=True,exist_ok=True)
+        self.video_pairs=videos.Pairings(self.path.parent,catalog['source_id'])
+        self.writing=writing.Shelf(self.path.parent)
         self.lock=threading.RLock();self.last_tick=None
         self.label_path=self.path.parent/'stage-labels.json'
         self.label_stamp=None;self.label_pack=stage_labels.bundled();self.label_error=None
@@ -91,6 +93,9 @@ class GameStore:
             if row:
                 migrations.validate(state,catalog)
                 wardrobe.reconcile(state,catalog)
+                if any('voucher_rewards' not in r for r in state['reports']):
+                    past=db.execute("SELECT body FROM events WHERE json_extract(body,'$.kind')='milestone_earned' ORDER BY id")
+                    migrations.recover_reward_receipts(state,(json.loads(item[0]) for item in past))
                 events=state.pop('journal',[]);state['journal']=[]
                 db.executemany('INSERT INTO events(at,body) VALUES (?,?)',[(time.time(),encode(e)) for e in events])
                 if encode(state)!=row[1]:
@@ -115,6 +120,7 @@ class GameStore:
             return {'revision':row[0],'state':json.loads(row[1])} if row else {'revision':0,'state':None}
 
     def sync_labels(self):
+        self.writing.sync()
         try:
             info=self.label_path.stat()
             stamp=(info.st_mtime_ns,info.st_size)
@@ -133,7 +139,13 @@ class GameStore:
         with self.lock:
             self.sync_labels()
             return {**self.label_pack.summary,'custom':self.label_stamp is not None and not self.label_error,
-                    'error':self.label_error}
+                    'error':self.label_error,'writing_packs':self.writing.summary,'writing_errors':self.writing.errors}
+
+    def choose(self,slot,facts,rng,recent):
+        return self.writing.stage(slot,facts,rng,recent) or self.label_pack.choose(slot,facts,rng,recent)
+
+    def event(self,decision,catalog,rng):
+        self.writing.event(decision,catalog,rng)
 
     def import_labels(self, raw):
         pack=stage_labels.load_upload(raw)
@@ -181,10 +193,10 @@ class GameStore:
                 clock=db.execute("SELECT value FROM meta WHERE key='clock_tick'").fetchone()
                 delta=0 if not clock else max(0,now-float(clock[0]))
                 speed=state['night']['speed'] if state['phase']=='night' else 1
-                state=engine.command(state,self.catalog,'advance',{'seconds':delta*speed,'stop_at_decision':True},labels=self.label_pack)
+                state=engine.command(state,self.catalog,'advance',{'seconds':delta*speed,'stop_at_decision':True},labels=self)
             else:
                 if action=='advance': raise engine.RuleError('The server owns the game clock.')
-                state=engine.command(state,self.catalog,action,body,labels=self.label_pack)
+                state=engine.command(state,self.catalog,action,body,labels=self)
             events=state.pop('journal',[]);state['journal']=[]
             db.execute('INSERT OR REPLACE INTO save VALUES (1,?,?)',(revision+1,encode(state)))
             db.execute('INSERT INTO requests VALUES (?,?)',(request_id,digest))
@@ -280,6 +292,7 @@ class GameStore:
             history=payload.get('history',[])
             if not isinstance(history,list) or len(history)>2000000 or any(not isinstance(e,dict) for e in history): raise ValueError()
             history=history+state.pop('journal',[]);state['journal']=[]
+            migrations.recover_reward_receipts(state,history)
         except (KeyError,TypeError,ValueError) as exc:
             if isinstance(exc,engine.RuleError): raise
             raise engine.RuleError('Invalid recovery export. The current save is unchanged.') from None
@@ -301,6 +314,7 @@ class GameStore:
             row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
             result={'revision':row[0],'state':json.loads(row[1])} if row else {'revision':0,'state':None}
             public=copy.deepcopy(self.catalog)
+            public.pop('videos',None)
             for ident,c in public['cards'].items():
                 c.pop('image',None);c.pop('original',None)
                 if 'forms' in c:

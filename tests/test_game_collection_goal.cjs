@@ -18,9 +18,9 @@ const photo=(owner,id)=>({id,character_id:owner,original_name:'hidden-title-'+id
 const deep=Array.from({length:5},(_,i)=>'deep-'+i);
 const data={_tracking_store:'collection-goal-fixture',characters:[
  {id:'small',name:'Small Gallery'},{id:'deep',name:'Deep Gallery'},{id:'guest',name:'Guest'}],
- media:[photo('small','small-a'),photo('small','small-b'),photo('guest','guest-a'),...deep.map(id=>photo('deep',id))],
- sets:[{id:'deep-set',name:'Hidden set title',kind:'set',character_id:'deep',media_ids:deep,
-        after_hours_evolution:{version:1,status:'ready',media_ids:deep.slice(0,3)},
+ media:[photo('small','small-a'),photo('small','small-b'),photo('guest','guest-a'),...deep.map(id=>photo('deep',id)),...['f1','f2','f3'].map(id=>({...photo('deep',id),in_all:false}))],
+ sets:[{id:'deep-set',name:'Hidden set title',kind:'set',character_id:'deep',media_ids:[...deep,'f1','f2','f3'],
+        after_hours_evolution:{version:1,status:'ready',media_ids:['f1','f2','f3']},
         after_hours_duo:{version:1,media_ids:deep.slice(0,2)}}]};
 const writeLibrary=()=>fs.writeFileSync(path.join(library,'library.json'),JSON.stringify(data));
 writeLibrary();

@@ -7,7 +7,7 @@ from __future__ import annotations
 from . import stage_labels
 
 VERSION = 2
-BOOKING_RULES_VERSION = 5
+BOOKING_RULES_VERSION = 6
 
 # Select a family first. Its variants share that family's probability mass.
 POSITION_FAMILIES = {

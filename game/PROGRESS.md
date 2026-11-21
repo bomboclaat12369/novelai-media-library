@@ -1,5 +1,58 @@
 # After Hours — completed local build
 
+## Local completion build 1.4.0, 20 November 2026
+
+The Windows launcher in the outer folder opens the illustrated game through
+the read-only companion. Its local career folder is independent of the
+installed game and the review servers. The approved package and handoff
+bundle are preserved. Walker authorized publication of 1.4.0 through the
+Media Suite game updater on 20 November.
+
+- Patricia’s 19 approved outfits use 21 native, hash-verified views. Career
+  unlocks run every two levels from 20 through 56. Five outfits offer earlier
+  unlocks with a verified source photo, including an earned Evolution form or
+  either Duo face. Red gingham retains its existing receipt and level 10/20 rules.
+- Two rare mid-booking offers share the existing night-wide event limit. A
+  second worker costs $95 and stays reserved through cleanup. A second client
+  pays $75 and receives a separate wallet and first round. The game preserves
+  elapsed stages and the booked end time. Additional rounds and extensions
+  remain separate purchases. Timelines and reports identify the participants.
+- Collected same-Set photos unlock eligible videos. Other clips can be paired
+  from Saves & catalog in game-owned local settings. The room and Collection
+  use the same ownership gate. Video bytes stream from the read-only source.
+- Morning voucher receipts lead to a free Standard pack. Older reports
+  recover supported receipts from recorded awards. Existing balances survive.
+  New evolutions use the highest selected Main photo’s career rarity. Sets
+  composed entirely of Set-only photos retain their Rare evolution fallback.
+- Offline event packs and optional group-stage arrays import through Saves &
+  catalog. A missing fact cannot select conditional text. An imported line
+  cannot set a price or outcome. Existing displayed text is retained.
+
+**Verification.** The real Library supplied four characters, 374 cards and
+158 eligible video files. Nine clips had collectible photos in the same Set.
+A normal first Spotlight purchase unlocked a matching clip. A disposable
+Windows career played the clip in Chrome, kept it playing across clock
+repaints, tested seeking, paired another clip, and denied access before
+each unlock. The career ran at 8×, stopped at its first event at 39.75
+simulated seconds, and resumed on selection. It redeemed a voucher
+without spending cash, equipped a card, hired, upgraded, completed two
+Studio projects and a two-night Resort stay, then reopened and restored on
+day 17 with 12 collected cards. No browser scripting errors were observed.
+
+The phone and desktop wardrobe check earned and wore red gingham, restored an
+advanced disposable career from a compressed export, and rotated the earned
+pastel floral outfit through all three views. The read-only Library metadata,
+Battles rankings, and three exercised original media files matched their
+pre-test SHA-256 hashes. All playthroughs used separate game files.
+
+In 96 independent two-founder test nights, 478 bookings produced 19
+second-client and four second-worker offers. Separate 42-night campaigns
+opened Studio and Resort on nights 7/11 with the four-person real catalog
+and 9/16 with a twelve-character fixture. Counts are observations from
+these careers. The agreed story and narrative-generation work stays deferred.
+
+Prior checkpoints below describe the builds and verification on their dates.
+
 ## Scope and preservation
 
 Read START-HERE and every listed file, including the complete 457-line plan.

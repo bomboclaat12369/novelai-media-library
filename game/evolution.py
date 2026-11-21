@@ -47,9 +47,10 @@ def selected_forms(group, kind, ident, media, paths_for):
     return forms
 
 
-def duo_rarity(forms, cards):
+def set_rarity(forms, cards, kind):
     photos = (cards.get(f.get('media_id')) for f in forms)
-    return max((p['rarity'] for p in photos if p and p.get('source') == 'library' and p.get('available')), default=0)
+    return max((p['rarity'] for p in photos if p and p.get('source') == 'library' and p.get('available')),
+               default=2 if kind=='evolution' else 0)
 
 
 def ready_cards(groups, media, people, paths_for, specialty_for, ordinary_cards):
@@ -66,7 +67,7 @@ def ready_cards(groups, media, people, paths_for, specialty_for, ordinary_cards)
             forms = selected_forms(group, kind, ident, media, paths_for)
             if forms:
                 yield {'id': ident, 'owner': owner, 'name': group.get('name') or ('Duo' if kind == 'duo' else 'Evolution Set'),
-                       'source': kind, 'forms': forms, 'rarity': duo_rarity(forms, ordinary_cards) if kind == 'duo' else 2,
+                       'source': kind, 'forms': forms, 'rarity': set_rarity(forms, ordinary_cards, kind),
                        'rarity_schema': 2, 'specialty': specialty_for(ident), 'categories': [], 'source_categories': [],
                        'available': all(f['original'] for f in forms), 'ranked': False, 'rating': 1200,
                        'image': None, 'original': None}

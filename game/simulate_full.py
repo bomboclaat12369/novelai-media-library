@@ -64,17 +64,24 @@ def campaign(count,seed,nights=120,policy='balanced',keep_state=False,catalog=No
         do('auto')
         if policy=='aggressive':do('price',pricing='premium')
         do('start')
-        if policy!='conservative':
-            do('advance',seconds=100)
-            d=s['night']['decisions'][0]
-            if d['kind']=='booking' and any(w['energy']>=10 and m.assignment(s,p) in ('room','lounge') for p,w in s['people'].items()):do('decision',decision=d['id'],choice='accept')
-            do('advance',seconds=100)
-            if any(w['energy']<45 for w in s['people'].values()):do('decision',decision=s['night']['decisions'][1]['id'],choice='refresh')
-        do('finish')
+        if policy=='conservative':
+            do('finish')
+        else:
+            while s['night']:
+                do('advance',seconds=s['night']['duration'],stop_at_decision=True)
+                if not s['night']: break
+                n=s['night']
+                d=next(d for d in n['decisions'] if d['choice'] is None and d['at']<=n['elapsed']<d['until'])
+                choice='decline'
+                if d.get('meeting_id'): choice='accept'
+                elif d['kind'] in ('team_meal','hospitality') and any(w['energy']<45 for w in s['people'].values()):
+                    if s['cash']+n['revenue']-n['decision_costs']>=m.DECISIONS[d['kind']]['cost']: choice='refresh'
+                do('decision',decision=d['id'],choice=choice)
         if s['day']<=15:early.append(s['reports'][-1]['profit'])
         if s['cash']>reserve+800 and s['day']%2==0:
             kind='premium' if s['day']%4 else 'collector'
             if kind=='collector' and all(i in s['owned'] for i in cat['cards']):kind='premium'
+            if kind=='premium' and not any(c['rarity']>=3 for c in g.available(cat)): kind='standard'
             do('pack',pack=kind);do('reveal_done');purchases.append(s['day'])
         if collecting and s['departments']['resort']:
             # Spend up to three quarters of discretionary savings, preserving a

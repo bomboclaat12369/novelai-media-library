@@ -5576,6 +5576,7 @@ class MediaHandler(BaseHTTPRequestHandler):
 
     def do_HEAD(self) -> None:
         try:
+            if self._game_route(): return
             path = urllib.parse.urlparse(self.path).path
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/(?:(thumb)|(original))", path)
             if not match:

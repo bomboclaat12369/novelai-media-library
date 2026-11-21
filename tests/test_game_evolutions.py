@@ -179,7 +179,7 @@ class Evolutions(unittest.TestCase):
         card = catalog['cards'][ident]
         expected = group['after_hours_evolution']['media_ids']
         self.assertEqual([f['media_id'] for f in card['forms']], expected)
-        self.assertEqual(card['rarity'], 2)
+        self.assertEqual(card['rarity'], max((catalog['cards'][mid]['rarity'] for mid in expected if mid in catalog['cards']),default=2))
         for mid in expected:
             member = next(m for m in self.raw_media if m['id'] == mid)
             self.assertEqual(mid in catalog['cards'], bool(member.get('in_all', True)))

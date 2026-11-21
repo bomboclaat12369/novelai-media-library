@@ -67,8 +67,27 @@ async function run(){
  await page.getByRole('button',{name:'Show Patricia’s side profile'}).click();
  assert.match(await venueArt.getAttribute('src'),/patricia-side\.png$/);
  assert.match(await roomArt.getAttribute('src'),/patricia-front\.png$/);
+ // Exercise the three-view outfit and the player's compressed-file recovery control.
+ const triple='patricia-pastel-floral-bikini',outfitUrl=new URL('api/outfit/'+triple+'?view=back',url).href;
+ assert.equal((await page.request.get(outfitUrl)).status(),403);
+ const exported=await (await page.request.get(new URL('api/export?download=1',url).href)).json();
+ const owner=Object.keys(exported.save.state.people).find(id=>exported.catalog.people[id].name==='Patricia');
+ exported.save.state.people[owner].xp=5500;
+ await page.locator('.nav [data-screen=saves]').click();
+ await page.locator('#restore-file').setInputFiles({name:'wardrobe-review.json.gz',mimeType:'application/gzip',
+  buffer:require('node:zlib').gzipSync(JSON.stringify(exported))});
+ await page.waitForFunction(id=>derived.wardrobe[id].outfits.every(o=>o.unlocked),owner);
+ await page.locator('.nav [data-screen=club]').click();await wardrobe.click();
+ await modal.locator('[data-outfit-preview]').selectOption(triple);
+ await modal.getByRole('button',{name:'Wear pastel floral bikini'}).click();
+ await modal.locator('[data-outfit="'+triple+'"]:disabled').waitFor();await close();
+ await page.getByRole('button',{name:'Show Patricia’s side profile'}).click();
+ await page.getByRole('button',{name:'Show Patricia’s back view'}).click();
+ await venueArt.evaluate(img=>img.decode());assert.match(await venueArt.getAttribute('src'),/view=back$/);
+ assert.equal((await page.request.get(outfitUrl)).status(),200);
+ assert.equal((await page.request.get(outfitUrl.replace('view=back','view=unknown'))).status(),404);
  assert.deepEqual(errors,[]);
- console.log('Wardrobe passed: locked goals and image gate, first-booking reveal, both views, reload, gym turn.');
+ console.log('Wardrobe passed: 19 outfits, locked art, first-booking unlock, phone layout, compressed restore, front/side/back rotation.');
 }
 
 run().catch(e=>{console.error(e);process.exitCode=1;}).finally(async()=>{

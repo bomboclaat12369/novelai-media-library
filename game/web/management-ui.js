@@ -10,9 +10,11 @@ root.addEventListener('toggle',event=>{
 },true);
 const esc=escapeHTML,dis=v=>v?'disabled':'';
 function initManagementUI(){
- const reportsBeforeBookings=reports;reports=()=>reportsBeforeBookings()+bookingReports();
+ const baseSaves=saves;saves=()=>baseSaves()+writingPanel();
+ const baseCollection=collection;collection=()=>baseCollection()+earnedClipsPanel(filter.owner??save.collection_target);
+ const reportsBeforeBookings=reports;reports=()=>reportsBeforeBookings()+voucherHistory()+bookingReports();
  navigation.splice(1,0,['studio','◈','Studio'],['resort','☼','Resort']);navigation.push(['saves','↺','Saves & catalog']);
- const oldPacks=packs;packs=()=>`<section class="panel voucher"><div><h3>Earned pack rewards</h3><p>${save.pack_vouchers} Standard voucher(s) from deliveries and milestones.</p></div><button data-action="voucher" ${dis(save.phase!=='prepare'||!save.pack_vouchers)}>Redeem a voucher</button></section>`+oldPacks();
+ const oldPacks=packs;packs=()=>`<section class="panel voucher"><div><h3>Earned pack rewards</h3><p>${save.pack_vouchers} Standard ${save.pack_vouchers===1?'voucher':'vouchers'} available · one free Standard pack each.</p></div><button data-action="voucher" ${dis(save.phase!=='prepare'||!save.pack_vouchers)}>Redeem a voucher</button></section>`+oldPacks()+voucherHistory();
  const oldTeam=team;team=()=>oldTeam()+development();
  const oldReports=reports;reports=()=>oldReports()+`<section class="panel"><h2>Department results</h2><p>${save.totals.studio_completed} Studio deliveries · ${save.totals.resort_completed} Resort checkouts · ${money(save.totals.contract_revenue)} department revenue.</p><p class="note">Night reports include department earnings, wages, upkeep and business decisions. Deposits are recorded separately when scheduling; capital purchases are in the full history.</p></section>`+save.reports.slice(-3).reverse().map(r=>`<details class="panel"><summary>Night ${r.day} · planning and decisions</summary><p>Department revenue ${money(r.department_revenue)} · training ${money(r.training_cost)} · business choices ${money(r.decision_costs)}.</p>${contractReceipts(r, contractsEndingOn(r.day))}<ul>${(r.activity||[]).map(t=>`<li>${esc(t)}</li>`).join('')}</ul></details>`).join('');
 }
@@ -23,13 +25,27 @@ function meetingCaption(meeting,activity,worker){
  return `<p class="meeting-text">${esc(text)}</p>${meeting?`<div class="meeting-meta"><span>${esc(meeting.phase)}</span>${progress!==null?`<span>${meeting.remaining}s remaining</span>`:''}</div>${progress!==null?`<div class="progress-track" role="progressbar" aria-label="Meeting progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><div class="progress-fill" style="width:${progress}%"></div></div>`:''}${meeting.timeline?.length?`<div class="booking-heading">Booking ${meeting.booking_number} · ${meeting.finish_count} finish${meeting.finish_count===1?'':'es'} so far</div>${bookingTimeline(meeting.timeline)}`:''}${bookingHistory(meeting)}${meeting.last?`<p class="note meeting-last">Last booking: ${esc(meeting.last.text)} · +${money(meeting.last.value)}</p>`:''}`:''}`;
 }
 function bookingTimeline(rows){
- return `<ol class="booking-timeline" aria-label="Booking stages in order">${rows.map(row=>`<li class="${row.status==='current'?'is-current':row.status==='paused'?'is-paused':'is-done'}" ${row.status==='current'?'aria-current="step"':''}><div class="booking-step-meta"><strong>${row.status==='current'?'NOW':row.status==='paused'?'PAUSED':'DONE'}</strong><span>${Math.floor(row.at/60)}:${String(Math.floor(row.at%60)).padStart(2,'0')} · ${esc(row.phase)}${row.cycle>1?` · Round ${row.cycle}`:''}</span></div><span>${esc(row.text)}</span></li>`).join('')}</ol>`;
+ return `<ol class="booking-timeline" aria-label="Booking stages in order">${rows.map(row=>`<li class="${row.status==='current'?'is-current':row.status==='paused'?'is-paused':'is-done'}" ${row.status==='current'?'aria-current="step"':''}><div class="booking-step-meta"><strong>${row.status==='current'?'NOW':row.status==='paused'?'PAUSED':'DONE'}</strong><span>${Math.floor(row.at/60)}:${String(Math.floor(row.at%60)).padStart(2,'0')} · ${esc(row.phase)}${row.participants?' · '+esc(row.participants):''}${row.cycle>1?` · Round ${row.cycle}`:''}</span></div><span>${esc(row.text)}</span></li>`).join('')}</ol>`;
 }
 function bookingHistory(meeting){
  return (meeting?.history||[]).map(past=>`<details class="booking-history" data-booking-history="${esc(past.id)}" ${openBookingHistory.has(past.id)?'open':''}><summary>Booking ${past.number} · ${past.duration}s · ${past.finish_count} finish${past.finish_count===1?'':'es'} · +${money(past.value)}</summary>${bookingTimeline(past.timeline)}</details>`).join('');
 }
 function contractsEndingOn(day){
  return (save.contracts||[]).filter(c=>c.end===day && c.status==='completed');
+}
+function voucherReceipts(report){
+ const names={first_service:'First 30 bookings',studio_delivery:'First Studio project completed',resort_checkout:'First Resort checkout'};
+ const rows=(report?.voucher_rewards||[]).map(reward=>{
+  const contract=reward.source==='studio'&&save.contracts.find(c=>c.id===reward.contract);
+  const source=contract?person(contract.owner).name+' · '+contract.spec.name:
+   names[reward.milestone]||(/^bookings-\d+$/.test(reward.milestone)?reward.milestone.slice(9)+' bookings':'Career milestone');
+  return `<li>${esc(source)} · +${reward.amount} Standard ${reward.amount===1?'voucher':'vouchers'}</li>`;
+ });
+ return rows.length?`<ul class="voucher-receipts">${rows.join('')}</ul>`:'';
+}
+function voucherHistory(){
+ const nights=save.reports.filter(r=>r.voucher_rewards?.length).slice().reverse();
+ return nights.length?`<details class="panel"><summary>Voucher history</summary>${nights.map(r=>`<h3>Night ${r.day}</h3>${voucherReceipts(r)}`).join('')}</details>`:'';
 }
 
 function contractReceipts(report, contracts, showTonight=false){
@@ -45,7 +61,8 @@ function contractReceipts(report, contracts, showTonight=false){
   if(!studio && Number.isFinite(nightlyPay))lines.push(['Checkout night', money(nightlyPay)]);
   if(Number.isFinite(c.spec.fee))lines.push(['After '+money(c.spec.fee)+' deposit', money(c.revenue-c.spec.fee)]);
   const rewards = [];
-  if(studio && c.success && Number.isSafeInteger(c.spec.packs) && c.spec.packs>0)
+  if(studio && c.success && Number.isSafeInteger(c.spec.packs) && c.spec.packs>0 &&
+     !(showTonight&&report.voucher_rewards?.some(r=>r.contract===c.id)))
    rewards.push(c.spec.packs+' Standard '+(c.spec.packs===1?'voucher':'vouchers'));
   if(c.special_card)rewards.push('Card awarded · '+esc(card(c.special_card)?.name||'Studio card'));
   const role = derived.assignments?.[c.owner];
@@ -67,7 +84,16 @@ function bookingReports(){
  const report=available.find(r=>r.day===bookingReportDay)||available.at(-1);
  return `<section class="panel"><h2>Booking histories</h2><label>Night<select id="booking-report-night">${available.slice().reverse().map(r=>`<option value="${r.day}" ${r.day===report.day?'selected':''}>Night ${r.day}</option>`).join('')}</select></label>${report.booking_history.map(meeting=>{
   const name=person(meeting.owner).name;
-  const rows=meeting.segments.filter(s=>s.label).map(s=>({text:s.label.text.replace('{worker}',name),at:s.start-meeting.start,cycle:s.cycle,status:'done',phase:s.slot==='meeting.stage'?`Stage ${s.stage_index}`:s.slot.slice(8)}));
+  const partner=meeting.group?.partner?person(meeting.group.partner).name:'';
+  const rows=meeting.segments.filter(s=>s.label).map(s=>{
+   let participants='';
+   if(meeting.group&&s.start>=meeting.group.start){
+    if(partner)participants=({original:name,joining:partner,both:name+' + '+partner})[s.workers];
+    else participants=['meeting.cleanup','meeting.complete'].includes(s.slot)?'Both clients':s.client==='joining'?'Second client':'First client';
+   }
+   const text=s.label.text.replace(/\{(worker|partner)\}/g,(_,key)=>key==='partner'||s.workers==='joining'?partner:name);
+   return {text,participants,at:s.start-meeting.start,cycle:s.cycle,status:'done',phase:s.slot==='meeting.stage'?`Stage ${s.stage_index}`:s.slot.slice(8)};
+  });
   return `<h3>${esc(name)}</h3>`+bookingHistory({history:[{id:meeting.id,number:meeting.sequence,value:meeting.value,duration:Math.round(meeting.end-meeting.start),finish_count:meeting.finish_count,timeline:rows}]});
  }).join('')||'<p>No private-room bookings that night.</p>'}</section>`;
 }
@@ -75,21 +101,27 @@ function decisionContext(decision){
  if(!decision.worker)return 'Venue-wide';
  const owners=Object.keys(save.people).filter(p=>save.night?.assignments[p]==='room');
  const index=owners.indexOf(decision.worker);
- return `${person(decision.worker).name}${index>=0?` · Private room ${index+1}`:' · Lounge'}`;
+ return `${person(decision.worker).name}${decision.partner?' + '+person(decision.partner).name:decision.client==='joining'?' · Second client':''}${index>=0?` · Private room ${index+1}`:' · Lounge'}`;
 }
 function stageLabelsPanel(){
  const info=boot.stage_labels;if(!info)return '';
  return `<section class="panel stage-labels-panel"><h2>Stage labels</h2><p>${info.entries} labels · ${info.custom?'Your imported pack':'Included pack'}</p><label>Import stage labels<input id="stage-label-file" type="file" accept=".json,.zip,application/json,application/zip"></label><p class="note">Choose a stage-label JSON or ZIP. This replaces the active pack. Your wording stays exactly as written. New label selections use this pack; labels already shown remain saved. Missing phases use built-in wording.</p>${info.length_warnings?`<p class="note">${info.length_warnings} labels exceed the suggested 2–6 words. Their wording is preserved.</p>`:''}${info.error?`<p class="negative">The imported pack could not load; included labels are in use. ${esc(info.error)}</p>`:''}${save.night&&!save.night.stage_tracking?'<p class="note">Stage tracking begins next night. This ongoing night keeps its existing activity summaries.</p>':''}</section>`;
 }
-function importStageLabels(file){
- if(file.size>32*1024*1024){notify('This label pack exceeds 32 MB.');return;}
+function writingPanel(){
+ const info=boot.stage_labels;
+ const list=Object.entries(info?.writing_packs||{}).map(([id,n])=>`<li>${esc(id)} · ${n} entries</li>`).join('');
+ return `<section class="panel"><h2>Event and group wording</h2><p>Import offline event variations or group stages. Your selected wording is saved with each offer or stage.</p><label>Import writing pack<input id="event-writing-file" type="file" accept=".json,application/json"></label>${list?'<ul>'+list+'</ul>':'<small>Using the included wording.</small>'}${(info?.writing_errors||[]).map(e=>`<p class="negative">${esc(e)}</p>`).join('')}</section>`;
+}
+function importStageLabels(file,writing=false){
+ const limit=writing?64:32;
+ if(file.size>limit*1024*1024){notify('This pack exceeds '+limit+' MiB.');return;}
  actionQueue=actionQueue.then(async()=>{
   busy=true;
   try{
-   const response=await fetch('/game/api/stage-labels',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Game-Token':boot.token},body:file});
+   const response=await fetch('/game/api/'+(writing?'writing-pack':'stage-labels'),{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Game-Token':boot.token},body:file});
    const result=await response.json();
    if(!response.ok)throw Error(result.error||'The label pack could not be imported.');
-   accept(result);render();notify(`${result.stage_labels.entries} labels imported. Wording preserved.`);
+   accept(result);render();notify(writing?'Writing pack imported.':`${result.stage_labels.entries} labels imported. Wording preserved.`);
   }catch(e){notify(e.message);}
   finally{busy=false;}
  }).catch(e=>notify(e.message));
@@ -227,8 +259,8 @@ function saves(){
  <button data-action="new-career">Start new career</button></section>
  <div class="department-layout"><section class="panel"><h2>Save & recover</h2>
  <p>Active save · <strong>${esc(saveFilename)}</strong></p>
- <div class="actions"><a href="/game/api/export">Export save & history ↗</a><button data-action="backup-now">Create backup</button></div>
- <label>Restore a JSON export<input id="restore-file" type="file" accept=".json,application/json"></label>
+ <div class="actions"><a href="/game/api/export?download=1">Export save & history ↗</a><button data-action="backup-now">Create backup</button></div>
+ <label>Restore a career export<input id="restore-file" type="file" accept=".json,.gz,application/json,application/gzip"></label>
  <p class="note">Restore brings back the backup's money, cards and progress. Unfinished nights resume paused.</p>
  <h3>Recent backups</h3>
  ${backupRows.map(b=>`<p class="backup-row"><span>${esc(b.label||'Revision '+Number(b.id.split('.')[0]))} · ${Math.round(b.bytes/1024)} KB</span><button data-action="restore-backup" data-backup="${esc(b.id)}">Restore backup</button></p>`).join('')||'<p>No backups yet.</p>'}
@@ -238,13 +270,47 @@ function saves(){
  <button data-action="refresh-catalog" ${dis(save.phase!=='prepare')}>Refresh catalog read-only</button>
  <p class="note">Rarity, mastery and discovery history stay fixed. Missing files retain their cards. Imported save paths cannot choose source media.</p>
  <h3>Optional stories</h3><p class="note">Narrative history is reserved separately. Story import, relationships and generation remain deferred and never block business progression.</p>
- </section></div>`+stageLabelsPanel();
+ </section></div>`+(!boot.catalog.demo?'<section class="panel"><h2>Video rewards</h2><p>Collect a photo to unlock the videos in its Set. Pair other clips with a photo here. Pairings apply to careers using this Library on this computer.</p><button data-action="clip-editor">Edit video pairings</button></section>':'')+stageLabelsPanel();
+}
+function earnedClipsPanel(owner){
+ const rows=Object.entries(derived.videos||{}).filter(([id])=>!owner||owner===id);
+ if(boot.catalog.demo||filter.status==='missing')return '';
+ return `<section class="panel"><h2>Earned videos</h2>${rows.length?rows.map(([id,clips])=>`<h3>${esc(person(id).name)}</h3><div class="actions">${clips.map(c=>`<button class="ghost" data-action="play-clip" data-owner="${esc(id)}" data-clip="${esc(c.id)}">▶ ${esc(c.name)}</button>`).join('')}</div>`).join(''):'<p>Collect a photo from a Set with video to unlock its clips.</p>'}</section>`;
+}
+function openClip(owner,id){
+ const clip=derived.videos?.[owner]?.find(c=>c.id===id);if(!clip)return;
+ $('.venue-media video')?.pause();
+ modal.innerHTML=`<div class="modal-head"><h2>${esc(clip.name)}</h2><button data-action="close-modal" aria-label="Close video">✕</button></div><video class="clip-player" controls playsinline preload="metadata" src="${esc(clipUrl(id))}"></video>`;
+ modal.showModal();
+}
+modal.addEventListener('close',()=>modal.querySelector('video')?.pause());
+let pairingEditor;
+async function editClipPair(body={}){
+ const token=boot.token;
+ try{
+  const response=await fetch('/game/api/video-pairings',{method:'POST',headers:{'Content-Type':'application/json','X-Game-Token':token},body:JSON.stringify(body)});
+  const result=await response.json();if(!response.ok)throw Error(result.error);
+  if(boot.token!==token)return;
+  pairingEditor=result.editor;
+  if(result.revision>=revision)accept(result);
+  render();showClipEditor(body.clip);
+  if(body.clip)notify(body.photo?'Video pairing saved.':'Video pairing removed.');
+ }catch(e){notify(e.message);}
+}
+function showClipEditor(selected){
+ const {clips,photos,pairs}=pairingEditor,ids=Object.keys(clips).sort((a,b)=>clips[a].name.localeCompare(clips[b].name));
+ const id=Object.hasOwn(clips,selected)?selected:ids[0],owner=clips[id]?.owner;
+ const options=Object.entries(photos).filter(([,p])=>p.owner===owner).sort((a,b)=>a[1].name.localeCompare(b[1].name));
+ modal.innerHTML=`<div class="modal-head"><h2>Video pairings</h2><button data-action="close-modal" aria-label="Close pairings">✕</button></div>${id?`<label>Clip without a Set match<select id="pair-clip">${ids.map(k=>`<option value="${esc(k)}" ${k===id?'selected':''}>${esc(person(clips[k].owner).name+' · '+clips[k].name)}</option>`).join('')}</select></label><label>Matching photo<select id="pair-photo"><option value="">Unpaired</option>${options.map(([k,p])=>`<option value="${esc(k)}" ${k===pairs[id]?'selected':''}>${esc(p.name)}</option>`).join('')}</select></label><button class="primary" data-action="save-clip-pair">Save pairing</button>`:'<p>All eligible clips already have Set matches, or this Library has no eligible clips.</p>'}`;
+ if(!modal.open)modal.showModal();
 }
 function managementRequest(path,data={}){
  actionQueue=actionQueue.then(async()=>{
   busy=true;
   try{
-   const response=await fetch('/game/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Game-Token':boot.token},body:JSON.stringify({revision,...data})});
+   const file=data instanceof File;
+   const headers={'Content-Type':file?'application/octet-stream':'application/json','X-Game-Token':boot.token,'X-Game-Revision':String(revision)};
+   const response=await fetch('/game/api/'+path,{method:'POST',headers,body:file?data:JSON.stringify({revision,...data})});
    const r=await response.json();accept(r);
    if(!response.ok)throw Error(r.error||'The operation could not be saved.');
    if(path==='new-career'){location.reload();return;}
@@ -261,6 +327,9 @@ function managementRequest(path,data={}){
  return actionQueue;
 }
 async function managementClick(b,a){
+ if(a==='play-clip'){openClip(b.dataset.owner,b.dataset.clip);return true;}
+ if(a==='clip-editor'){await editClipPair();return true;}
+ if(a==='save-clip-pair'){b.disabled=true;const clip=$('#pair-clip').value;try{await editClipPair({clip,photo:$('#pair-photo').value||null,previous:pairingEditor.pairs[clip]||null});}finally{b.disabled=false;}return true;}
  if(a==='new-career'){
   modal.innerHTML=`<div class="modal-head"><h2>Start a new career?</h2></div>
    <p>Choose two founders and begin on night 1 with $600. Your current career will be backed up.</p>
@@ -295,13 +364,20 @@ async function managementClick(b,a){
  return false;
 }
 function managementChange(el){
+ if(el.dataset.roomClip){roomClip.set(el.dataset.roomClip,el.value);render();return true;}
+ if(el.id==='pair-clip'){showClipEditor(el.value);return true;}
  if(el.id==='booking-report-night'){bookingReportDay=Number(el.value);render();return true;}
  if(el.id==='stage-label-file'&&el.files[0]){importStageLabels(el.files[0]);return true;}
+ if(el.id==='event-writing-file'&&el.files[0]){importStageLabels(el.files[0],true);return true;}
  if(el.dataset.profile){act('profile',{owner:el.dataset.profile,value:el.value});return true;}
  if(el.dataset.training){act('training',{owner:el.dataset.training,value:el.value});return true;}
  if(el.dataset.quoteOwner){quoteOwner[el.dataset.quoteOwner]=el.value;render();return true;}
  if(el.dataset.quoteKind){quoteKind[el.dataset.quoteKind]=el.value;render();return true;}
  if(el.dataset.quoteStart){quoteStart[el.dataset.quoteStart]=Number(el.value);render();return true;}
- if(el.id==='restore-file'&&el.files[0]){const file=el.files[0];if(file.size>32*1024*1024)notify('This export exceeds the 32 MB recovery limit.');else file.text().then(text=>managementRequest('restore',{export:JSON.parse(text)})).catch(()=>notify('Invalid JSON file. Your current save is unchanged.'));return true;}
+ if(el.id==='restore-file'&&el.files[0]){
+  const file=el.files[0];if(file.size>256*1024*1024)notify('Choose a career export of up to 256 MiB.');
+  else managementRequest('restore',file);
+  return true;
+ }
  return false;
 }

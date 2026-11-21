@@ -25,6 +25,7 @@ def dispatch(handler):
     proxy.__dict__.update(handler.__dict__)
     proxy.server=handler.server.after_hours
     if handler.command=='GET':proxy.do_GET()
+    elif handler.command=='HEAD':proxy.do_HEAD()
     elif handler.command=='POST':proxy.do_POST()
     else:proxy.send(405,{'error':'Method not allowed.'})
     return True

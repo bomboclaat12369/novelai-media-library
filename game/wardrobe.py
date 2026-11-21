@@ -28,7 +28,8 @@ def validate(state):
         route = receipt.get('route')
         if route not in ('photo', 'career') or type(receipt.get('day')) is not int or not 1 <= receipt['day'] <= state['day']:
             raise ValueError('Invalid outfit unlock.')
-        if type(receipt.get('level')) is not int or receipt['level'] < outfit[route + '_level']:
+        threshold = outfit.get(route + '_level')
+        if threshold is None or type(receipt.get('level')) is not int or receipt['level'] < threshold:
             raise ValueError('Invalid outfit milestone.')
         if route == 'photo' and not isinstance(receipt.get('card_id'), str):
             raise ValueError('Missing outfit photo evidence.')
@@ -38,20 +39,23 @@ def validate(state):
 
 
 def matching_card(state, catalog, outfit):
+    photos = outfit['photo_ids']
+    if not photos:
+        return None
     source = hashlib.sha256(catalog['source_id'].encode()).hexdigest()
     if source != outfit['library_sha256']:
         return None
-    photo = outfit['photo_id']
     cards = catalog['cards']
-    if photo in state['owned'] and cards[photo].get('source') == 'library' and cards[photo]['owner'] == outfit['owner']:
-        return photo
+    for photo in photos:
+        if photo in state['owned'] and cards[photo].get('source') == 'library' and cards[photo]['owner'] == outfit['owner']:
+            return photo
     for ident, item in state['owned'].items():
         card = cards[ident]
         if card['owner'] != outfit['owner'] or card.get('source') not in evolution.SET_CARDS:
             continue
         forms = card['forms'] if card['source'] == 'duo' else evolution.earned_forms(card, item)
-        key = evolution.form_key(ident, photo)
-        if any(form['key'] == key for form in forms):
+        keys = {evolution.form_key(ident, photo) for photo in photos}
+        if any(form['key'] in keys for form in forms):
             return ident
     return None
 
@@ -63,7 +67,7 @@ def reconcile(state, catalog):
         if key in book['unlocked'] or owner not in state['people']:
             continue
         level = 1 + state['people'][owner]['xp'] // 100
-        if level < outfit['photo_level']:
+        if level < (outfit['photo_level'] or outfit['career_level']):
             continue
         receipt = {'owner': owner, 'level': level, 'day': state['day']}
         if level >= outfit['career_level']:
@@ -108,5 +112,8 @@ def views(state, catalog):
                'has_photo': bool(matching_card(state, catalog, outfit))}
         if receipt:
             row['art'] = {'appearance_id': key, 'image': '/game/api/outfit/' + key, 'sha256': outfit['sha256']}
+            for view in ('side', 'back'):
+                if view in outfit:
+                    row['art'][view] = {'image': row['art']['image'] + '?view=' + view, 'sha256': outfit[view + '_sha256']}
         worker['outfits'].append(row)
     return result

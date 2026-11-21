@@ -7,6 +7,10 @@ $configPath = Join-Path $install 'local.json'
 if (Test-Path -LiteralPath $configPath) { $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json }
 $candidates = @()
 if ($config.python) { $candidates += $config.python }
+$localPython = Join-Path $env:LOCALAPPDATA 'Programs\Python'
+if (Test-Path -LiteralPath $localPython) {
+    $candidates += @(Get-ChildItem -LiteralPath $localPython -Directory -Filter 'Python3*' | Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'python.exe' })
+}
 foreach ($name in @('python.exe','python3.exe')) {
     $command = Get-Command $name -ErrorAction SilentlyContinue
     if ($command) { $candidates += $command.Source }
@@ -33,6 +37,12 @@ if ($Check) {
     exit $LASTEXITCODE
 }
 if (!$Library -and $config.library) { $Library=$config.library }
+if (!$Demo -and !$Library) {
+    $documents = [Environment]::GetFolderPath('MyDocuments')
+    if (!$documents) { $documents = Join-Path $env:USERPROFILE 'Documents' }
+    $conventional = Join-Path $documents 'NovelAI Media Library'
+    if (Test-Path -LiteralPath (Join-Path $conventional 'library.json')) { $Library=$conventional }
+}
 if (!$Demo -and !$Library) { $Library=Read-Host 'Full path to the Media Library folder or library.json' }
 if ($Library -and [IO.Path]::GetFileName($Library) -eq 'library.json') { $Library=Split-Path -Parent $Library }
 if (!$Demo -and !(Test-Path -LiteralPath (Join-Path $Library 'library.json'))) { throw 'The selected folder does not contain library.json.' }

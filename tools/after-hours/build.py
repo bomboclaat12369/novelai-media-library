@@ -15,7 +15,7 @@ TOOLS = "tools/after-hours"
 FILE_LIST = "after-hours-files.json"
 GAME_MODULES = (
     "__init__ booking_state bookings catalog companion engine evolution flavor library_snapshot "
-    "management meeting_rules meetings migrations server stage_labels store wardrobe"
+    "management meeting_rules meetings migrations server stage_labels store videos wardrobe writing"
 ).split()
 WEB_FILES = "index.html app.js management-ui.js renderer.js style.css favicon.svg venue.js venue.css illustrations/characters.json illustrations/patricia-front.png illustrations/alice-front.png illustrations/patricia-side.png illustrations/alice-side.png".split()
 VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
@@ -50,10 +50,18 @@ def card_paths(value):
 def contents(rev):
     config_path = "release-standalone.json"
     config = json.loads(git("show", f"{rev}:{config_path}"))
-    names = {"runtime-src/companion-runtime.pyw", "game/Launch.ps1", config_path,
+    names = {"runtime-src/companion-runtime.pyw", "game/Launch.ps1", "game/Start-After-Hours.bat",
+             "game/release-version.txt", config_path,
              "game/stage-data/catalog.json", "game/stage-data/stage-labels.json"}
     names.update(f"game/{name}.py" for name in GAME_MODULES)
-    names.update({"game/wardrobe-data/outfits.json", "game/wardrobe-data/patricia-red-gingham-front.png"})
+    wardrobe = "game/wardrobe-data/outfits.json"
+    names.add(wardrobe)
+    for outfit in json.loads(git("show", f"{rev}:{wardrobe}")).values():
+        for view in ("front", "side", "back"):
+            if view in outfit:
+                if not re.fullmatch(r"[a-z0-9-]+\.png", outfit[view]):
+                    raise ValueError("Invalid wardrobe asset name")
+                names.add("game/wardrobe-data/" + outfit[view])
     names.update(f"game/web/{name}" for name in WEB_FILES)
     for suffix in ("ranks", "collection", "editions", "base-layout", "encore"):
         part, = (p for p in config["parts"] if p.endswith(f".{suffix}.txt"))

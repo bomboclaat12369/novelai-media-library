@@ -8,7 +8,7 @@ from . import management as m
 from . import evolution, flavor, wardrobe
 from . import meetings, stage_labels, bookings
 
-VERSION = '1.2.0-local'
+VERSION = '1.4.0-local'
 NIGHT_SPEEDS = (1, 2, 4, 8)
 PACK_RARITY_WEIGHTS = (55, 27, 12, 5, 1)
 PACKS = {'standard': {'name':'Standard','price':100,'count':5},
@@ -256,7 +256,8 @@ def settle(state):
               'earnings':night['earnings'],'demand':night['demand'],
               'department_revenue':night['department_revenue'], 'training_cost':training_cost,
               'decision_costs':night['decision_costs'], 'decisions':copy.deepcopy(night['decisions']),
-              'activity':night['log'][-12:], 'assignments':night['assignments']}
+              'activity':night['log'][-12:], 'assignments':night['assignments'],
+              'voucher_rewards':list(night.get('voucher_rewards',[]))}
     if night.get('stage_tracking') == 2:
         report['booking_history'] = copy.deepcopy(night['booking_history'])
         report['duration'] = night['duration']

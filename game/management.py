@@ -57,6 +57,13 @@ for _kind, _title, _pay, _energy in (
         'revenue': _pay, 'energy': _energy, 'roles': ('room',), 'default': 'decline',
         'options': [{'id': 'accept', 'label': f'Accept · +${_pay}, −{_energy} energy'},
                     {'id': 'decline', 'label': 'Finish the booking'}]}
+for _kind, _title, _pay, _energy in (
+    ('second_worker', 'A client wants a second worker', 95, 8),
+    ('second_client', 'Another client wants to join', 75, 10),
+):
+    DECISIONS[_kind] = {'title': _title, 'detail': _title, 'revenue': _pay, 'energy': _energy,
+        'partner_energy': 10 if _kind=='second_worker' else 0, 'default': 'decline', 'roles': ('room',),
+        'options': [{'id':'accept','label':f'Accept · +\u0024{_pay}'},{'id':'decline','label':'Keep this booking private'}]}
 for _kind, _cost, _energy, _loyalty in (('team_meal', 40, 20, 0), ('regular_perk', 20, 0, 4)):
     _title, _detail = flavor.EVENTS[_kind][0]
     DECISIONS[_kind] = {'title': _title, 'detail': _detail, 'cost': _cost, 'restore_energy': _energy, 'loyalty': _loyalty,
@@ -369,7 +376,9 @@ def advance_wave(state, catalog, wave):
             payout = round(spec['pay'] * min(1.25, c['quality'] / (6 * c['nights'])) * (1 if success else .55))
             c['revenue'] = payout; c['success'] = success
             n['revenue'] += payout; n['department_revenue'] += payout; n['earnings'][c['owner']] += payout
-            if success: state['pack_vouchers'] += spec['packs']
+            if success and spec['packs']:
+                state['pack_vouchers'] += spec['packs']
+                n.setdefault('voucher_rewards', []).append({'source':'studio','contract':c['id'],'amount':spec['packs']})
             if success and spec['days'] >= 2 and rng.random() < .2:
                 pool = [x for x in catalog['cards'].values() if x['owner'] == c['owner'] and x.get('available')
                         and x.get('source') not in evolution.SET_CARDS]
@@ -396,17 +405,14 @@ def after_settle(state, report):
     goals = [('first_service', state['totals']['services'] >= 30),
              ('studio_delivery', state['totals']['studio_completed'] >= 1),
              ('resort_checkout', state['totals']['resort_completed'] >= 1)]
-    for ident, done in goals:
-        if done and ident not in state['milestones']:
-            state['milestones'].append(ident); state['pack_vouchers'] += 1
-            record(state, 'milestone_earned', milestone=ident, standard_vouchers=1)
-    # One continuing save; repeatable seasonal goals provide later collecting rewards.
+    awards = [(ident, 1) for ident, done in goals if done]
     season = state['totals']['services'] // 250
-    for number in range(1, season + 1):
-        ident = f'bookings-{number * 250}'
+    awards.extend((f'bookings-{number * 250}', 2) for number in range(1, season + 1))
+    for ident, amount in awards:
         if ident not in state['milestones']:
-            state['milestones'].append(ident); state['pack_vouchers'] += 2
-            record(state, 'milestone_earned', milestone=ident, standard_vouchers=2)
+            state['milestones'].append(ident); state['pack_vouchers'] += amount
+            report['voucher_rewards'].append({'source':'milestone','milestone':ident,'amount':amount})
+            record(state, 'milestone_earned', milestone=ident, standard_vouchers=amount)
 
 
 def derived(state):

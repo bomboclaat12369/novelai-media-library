@@ -7,6 +7,30 @@ from . import engine, evolution, management, meetings, wardrobe
 SCHEMA = 2
 
 
+def recover_reward_receipts(state, history):
+    """Rebuild legacy reports from recorded awards, without awarding or spending vouchers."""
+    missing = {r['day']: r for r in state['reports'] if 'voucher_rewards' not in r}
+    if not missing:
+        return
+    for report in missing.values():
+        report['voucher_rewards'] = []
+    for contract in state['contracts']:
+        report = missing.get(contract['end'])
+        if report and contract['department']=='studio' and contract['status']=='completed' and contract.get('success') is True:
+            amount = contract['spec'].get('packs',0)
+            if type(amount) is int and amount > 0:
+                report['voucher_rewards'].append({'source':'studio','contract':contract['id'],'amount':amount})
+    seen = set()
+    for event in history:
+        milestone, amount, day = event.get('milestone'), event.get('standard_vouchers'), event.get('day')
+        if event.get('kind')!='milestone_earned' or type(day) is not int or day not in missing:
+            continue
+        if not isinstance(milestone,str) or milestone in seen or type(amount) is not int or amount < 1:
+            continue
+        seen.add(milestone)
+        missing[day]['voucher_rewards'].append({'source':'milestone','milestone':milestone,'amount':amount})
+
+
 def migrate(original):
     state = copy.deepcopy(original)
     version = state.get('schema')
@@ -38,6 +62,14 @@ def validate(state, catalog):
 
     try:
         wardrobe.validate(state)
+        for report in state['reports']:
+            rewards=report.get('voucher_rewards',[])
+            if not isinstance(rewards,list): raise ValueError('Invalid voucher history.')
+            for reward in rewards:
+                if not isinstance(reward,dict) or not integer(reward.get('amount'),1): raise ValueError('Invalid voucher amount.')
+                if reward.get('source')=='studio' and integer(reward.get('contract'),1): continue
+                if reward.get('source')=='milestone' and isinstance(reward.get('milestone'),str): continue
+                raise ValueError('Invalid voucher source.')
         if 'collection_target' in state and state['collection_target'] not in catalog['people']:
             raise ValueError('Unknown collection target.')
         if not integer(state['day'], 1) or not finite(state['cash'], -10**12): raise ValueError()

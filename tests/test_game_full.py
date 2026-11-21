@@ -288,25 +288,26 @@ class Recovery(unittest.TestCase):
         for i in range(1,4):
             with patch('game.store.time.monotonic',return_value=100+i*10):
                 r=self.store.apply('tick',{},f'event-tick-{i}',r['revision'])
-        r=self.store.apply('pause',{'paused':True},'event-pause',r['revision'])
-        decision=r['state']['night']['decisions'][0]
+        night=r['state']['night']
+        self.assertTrue(night['paused'])
+        decision=next(d for d in night['decisions'] if d['choice'] is None and d['at']<=night['elapsed']<d['until'])
         reopened=GameStore(self.path,self.cat)
         r=reopened.read()
-        self.assertEqual(r['state']['night']['decisions'][0]['copy'],decision['copy'])
+        self.assertEqual(next(d['copy'] for d in r['state']['night']['decisions'] if d['id']==decision['id']),decision['copy'])
         with self.assertRaises(g.RuleError):
             reopened.apply('decision',{'decision':decision['id'],'choice':'invalid'},'invalid-answer',r['revision'])
         self.assertEqual(reopened.read(),r)
-        body={'decision':decision['id'],'choice':'accept'}
+        body={'decision':decision['id'],'choice':m.DECISIONS[decision['kind']]['options'][0]['id']}
         with patch('game.store.time.monotonic',return_value=1000):
             r=reopened.apply('decision',body,'answer-event',r['revision'])
         self.assertFalse(r['state']['night']['paused']);self.assertEqual(r['state']['night']['speed'],4)
-        self.assertEqual(r['state']['night']['elapsed'],100)
+        self.assertEqual(r['state']['night']['elapsed'],decision['at'])
         cash=r['state']['night']['revenue']
         replay=reopened.apply('decision',body,'answer-event',r['revision'])
         self.assertTrue(replay['replayed']);self.assertEqual(replay['state']['night']['revenue'],cash)
         with patch('game.store.time.monotonic',return_value=1001):
             r=reopened.apply('tick',{},'tick-after-event',r['revision'])
-        self.assertEqual(r['state']['night']['elapsed'],104)
+        self.assertEqual(r['state']['night']['elapsed'],decision['at']+4)
 
     def test_eight_times_speed_and_delayed_ticks_stop_at_each_event(self):
         with patch('game.store.time.monotonic',return_value=100):

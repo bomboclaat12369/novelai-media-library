@@ -4,7 +4,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from . import evolution
+from . import evolution, videos
 from .library_snapshot import rows as snapshot_rows
 
 RARITIES = ('Common', 'Uncommon', 'Rare', 'Epic', 'Legendary')
@@ -107,7 +107,8 @@ def read_library(root):
     owners = {c['owner'] for c in cards.values()}
     people = {p: v for p, v in people.items() if p in owners}
     return {'source_id': str(data.get('_tracking_store') or hashlib.sha256(str(root).encode()).hexdigest()),
-            'demo': False, 'people': people, 'cards': cards}
+            'demo': False, 'people': people, 'cards': cards,
+            'videos': videos.catalog_rows(root, media, data.get('sets', []), cards, media_paths)}
 
 
 def public_catalog(catalog):
@@ -117,4 +118,4 @@ def public_catalog(catalog):
         public['image'] = '/api/image/' + key if card.get('image') or card.get('forms') else None
         public['original_available'] = bool(card.get('original') or card.get('forms'))
         cards[key] = public
-    return {**catalog, 'cards': cards}
+    return {**{k:v for k,v in catalog.items() if k!='videos'}, 'cards': cards}

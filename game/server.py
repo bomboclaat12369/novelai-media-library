@@ -1,11 +1,14 @@
 """Run an isolated preview; optionally read an existing library folder without editing it."""
 from __future__ import annotations
 import argparse
+import gzip
 import hashlib
 import html
+import io
 import json
 import mimetypes
 import os
+import re
 from pathlib import Path
 import secrets
 import select
@@ -15,6 +18,7 @@ import time
 import urllib.parse
 import webbrowser
 import threading
+import zlib
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 
 if __package__ in (None,''):
@@ -22,12 +26,13 @@ if __package__ in (None,''):
 from game.catalog import demo_catalog,read_library,public_catalog
 from game.engine import PACKS,PACK_RARITY_WEIGHTS,UPGRADES,NIGHT_SPEEDS,RuleError,forecast,upkeep,recurring_cost,hire_cost,upgrade_cost
 from game.store import GameStore,Conflict
-from game import bookings, evolution, management, meetings, stage_labels, wardrobe
+from game import bookings, evolution, management, meetings, stage_labels, videos, wardrobe, writing
 
 WEB=Path(__file__).resolve().parent/'web'
 PROJECT=WEB.parents[1]
 RESTART_EXIT_CODE=75
 HANDOFF_QUIET_SECONDS=3
+SAVE_FILE_LIMIT=256*1024*1024
 RENDERER={key:next(p for p in json.loads((PROJECT/'release-standalone.json').read_text())['parts'] if p.endswith('.'+suffix+'.txt'))
           for key,suffix in [('ranks','ranks'),('collection','collection'),('editions','editions'),('base','base-layout'),('encore','encore')]}
 
@@ -58,7 +63,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff')
         self.send_header('Content-Security-Policy',"default-src 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'")
         for k,v in (extra or {}).items(): self.send_header(k,v)
-        self.end_headers();self.wfile.write(body)
+        self.end_headers()
+        if self.command!='HEAD': self.wfile.write(body)
 
     def state_payload(self,result=None):
         result=result or self.server.store.read();s=result['state']
@@ -68,6 +74,7 @@ class Handler(BaseHTTPRequestHandler):
                                 'meetings':meetings.views(s,self.server.store.catalog),
                                 'evolutions':evolution.progress(self.server.store.catalog,s['owned']),
                                 'wardrobe':wardrobe.views(s,self.server.store.catalog),
+                                'videos':videos.library_views(self.server.store.catalog,s,self.server.store.video_pairs.read()),
                                 'duos':evolution.duo_views(self.server.store.catalog,s['owned']),**management.derived(s)}
         result['stage_labels']=self.server.store.label_info()
         return result
@@ -88,9 +95,52 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         return self.game_request(self.get_game)
 
+    def do_HEAD(self):
+        return self.game_request(self.clip_response) if self.path.split('?')[0].startswith(('/game/api/video/','/api/video/')) else self.send(404,{'error':'Unknown media.'})
+
+    def clip_response(self):
+        vid=urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).split('/api/video/',1)[-1]
+        with self.server.operation_lock:
+            store=self.server.store
+            clip=videos.unlocked(store.catalog,store.read()['state'],store.video_pairs.read()).get(vid)
+            if not clip: return self.send(403,{'error':'Collect a matching photo to unlock this video.'})
+            file=Path(clip['original']).resolve()
+            if not self.server.library_root or self.server.library_root not in file.parents:
+                return self.send(404,{'error':'Video unavailable.'})
+            try: stream=file.open('rb')
+            except OSError: return self.send(404,{'error':'Video unavailable.'})
+        with stream:
+            size=os.fstat(stream.fileno()).st_size
+            start,end=0,size-1
+            request=self.headers.get('Range')
+            if request is not None:
+                match=re.fullmatch(r'bytes=(\d*)-(\d*)',request)
+                if not match or not any(match.groups()) or max(map(len,match.groups()))>20:
+                    return self.send(416,b'',extra={'Content-Range':f'bytes */{size}'})
+                left,right=match.groups()
+                start=int(left) if left else max(0,size-int(right))
+                end=min(size-1,int(right)) if left and right else size-1
+                if start>end: return self.send(416,b'',extra={'Content-Range':f'bytes */{size}'})
+            self.send_response(206 if request else 200)
+            self.send_header('Content-Type',mimetypes.guess_type(file.name)[0] or 'video/mp4')
+            self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff')
+            self.send_header('Accept-Ranges','bytes');self.send_header('Content-Length',str(end-start+1))
+            if request: self.send_header('Content-Range',f'bytes {start}-{end}/{size}')
+            self.end_headers()
+            if self.command=='HEAD': return
+            stream.seek(start)
+            remaining=end-start+1
+            try:
+                while remaining:
+                    chunk=stream.read(min(262144,remaining))
+                    if not chunk: break
+                    self.wfile.write(chunk);remaining-=len(chunk)
+            except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError): pass
+
     def get_game(self):
         path=urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
         if path.startswith('/game/'): path=path[5:]
+        if path.startswith('/api/video/'): return self.clip_response()
         if path=='/api/player-presence':
             session=self.server.suite_session
             key=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('key',[''])[0]
@@ -141,6 +191,12 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/backups': return self.send(200,{'backups':self.server.store.backups(),'save_name':self.server.store.path.name})
         if path=='/api/renderer': return self.send(200,renderer_assets())
         if path=='/api/export':
+            if urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get('download')==['1']:
+                body=json.dumps(self.server.store.export(),ensure_ascii=False,separators=(',',':')).encode()
+                if len(body)>8*1024*1024:
+                    return self.send(200,gzip.compress(body,compresslevel=4),'application/gzip',
+                                     {'Content-Disposition':'attachment; filename="club-game-save.json.gz"'})
+                return self.send(200,body,extra={'Content-Disposition':'attachment; filename="club-game-save.json"'})
             return self.send(200,self.server.store.export(),extra={'Content-Disposition':'attachment; filename="club-game-save.json"'})
         if path.startswith('/api/outfit/'):
             key=path.removeprefix('/api/outfit/')
@@ -150,7 +206,10 @@ class Handler(BaseHTTPRequestHandler):
                 state=self.server.store.read()['state']
                 if not state or key not in state['wardrobe']['unlocked']:
                     return self.send(403,{'error':'Earn this outfit to see its artwork.'})
-                return self.send(200,(wardrobe.ART_DIR/outfit['front']).read_bytes(),'image/png')
+                view=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query,keep_blank_values=True).get('view',['front'])
+                if len(view)!=1 or view[0] not in ('front','side','back') or view[0] not in outfit:
+                    return self.send(404,{'error':'This outfit has no such view.'})
+                return self.send(200,(wardrobe.ART_DIR/outfit[view[0]]).read_bytes(),'image/png')
         if path.startswith('/api/image/'):
             ident=path.removeprefix('/api/image/')
             with self.server.operation_lock:
@@ -223,7 +282,7 @@ class Handler(BaseHTTPRequestHandler):
     def post_game(self):
         path=urllib.parse.urlparse(self.path).path
         if path.startswith('/game/'): path=path[5:]
-        if path not in ('/api/action','/api/refresh','/api/restore','/api/new-career','/api/backup','/api/restart','/api/stage-labels'): return self.send(404,{'error':'Not found.'})
+        if path not in ('/api/action','/api/refresh','/api/restore','/api/new-career','/api/backup','/api/restart','/api/stage-labels','/api/writing-pack','/api/video-pairings'): return self.send(404,{'error':'Not found.'})
         origin=self.headers.get('Origin')
         if origin and origin not in {f'http://127.0.0.1:{self.server.server_port}',f'http://localhost:{self.server.server_port}'}:
             return self.send(403,{'error':'Origin not allowed.'})
@@ -231,12 +290,22 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403,{'error':'Refresh this game tab to reconnect.'})
         try:
             length=int(self.headers.get('Content-Length','0'))
-            if not 0<length<=(stage_labels.MAX_BYTES if path in ('/api/restore','/api/stage-labels') else 65536): raise RuleError('Invalid request size.')
             mime=self.headers.get('Content-Type','').split(';')[0]
-            allowed=('application/json','application/zip','application/octet-stream') if path=='/api/stage-labels' else ('application/json',)
+            save_file=path=='/api/restore' and mime=='application/octet-stream'
+            limit=SAVE_FILE_LIMIT if save_file else writing.LIMIT if path=='/api/writing-pack' else stage_labels.MAX_BYTES if path in ('/api/restore','/api/stage-labels') else 65536
+            if not 0<length<=limit: raise RuleError('Invalid request size.')
+            allowed=('application/json','application/zip','application/octet-stream') if save_file or path in ('/api/stage-labels','/api/writing-pack') else ('application/json',)
             if mime not in allowed: raise RuleError('Unsupported request format.')
             raw=self.rfile.read(length)
-            request={} if path=='/api/stage-labels' else json.loads(raw)
+            if save_file:
+                if raw.startswith(b'\x1f\x8b'):
+                    try:
+                        with gzip.GzipFile(fileobj=io.BytesIO(raw)) as source: raw=source.read(SAVE_FILE_LIMIT+1)
+                    except (OSError,EOFError,zlib.error) as exc: raise RuleError('The compressed career file is incomplete.') from exc
+                if len(raw)>SAVE_FILE_LIMIT: raise RuleError('Choose a career export up to 256 MiB after decompression.')
+                request={'revision':int(self.headers.get('X-Game-Revision','-1')),'export':json.loads(raw)}
+            else:
+                request={} if path in ('/api/stage-labels','/api/writing-pack') else json.loads(raw)
             if not isinstance(request,dict) or not isinstance(request.get('body',{}),dict): raise RuleError('Invalid request.')
             with self.server.operation_lock:
                 # A restore can change the active file while this request is waiting.
@@ -245,8 +314,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(403,{'error':'Refresh this game tab to reconnect.'})
                 if self.server.restarting:
                     return self.send(503,{'error':'The game is restarting. Reconnect in a moment.'})
+                if path=='/api/video-pairings':
+                    store=self.server.store
+                    if 'clip' in request:
+                        store.video_pairs.set(store.catalog,request['clip'],request.get('photo'),request.get('previous'))
+                    return self.send(200,{'editor':store.video_pairs.editor(store.catalog),**self.state_payload()})
                 if path=='/api/stage-labels':
                     self.server.store.import_labels(raw)
+                    return self.send(200,self.state_payload())
+                if path=='/api/writing-pack':
+                    with self.server.store.lock: self.server.store.writing.install(raw)
                     return self.send(200,self.state_payload())
                 if path=='/api/restart':
                     if not self.server.restartable:
