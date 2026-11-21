@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "id": "workbench-review-multi-angle-sets-2026-11-20",
+  "id": "workbench-cross-post-group-review-2026-11-20",
   "components": [
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Review automatically matched photos by destination Set, including earlier matches. Keep a photo or return it to unmatched. Workbench checks shared scene details and original post order to recognize more photos from the same shoot across poses and camera angles."
+  "workbench_notes": "Review likely cross-post groups separately from strict automatic matching. Inspect photos by post, approve the group or just the checked photos, choose the destination Set, dismiss a suggestion or undo a decision. Saved Set decisions can improve the local ordering of suggestions."
 }

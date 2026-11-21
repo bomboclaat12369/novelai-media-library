@@ -1,4 +1,23 @@
-LOCAL DUPLICATE REVIEW 2.0.38
+LOCAL DUPLICATE REVIEW 2.0.39
+
+NEW IN 2.0.39 — APPROVE CROSS-POST GROUPS
+- Open Folder Organizer → Auto-match Sets → Review likely groups. Each group
+  shows different photos from multiple posts, or photos from a different post
+  than a suggested destination Set. Click a thumbnail to enlarge it.
+- Closest matches appears first. More from post order offers additional photos
+  when visual similarities agree with their positions in saved source posts.
+  It also checks nearby photos in two posts linked by the same surviving image.
+  The two lists use different candidates at the time of review. Choose a
+  destination or name a new draft Set. Uncheck outliers and
+  click Approve group or Approve selected. Only checked photos gain membership.
+- Next group leaves a suggestion pending. Dismiss group hides that combination
+  across restarts. Undo last review restores the prior decision. The current
+  post, selection and unfinished draft stay available when the dialog closes.
+- This queue uses the saved outfit and setting analysis. Analyze remaining
+  photos indexes missing stills for suggestions. It does not assign them.
+  Workbench uses confirmed Sets to test ranking weights on separate shoots
+  and adopts a change only when it improves cross-post retrieval locally.
+  Match photos continues to use its own strict automatic rules.
 
 NEW IN 2.0.38 — REVIEW MATCHED PHOTOS
 - In Folder Organizer, open Auto-match Sets in the left sidebar. Review matched

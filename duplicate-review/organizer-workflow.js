@@ -203,6 +203,7 @@ async function openAutoSets(){
  const status=el('p');
  status.setAttribute('role','status');
  const actions=el('div',undefined,'row');actions.style.flexWrap='wrap';
+ const likelyGroups=button('Review likely groups',()=>task(openLikelyGroups));
  let token=null,closed=false;
  matchDialog.onclose=()=>{closed=true;if(token)api('cancel-matching',{match_token:token}).catch(()=>{})};
  const close=button('Close',()=>matchDialog.close());
@@ -255,12 +256,13 @@ async function openAutoSets(){
    matches.disabled=!data.sets.some(g=>g.auto_members?.length);
    const review=button('Review unmatched photos',()=>task(reviewUnmatched));
    review.disabled=!counts.remaining;
-   actions.replaceChildren(matches,review,close);
+   actions.replaceChildren(matches,likelyGroups,review,close);
   }catch(error){token=null;close.textContent='Close';status.textContent=error.message;actions.replaceChildren(close)}
  }
  if(missing)actions.append(button('Analyze and match',()=>task(()=>run(true)),'primary'));
  if(data.match_analyzed)actions.append(button(missing?'Match analyzed photos':'Match photos',()=>task(()=>run(false)),missing?'small':'primary'));
  if(data.sets.some(g=>g.auto_members?.length))actions.append(button('Review matched photos',()=>task(()=>openMatchReview('all'))));
+ if(data.match_stills)actions.append(likelyGroups);
  actions.append(button('Review unmatched photos',()=>task(reviewUnmatched)),close);
  matchDialog.showModal();
 }

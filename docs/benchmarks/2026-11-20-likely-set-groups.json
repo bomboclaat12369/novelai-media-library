@@ -1,0 +1,107 @@
+{
+  "date": "2026-11-20",
+  "component": "Workbench 2.0.39",
+  "rule": "cross-post-review-v1",
+  "current_inventory": {
+    "method": "Read-only replay of the reported collection with its saved inventory, source order, duplicate evidence and Set decisions, applying strict 2.0.38 matching in memory first.",
+    "unmatched_before_strict": 2180,
+    "strict_placements": 138,
+    "remaining_after_strict": 2042,
+    "eligible_analyzed_after_holds": 1965,
+    "closest": {
+      "groups": 91,
+      "photos": 552,
+      "suggested_new_groups": 78,
+      "photos_suggested_for_existing_sets": 60
+    },
+    "additional_from_post_order": {
+      "groups": 9,
+      "photos": 21,
+      "suggested_new_groups": 7,
+      "photos_suggested_for_existing_sets": 2
+    },
+    "distinct_suggested_photos": 573,
+    "review_placements_without_approval": 0,
+    "held_out_reference_retrieval": {
+      "fit_sets": 56,
+      "held_out_sets": 30,
+      "held_out_queries": 316,
+      "default_first_reference_per_set": 0.7512,
+      "tuned_first_reference_per_set": 0.7998,
+      "measure": "Mean per-Set top-one accuracy among known shoots when retrieving only references from other primary posts. Held-out Sets check the choice learned from the fit Sets. This is a ranking check, not whole-group accuracy."
+    }
+  },
+  "historical_replay": {
+    "method": "Four inventories with human memberships hidden except for two references in a deterministic subset of known Sets. The replay applies the strict matcher in memory, then computes both disjoint review lists. All photos and any proposed destination must be supported by available labels to score a whole group. Partial evidence can still reveal a mixed group. Workbench and Library label sets overlap and must be read separately.",
+    "labels": {
+      "workbench": {
+        "closest": {
+          "all": {
+            "groups": 1329,
+            "photos": 6992,
+            "fully_labelled_groups": 289,
+            "fully_correct_groups": 236,
+            "known_mixed_groups": 107
+          },
+          "first_30_each_inventory": {
+            "groups": 90,
+            "photos": 482,
+            "fully_labelled_groups": 24,
+            "fully_correct_groups": 24
+          }
+        },
+        "broader": {
+          "all": {
+            "groups": 64,
+            "photos": 216,
+            "fully_labelled_groups": 18,
+            "fully_correct_groups": 16,
+            "known_mixed_groups": 2
+          },
+          "first_30_each_inventory": {
+            "groups": 52,
+            "photos": 175,
+            "fully_labelled_groups": 17,
+            "fully_correct_groups": 15,
+            "known_mixed_groups": 2
+          }
+        }
+      },
+      "library": {
+        "closest": {
+          "all": {
+            "groups": 1356,
+            "photos": 7272,
+            "known_mixed_groups": 51,
+            "fully_labelled_groups": 128,
+            "fully_correct_groups": 93
+          },
+          "first_30_each_inventory": {
+            "groups": 90,
+            "photos": 477,
+            "fully_labelled_groups": 17,
+            "fully_correct_groups": 17,
+            "known_mixed_groups": 1
+          }
+        },
+        "broader": {
+          "all": {
+            "groups": 58,
+            "photos": 187,
+            "fully_labelled_groups": 11,
+            "fully_correct_groups": 9,
+            "known_mixed_groups": 2
+          },
+          "first_30_each_inventory": {
+            "groups": 51,
+            "photos": 173,
+            "fully_labelled_groups": 11,
+            "fully_correct_groups": 9,
+            "known_mixed_groups": 2
+          }
+        }
+      }
+    }
+  },
+  "limits": "Suggestions from different posts can share a room, outfit or pose and still belong to different shoots. Unknown photos cannot establish accuracy. The separate approval step is required."
+}

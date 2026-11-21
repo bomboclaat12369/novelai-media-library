@@ -5,10 +5,13 @@ from test_organizer import fixture,add_instagram
 from app import make_server
 with tempfile.TemporaryDirectory() as temp:
     engine,bulk,org,ids=fixture(temp)
-    if '--auto-sets' in sys.argv:
+    if '--auto-sets' in sys.argv or '--likely-sets' in sys.argv:
         def offline(*args,**kwargs):raise ValueError('Offline test library.')
         engine.library.request=offline
     add_instagram(bulk,ids)
+    if '--likely-sets' in sys.argv:
+        from test_likely_sets import split_source_posts
+        split_source_posts(bulk,ids)
     if "--large" in sys.argv or "--focus" in sys.argv or "--resume" in sys.argv:
         from test_organizer_evidence import add_large_post
         add_large_post(bulk,ids)

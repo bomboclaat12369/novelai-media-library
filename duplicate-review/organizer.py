@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import tracking
 import organizer_auto_sets
+import organizer_likely_sets
 from bulk.sources import natural, original_name, original_order_key, original_sequence
 from engine import load_image, sha256, stat_key, linked
 
@@ -33,6 +34,7 @@ class Organizer:
         self.job={'running':False,'phase':'Saved inventory ready','done':0,'total':0,'eta_seconds':None}
         self.library_placement=None
         self.match_preparation=None
+        self.likely_reviews={}
         self.bound=None;self.catalog={};self.posts={};self.order_cache={};self.vector_by_id={};self.quick={}
         self.encoder_type=None;self.recipe=None;self.scope='';self.revision=0;self.discarded=set();self.parked={}
         with self.db() as db:
@@ -70,6 +72,7 @@ class Organizer:
         if self.match_preparation:
             self.match_preparation.cancel.set()
             self.match_preparation=None
+        self.likely_reviews.clear()
         self.bound=key;self.catalog=dict(cat);self.posts={};self.order_cache={}
         alias='section:'+current['section_id'] if current.get('section_id') else hashlib.sha256(json.dumps(current.get('config',{}).get('roots',[]),sort_keys=True).encode()).hexdigest()
         with self.db() as db:
@@ -718,6 +721,10 @@ class Organizer:
             if int(body.get('revision',-1))!=state.get('revision',0):raise ValueError('Review changed in another window. Reload before saving.')
             previous_undo=copy.deepcopy(state.get('undo'))
             match_result=None
+            likely_action=action in ('approve_likely','dismiss_likely')
+            if likely_action:
+                self.check_collection_idle(body)
+                self.refresh_library_placement(force=True)
             if action=='auto_sets':
                 self.check_collection_idle(body)
                 self.refresh_library_placement(force=True)
@@ -730,13 +737,19 @@ class Organizer:
                     prepared.collect()
                     if prepared.plan is None:raise ValueError(prepared.status.get('error','Matching stopped.'))
             with self.db() as db:
-                if action=='auto_sets':
+                undoing_review=action=='undo' and (state.get('undo') or {}).get('likely_review')
+                if action=='auto_sets' or likely_action or undoing_review:
                     db.execute('BEGIN IMMEDIATE')
                     row=db.execute('SELECT data FROM state WHERE scope=?',(self.scope,)).fetchone()
                     state=json.loads(row[0]) if row else {'revision':0,'selection':[]}
                     if int(body.get('revision',-1))!=state.get('revision',0):
                         raise ValueError('Review changed in another window. Reopen Auto-match Sets.')
                     previous_undo=copy.deepcopy(state.get('undo'))
+                if likely_action:
+                    review,offer,choices=organizer_likely_sets.validate(self,action,body,state,db)
+                    if action=='approve_likely':
+                        body=choices
+                if action=='auto_sets':
                     if not prepared.compatible(self,state,db):
                         raise ValueError('The collection or its selection changed. Run matching again to use your latest choices.')
                     match_result=organizer_auto_sets.apply_matches(self,state,db,prepared)
@@ -772,7 +785,12 @@ class Organizer:
                             item=self.catalog[ident];row={'hashes':sorted(self.hashes(ident)),'name':self.image(ident)['name'],'character_id':owner,'library_instance':body.get('library_instance') or (self.bulk.current or {}).get('config',{}).get('library_instance'),'options':options,'created':time.time()}
                             db.execute('INSERT OR REPLACE INTO individual_imports VALUES (?,?,?)',(self.scope,item['sha'],json.dumps(row)))
                     state['selection']=[]
-                elif action=='save':
+                elif action=='dismiss_likely':
+                    context=organizer_likely_sets.DISMISSED
+                    db.execute('INSERT INTO rejected VALUES (?,?,?)',(self.scope,context,offer['key']))
+                    state['undo']={'action':'reject','context':context,'ids':[offer['key']],'likely_review':offer['key']}
+                    organizer_likely_sets.record(self,db,review,offer,'dismissed_likely',[])
+                elif action in ('save','approve_likely'):
                     ids=self.valid_ids(body.get('ids',[]))
                     if not ids:raise ValueError('Select at least one image.')
                     target=str(body.get('target',''));allsets=self.sets(include_discarded=True);previous=allsets.get(target)
@@ -789,6 +807,7 @@ class Organizer:
                             memberships[i].append({'id':sid,'name':g['name']})
                     conflicts=[{'id':i,'name':self.image(i)['name'],'sets':sorted(memberships[i],key=lambda g:g['id'])} for i in ids if memberships.get(i)]
                     if conflicts:
+                        if likely_action:raise ValueError('A photo has been assigned. Refresh the likely groups.')
                         signature=hashlib.sha256(json.dumps({'target':target,'ids':sorted(ids),'conflicts':conflicts},sort_keys=True).encode()).hexdigest()
                         if body.get('membership_confirmation')!=signature:
                             return {'confirmation_required':True,'conflicts':conflicts,'membership_confirmation':signature,'destination':name}
@@ -818,7 +837,11 @@ class Organizer:
                         if field in group:group[field]=[i for i in group[field] if i not in ids]
                     if previous is None:group['created']=stamp
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,ident,json.dumps(group)))
-                    state.update(selection=[],target='',new_name='',new_colors=[],new_categories=[],new_favorite=False)
+                    if likely_action:
+                        state['undo'].update(selection=state.get('selection',[]),likely_review=offer['key'])
+                        organizer_likely_sets.record(self,db,review,offer,'approved_likely',ids,ident)
+                    else:
+                        state.update(selection=[],target='',new_name='',new_colors=[],new_categories=[],new_favorite=False)
                 elif action in ('set_colors','set_details'):
                     target=str(body.get('target',''));group=self.sets(include_discarded=True).get(target)
                     if not group:raise ValueError('Choose an available set.')
@@ -924,6 +947,11 @@ class Organizer:
                     if undo['action']=='auto_sets':
                         organizer_auto_sets.undo_matches(self,db,undo)
                     elif undo['action']=='set':
+                        if undo.get('likely_review'):
+                            current=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,undo['id'])).fetchone()
+                            previous=json.loads(undo['previous']) if undo.get('previous') else {}
+                            if not current or json.loads(current[0]).get('applied_at')!=previous.get('applied_at'):
+                                raise ValueError('This group has reached the Library. Restore its import checkpoint to undo the transfer.')
                         db.executemany("DELETE FROM rejected WHERE scope=? AND context='auto-hold' AND id=?",((self.scope,h) for h in undo.get('new_auto_holds',[])))
                         db.execute('DELETE FROM sets WHERE scope=? AND id=?',(self.scope,undo['id']))
                         if undo['previous']:db.execute('INSERT INTO sets VALUES (?,?,?)',(self.scope,undo['id'],undo['previous']))
@@ -957,11 +985,17 @@ class Organizer:
                         for ident in undo['ids']:db.execute('DELETE FROM rejected WHERE scope=? AND context=? AND id=?',(self.scope,undo['context'],ident))
                 else:raise ValueError('Unknown organizer action.')
                 if action=='undo':
+                    if undo.get('likely_review'):
+                        tracking.journal().event(db,'decision.undo_likely_group',self.scope,
+                                                 {'action':undo['action'],'set':undo.get('id'),'key':undo['likely_review']})
                     history=state.get('undo_stack',[])
                     if history:state['undo']=history.pop()
                 elif action!='pin' and previous_undo and state.get('undo')!=previous_undo:
                     state['undo_stack']=(state.get('undo_stack',[])+[previous_undo])[-19:]
                 state['revision']=state.get('revision',0)+1;self.put_state(db,state)
+            if likely_action:
+                review.revision=state['revision']
+                review.rows.remove(offer)
             self.load_dispositions()
             summary=self.summary()
             if match_result is not None:summary['auto_result']=match_result

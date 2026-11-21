@@ -39,6 +39,7 @@ def make_server(engine, port=0, token=None):
     from bulk.workbench import Workbench
     bulk = Workbench(engine)
     from organizer import Organizer
+    import organizer_likely_sets
     from updater import Updater
     organizer = Organizer(engine, bulk)
     from library_editing import LibraryEditor
@@ -56,7 +57,8 @@ def make_server(engine, port=0, token=None):
     bulk_html = bulk_html.replace('</body>',update_tag+'</body>')
     organizer_html = organizer_html.replace('__UPDATER__',update_js)
     organizer_html = organizer_html.replace('__ORGANIZER_WORKFLOW__',(Path(__file__).parent/'missing-files.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-workflow.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-search.js').read_text(encoding='utf-8'))
-    organizer_html = organizer_html.replace('__ORGANIZER_SESSION__',(Path(__file__).parent/'organizer-session.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-match-review.js').read_text(encoding='utf-8'))
+    review_scripts = ('organizer-session.js', 'organizer-match-review.js', 'organizer-likely.js')
+    organizer_html = organizer_html.replace('__ORGANIZER_SESSION__','\n'.join((Path(__file__).parent/name).read_text(encoding='utf-8') for name in review_scripts))
 
     autofill_js=(Path(__file__).parent/'no-autofill.js').read_text(encoding='utf-8')
     def no_autofill(page):
@@ -79,10 +81,10 @@ def make_server(engine, port=0, token=None):
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
             self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'nonce-"+token+"'; style-src 'unsafe-inline'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
-            self.end_headers()
             try:
+                self.end_headers()
                 self.wfile.write(data)
-            except (BrokenPipeError, ConnectionResetError):
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
 
         def allowed(self):
@@ -258,6 +260,8 @@ def make_server(engine, port=0, token=None):
                     result=organizer.manual_search(body)
                 elif path == '/api/organizer/match-review':
                     result=organizer.review_matches(body)
+                elif path == '/api/organizer/likely-groups':
+                    result=organizer_likely_sets.load_page(organizer,body)
                 elif path == '/api/organizer/prepare-matches':
                     result=organizer.prepare_matches(body)
                 elif path == '/api/organizer/cancel-matching':

@@ -266,15 +266,68 @@ def scene_lookalikes(items, vectors, truth, mixed_posts):
     return dict(counts)
 
 
+def review_counts(rows, truth, seeded):
+    counts = Counter(groups=len(rows), photos=sum(len(r['members']) for r in rows))
+    for row in rows:
+        labels = [truth.get(i) for i in row['members']]
+        target = row['target']
+        if target in seeded:
+            labels.append(target)
+        elif target:
+            labels.extend(truth.get(i) for i in row['references'])
+        known = set(labels) - {None}
+        if len(known) > 1:
+            counts['known_mixed_groups'] += 1
+        if known and None not in labels:
+            counts['fully_labelled_groups'] += 1
+            counts['fully_correct_groups'] += int(len(known) == 1)
+    return dict(counts)
+
+
+def review_remainder(items, vectors, truth, mixed, sequences, cache=None):
+    from likely_sets import review_queue
+    from set_matching import evidence_vectors, match_sets
+    from shoot_scene import SceneEvidence
+    from source_shoots import combine, source_matches
+    groups = seeded_sets(truth)
+    seeded = set(groups)
+    valid = evidence_vectors(items,vectors)
+    scene = SceneEvidence(items,cache_path=cache)
+    try:
+        plan = match_sets(items,valid,groups,set(),mixed,sequences)
+        hits = source_matches(items,valid,groups,set(),mixed,scene)
+        plan = combine(plan,hits,items,valid,groups)
+    finally:
+        scene.close()
+    for index, new in enumerate(plan['new']):
+        groups['simulated-auto-'+str(index)] = {'members':new['members'], 'auto_members':new['members']}
+    for gid, matches in plan['add'].items():
+        groups[gid]['members'].extend(matches)
+        groups[gid]['auto_members'] = list(matches)
+    result, seen = {}, set()
+    for breadth in ('closest','broader'):
+        rows, calibration = review_queue(items,valid,groups,set(),mixed,breadth=breadth)
+        offered = [i for row in rows for i in row['members']]
+        if len(offered) != len(set(offered)) or seen.intersection(offered):
+            raise ValueError('A photo appeared twice in the review queues.')
+        seen.update(offered)
+        result[breadth] = {'all':review_counts(rows,truth,seeded),'first_30':review_counts(rows[:30],truth,seeded),
+                           'ranking':calibration}
+    return result
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--workbench',required=True,type=Path)
     p.add_argument('--library',required=True,type=Path,help='library.json to read')
     p.add_argument('--split',choices=('inventory','development','validation'),required=True)
     p.add_argument('--lookalikes',action='store_true')
+    p.add_argument('--likely-groups',action='store_true',help='Hide saved memberships, simulate strict matching and evaluate group suggestions for the remainder')
     p.add_argument('--source-scenes',action='store_true',help='Check original photos locally with the multi-angle matcher')
     p.add_argument('--labels',choices=('library','workbench'),default='library')
     args=p.parse_args()
+    if args.likely_groups and args.lookalikes:
+        p.error('Choose one evaluation per run.')
     for pos, items, vectors, truth, sequences in inventories(args.workbench,args.library,args.labels):
         if args.split=='inventory':
             print(json.dumps({'profile':pos,'photos':len(items),'analysed':len(vectors),'labelled':len(truth),'sets':len(set(truth.values()))}),flush=True)
@@ -282,6 +335,9 @@ def main():
         if (pos%2 == 0) != (args.split=='development'):
             continue
         mixed={'forum:smg:603571'}
+        if args.likely_groups:
+            print(json.dumps({'profile':pos,'review':review_remainder(items,vectors,truth,mixed,sequences)}),flush=True)
+            continue
         if args.lookalikes:
             results = scene_lookalikes(items, vectors, truth, mixed) if args.source_scenes else lookalikes(items, vectors, truth)
             print(json.dumps({'profile':pos,'lookalikes':results}),flush=True)
