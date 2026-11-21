@@ -81,6 +81,23 @@ class Completion(unittest.TestCase):
         self.assertEqual([r['voucher_rewards'][0]['amount'] for r in s['reports']],[1,2])
         self.assertEqual(s['pack_vouchers'],0)
 
+    def test_old_management_receipts_use_recorded_results_without_repaying(self):
+        old={'day':3,'revenue':80,'earnings':{'p':40},'assignments':{'p':'lounge'},
+             'decisions':[{'id':'offer','kind':'lounge_round','choice':'accept','worker':'p'}]}
+        ambiguous={**copy.deepcopy(old),'day':4,'revenue':81}
+        active={**copy.deepcopy(old),'day':5,'energy_spent':{'p':12}}
+        paid={'department':'resort','status':'completed','spec':{'rate':155,'expectation':55},'satisfaction':55}
+        missed={**copy.deepcopy(paid),'satisfaction':54}
+        state={'day':5,'cash':610,'people':{'p':{'energy':33}},'reports':[old,ambiguous],
+               'night':active,'contracts':[paid,missed],'journal':[]}
+        for _ in range(2):
+            migrations.recover_management_receipts(state)
+        self.assertEqual([paid['checkout_bonus_paid'],missed['checkout_bonus_paid']],[46,0])
+        self.assertEqual([s['earnings']['p'] for s in (old,ambiguous,active)],[80,40,80])
+        self.assertEqual(active['energy_spent']['p'],18)
+        self.assertEqual((state['cash'],state['people']['p']['energy']),(610,33))
+        self.assertEqual([e['day'] for e in state['journal']],[3,5])
+
     def test_earned_forms_and_exact_manual_video_pairings(self):
         with tempfile.TemporaryDirectory() as tmp:
             book=videos.Pairings(tmp,'test')

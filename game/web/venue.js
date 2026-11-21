@@ -196,11 +196,23 @@ function staffingConflicts(){
  return `<section class="panel staffing-conflicts" aria-label="Staffing conflicts"><h2>Choose who works tonight</h2>
   ${rows.join('')}<button class="ghost small" data-screen="team">Change team assignments</button></section>`;
 }
+function nextDepartmentOpening(){
+ if(save.phase!=='prepare')return '';
+ const dept=['studio','resort'].find(key=>!save.departments[key]);
+ if(!dept)return '';
+ const name=esc(boot.departments[dept].name);
+ const title=canOpenDepartment(dept)?`${name} is ready to open`:`Next opening · ${name}`;
+ return `<section class="panel next-opening" aria-labelledby="next-opening-title">
+  <h2 id="next-opening-title">${title}</h2>
+  ${openingGoals(dept)}
+  <button class="ghost small" data-screen="${dept}">View ${name} →</button>
+ </section>`;
+}
 function illustratedClub(){
  const n=save.night,last=save.reports.at(-1),clock=seconds=>Math.floor(seconds/60)+':'+String(Math.floor(seconds%60)).padStart(2,'0');
  return `<div class="lounge-heading"><div><div class="eyebrow">The club / Night ${save.day}</div><h1>${n?'An evening at After Hours':'Make tonight your own.'}</h1></div><div class="actions">${nightControls()}${boot.restartable?'<button class="ghost small" data-action="restart-game">Restart game</button>':''}</div></div>
   <div class="lounge-summary"><span>Cash <strong>${money(save.cash)}</strong></span><span>${n?`${clock(n.elapsed)} / ${clock(n.duration||boot.night_duration)} · ${n.paused?'Paused':'Doors open'}`:`${esc(derived.demand)} demand`}</span><span>${n?`${n.served} paid bookings · <strong>${money(n.revenue)}</strong> earned`:`<strong>${money(derived.recurring)}</strong> recurring costs`}</span><span>Last night ${last?`<strong class="${last.profit<0?'negative':'positive'}">${money(last.profit)}</strong> net`:'—'}</span></div>
-  ${staffingConflicts()}${illustratedVenue()}
+  ${staffingConflicts()}${illustratedVenue()}${nextDepartmentOpening()}
   <details class="venue-planning panel" data-venue-section="planning" ${venueSections.has('planning')?'open':''}><summary>Tonight’s plan <span>Assignments, cards & prices</span></summary><div class="venue-plan-body"><div class="sectionhead"><p>Each girl keeps her career and energy across cards.</p><button class="ghost small" data-screen="team">Team & recruitment →</button></div><div class="staff-grid">${Object.keys(save.people).map(staffHTML).join('')}</div><label class="policy-label" for="pricing">Price policy</label><select id="pricing" ${n?'disabled':''}>${[['accessible','Accessible · more bookings'],['standard','Standard · balanced'],['premium','Premium · higher price, fewer bookings']].map(([value,label])=>`<option value="${value}" ${save.pricing===value?'selected':''}>${label}</option>`).join('')}</select>${savedPlans()}</div></details>
   ${venueActivity(n,last)}
   ${save.cash<derived.recurring&&!n?'<section class="panel"><h3>Time to regroup</h3><p>Take a two-day recovery break to restore energy and receive an operating reserve.</p><button data-action="recovery">Take recovery break</button></section>':''}`;

@@ -31,6 +31,31 @@ class IntegratedRules(unittest.TestCase):
         s=g.command(s,self.cat,'auto');s=g.command(s,self.cat,'start')
         return g.command(s,self.cat,'finish')
 
+    def test_lounge_offer_is_paid_once_and_credited_to_its_host(self):
+        state=g.new_game(self.cat,['demo-0','demo-1'],1)
+        state=g.command(state,self.cat,'start')
+        for _ in range(7):
+            state=g.command(state,self.cat,'advance',{'seconds':180,'stop_at_decision':True})
+            n=state['night']
+            offer=next(d for d in n['decisions'] if d['choice'] is None and d['at']<=n['elapsed']<d['until'])
+            if offer['kind']=='lounge_round':
+                break
+            state=g.command(state,self.cat,'decision',{'decision':offer['id'],'choice':'decline'})
+        self.assertEqual(offer['kind'],'lounge_round')
+        state=g.command(state,self.cat,'decision',{'decision':offer['id'],'choice':'accept'})
+        after=state['night']
+        paid=next(d for d in after['decisions'] if d['id']==offer['id'])
+        host=paid['worker']
+        self.assertEqual(n['assignments'][host],'lounge')
+        self.assertEqual(after['revenue']-n['revenue'],40)
+        self.assertEqual(after['earnings'][host]-n['earnings'][host],40)
+        self.assertEqual(after['energy_spent'][host]-n['energy_spent'][host],6)
+        self.assertEqual(paid['host_credit'],{'revenue':40,'energy':6})
+        with self.assertRaises(g.RuleError):
+            g.command(state,self.cat,'decision',{'decision':offer['id'],'choice':'accept'})
+        report=g.command(state,self.cat,'finish')['reports'][-1]
+        self.assertEqual(sum(report['earnings'].values()),report['revenue'])
+
     def test_department_order_and_small_roster_unlocks(self):
         with self.assertRaises(g.RuleError):g.command(self.s,self.cat,'department',{'kind':'studio'})
         s=copy.deepcopy(self.s);s.update(day=4,cash=3000);s['totals']['services']=18
@@ -202,6 +227,7 @@ class IntegratedRules(unittest.TestCase):
             s=g.command(s,self.cat,'start')
             s=g.command(s,self.cat,'finish')
         self.assertEqual(s['contracts'][0]['satisfaction'],0)
+        self.assertEqual(s['contracts'][0]['checkout_bonus_paid'],0)
         self.assertEqual(s['loyalty'],0)
         from game.migrations import validate
         validate(s,self.cat)

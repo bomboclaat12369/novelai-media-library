@@ -143,6 +143,13 @@ def department_upkeep(state):
     return sum(DEPARTMENTS[k]['upkeep'] * level for k, level in state.get('departments', {}).items())
 
 
+def resort_checkout_bonus(spec, satisfaction=None):
+    """The quoted bonus is paid only when the guest meets the saved target."""
+    if satisfaction is not None and satisfaction < spec['expectation']:
+        return 0
+    return round(spec['rate'] * .3)
+
+
 def contract_quote(state, department, kind, owner):
     from .engine import RuleError
     table = PROJECTS if department == 'studio' else STAYS if department == 'resort' else {}
@@ -151,9 +158,12 @@ def contract_quote(state, department, kind, owner):
     spec = table[kind]
     worker = state['people'][owner]
     bonus = skill_bonus(worker, department)
-    return {**spec, 'quality_bonus': round(bonus, 3),
-            'success_chance': round(min(.99, 1 - spec.get('risk', 0) + bonus / 2), 3),
-            'estimated_pay': round(spec.get('pay', spec.get('rate', 0) * spec['days']) * (1 + bonus))}
+    quote = {**spec, 'quality_bonus': round(bonus, 3),
+             'success_chance': round(min(.99, 1 - spec.get('risk', 0) + bonus / 2), 3),
+             'estimated_pay': round(spec.get('pay', spec.get('rate', 0) * spec['days']) * (1 + bonus))}
+    if department == 'resort':
+        quote['checkout_bonus'] = resort_checkout_bonus(spec)
+    return quote
 
 
 def reservation_options(state, department, owner, spec):
@@ -320,6 +330,9 @@ def resolve_decision(state, decision, choice, automatic=False):
             from .meetings import identity
             decision['meeting_id'] = identity(state, owner, min(6, int(n['elapsed'] // 50) + 1))
         n['revenue'] += spec['revenue']
+        n['earnings'][owner] += spec['revenue']
+        n['energy_spent'][owner] += spec['energy']
+        decision['host_credit'] = {'revenue': spec['revenue'], 'energy': spec['energy']}
     if choice in ('refresh', 'promote', 'perk'):
         cost = spec['cost']
         if state['cash'] + n['revenue'] - n['decision_costs'] < cost: raise RuleError('Keep enough cash for this decision.')
@@ -388,7 +401,8 @@ def advance_wave(state, catalog, wave):
                     item['copies'] += 1; item['studio_award'] = True; c['special_card'] = special
             n['log'].append(spec['name'] + f": {'delivered' if success else 'reworked at reduced fee'} · ${payout}")
         else:
-            bonus = round(spec['rate'] * .3) if c['satisfaction'] >= spec['expectation'] else 0
+            bonus = resort_checkout_bonus(spec, c['satisfaction'])
+            c['checkout_bonus_paid'] = bonus
             n['revenue'] += bonus; n['department_revenue'] += bonus; c['revenue'] += bonus
             n['earnings'][c['owner']] += bonus
             state['loyalty'] = max(0, min(100, state['loyalty'] + (3 if bonus else -1)))

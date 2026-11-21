@@ -1,5 +1,19 @@
 # After Hours — completed local build
 
+## Version 1.4.1 — department planning and receipts
+
+The Club tracks progress toward the next department opening. The Studio
+and Resort show the deposit, when the work pays, and cash left after the
+next night's wages and upkeep. Studio delivery receipts open
+the awarded card. Resort checkouts show the satisfaction target, the bonus
+included in the payout, and the total after the deposit.
+
+Accepted lounge rounds now credit the host's earnings and energy spent.
+Older receipts recover the credit when the recorded offer and till agree.
+A disposable browser career opened both departments, collected a Studio
+card and confirmed a $46 Resort bonus. A copy of an older career kept its
+cash, cards and contract earnings through restart and restore.
+
 ## Local completion build 1.4.0, 20 November 2026
 
 The Windows launcher in the outer folder opens the illustrated game through

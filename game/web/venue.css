@@ -80,6 +80,16 @@
 .reservation-calendar tbody th{text-align:left;color:var(--text);font-weight:600}
 .opening-goals{margin:12px 0;max-width:32rem}.opening-goals>div{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);padding:6px 0}
 .opening-goals dt{color:var(--muted)}.opening-goals dd{margin:0;font-variant-numeric:tabular-nums}
+.next-opening{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px 24px;margin:12px 0 0;padding:14px 18px}
+.next-opening h2{font-size:16px;margin:0}
+.next-opening .opening-goals{display:flex;flex-wrap:wrap;gap:7px 22px;margin:0;max-width:none}
+.next-opening .opening-goals>div{display:block;border:0;padding:0}
+.next-opening dt{font-size:12px}
+@media(max-width:760px){
+ .next-opening{grid-template-columns:minmax(0,1fr) auto}
+ .next-opening .opening-goals{grid-column:1/-1;grid-row:2}
+ .next-opening button{grid-column:2;grid-row:1}
+}
 .staffing-conflicts{margin-bottom:14px}.staffing-conflicts h2{font-size:20px;margin-bottom:10px}
 .staffing-conflicts .actions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px}.staffing-conflicts p{margin:4px 0}
 .collection-actions{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}

@@ -33,7 +33,7 @@ async function check() {
     const jsErrors = [];
     page.on('pageerror', e => jsErrors.push(e.message));
     const get = async endpoint => (await page.request.get(url+'api/'+endpoint)).json();
-    const {token, catalog} = await get('bootstrap');
+    const {token, catalog, departments} = await get('bootstrap');
     let current = await get('state');
     async function act(action, body={}) {
         const response = await page.request.post(url+'api/action', {headers:{'X-Game-Token':token, Origin:new URL(url).origin},
@@ -41,11 +41,27 @@ async function check() {
         current = await response.json();
         assert.ok(response.ok(), action+' '+(current.error||response.status()));
     }
-    const night = async () => { await act('auto'); await act('start'); await act('finish'); };
     const nav = screen => page.locator('.nav [data-screen="'+screen+'"]').click();
+    const nextDepartment = page.locator('.next-opening');
+    const night = async () => {
+        await act('auto'); await act('start');
+        if (current.state.day===1) {
+            await page.reload();
+            await page.waitForFunction(()=>save?.phase==='night');
+            await page.evaluate(()=>clearInterval(interval));
+            assert.equal(await nextDepartment.count(),0);
+            current=await get('state');
+        }
+        await act('finish');
+    };
     await act('new',{selected:['demo-0','demo-2'],seed:19});
     await page.goto(url);
-    await nav('studio');
+    await page.setViewportSize({width:390,height:844});
+    assert.match(await nextDepartment.innerText(),/Next opening · Studio/);
+    assert.match(await nextDepartment.innerText(),/\$50 short of \$650/);
+    assert.ok(await nextDepartment.evaluate(el=>el.scrollWidth<=el.clientWidth));
+    await nextDepartment.getByRole('button',{name:'View Studio'}).click();
+    await page.setViewportSize({width:1400,height:960});
     const goals = page.locator('.opening-goals');
     assert.match(await goals.innerText(),/Paid club bookings\s+0 \/ 18/);
     assert.match(await goals.innerText(),/Opening funds\s+\$50 short/);
@@ -79,13 +95,45 @@ async function check() {
     }
     const rested = () => Object.keys(current.state.people).sort((a,b)=>current.state.people[b].energy-current.state.people[a].energy);
     const schedule = (department,kind,owner,start=current.state.day) => act('schedule',{department,kind,owner,start});
+    async function openFromClub(kind, name) {
+        await page.reload();
+        assert.equal(await nextDepartment.getByRole('heading').textContent(),name+' is ready to open');
+        await nextDepartment.getByRole('button',{name:'View '+name}).click();
+        const remaining=current.state.cash-current.derived.department_costs[kind]-current.derived.recurring-departments[kind].upkeep;
+        assert.equal(await page.locator('.budget-line strong').textContent(),money(Math.abs(remaining))+(remaining<0?' short':' left'));
+        assert.equal((await get('state')).revision,current.revision,'Reviewing an opening is read-only');
+        await page.getByRole('button',{name:'Open '+name,exact:true}).click();
+        await page.waitForFunction(key=>save.departments[key]===1,kind);
+        current=await get('state');
+        await nav('club');
+        if (kind==='studio') assert.match(await nextDepartment.innerText(),/Completed Studio projects\s+0 \/ 2/);
+        else assert.equal(await nextDepartment.count(),0);
+    }
+    let openedAward=false;
     while (!current.state.departments.resort || current.state.cash<400 || current.state.people[rested()[1]].energy<32) {
         assert.ok(current.state.day<45, 'Departments available within the sample career');
-        if (!current.state.departments.studio && current.derived.unlocks.studio && current.state.cash>=850) await act('department',{kind:'studio'});
-        if (current.state.departments.studio && current.state.totals.studio_completed<2) await schedule('studio','portrait',rested()[0]);
-        if (!current.state.departments.resort && current.derived.unlocks.resort && current.state.cash>=1650) await act('department',{kind:'resort'});
+        if (!current.state.departments.studio && current.derived.unlocks.studio && current.state.cash>=850) await openFromClub('studio','Studio');
+        if (current.state.departments.studio && current.state.totals.studio_completed<2 &&
+            !current.state.contracts.some(c=>c.department==='studio' && c.status==='active')) {
+            await schedule('studio',current.state.totals.studio_completed?'portrait':'editorial',rested()[0]);
+        }
+        if (!current.state.departments.resort && current.derived.unlocks.resort && current.state.cash>=1650) await openFromClub('resort','Resort');
         await night();
+        const award=current.state.contracts.find(c=>c.end===current.state.day-1 && c.special_card);
+        if (award && !openedAward) {
+            await page.reload();
+            const activity=page.locator('[data-venue-section=activity]');
+            await activity.locator('summary').click();
+            await activity.getByRole('button',{name:/View awarded card/}).click();
+            assert.ok((await page.locator('dialog[open] .source-detail').innerText()).includes(catalog.cards[award.special_card].name));
+            await page.getByRole('button',{name:'Close card'}).click();
+            await nav('studio');
+            assert.equal(await page.getByRole('button',{name:/View awarded card/}).getAttribute('data-card'),award.special_card);
+            assert.equal((await get('state')).revision,current.revision);
+            openedAward=true;
+        }
     }
+    assert.ok(openedAward,'Opened the earned Studio card in the sample career');
     const [creator,host] = rested(), firstDay=current.state.day;
     await schedule('studio','portrait',host,firstDay+2);
     const beforeQuote = current;
@@ -115,6 +163,10 @@ async function check() {
     await choose('resort','kind','retreat');
     await page.waitForFunction(expected=>revision===expected,current.revision);
     await choose('resort','start',firstDay);
+    assert.match(await page.locator('.quote').innerText(),/\$250 for the stay after the deposit/);
+    assert.match(await page.locator('.quote').innerText(),/\$46 bonus at 55\/100/);
+    const reserveCash=beforeQuote.state.cash-60-beforeQuote.derived.recurring;
+    assert.equal(await availability.locator('.budget-line strong').textContent(),money(Math.abs(reserveCash))+(reserveCash<0?' short':' left'));
     await reserve.click();
     await page.waitForFunction(day=>save.contracts.some(c=>c.department==='resort'&&c.start===day&&c.status==='active'),firstDay);
     await nav('studio');
@@ -125,6 +177,8 @@ async function check() {
     assert.ok(await reserve.isDisabled());
     await choose('studio','kind','editorial');
     await choose('studio','start',firstDay);
+    const editorial=beforeQuote.derived.quotes.studio[creator].editorial;
+    assert.ok((await page.locator('.quote').innerText()).includes(money(editorial.estimated_pay-editorial.fee)+' after the deposit'));
     await reserve.click();
     await page.waitForFunction(day=>save.contracts.some(c=>c.kind==='editorial'&&c.start===day),firstDay);
     current=await get('state');
@@ -146,6 +200,8 @@ async function check() {
         if (c.department==='resort') {
             assert.ok(report.earnings[c.owner]<c.revenue);
             expected.push(money(report.earnings[c.owner]));
+            assert.equal(c.checkout_bonus_paid,46);
+            expected.push(c.satisfaction+'/100 · target '+c.spec.expectation,money(c.checkout_bonus_paid));
         }
         expected.push(money(c.revenue-c.spec.fee));
         assert.deepEqual(values,expected);

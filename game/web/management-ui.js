@@ -48,6 +48,12 @@ function voucherHistory(){
  return nights.length?`<details class="panel"><summary>Voucher history</summary>${nights.map(r=>`<h3>Night ${r.day}</h3>${voucherReceipts(r)}`).join('')}</details>`:'';
 }
 
+function studioCardReward(id){
+ const awarded=card(id);
+ if(!awarded||!save.owned[id])return 'Card awarded';
+ return `<button class="ghost small" data-action="inspect" data-card="${esc(id)}">View awarded card · ${esc(awarded.name)}</button>`;
+}
+
 function contractReceipts(report, contracts, showTonight=false){
  if(!contracts.length)return '';
  const roles = assignmentNames;
@@ -57,14 +63,18 @@ function contractReceipts(report, contracts, showTonight=false){
   const name = person(c.owner).name;
   const title = c.spec.name || (studio?'Studio project':'Resort stay');
   const lines = [[studio?'Delivery payout':'Entire stay', money(c.revenue)]];
-  const nightlyPay = report.earnings?.[c.owner];
-  if(!studio && Number.isFinite(nightlyPay))lines.push(['Checkout night', money(nightlyPay)]);
+  if(!studio){
+   const nightlyPay = report.earnings?.[c.owner];
+   if(Number.isFinite(nightlyPay))lines.push(['Checkout night', money(nightlyPay)]);
+   lines.push(['Guest satisfaction', c.satisfaction+'/100 · target '+c.spec.expectation]);
+   if(Number.isFinite(c.checkout_bonus_paid))lines.push(['Checkout bonus included', money(c.checkout_bonus_paid)]);
+  }
   if(Number.isFinite(c.spec.fee))lines.push(['After '+money(c.spec.fee)+' deposit', money(c.revenue-c.spec.fee)]);
   const rewards = [];
   if(studio && c.success && Number.isSafeInteger(c.spec.packs) && c.spec.packs>0 &&
      !(showTonight&&report.voucher_rewards?.some(r=>r.contract===c.id)))
    rewards.push(c.spec.packs+' Standard '+(c.spec.packs===1?'voucher':'vouchers'));
-  if(c.special_card)rewards.push('Card awarded · '+esc(card(c.special_card)?.name||'Studio card'));
+  if(c.special_card)rewards.push(studioCardReward(c.special_card));
   const role = derived.assignments?.[c.owner];
   let plan = '';
   if(showTonight && roles[role] && save.people[c.owner]){
@@ -192,9 +202,32 @@ function reservationControls(dept,owner,kind,start,quote){
   lines.push(`${name} can take this booking. It replaces her current ${assignmentNames[worker.role].toLowerCase()} assignment for ${quote.days===1?'one night':quote.days+' nights'}.`);
   lines.push(`${money(save.cash-quote.fee)} left after the deposit.`);
  }
- return `<div class="reservation-check" role="status">${lines.map(line=>`<p>${esc(line)}</p>`).join('')}${alternative}</div>`+button(blocked);
+ const reserve=blocked?'':budgetLine('After deposit and one night of wages &amp; upkeep',save.cash-quote.fee-derived.recurring);
+ return `<div class="reservation-check" role="status">${lines.map(line=>`<p>${esc(line)}</p>`).join('')}${reserve}${alternative}</div>`+button(blocked);
 }
 function nightRange(start,end){return start===end?'night '+start:'nights '+start+'–'+end;}
+function contractTerms(dept,quote,start){
+ const end=start+quote.days-1;
+ let terms;
+ if(dept==='studio'){
+  const rewards=[];
+  if(quote.packs)rewards.push(`${quote.packs} Standard voucher on successful delivery.`);
+  if(quote.days>=2)rewards.push('20% chance of an extra card on successful delivery.');
+  terms=`<p>Paid on delivery, night ${end}. A successful project earns an estimated ${money(quote.estimated_pay)} · <strong>${money(quote.estimated_pay-quote.fee)} after the deposit</strong>.</p>
+   <p>${Math.round(quote.success_chance*100)}% delivery chance with sufficient work completed. Rework pays 55% of the quality-adjusted fee.</p>
+   ${rewards.length?`<p>${rewards.join(' ')}</p>`:''}`;
+ }else{
+  const baseAfterDeposit=quote.rate*quote.days-quote.fee;
+  const bonus=Number.isFinite(quote.checkout_bonus)?money(quote.checkout_bonus)+' bonus':'checkout bonus';
+  terms=`<p>${money(quote.rate)} base per night · <strong>${money(baseAfterDeposit)} for the stay after the deposit</strong>. Service quality adjusts nightly pay.</p>
+   <p>Night ${end} checkout · ${bonus} at ${quote.expectation}/100 satisfaction or higher.</p>`;
+ }
+ return `<div class="quote"><p><strong>${quote.days===1?'Night '+start:'Nights '+start+'–'+end}</strong></p>
+  <p>Deposit due now ${money(quote.fee)} · ${quote.energy} energy/night</p>${terms}</div>`;
+}
+function canOpenDepartment(dept){
+ return derived.unlocks[dept] && save.cash >= derived.department_costs[dept];
+}
 function openingGoals(dept){
  const goals=derived.opening_progress?.[dept];
  if(!goals)return `<p>${dept==='studio'?'Reach night 4 and complete 18 club bookings.':'Open the Studio and complete two projects.'}</p>`;
@@ -205,7 +238,7 @@ function openingGoals(dept){
   return `<div><dt>${labels[key]}</dt><dd class="${met?'positive':''}">${met?'✓ ':''}${progress}</dd></div>`;
  });
  const cost=derived.department_costs[dept];
- rows.push(`<div><dt>Opening funds</dt><dd>${save.cash>=cost?money(cost)+' available':money(cost-save.cash)+' short'}</dd></div>`);
+ rows.push(`<div><dt>Opening funds</dt><dd>${save.cash>=cost?money(cost)+' available':money(cost-save.cash)+' short of '+money(cost)}</dd></div>`);
  return `<dl class="opening-goals" aria-label="Department opening progress">${rows.join('')}</dl>`;
 }
 function studio(){return departmentUI('studio');}function resort(){return departmentUI('resort');}
@@ -213,9 +246,10 @@ function departmentUI(dept){
  const isStudio=dept==='studio',table=isStudio?boot.projects:boot.stays,level=save.departments[dept];
  const intro=head('One shared calendar',isStudio?'The Studio':'The Resort',isStudio?'Reserve a creator for a defined project. Earn money, pack vouchers and occasional special card awards.':'Welcome multi-night stays. Balance package expectations, staffing, energy and guest satisfaction.');
  if(!level){
-  const ready=derived.unlocks[dept]&&save.cash>=derived.department_costs[dept];
+  const ready=canOpenDepartment(dept);
   return intro+`<section class="panel"><h2>${ready?'Ready to open':'Opening requirements'}</h2>${openingGoals(dept)}
    <p>${money(derived.department_costs[dept])} to open · ${money(boot.departments[dept].upkeep)} upkeep/night</p>
+   ${ready&&save.phase==='prepare'?budgetLine('After opening and one night of wages &amp; upkeep',save.cash-derived.department_costs[dept]-derived.recurring-boot.departments[dept].upkeep):''}
    <button class="primary" data-action="department" data-kind="${dept}" ${dis(!ready||save.phase!=='prepare')}>Open ${boot.departments[dept].name}</button></section>`;
  }
  const owner=quoteOwner[dept]&&save.people[quoteOwner[dept]]?quoteOwner[dept]:Object.keys(save.people)[0],kind=quoteKind[dept]||Object.keys(table)[0];quoteOwner[dept]=owner;quoteKind[dept]=kind;
@@ -227,9 +261,9 @@ function departmentUI(dept){
  <label>${isStudio?'Project':'Package'}<select id="quote-kind-${dept}" data-quote-kind="${dept}">${Object.entries(table).map(([id,p])=>`<option value="${id}" ${id===kind?'selected':''}>${p.name} · ${p.days} night(s)</option>`).join('')}</select></label>
  <label>Assigned ${isStudio?'creator':'host'}<select id="quote-owner-${dept}" data-quote-owner="${dept}">${Object.keys(save.people).map(id=>`<option value="${esc(id)}" ${owner===id?'selected':''}>${esc(person(id).name)} · energy ${Math.round(save.people[id].energy)}</option>`).join('')}</select></label>
  <label>Starting night<select id="quote-start-${dept}" data-quote-start="${dept}">${Array.from({length:horizon+1},(_,i)=>save.day+i).map(d=>`<option value="${d}" ${d===start?'selected':''}>Night ${d}</option>`).join('')}</select></label>
- <div class="quote"><p><strong>${quote.days===1?'Night '+start:'Nights '+start+'–'+(start+quote.days-1)}</strong></p><p>Deposit ${money(quote.fee)} · ${quote.energy} energy/night</p><p>${isStudio?`Estimated payout ${money(quote.estimated_pay)} · ${Math.round(quote.success_chance*100)}% delivery chance. Rework pays 55%.`:`Base rate ${money(quote.rate)}/night; quality adjusts payment. Satisfaction ${quote.expectation}+ earns a checkout bonus.`}</p><p>${quote.packs?`${quote.packs} Standard voucher on successful delivery. `:''}${isStudio&&quote.days>=2?'20% chance of an extra card award on successful delivery.':''}</p></div>
+ ${contractTerms(dept,quote,start)}
  ${reservationControls(dept,owner,kind,start,quote)}<p class="note">Cancelling frees the dates. The deposit is nonrefundable.</p></section>
- <section><h2>Active reservations</h2>${active.map(c=>`<article class="panel reservation"><h3>${esc(c.spec.name)} · ${esc(person(c.owner).name)}</h3><p>Nights ${c.start}–${c.end} · ${c.nights}/${c.spec.days} completed</p><p>${isStudio?'Shared career and equipped card apply.':`Satisfaction ${c.satisfaction}/100 · ${money(c.revenue)} earned`}</p><button class="ghost" data-action="cancel_contract" data-contract="${c.id}" ${dis(save.phase!=='prepare')}>Cancel · no deposit refund</button></article>`).join('')||'<p class="note">No active reservations.</p>'}<h3>Recent deliveries</h3>${completed.map(c=>`<p class="completed">${esc(c.spec.name)} · ${esc(person(c.owner).name)} · ${money(c.revenue)}${c.special_card?' · special card awarded':''}${c.success===false?' · reduced fee':''}</p>`).join('')||'<p class="note">Completed work appears here.</p>'}</section></div>`+calendarUI(owner,start,quote.days);
+ <section><h2>Active reservations</h2>${active.map(c=>`<article class="panel reservation"><h3>${esc(c.spec.name)} · ${esc(person(c.owner).name)}</h3><p>Nights ${c.start}–${c.end} · ${c.nights}/${c.spec.days} completed</p><p>${isStudio?'Shared career and equipped card apply.':`Satisfaction ${c.satisfaction}/100 · target ${c.spec.expectation} · ${money(c.revenue)} earned`}</p><button class="ghost" data-action="cancel_contract" data-contract="${c.id}" ${dis(save.phase!=='prepare')}>Cancel · no deposit refund</button></article>`).join('')||'<p class="note">No active reservations.</p>'}<h3>${isStudio?'Recent deliveries':'Recent checkouts'}</h3>${completed.map(c=>`<p class="completed">${esc(c.spec.name)} · ${esc(person(c.owner).name)} · ${money(c.revenue)}${c.special_card?' · '+studioCardReward(c.special_card):''}${c.success===false?' · reduced fee':''}</p>`).join('')||'<p class="note">Completed work appears here.</p>'}</section></div>`+calendarUI(owner,start,quote.days);
 }
 function calendarUI(owner,start,duration){
  const preview=save.phase==='prepare',first=preview?Math.max(save.day,start-1):save.day;

@@ -92,6 +92,7 @@ class GameStore:
             db.execute("INSERT OR REPLACE INTO meta VALUES ('catalog_stamp',?)",(self.catalog_stamp,))
             if row:
                 migrations.validate(state,catalog)
+                migrations.recover_management_receipts(state)
                 wardrobe.reconcile(state,catalog)
                 if any('voucher_rewards' not in r for r in state['reports']):
                     past=db.execute("SELECT body FROM events WHERE json_extract(body,'$.kind')='milestone_earned' ORDER BY id")
@@ -287,6 +288,7 @@ class GameStore:
             state=migrations.migrate(payload['save']['state'])
             cat=merge_catalog(payload['catalog'],self.source_catalog,state['owned'])
             migrations.validate(state,cat)
+            migrations.recover_management_receipts(state)
             wardrobe.reconcile(state,cat)
             if state.get('night'): state['night']['paused']=True
             history=payload.get('history',[])

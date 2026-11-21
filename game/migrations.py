@@ -7,6 +7,40 @@ from . import engine, evolution, management, meetings, wardrobe
 SCHEMA = 2
 
 
+def recover_management_receipts(state):
+    """Reconstruct recorded results without awarding cash or spending energy again."""
+    for contract in state['contracts']:
+        if contract['department'] == 'resort' and contract['status'] == 'completed' and 'checkout_bonus_paid' not in contract:
+            contract['checkout_bonus_paid'] = management.resort_checkout_bonus(contract['spec'], contract['satisfaction'])
+
+    shifts = list(state['reports'])
+    if state.get('night'):
+        shifts.append(state['night'])
+    for shift in shifts:
+        # Through 1.4.0 a lounge round paid $40 and cost 6 energy. Only
+        # attribute it when the recorded offer explains the full discrepancy.
+        earnings = shift.get('earnings')
+        decisions = shift.get('decisions')
+        if not isinstance(earnings, dict) or not isinstance(decisions, list) or not all(type(v) is int for v in earnings.values()):
+            continue
+        if shift.get('revenue') != sum(earnings.values()) + 40:
+            continue
+        lounge = [d for d in decisions if isinstance(d, dict) and d.get('kind') == 'lounge_round' and d.get('choice') == 'accept']
+        if len(lounge) != 1 or 'host_credit' in lounge[0]:
+            continue
+        owner = lounge[0].get('worker')
+        assignments = shift.get('assignments')
+        if not isinstance(owner, str) or owner not in earnings or not isinstance(assignments, dict) or assignments.get(owner) != 'lounge':
+            continue
+        earnings[owner] += 40
+        spent = shift.get('energy_spent')
+        if isinstance(spent, dict) and type(spent.get(owner)) in (int, float):
+            spent[owner] += 6
+        lounge[0]['host_credit'] = {'revenue': 40, 'energy': 6}
+        state.setdefault('journal', []).append({'kind': 'lounge_receipt_corrected', 'day': shift.get('day', state['day']),
+                                               'decision': lounge[0].get('id'), 'worker': owner, 'revenue': 40, 'energy': 6})
+
+
 def recover_reward_receipts(state, history):
     """Rebuild legacy reports from recorded awards, without awarding or spending vouchers."""
     missing = {r['day']: r for r in state['reports'] if 'voucher_rewards' not in r}
@@ -120,6 +154,7 @@ def validate(state, catalog):
             if c['department']=='studio':
                 if not finite(spec['pay']) or not integer(spec['packs']): raise ValueError()
             elif not finite(spec['rate']) or not finite(spec['expectation'],0,100): raise ValueError()
+            if 'checkout_bonus_paid' in c and not integer(c['checkout_bonus_paid']): raise ValueError()
         if state['phase']=='night':
             n=state['night']
             if not finite(n['elapsed'],0,300) or not integer(n['wave'],0,6) or type(n['speed']) is not int or n['speed'] not in engine.NIGHT_SPEEDS: raise ValueError()

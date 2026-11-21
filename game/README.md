@@ -2,7 +2,7 @@
 
 A complete local main-game build for the Media Library companion. Choose two
 founders, grow the club, collect cards, schedule Studio projects and manage
-multi-night Resort stays on one calendar. The current local build is **1.4.0**.
+multi-night Resort stays on one calendar. The current local build is **1.4.1**.
 
 ## Play on this Windows computer
 
@@ -74,6 +74,13 @@ companion was not replaced or updated.
 - **Resort:** available after two Studio deliveries. Opening costs $1,250 plus
   $24 upkeep per suite. Two-, three- and four-night packages reserve a host,
   earn nightly revenue and track satisfaction for checkout bonuses.
+
+During preparation, the Club shows what you still need to open the next
+department. Before you pay an opening fee or reservation deposit, you can see
+what you'll have left after the next night's wages and upkeep. Each contract
+quote shows when you get paid. At checkout, the morning report includes the
+guest's satisfaction and the bonus paid. A Studio delivery that earns a card
+lets you open it from the receipt.
 
 One person cannot occupy two departments on the same date. Projects, stays
 and club work advance together with shared money, energy and career skills.
