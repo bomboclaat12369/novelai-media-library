@@ -124,8 +124,9 @@ async function showTransfer(plan){
   }catch(e){status.textContent=e.message+' Reopen the preview to resume safely.';cancel.disabled=false;throw e;}
   finally{applying=false;stop.disabled=true;}
  }
+ if(plan.protected_auto_conflicts)transferDialog.append(el('p','Some automatically matched photos already belong to another Library Set. Skip conflicting images to keep their existing memberships.'));
  const confirm=button(plan.conflicts.length?'Apply and move memberships':'Apply changes',()=>task(()=>apply('move')),'primary');
- confirm.disabled=!!plan.issues.length||(!plan.sets.length&&!individuals.length);
+ confirm.disabled=!!plan.protected_auto_conflicts||!!plan.issues.length||(!plan.sets.length&&!individuals.length);
  transferDialog.append(status,confirm,stop);
  if(plan.conflicts.length){const skip=button('Skip conflicting set images',()=>task(()=>apply('skip')));skip.disabled=!!plan.issues.length;transferDialog.append(skip)}
  transferDialog.append(cancel);if(!transferDialog.open)transferDialog.showModal();
@@ -182,7 +183,68 @@ async function openCheckpoints(){
 
 const missingFilesButton=button('Missing files',()=>window.naiOpenMissingFiles({host:document.body,request:(action,body)=>api('missing-'+action,body)}));$('export').before(missingFilesButton);
 
-// Individual imports use the same source inventory, viewer and persistent selection.
+const matchDialog=document.createElement('dialog');
+matchDialog.style.cssText='width:min(530px,92vw);height:auto;padding:20px';
+matchDialog.setAttribute('aria-label','Auto-match Sets');
+document.body.append(matchDialog);
+const autoSetsButton=button('Auto-match Sets',()=>task(openAutoSets));
+autoSetsButton.id='autoSets';
+$('index').before(autoSetsButton);
+
+async function reviewUnmatched(){
+ matchDialog.close();
+ await open('unmatched','unmatched');
+}
+
+async function openAutoSets(){
+ if(!data?.job){toast('Choose a collection first.');return}
+ const sourceJob=data.job, revision=data.state.revision;
+ const missing=data.match_stills-data.match_analyzed;
+ const status=el('p');
+ status.setAttribute('role','status');
+ const actions=el('div',undefined,'row');actions.style.flexWrap='wrap';
+ const close=button('Close',()=>matchDialog.close());
+ matchDialog.replaceChildren(el('h2','Auto-match Sets'),
+  el('p','Create draft Sets and fill Sets you’ve started. In large posts, Workbench also checks consecutive photos in Original post order. Uncertain matches stay in Unmatched photos.'),
+  status,actions);
+ status.textContent=missing?data.match_analyzed+' photos have saved analysis. '+missing+' still need analysis.':'The saved visual analysis is ready.';
+ async function run(analyze){
+  actions.replaceChildren(close);
+  try{
+   await saveDraft();
+   if(analyze){
+    let progress=await api('index',{job:sourceJob,revision,for_set_matching:true});
+    while(progress.running&&matchDialog.open){
+     status.textContent=progress.phase+' · '+progress.done+' / '+progress.total;
+     await new Promise(resolve=>setTimeout(resolve,1000));
+     if(!matchDialog.open)return;
+     progress=await api('progress');
+    }
+    if(!matchDialog.open)return;
+    if(progress.phase!=='Visual analysis saved'&&!progress.phase.startsWith('All saved images already indexed')){
+     throw Error(progress.phase+' Reopen Auto-match Sets to use the finished analysis.');
+    }
+   }
+   status.textContent='Matching photos…';
+   const result=await api('auto_sets',{job:sourceJob,revision});
+   const counts=result.auto_result;
+   const position=captureSession();
+   await refresh();
+   if(view){await open(currentKind,currentId,offset,false);await related();await restoreScroll(position);scheduleSession()}
+   if(!matchDialog.open)return;
+   status.textContent=counts.new_members+' photos in '+counts.created_sets+' new Sets · '+counts.added_members+
+    ' added to '+counts.extended_sets+' existing Sets · '+counts.remaining+' unmatched.';
+   const review=button('Review unmatched photos',()=>task(reviewUnmatched),'primary');
+   review.disabled=!counts.remaining;
+   actions.replaceChildren(review,close);
+  }catch(error){status.textContent=error.message;actions.replaceChildren(close)}
+ }
+ if(missing)actions.append(button('Analyze and match',()=>task(()=>run(true)),'primary'));
+ if(data.match_analyzed)actions.append(button(missing?'Match analyzed photos':'Match photos',()=>task(()=>run(false)),missing?'small':'primary'));
+ actions.append(button('Review unmatched photos',()=>task(reviewUnmatched)),close);
+ matchDialog.showModal();
+}
+
 const allImagesButton=button('All images',()=>task(()=>open('all_images','all_images')));
 allImagesButton.id='allImages';upNextButton.before(allImagesButton);
 const individualQueueButton=button('Import queue · 0',()=>task(()=>open('imports','imports')));

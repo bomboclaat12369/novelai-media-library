@@ -1,0 +1,98 @@
+{
+  "date": "2026-11-20",
+  "rule": "corroborated-shoot-v1",
+  "inventories": 4,
+  "analyzed_stills": 15911,
+  "method": "Read-only replay of saved visual analysis and original source order. A fresh-start replay hides every Set. A second replay retains two manually assigned anchors for a deterministic subset of Sets. The two label sources overlap and their counts should be read separately.",
+  "labels": {
+    "library": {
+      "fresh": {
+        "known_mixed_drafts": 0,
+        "eligible_labelled_photos": 2986,
+        "new_drafts": 69,
+        "new_photos": 231,
+        "partly_or_entirely_unlabelled_drafts": 54,
+        "fully_labelled_pure_drafts": 15,
+        "photos_in_fully_labelled_pure_drafts": 49,
+        "drafts_from_consecutive_photos": 4,
+        "photos_from_consecutive_runs": 21
+      },
+      "started": {
+        "wrong_additions": 0,
+        "known_mixed_drafts": 0,
+        "eligible_labelled_photos": 2448,
+        "new_drafts": 30,
+        "new_photos": 99,
+        "partly_or_entirely_unlabelled_drafts": 27,
+        "fully_labelled_pure_drafts": 3,
+        "photos_in_fully_labelled_pure_drafts": 9,
+        "additions": 9,
+        "correct_additions": 9
+      },
+      "lookalike_challenges": {
+        "mixed_posts": 424,
+        "false_new_drafts": 0,
+        "false_additions": 0,
+        "mixed_reposts": 424,
+        "false_repost_drafts": 0,
+        "false_repost_additions": 0,
+        "ordered_mixed_boundaries": 424,
+        "false_ordered_drafts": 0,
+        "false_ordered_additions": 0,
+        "sparse_mixed_posts": 424,
+        "false_sparse_drafts": 0,
+        "false_sparse_additions": 0,
+        "false_sparse_ordered_drafts": 0,
+        "false_sparse_ordered_additions": 0,
+        "three_anchor_boundaries": 290,
+        "false_three_anchor_additions": 0,
+        "false_partial_repost_additions": 0
+      }
+    },
+    "workbench": {
+      "fresh": {
+        "known_mixed_drafts": 0,
+        "eligible_labelled_photos": 4327,
+        "new_drafts": 69,
+        "new_photos": 231,
+        "partly_or_entirely_unlabelled_drafts": 46,
+        "fully_labelled_pure_drafts": 23,
+        "photos_in_fully_labelled_pure_drafts": 76,
+        "drafts_from_consecutive_photos": 4,
+        "photos_from_consecutive_runs": 21
+      },
+      "started": {
+        "wrong_additions": 0,
+        "known_mixed_drafts": 0,
+        "eligible_labelled_photos": 3893,
+        "new_drafts": 18,
+        "new_photos": 60,
+        "partly_or_entirely_unlabelled_drafts": 14,
+        "fully_labelled_pure_drafts": 4,
+        "photos_in_fully_labelled_pure_drafts": 13,
+        "additions": 5,
+        "correct_additions": 5
+      },
+      "lookalike_challenges": {
+        "mixed_posts": 360,
+        "false_new_drafts": 0,
+        "false_additions": 0,
+        "mixed_reposts": 360,
+        "false_repost_drafts": 0,
+        "false_repost_additions": 0,
+        "ordered_mixed_boundaries": 358,
+        "false_ordered_drafts": 0,
+        "false_ordered_additions": 0,
+        "sparse_mixed_posts": 358,
+        "false_sparse_drafts": 0,
+        "false_sparse_additions": 0,
+        "false_sparse_ordered_drafts": 0,
+        "false_sparse_ordered_additions": 0,
+        "three_anchor_boundaries": 328,
+        "false_three_anchor_additions": 0,
+        "false_partial_repost_additions": 0
+      }
+    }
+  },
+  "limits": "A draft is fully verified only when every photo has a saved manual label and those labels agree. Unlabelled photos cannot establish accuracy. The look-alike challenges reuse photos in deliberately different positions and source contexts. These are stress cases, not independent statistical trials. Replay on a collection without recognized posts made no automatic drafts."
+}

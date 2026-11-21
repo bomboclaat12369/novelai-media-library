@@ -1,11 +1,9 @@
 {
   "schema": 1,
-  "id": "set-card-reminders-2026-11-14",
+  "id": "workbench-original-order-auto-sets-2026-11-20",
   "components": [
-    "standalone",
-    "runtime",
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Includes the updated companion with Possible Duo and Possible Evolution reminders on library Sets."
+  "workbench_notes": "Adds Auto-match Sets in the Workbench Organizer. It creates draft Sets, fills Sets you have started, and checks consecutive photos in original post order. Uncertain photos stay available for manual review."
 }

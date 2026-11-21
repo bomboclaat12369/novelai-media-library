@@ -1,4 +1,5 @@
 import copy,json,tempfile,threading,unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 from http.server import ThreadingHTTPServer
@@ -55,7 +56,7 @@ class IndividualQueueTests(unittest.TestCase):
         import sqlite3
         from checkpoints import Checkpoints
         directory=Path(self.temp.name)/'old-snapshot';directory.mkdir()
-        with sqlite3.connect(self.org.path) as src,sqlite3.connect(directory/'organizer.sqlite3') as dst:
+        with closing(sqlite3.connect(self.org.path)) as src,closing(sqlite3.connect(directory/'organizer.sqlite3')) as dst,dst:
             src.backup(dst);dst.execute('DROP TABLE individual_imports')
         self.queue();Checkpoints(self.engine,self.bulk,self.org).install_databases(directory)
         self.assertFalse(self.org.summary()['individuals']);self.queue();self.assertEqual(len(self.org.summary()['individuals']),1)

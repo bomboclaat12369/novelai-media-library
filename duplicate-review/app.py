@@ -263,7 +263,7 @@ def make_server(engine, port=0, token=None):
                 elif path == '/api/organizer/related':
                     result=organizer.related(body)
                 elif path == '/api/organizer/index':
-                    result=organizer.index(body.get('ids'))
+                    result=organizer.index(body.get('ids'),match_request=body if body.get('for_set_matching') else None)
                 elif path in ('/api/organizer/video-step','/api/organizer/video-frame'):
                     result=organizer.video_action(path.rsplit('-',1)[-1],body)
                 elif path == '/api/organizer/pause':

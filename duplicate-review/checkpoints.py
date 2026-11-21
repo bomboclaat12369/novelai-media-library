@@ -4,6 +4,7 @@ Original files are optional. Restore refuses missing originals or changed paths;
 its journal rolls back both applications after interrupted/failed installation.
 """
 import hashlib,json,shutil,sqlite3,time,uuid
+from contextlib import closing
 from pathlib import Path
 from engine import linked,sha256
 import tracking
@@ -25,7 +26,8 @@ class Checkpoints:
             source=self.engine.state_dir/name
             if not source.exists():continue
             target=directory/name
-            with sqlite3.connect(source) as src,sqlite3.connect(target) as dst:src.backup(dst)
+            with closing(sqlite3.connect(source)) as src,closing(sqlite3.connect(target)) as dst:
+                src.backup(dst)
             hashes[name]=sha256(target)
         return hashes
 
@@ -84,7 +86,7 @@ class Checkpoints:
     def fingerprint(self):
         hashes={}
         for name in self.names:
-            with sqlite3.connect(self.engine.state_dir/name) as db:
+            with closing(sqlite3.connect(self.engine.state_dir/name)) as db:
                 # Data version alone is connection-local; the deterministic dump
                 # catches changes made through any connection/window.
                 digest=hashlib.sha256()
@@ -116,7 +118,7 @@ class Checkpoints:
     def install_databases(self,directory):
         for name in self.names:
             if not (directory/name).exists():continue
-            with sqlite3.connect(directory/name) as src,sqlite3.connect(self.engine.state_dir/name) as dst:
+            with closing(sqlite3.connect(directory/name)) as src,closing(sqlite3.connect(self.engine.state_dir/name)) as dst,dst:
                 log=tracking.journal();log.schema(dst)
                 history=log.rows(dst)
                 identities=dst.execute('SELECT kind,alias,identity FROM tracking_identities').fetchall()

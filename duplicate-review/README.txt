@@ -1,4 +1,17 @@
-LOCAL DUPLICATE REVIEW 2.0.15
+LOCAL DUPLICATE REVIEW 2.0.37
+
+NEW IN 2.0.37 — AUTOMATIC SET MATCHING
+- In Folder Organizer, choose a collection and click Auto-match Sets. Choose
+  Match photos when analysis is ready or Analyze and match to finish the scan.
+- Workbench can create new draft Sets and add photos to Sets you have started.
+  It compares outfit and setting with other photos in the collection. In large
+  posts it also checks consecutive photos in Original post order across page
+  breaks. It can find a photo in a different post from its known Set.
+- Your current post and selection stay in place. Review unmatched photos opens
+  the remaining photos. Use Undo to reverse the batch or remove an individual
+  match from its draft before using the normal Import to library workflow.
+- To select an uncertain run yourself, click Select on its first photo and
+  Shift-click Select on its last photo on the same page.
 
 NEW IN 2.0.15: ORGANIZER VISIBILITY AND FAVORITES
 - Highlight unassigned toggles a red border/banner for images without a set.

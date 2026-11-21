@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
 import tracking
+import organizer_auto_sets
+from bulk.sources import natural, original_name, original_order_key, original_sequence
 from engine import load_image, sha256, stat_key, linked
 
 
@@ -22,10 +24,6 @@ def title_case_label(value):
 
 def set_name_colors(name, colors=None):
     return runtime_helpers()['set_name_colors'](name,colors)
-
-
-def natural(value):
-    return tuple((1,int(x)) if x.isdigit() else (0,x.casefold()) for x in re.split(r'(\d+)',str(value)))
 
 
 class Organizer:
@@ -321,8 +319,10 @@ class Organizer:
                 posts.append({k:v for k,v in p.items() if k!='ids'}|{'count':len(visible),'remaining':sum(i not in assigned for i in live),'unresolved':len(visible)-len(live),'status':statuses.get(p['id'],'pending'),'mixed':self.is_mixed(p['id'],state.get('post_evidence',{})),'large':len(p['ids'])>=1000,'source_count':len(p['ids']),'cover':next(iter(live or visible),None)})
             posts.sort(key=lambda p:(p['status']!='pending',p['remaining']==0,natural(p['label'])))
             total=sum(not r.get('quarantine_only') and i not in self.discarded for i,r in self.catalog.items())
+            stills=organizer_auto_sets.available_stills(self)
             return {'job':(self.bulk.current or {}).get('id'),'section_id':(self.bulk.current or {}).get('section_id'),'roots':(self.bulk.current or {}).get('config',{}).get('roots',[]),'inventory_running':bool((self.bulk.current or {}).get('running')),'scope':self.scope,'collections':self.bulk.collections(),'posts':posts,'sets':[dict(g,count=len(g['members'])) for g in sets.values()],
                 'individuals':self.individual_imports(),'up_next':self.pinned_ids(state),'later_count':sum(p['status']=='deferred' for p in posts),
+                'match_stills':len(stills),'match_analyzed':len(stills.intersection(self.vector_by_id)),
                 'reference_image':self.image(reference)|{'analyzed':reference in self.vector_by_id} if reference else None,'category_catalog':self.category_catalog(),'state':state,'images':total,'unresolved':sum(bool(r.get('quarantine_only')) for i,r in self.catalog.items() if i not in self.discarded),'indexed':sum(i in self.vector_by_id for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded),
                 'unassigned_count':sum(not r.get('quarantine_only') and i not in self.discarded and i not in assigned for i,r in self.catalog.items()),'unsorted_count':len(self.unsorted_ids()),'discarded_count':sum(not self.catalog[i].get('quarantine_only') for i in self.discarded),
                 'progress':dict(self.job),'inventory_complete':bool((self.bulk.current or {}).get('inventory_complete') or (self.bulk.current or {}).get('complete'))}
@@ -335,28 +335,16 @@ class Organizer:
         values=(self.matrix@chosen.T).max(axis=1)
         return dict(zip(self.vector_ids,values.tolist()))
 
-    @staticmethod
-    def original_order_key(name,source):
-        if str(source).startswith('instagram:'):
-            # Carousel position follows the final underscore, not the media ID.
-            # Bare numbered filenames are used by some older IG downloads.
-            match=re.search(r'(?:^|_)(\d+)\.[^.]+$',name)
-            if match:return (0,int(match[1]),natural(name))
-        return (1,0,natural(name))
-
     def original_name(self,ident,source):
-        item=self.catalog[ident]
-        paths=[o.get('original_path') or o.get('path','') for o in item.get('origins',[]) if o.get('key')==source]
-        names=[re.split(r'[\\/]',p)[-1] for p in paths if p]
-        return min(names,key=lambda name:self.original_order_key(name,source)) if names else re.split(r'[\\/]',item['path'])[-1]
+        return original_name(self.catalog[ident],source)
+
+    original_order_key=staticmethod(original_order_key)
 
     def ordered(self,ids,mode,source=None):
         ids=list(ids);cache=(tuple(ids),mode,source)
         if cache in self.order_cache:return self.order_cache[cache]
         if mode=='original':
-            # Origin filenames supply display order only. IDs and image paths keep
-            # pointing to the survivor selected during duplicate review.
-            return sorted(ids,key=lambda i:(self.original_order_key(self.original_name(i,source),source),i))
+            return original_sequence(self.catalog,source,ids)
         base=sorted(ids,key=lambda i:(self.catalog[i].get('quarantine_only',False),natural(self.catalog[i]['path'])))
         if mode=='filename' or len(base)<3:return base
         # Preserve coarse source neighborhoods in very large mixed posts; each block
@@ -392,7 +380,11 @@ class Organizer:
             expected=config.get('library_instance')
             # Sections store tracking's instance ID, not the catalog's store ID.
             if expected and self.engine.library.request('/api/tracking/status')['instance']!=expected:return
-            main={};review=set();purgatory=set()
+            main={};review=set();purgatory=set();held=set();set_ids_by_sha={}
+            live_members={}
+            for group in catalog.get('sets',[]):
+                for media_id in group.get('media_ids',[]):
+                    live_members.setdefault(media_id,set()).add(group['id'])
             for row in catalog['files']:
                 if row.get('character_id',owner)!=owner:continue
                 digest=row.get('sha')
@@ -401,7 +393,9 @@ class Organizer:
                 main[digest]=main.get(digest,False) or bool(visible)
                 if row.get('in_review'):review.add(digest)
                 if row.get('in_purgatory'):purgatory.add(digest)
-            result.update(main=main,review=review,purgatory=purgatory)
+                if row.get('flagged_for_removal') or row.get('in_review') or row.get('in_purgatory'):held.add(digest)
+                if row.get('id') in live_members:set_ids_by_sha.setdefault(digest,set()).update(live_members[row['id']])
+            result.update(main=main,review=review,purgatory=purgatory,held_hashes=held,set_ids_by_sha=set_ids_by_sha)
         except (ValueError,OSError,KeyError,TypeError):
             # Disconnected or changed library is unknown, never "not in Main".
             pass
@@ -438,6 +432,7 @@ class Organizer:
             elif kind=='set':
                 group=self.sets().get(ident);ids=group.get('members',[]) if group else []
             elif kind=='unsorted':group={'label':'Unsorted'};ids=self.unsorted_ids()
+            elif kind=='unmatched':group={'label':'Unmatched photos'};ids=organizer_auto_sets.remaining(self)
             elif kind=='up_next':group={'label':'★ Up next'};ids=self.pinned_ids()
             elif kind=='imports':group={'label':'Individual import queue'};ids=list(dict.fromkeys(r['id'] for r in self.individual_imports() if r['id']))
             elif kind=='all_images':group={'label':'All available images'};ids=[i for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.discarded and r.get('media_type','image')=='image']
@@ -686,7 +681,7 @@ class Organizer:
             n=value.get(key)
             if isinstance(n,(int,float)) and 0<=n<=maximum:result[key]=int(n)
         view=value.get('view')
-        if isinstance(view,dict) and view.get('kind') in ('post','set','unsorted','discarded','up_next','imports','all_images') and isinstance(view.get('id'),str):
+        if isinstance(view,dict) and view.get('kind') in ('post','set','unsorted','unmatched','discarded','up_next','imports','all_images') and isinstance(view.get('id'),str):
             n=view.get('offset',0)
             if isinstance(n,(int,float)) and 0<=n<=1000000:
                 result['view']={'kind':view['kind'],'id':view['id'][:500],'offset':int(n)}
@@ -718,8 +713,23 @@ class Organizer:
                 return {'saved':True}
             if int(body.get('revision',-1))!=state.get('revision',0):raise ValueError('Review changed in another window. Reload before saving.')
             previous_undo=copy.deepcopy(state.get('undo'))
+            match_result=None
+            if action=='auto_sets':
+                self.check_collection_idle(body)
+                self.refresh_library_placement(force=True)
             with self.db() as db:
-                if action=='pin':
+                if action=='auto_sets':
+                    db.execute('BEGIN IMMEDIATE')
+                    row=db.execute('SELECT data FROM state WHERE scope=?',(self.scope,)).fetchone()
+                    state=json.loads(row[0]) if row else {'revision':0,'selection':[]}
+                    if int(body.get('revision',-1))!=state.get('revision',0):
+                        raise ValueError('Review changed in another window. Reopen Auto-match Sets.')
+                    previous_undo=copy.deepcopy(state.get('undo'))
+                    match_result=organizer_auto_sets.apply_matches(self,state,db)
+                    if not match_result['matched']:
+                        db.commit()
+                        return dict(self.summary(), auto_result=match_result)
+                elif action=='pin':
                     ident=self.valid_ids([body.get('id')])[0];hashes=self.hashes(ident)
                     if not isinstance(body.get('pinned'),bool):raise ValueError('Choose star or unstar.')
                     pins=[p for p in state.get('pins',[]) if not hashes.intersection(p['hashes'])]
@@ -779,6 +789,8 @@ class Organizer:
                         moved[sid]=old_other[0] if old_other else None
                         other=dict(other,members=[i for i in other['members'] if i not in adding],
                             removed_members=list(set(other.get('removed_members',[]))|adding.intersection(other['members'])),updated=time.time())
+                        for field in ('auto_members','auto_pending'):
+                            if field in other:other[field]=[i for i in other[field] if i not in adding]
                         db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,sid,json.dumps(other)))
                     state['undo']['moved']=moved
                     members=list(dict.fromkeys((previous or {}).get('members',[])+ids))
@@ -788,6 +800,8 @@ class Organizer:
                     favorite=self.favorite(body.get('favorite',(previous or {}).get('favorite',state.get('new_favorite',False))))
                     group=dict(previous or {},id=ident,name=name,colors=set_name_colors(name,colors),categories=categories,favorite=favorite,members=members,updated=stamp,library_id=(previous or {}).get('library_id'))
                     group['removed_members']=[i for i in group.get('removed_members',[]) if i not in ids]
+                    for field in ('auto_members','auto_pending'):
+                        if field in group:group[field]=[i for i in group[field] if i not in ids]
                     if previous is None:group['created']=stamp
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,ident,json.dumps(group)))
                     state.update(selection=[],target='',new_name='',new_colors=[],new_categories=[],new_favorite=False)
@@ -808,8 +822,17 @@ class Organizer:
                     target=str(body.get('target',''));old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
                     if not old:raise ValueError('Only locally saved drafts can be edited here.')
                     group=json.loads(old[0])
-                    if group.get('library_id'):raise ValueError('Existing library membership is preserved; edit removals in the media library.')
-                    ids=self.valid_ids(body.get('ids',[]));state['undo']={'action':'set','id':target,'previous':old[0],'selection':ids}
+                    ids=self.valid_ids(body.get('ids',[]))
+                    if not ids or not set(ids)<=set(group['members']):raise ValueError('Select current members of this Set.')
+                    if group.get('library_id') and not set(ids)<=set(group.get('auto_pending',[])):
+                        raise ValueError('Existing library membership is preserved; edit removals in the media library.')
+                    state['undo']={'action':'set','id':target,'previous':old[0],'selection':ids}
+                    holds={'auto-hold:'+h for i in ids for h in self.hashes(i)}
+                    old_holds={r[0] for r in db.execute("SELECT id FROM rejected WHERE scope=? AND context='auto-hold'",(self.scope,))}
+                    state['undo']['new_auto_holds']=sorted(holds-old_holds)
+                    db.executemany('INSERT OR IGNORE INTO rejected VALUES (?,?,?)',((self.scope,'auto-hold',v) for v in holds))
+                    for key in ('auto_pending','auto_members'):
+                        if key in group:group[key]=[i for i in group[key] if i not in ids]
                     group['members']=[i for i in group['members'] if i not in ids];group['updated']=time.time()
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)));state['selection']=[]
                 elif action in ('discard','restore_discard','unsort','restore_unsorted'):
@@ -865,7 +888,10 @@ class Organizer:
                 elif action=='undo':
                     undo=state.pop('undo',None)
                     if not undo:raise ValueError('No organizer action to undo.')
-                    if undo['action']=='set':
+                    if undo['action']=='auto_sets':
+                        organizer_auto_sets.undo_matches(self,db,undo)
+                    elif undo['action']=='set':
+                        db.executemany("DELETE FROM rejected WHERE scope=? AND context='auto-hold' AND id=?",((self.scope,h) for h in undo.get('new_auto_holds',[])))
                         db.execute('DELETE FROM sets WHERE scope=? AND id=?',(self.scope,undo['id']))
                         if undo['previous']:db.execute('INSERT INTO sets VALUES (?,?,?)',(self.scope,undo['id'],undo['previous']))
                         for sid,raw in undo.get('moved',{}).items():
@@ -904,13 +930,20 @@ class Organizer:
                     state['undo_stack']=(state.get('undo_stack',[])+[previous_undo])[-19:]
                 state['revision']=state.get('revision',0)+1;self.put_state(db,state)
             self.load_dispositions()
-            return self.summary()
+            summary=self.summary()
+            if match_result is not None:summary['auto_result']=match_result
+            return summary
 
-    def index(self,only=None):
+    def index(self,only=None,match_request=None):
         with self.lock,self.bulk.lock:
             self.bind()
+            if match_request is not None:
+                self.check_collection_idle(match_request)
+                if match_request.get('revision')!=self.state().get('revision',0):
+                    raise ValueError('Review changed in another window. Reopen Auto-match Sets.')
             if self.job['running'] or self.engine.status['running'] or (self.bulk.current or {}).get('running'):raise ValueError('Wait for the current operation.')
             todo=[copy.copy(r) for i,r in self.catalog.items() if not r.get('quarantine_only') and i not in self.vector_by_id and i not in self.discarded]
+            if match_request is not None:todo=[r for r in todo if r.get('media_type','image')=='image']
             if only is not None:
                 requested=set(self.valid_ids(only));todo=[r for r in todo if r['id'] in requested]
             if not todo:return dict(self.job)|{'phase':'All saved images already indexed','remaining':0}
@@ -1019,13 +1052,18 @@ class Organizer:
                 result=self.engine.library.request('/api/organizer/preview',{'character_id':owner,'draft':draft})
                 if draft['individuals'] and 'individuals' not in result:raise ValueError('Update the Media Library companion to use individual Workbench imports. Nothing has been imported.')
                 if (any(g.get('purgatory_edited') for g in draft['sets']) or draft['state'].get('duplicate_choices')) and 'duplicates' not in result:raise ValueError('Update and restart the companion to apply Set Purgatory and duplicate choices. Nothing has been imported.')
-                self.transfer_plan={'token':result['token'],'revision':self.state()['revision'],'scope':self.scope,'individuals':draft['individuals']}
+                automatic={i for g in draft['sets'] for i in g.get('auto_members',[]) if i in g['members']}
+                protected=[c['id'] for c in result.get('conflicts',[]) if c['id'] in automatic]
+                if protected:result['protected_auto_conflicts']=len(protected)
+                self.transfer_plan={'token':result['token'],'revision':self.state()['revision'],'scope':self.scope,'individuals':draft['individuals'],'protected_auto_conflicts':protected}
                 return result
             plan=getattr(self,'transfer_plan',{})
             if plan.get('token')!=body.get('token') or plan.get('scope')!=self.scope or plan.get('revision')!=self.state()['revision']:
                 raise ValueError('Drafts changed. Preview again to resume safely.')
             if action=='import':return self.engine.library.request('/api/organizer/import',{'token':body['token'],'id':body.get('id')})
             if action!='apply':raise ValueError('Unknown transfer action.')
+            if plan.get('protected_auto_conflicts') and body.get('conflicts','move')!='skip':
+                raise ValueError('An automatic match already belongs to another Library Set. Choose Skip conflicts to preserve its membership.')
             tracking.transfer(self.engine,self.bulk,self)
             result=self.engine.library.request('/api/organizer/apply',{'token':body['token'],'conflicts':body.get('conflicts','move')})
             with self.db() as db:
@@ -1038,6 +1076,9 @@ class Organizer:
                     row=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,ident)).fetchone()
                     if not row:continue
                     group=json.loads(row[0]);group['library_id']=sid;group['applied_at']=time.time();group['purgatory_edited']=False;group['applied_partial']=bool(result.get('skipped'))
+                    if 'auto_pending' in group:
+                        # Only unapplied conflicts remain removable in the local draft.
+                        group['auto_pending']=[i for i in group['auto_pending'] if i in plan.get('protected_auto_conflicts',[])]
                     db.execute('UPDATE sets SET data=? WHERE scope=? AND id=?',(json.dumps(group),self.scope,ident))
             result['library_url']=self.engine.library.base+'/library'
             return result

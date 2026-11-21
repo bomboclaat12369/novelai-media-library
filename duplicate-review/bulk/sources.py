@@ -9,6 +9,28 @@ DATED_IG_POST = re.compile(r'^(\d{4}-\d{2}-\d{2}) - Post ([A-Za-z0-9_-]{8,32})$'
 IG_ACCOUNT_FOLDER = re.compile(r'^Instagram[-_ ]+([A-Za-z0-9_.-]+)$', re.I)
 
 
+def natural(value):
+    return tuple((1,int(x)) if x.isdigit() else (0,x.casefold()) for x in re.split(r'(\d+)',str(value)))
+
+
+def original_order_key(name, source):
+    if str(source).startswith('instagram:'):
+        match = re.search(r'(?:^|_)(\d+)\.[^.]+$', name)
+        if match:
+            return (0,int(match[1]),natural(name))
+    return (1,0,natural(name))
+
+
+def original_name(item, source):
+    paths = [o.get('original_path') or o.get('path','') for o in item.get('origins',[]) if o.get('key')==source]
+    names = [re.split(r'[\\/]',path)[-1] for path in paths if path]
+    return min(names,key=lambda name:original_order_key(name,source)) if names else re.split(r'[\\/]',item['path'])[-1]
+
+
+def original_sequence(catalog, source, ids):
+    return sorted(ids,key=lambda i:(original_order_key(original_name(catalog[i],source),source),i))
+
+
 def source_of(path, forum='smg', owner=''):
     parts = list((PureWindowsPath(path) if '\\' in str(path) else PurePosixPath(path)).parts)
     quarantine = next((i for i, p in enumerate(parts) if p.casefold() == QUARANTINE.casefold()), None)
