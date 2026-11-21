@@ -2,6 +2,8 @@
 let selectedRoom='room-0',backupRows=[],saveFilename='',quoteOwner={},quoteKind={},quoteStart={};
 const openBookingHistory=new Set();
 let bookingReportDay=null;
+let reservationLookup=null;
+const assignmentNames={room:'Private room',lounge:'Lounge',rest:'Rest',train:'Training',studio:'Studio',resort:'Resort'};
 root.addEventListener('toggle',event=>{
  const id=event.target.dataset?.bookingHistory;
  if(id){if(event.target.open)openBookingHistory.add(id);else openBookingHistory.delete(id);}
@@ -32,7 +34,7 @@ function contractsEndingOn(day){
 
 function contractReceipts(report, contracts, showTonight=false){
  if(!contracts.length)return '';
- const roles = {room:'Private room', lounge:'Lounge', rest:'Rest', train:'Training', studio:'Studio', resort:'Resort'};
+ const roles = assignmentNames;
  const rows = contracts.map(c=>{
   const studio = c.department==='studio';
   const outcome = studio ? (c.success===false?'Studio rework':'Studio delivery') : 'Resort checkout';
@@ -98,18 +100,125 @@ function venue(){return illustratedVenue();}
 function savedPlans(){return `<section class="panel plan-panel"><h3>Keep a useful plan</h3><div class="form-grid"><label>Plan name<input id="plan-name" maxlength="40" placeholder="e.g. Weekend rotation"></label><button data-action="save-plan" ${dis(save.phase!=='prepare')}>Save current plan</button><label>Retained plans<select id="plan-choice"><option value="">Choose a plan</option>${Object.keys(save.saved_plans).map(n=>`<option>${esc(n)}</option>`).join('')}</select></label><button data-action="load-plan" ${dis(save.phase!=='prepare')}>Load plan</button><button data-action="delete-plan" ${dis(save.phase!=='prepare')}>Remove plan</button></div><small>Retains pricing, assignments, equipment and training. Reservations always take priority. Card changes never restore energy.</small></section>`;}
 function club(){return illustratedClub();}
 function development(){return `<section class="panel"><h2>Career development</h2><div class="development-grid">${Object.entries(save.people).map(([p,w])=>`<div><h3>${esc(person(p).name)}</h3><p class="note">Club ${w.skills.club} · Studio ${w.skills.studio} · Resort ${w.skills.resort} skill XP</p><label>Starting game strength<select data-profile="${esc(p)}" ${dis(save.phase!=='prepare')}>${Object.entries(boot.profiles).map(([k,v])=>`<option value="${k}" ${w.profile===k?'selected':''}>${v.name} · +4% ${v.focus}</option>`).join('')}</select></label><label>Training focus<select data-training="${esc(p)}" ${dis(save.phase!=='prepare')}>${['club','studio','resort'].map(k=>`<option ${w.training===k?'selected':''}>${k}</option>`).join('')}</select></label></div>`).join('')}</div><p class="note">These configurable traits are game rules, not claims about the people in your photographs. Changing a focus preserves earned progress.</p></section>`;}
+function reservationLookupFor(department,owner,kind){
+ const key=JSON.stringify([boot.token,revision,department,owner,kind]);
+ if(reservationLookup?.key===key)return reservationLookup;
+ const request={key},requestedRevision=revision,requestedToken=boot.token;
+ reservationLookup=request;
+ const query=new URLSearchParams({department,owner,kind});
+ (async()=>{
+  try{
+   const response=await fetch('/game/api/reservation-options?'+query);
+   const result=await response.json();
+   if(!response.ok)throw Error(result.error||'Couldn’t check availability.');
+   if(result.revision===requestedRevision&&result.token===requestedToken)request.options=result.options;
+   else if(reservationLookup===request){
+    if(screen!==department){reservationLookup=null;return;}
+    const refresh=await fetch('/game/api/bootstrap');
+    if(!refresh.ok)throw Error('Couldn’t refresh the current schedule.');
+    const current=await refresh.json();
+    if(reservationLookup===request&&revision===requestedRevision&&boot.token===requestedToken){
+     accept(current);
+     reservationLookup=null;
+     render();
+     return;
+    }
+   }
+  }catch(error){request.error=error.message;}
+  if(reservationLookup===request&&screen===department)render();
+ })();
+ return request;
+}
+function reservationControls(dept,owner,kind,start,quote){
+ const button=disabled=>`<button class="primary full" data-action="schedule" data-department="${dept}" ${dis(disabled)}>Reserve &amp; pay deposit</button>`;
+ if(save.phase!=='prepare')return '<p class="note">Reservations reopen after tonight.</p>'+button(true);
+ if(!Number.isInteger(boot.reservation_horizon))return button(save.cash<quote.fee);
+ const lookup=reservationLookupFor(dept,owner,kind);
+ if(lookup.error)return `<p class="note">${esc(lookup.error)} <button class="ghost small" data-action="retry-reservation">Try again</button></p>`+button(true);
+ if(!lookup.options)return '<p role="status" class="note">Checking available nights…</p>'+button(true);
+ const {first,last,conflicts,low_energy,low_cash}=lookup.options;
+ const conflict=conflicts[start],worker=save.people[owner],name=person(owner).name,lines=[];
+ let alternative='';
+ if(conflict){
+  if(conflict.contract!=null){
+   const booked=save.contracts.find(contract=>contract.id===conflict.contract);
+   lines.push(booked?`Night ${conflict.night} overlaps ${name}’s ${booked.spec.name} at the ${boot.departments[booked.department].name} (${nightRange(booked.start,booked.end)}).`:`${name} is already booked on night ${conflict.night}.`);
+  }else{
+   lines.push(dept==='studio'?`Every Studio position is booked on night ${conflict.night}.`:`Every Resort suite is booked on night ${conflict.night}.`);
+  }
+  if(!low_energy&&!low_cash){
+   const free=Array.from({length:last-first+1},(_,i)=>first+i).filter(day=>!conflicts[day]);
+   const next=free.find(day=>day>start)??free[0];
+   if(next!==undefined)alternative=`<button class="ghost small" data-action="use-reservation-start" data-department="${dept}" data-start="${next}">${next>start?'Use next opening':'Use earlier opening'} · night ${next}</button>`;
+   else lines.push(`All start dates through night ${last} have a conflict. Try another worker or a shorter booking.`);
+  }
+ }
+ if(low_energy)lines.push(`${name} has ${Math.floor(worker.energy)} energy. She needs ${quote.energy} to reserve this booking.`);
+ if(low_cash)lines.push(`You need ${money(quote.fee-save.cash)} more for the deposit.`);
+ const blocked=!!conflict||low_energy||low_cash;
+ if(!blocked){
+  lines.push(`${name} can take this booking. It replaces her current ${assignmentNames[worker.role].toLowerCase()} assignment for ${quote.days===1?'one night':quote.days+' nights'}.`);
+  lines.push(`${money(save.cash-quote.fee)} left after the deposit.`);
+ }
+ return `<div class="reservation-check" role="status">${lines.map(line=>`<p>${esc(line)}</p>`).join('')}${alternative}</div>`+button(blocked);
+}
+function nightRange(start,end){return start===end?'night '+start:'nights '+start+'–'+end;}
+function openingGoals(dept){
+ const goals=derived.opening_progress?.[dept];
+ if(!goals)return `<p>${dept==='studio'?'Reach night 4 and complete 18 club bookings.':'Open the Studio and complete two projects.'}</p>`;
+ const labels={night:'Nights reached',bookings:'Paid club bookings',studio:'Studio',projects:'Completed Studio projects'};
+ const rows=Object.entries(goals).map(([key,[current,target]])=>{
+  const met=current>=target;
+  const progress=key==='studio'?(met?'Open':'Still closed'):Math.min(current,target)+' / '+target;
+  return `<div><dt>${labels[key]}</dt><dd class="${met?'positive':''}">${met?'✓ ':''}${progress}</dd></div>`;
+ });
+ const cost=derived.department_costs[dept];
+ rows.push(`<div><dt>Opening funds</dt><dd>${save.cash>=cost?money(cost)+' available':money(cost-save.cash)+' short'}</dd></div>`);
+ return `<dl class="opening-goals" aria-label="Department opening progress">${rows.join('')}</dl>`;
+}
 function studio(){return departmentUI('studio');}function resort(){return departmentUI('resort');}
 function departmentUI(dept){
  const isStudio=dept==='studio',table=isStudio?boot.projects:boot.stays,level=save.departments[dept];
  const intro=head('One shared calendar',isStudio?'The Studio':'The Resort',isStudio?'Reserve a creator for a defined project. Earn money, pack vouchers and occasional special card awards.':'Welcome multi-night stays. Balance package expectations, staffing, energy and guest satisfaction.');
- if(!level)return intro+`<section class="panel"><h2>${derived.unlocks[dept]?'Ready to open':'The next milestone'}</h2><p>${isStudio?'Reach night 4 and complete 18 club bookings.':'Complete two Studio projects.'}</p><p>${money(derived.department_costs[dept])} to open · ${money(boot.departments[dept].upkeep)} upkeep/night</p><button class="primary" data-action="department" data-kind="${dept}" ${dis(!derived.unlocks[dept]||save.cash<derived.department_costs[dept]||save.phase!=='prepare')}>Open ${boot.departments[dept].name}</button></section>`;
+ if(!level){
+  const ready=derived.unlocks[dept]&&save.cash>=derived.department_costs[dept];
+  return intro+`<section class="panel"><h2>${ready?'Ready to open':'Opening requirements'}</h2>${openingGoals(dept)}
+   <p>${money(derived.department_costs[dept])} to open · ${money(boot.departments[dept].upkeep)} upkeep/night</p>
+   <button class="primary" data-action="department" data-kind="${dept}" ${dis(!ready||save.phase!=='prepare')}>Open ${boot.departments[dept].name}</button></section>`;
+ }
  const owner=quoteOwner[dept]&&save.people[quoteOwner[dept]]?quoteOwner[dept]:Object.keys(save.people)[0],kind=quoteKind[dept]||Object.keys(table)[0];quoteOwner[dept]=owner;quoteKind[dept]=kind;
- const quote=derived.quotes[dept][owner][kind],start=Math.max(save.day,Number(quoteStart[dept]||save.day));quoteStart[dept]=start;
+ const horizon=boot.reservation_horizon??14;
+ const quote=derived.quotes[dept][owner][kind],start=Math.min(save.day+horizon,Math.max(save.day,Number(quoteStart[dept]||save.day)));quoteStart[dept]=start;
  const active=save.contracts.filter(c=>c.department===dept&&c.status==='active'),completed=save.contracts.filter(c=>c.department===dept&&c.status==='completed').slice(-8).reverse();
- return intro+opportunities()+`<section class="panel"><div class="actions"><strong>${level} ${isStudio?'production position(s)':'guest suite(s)'} · ${money(level*boot.departments[dept].upkeep)} upkeep/night</strong><button data-screen="club">${save.night?'Watch the shared night':'Return to Club to open tonight'} →</button></div></section><div class="department-layout"><section class="panel"><h2>${isStudio?'Schedule a project':'Book a stay'}</h2><label>${isStudio?'Project':'Package'}<select data-quote-kind="${dept}">${Object.entries(table).map(([id,p])=>`<option value="${id}" ${id===kind?'selected':''}>${p.name} · ${p.days} night(s)</option>`).join('')}</select></label><label>Assigned ${isStudio?'creator':'host'}<select data-quote-owner="${dept}">${Object.keys(save.people).map(id=>`<option value="${esc(id)}" ${owner===id?'selected':''}>${esc(person(id).name)} · energy ${Math.round(save.people[id].energy)}</option>`).join('')}</select></label><label>Starting night<select data-quote-start="${dept}">${Array.from({length:15},(_,i)=>save.day+i).map(d=>`<option value="${d}" ${d===start?'selected':''}>Night ${d}</option>`).join('')}</select></label><div class="quote"><p><strong>Nights ${start}–${start+quote.days-1}</strong> · one worker reserved</p><p>Deposit ${money(quote.fee)} · ${quote.energy} energy/night</p><p>${isStudio?`Estimated payout ${money(quote.estimated_pay)} · ${Math.round(quote.success_chance*100)}% delivery chance. Rework pays 55%.`:`Base rate ${money(quote.rate)}/night; quality adjusts payment. Satisfaction ${quote.expectation}+ earns a checkout bonus.`}</p><p>${quote.packs?`${quote.packs} Standard voucher on successful delivery. `:''}${isStudio&&quote.days>=2?'20% chance of an extra card award on successful delivery.':''}</p></div><button class="primary full" data-action="schedule" data-department="${dept}" ${dis(save.phase!=='prepare'||save.cash<quote.fee)}>Reserve & pay deposit</button><p class="note">These dates replace club work. The calendar rejects worker and capacity conflicts. Cancelling frees the reservation without refunding its deposit.</p></section><section><h2>Active reservations</h2>${active.map(c=>`<article class="panel reservation"><h3>${esc(c.spec.name)} · ${esc(person(c.owner).name)}</h3><p>Nights ${c.start}–${c.end} · ${c.nights}/${c.spec.days} completed</p><p>${isStudio?'Shared career and equipped card apply.':`Satisfaction ${c.satisfaction}/100 · ${money(c.revenue)} earned`}</p><button class="ghost" data-action="cancel_contract" data-contract="${c.id}" ${dis(save.phase!=='prepare')}>Cancel · no deposit refund</button></article>`).join('')||'<p class="note">No active reservations.</p>'}<h3>Recent deliveries</h3>${completed.map(c=>`<p class="completed">${esc(c.spec.name)} · ${esc(person(c.owner).name)} · ${money(c.revenue)}${c.special_card?' · special card awarded':''}${c.success===false?' · reduced fee':''}</p>`).join('')||'<p class="note">Completed work appears here.</p>'}</section></div>`+calendarUI();
+ return intro+opportunities()+`<section class="panel"><div class="actions"><strong>${level} ${isStudio?'production position(s)':'guest suite(s)'} · ${money(level*boot.departments[dept].upkeep)} upkeep/night</strong><button data-screen="club">${save.night?'Watch the shared night':'Return to Club to open tonight'} →</button></div></section>
+ <div class="department-layout"><section class="panel"><h2>${isStudio?'Schedule a project':'Book a stay'}</h2>
+ <label>${isStudio?'Project':'Package'}<select id="quote-kind-${dept}" data-quote-kind="${dept}">${Object.entries(table).map(([id,p])=>`<option value="${id}" ${id===kind?'selected':''}>${p.name} · ${p.days} night(s)</option>`).join('')}</select></label>
+ <label>Assigned ${isStudio?'creator':'host'}<select id="quote-owner-${dept}" data-quote-owner="${dept}">${Object.keys(save.people).map(id=>`<option value="${esc(id)}" ${owner===id?'selected':''}>${esc(person(id).name)} · energy ${Math.round(save.people[id].energy)}</option>`).join('')}</select></label>
+ <label>Starting night<select id="quote-start-${dept}" data-quote-start="${dept}">${Array.from({length:horizon+1},(_,i)=>save.day+i).map(d=>`<option value="${d}" ${d===start?'selected':''}>Night ${d}</option>`).join('')}</select></label>
+ <div class="quote"><p><strong>${quote.days===1?'Night '+start:'Nights '+start+'–'+(start+quote.days-1)}</strong></p><p>Deposit ${money(quote.fee)} · ${quote.energy} energy/night</p><p>${isStudio?`Estimated payout ${money(quote.estimated_pay)} · ${Math.round(quote.success_chance*100)}% delivery chance. Rework pays 55%.`:`Base rate ${money(quote.rate)}/night; quality adjusts payment. Satisfaction ${quote.expectation}+ earns a checkout bonus.`}</p><p>${quote.packs?`${quote.packs} Standard voucher on successful delivery. `:''}${isStudio&&quote.days>=2?'20% chance of an extra card award on successful delivery.':''}</p></div>
+ ${reservationControls(dept,owner,kind,start,quote)}<p class="note">Cancelling frees the dates. The deposit is nonrefundable.</p></section>
+ <section><h2>Active reservations</h2>${active.map(c=>`<article class="panel reservation"><h3>${esc(c.spec.name)} · ${esc(person(c.owner).name)}</h3><p>Nights ${c.start}–${c.end} · ${c.nights}/${c.spec.days} completed</p><p>${isStudio?'Shared career and equipped card apply.':`Satisfaction ${c.satisfaction}/100 · ${money(c.revenue)} earned`}</p><button class="ghost" data-action="cancel_contract" data-contract="${c.id}" ${dis(save.phase!=='prepare')}>Cancel · no deposit refund</button></article>`).join('')||'<p class="note">No active reservations.</p>'}<h3>Recent deliveries</h3>${completed.map(c=>`<p class="completed">${esc(c.spec.name)} · ${esc(person(c.owner).name)} · ${money(c.revenue)}${c.special_card?' · special card awarded':''}${c.success===false?' · reduced fee':''}</p>`).join('')||'<p class="note">Completed work appears here.</p>'}</section></div>`+calendarUI(owner,start,quote.days);
 }
-function calendarUI(){return `<section class="panel table-wrap"><h2>Shared availability</h2><table><thead><tr><th>Team member</th>${Array.from({length:7},(_,i)=>`<th>Night ${save.day+i}</th>`).join('')}</tr></thead><tbody>${Object.keys(save.people).map(p=>`<tr><td>${esc(person(p).name)}</td>${Array.from({length:7},(_,i)=>{const day=save.day+i,c=save.contracts.find(c=>c.owner===p&&c.status==='active'&&c.start<=day&&c.end>=day);return `<td>${c?c.department:'Available'}</td>`;}).join('')}</tr>`).join('')}</tbody></table><p class="note">Available dates follow the current club/rest/training plan. Every department advances together.</p></section>`;}
-function expansion(){return legacyExpansion().replace(/<div class="panel" style="margin-top:22px"><h3>A shared future[\s\S]*$/,'')+`<div class="upgrade-grid">${Object.entries(boot.departments).map(([id,d])=>`<article class="upgrade"><span class="level">${save.departments[id]} / 6 POSITIONS</span><h2>${d.name}</h2><p>${id==='studio'?'Milestone: night 4 and 18 club bookings.':'Milestone: complete two Studio projects.'}</p><p>${derived.unlocks[id]?'✓ Milestone met':'Still in progress'} · ${money(d.upkeep)} added upkeep/night</p><button data-action="department" data-kind="${id}" ${dis(save.phase!=='prepare'||!derived.unlocks[id]||save.departments[id]>=6||save.cash<derived.department_costs[id])}>${save.departments[id]?'Expand':'Open'} · ${money(derived.department_costs[id])}</button></article>`).join('')}</div><section class="panel"><h2>Keep the evening fresh</h2><p>Promotion costs $150: +3 reputation and +3.5 percentage points of club booking acceptance for four nights. Most useful with a larger staffed venue.</p><p>${save.promotion_until>=save.day?`Active through night ${save.promotion_until}.`:'No active campaign.'}</p><button data-action="marketing" ${dis(save.phase!=='prepare'||save.cash<150||save.promotion_until>=save.day+3)}>Book campaign · $150</button><p class="note">Earn one voucher at your first 30 bookings, first Studio delivery and first Resort checkout. Every further 250 club bookings earns two. No mandatory reset.</p></section>`;}
+function calendarUI(owner,start,duration){
+ const preview=save.phase==='prepare',first=preview?Math.max(save.day,start-1):save.day;
+ const days=Array.from({length:7},(_,i)=>first+i),last=days[days.length-1],booked=new Map();
+ for(const contract of save.contracts){
+  if(contract.status!=='active'||contract.end<first||contract.start>last)continue;
+  if(!booked.has(contract.owner))booked.set(contract.owner,new Map());
+  for(let night=Math.max(first,contract.start);night<=Math.min(last,contract.end);night++)booked.get(contract.owner).set(night,contract);
+ }
+ const inRange=day=>preview&&day>=start&&day<start+duration;
+ const rows=Object.entries(save.people).map(([id,worker])=>{
+  const cells=days.map(day=>{
+   const existing=booked.get(id)?.get(day),selected=id===owner&&inRange(day);
+   const text=existing?`${boot.departments[existing.department].name} · ${existing.spec.name}`:assignmentNames[worker.role];
+   return `<td class="${selected?'proposed-night':''}">${esc(text)}</td>`;
+  }).join('');
+  return `<tr><th scope="row">${esc(person(id).name)}</th>${cells}</tr>`;
+ }).join('');
+ return `<section class="panel table-wrap reservation-calendar"><h2>Shared availability</h2><table><caption>${preview?esc(person(owner).name)+'’s proposed dates are highlighted. ':''}Unreserved nights show the current team plan.</caption><thead><tr><th scope="col">Team member</th>${days.map(day=>`<th scope="col" class="${inRange(day)?'range-night':''}">Night ${day}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></section>`;
+}
+function expansion(){return legacyExpansion().replace(/<div class="panel" style="margin-top:22px"><h3>A shared future[\s\S]*$/,'')+`<div class="upgrade-grid">${Object.entries(boot.departments).map(([id,d])=>`<article class="upgrade"><span class="level">${save.departments[id]} / 6 POSITIONS</span><h2>${d.name}</h2>${save.departments[id]?'':openingGoals(id)}<p>${money(d.upkeep)} added upkeep/night</p><button data-action="department" data-kind="${id}" ${dis(save.phase!=='prepare'||!derived.unlocks[id]||save.departments[id]>=6||save.cash<derived.department_costs[id])}>${save.departments[id]?'Expand':'Open'} · ${money(derived.department_costs[id])}</button></article>`).join('')}</div><section class="panel"><h2>Keep the evening fresh</h2><p>Promotion costs $150: +3 reputation and +3.5 percentage points of club booking acceptance for four nights. Most useful with a larger staffed venue.</p><p>${save.promotion_until>=save.day?`Active through night ${save.promotion_until}.`:'No active campaign.'}</p><button data-action="marketing" ${dis(save.phase!=='prepare'||save.cash<150||save.promotion_until>=save.day+3)}>Book campaign · $150</button><p class="note">Earn one voucher at your first 30 bookings, first Studio delivery and first Resort checkout. Every further 250 club bookings earns two. No mandatory reset.</p></section>`;}
 async function loadBackups(){const r=await fetch('/game/api/backups');if(r.ok){const d=await r.json();backupRows=d.backups;saveFilename=d.save_name;}}
 function saves(){
  return head('Careers and backups','Your next beginning.','Start a new career or recover the progress saved in a backup.')+`
@@ -170,6 +279,9 @@ async function managementClick(b,a){
   return true;
  }
  if(a==='select-room'){selectedRoom=b.dataset.room;render();return true;}
+ if(a==='use-reservation-start'){quoteStart[b.dataset.department]=Number(b.dataset.start);render();return true;}
+ if(a==='rest-for-coverage'){await act('plan',{owner:b.dataset.owner,role:'rest'});return true;}
+ if(a==='retry-reservation'){reservationLookup=null;render();return true;}
  if(a==='voucher'){await act('pack',{pack:'standard',voucher:true});return true;}
  if(a==='save-plan'){await act('save_plan',{name:$('#plan-name').value});return true;}
  if(a==='load-plan'||a==='delete-plan'){await act(a==='load-plan'?'load_plan':'delete_plan',{name:$('#plan-choice').value});return true;}

@@ -73,3 +73,12 @@
 .outfit-goal>div>span{white-space:nowrap;font-variant-numeric:tabular-nums}.outfit-or{margin:12px 0}
 .wardrobe-art{display:block;width:100%;height:clamp(160px,41dvh,340px);object-fit:contain;margin:0 auto 12px;background:#222821;border-radius:8px}
 #toast:has(.outfit-toast-art){display:flex;align-items:center;gap:12px}.outfit-toast-art{height:56px;width:40px;object-fit:contain}
+.reservation-check{margin:12px 0;padding:10px 14px;border-left:2px solid var(--gold);background:var(--panel)}
+.reservation-check p{margin:3px 0;line-height:1.55}.reservation-check button{margin:8px 0 2px}
+.reservation-calendar caption{text-align:left;color:var(--muted);font-size:13px;padding:4px 0 10px}
+.reservation-calendar .range-night{color:var(--gold)}.reservation-calendar .proposed-night{background:#413a2b;box-shadow:inset 0 -2px var(--gold)}
+.reservation-calendar tbody th{text-align:left;color:var(--text);font-weight:600}
+.opening-goals{margin:12px 0;max-width:32rem}.opening-goals>div{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);padding:6px 0}
+.opening-goals dt{color:var(--muted)}.opening-goals dd{margin:0;font-variant-numeric:tabular-nums}
+.staffing-conflicts{margin-bottom:14px}.staffing-conflicts h2{font-size:20px;margin-bottom:10px}
+.staffing-conflicts .actions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px}.staffing-conflicts p{margin:4px 0}

@@ -113,9 +113,8 @@ def auto_assign(state):
 
 def start_night(state):
     prep_only(state)
-    for role, key in [('room','rooms'),('lounge','lounge')]:
-        if sum(m.assignment(state, p)==role for p in state['people']) > state['facilities'][key]:
-            raise RuleError('More girls are assigned than available positions. Use Auto assign or adjust the plan.')
+    if m.club_staffing_conflicts(state):
+        raise RuleError('More girls are assigned than available positions. Use Auto assign or adjust the plan.')
     if state['pending_pack']:
         raise RuleError('Finish opening your pack first.')
     state['phase'] = 'night'

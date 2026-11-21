@@ -350,3 +350,30 @@ Focused rules checks covered both routes, acquired Set photos and save
 recovery. A browser walkthrough checked the locked goals on desktop and
 mobile, the protected artwork, the nonblocking reveal and both figures
 after equipping, reloading and changing back to gym.
+
+## Planning Studio projects and Resort stays — 20 November 2026
+
+Studio, Resort and Expansion show progress toward the existing opening
+requirements and how much cash is needed. Once open, both departments
+check the worker and department capacity on every night of the proposed
+booking. The calendar identifies conflicting projects and stays and shows
+the worker’s regular assignment on free nights. Selecting another opening
+updates the quote. Confirming the reservation charges the deposit.
+
+In a disposable browser career, a three-night Resort stay overlapped a
+Studio portrait session on its last night. The planner offered the next
+free start, and inspecting it kept the save revision and balance intact.
+The same walkthrough covered a full Studio, a schedule change in another
+window and a two-night checkout. Rules checks covered all fifteen possible
+start dates, cancellation, expanded capacity, energy and the deposit.
+
+The first shift after a worker returns can have more people than positions.
+A test career reproduced two workers assigned to one room after a Studio
+delivery. Preparation now identifies the workers competing for that spot.
+The player can rest either worker directly, change the team, or use the
+existing Auto assign option. A browser career returned a host to a full
+lounge, rested the covering worker and opened the next night successfully.
+
+Walker asked After Hours to own routine playtesting and group small issues
+for later. The next gameplay area to assess is collecting with a small
+roster and uneven galleries, including how players track a chosen worker.

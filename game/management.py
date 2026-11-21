@@ -28,6 +28,7 @@ DEPARTMENTS = {
     'studio': {'name': 'Studio', 'price': 650, 'upkeep': 14, 'capacity': 1},
     'resort': {'name': 'Resort', 'price': 1250, 'upkeep': 24, 'capacity': 1},
 }
+RESERVATION_HORIZON = 14
 DECISIONS = {
     'booking': {'title': 'A last-minute sex booking', 'detail': "A customer's here for pussy and has $55 ready. Taking the booking costs one working club host 10 energy.",
                 'revenue': 55, 'energy': 10, 'roles': ('room', 'lounge'),
@@ -105,14 +106,30 @@ def assignment(state, owner, day=None):
     return booked[0]['department'] if booked else state['people'][owner]['role']
 
 
+def club_staffing_conflicts(state):
+    reserved = {contract['owner'] for contract in reservations(state)}
+    conflicts = []
+    for role, facility in (('room', 'rooms'), ('lounge', 'lounge')):
+        owners = [owner for owner, worker in state['people'].items() if worker['role'] == role and owner not in reserved]
+        capacity = state['facilities'][facility]
+        if len(owners) > capacity:
+            conflicts.append({'role': role, 'capacity': capacity, 'owners': owners})
+    return conflicts
+
+
 def skill_bonus(worker, department):
     profile = PROFILES.get(worker.get('profile'), PROFILES['host'])
     return min(.16, worker.get('skills', {}).get(department, 0) / 1500) + (profile['bonus'] if profile['focus'] == department else 0)
 
 
+def opening_progress(state):
+    return {'studio': {'night': (state['day'], 4), 'bookings': (state['totals']['services'], 18)},
+            'resort': {'studio': (state['departments']['studio'], 1), 'projects': (state['totals']['studio_completed'], 2)}}
+
+
 def unlocks(state):
-    return {'studio': state['day'] >= 4 and state['totals']['services'] >= 18,
-            'resort': bool(state['departments']['studio']) and state['totals']['studio_completed'] >= 2}
+    return {department: all(current >= target for current, target in goals.values())
+            for department, goals in opening_progress(state).items()}
 
 
 def department_upkeep(state):
@@ -132,6 +149,39 @@ def contract_quote(state, department, kind, owner):
             'estimated_pay': round(spec.get('pay', spec.get('rate', 0) * spec['days']) * (1 + bonus))}
 
 
+def reservation_options(state, department, owner, spec):
+    """First conflict in each possible stay, including nights beyond the last start."""
+    first = state['day']
+    last = first + RESERVATION_HORIZON
+    final_night = last + spec['days'] - 1
+    capacity = state['departments'][department]
+    assigned, used = {}, {}
+    for contract in state['contracts']:
+        if contract['status'] != 'active':
+            continue
+        same_worker = contract['owner'] == owner
+        same_department = contract['department'] == department
+        if not same_worker and not same_department:
+            continue
+        for night in range(max(first, contract['start']), min(final_night, contract['end']) + 1):
+            if same_worker:
+                assigned[night] = contract['id']
+            if same_department:
+                used[night] = used.get(night, 0) + 1
+    conflicts = {}
+    for start in range(first, last + 1):
+        for night in range(start, start + spec['days']):
+            if night in assigned:
+                conflicts[start] = {'night': night, 'contract': assigned[night]}
+                break
+            if used.get(night, 0) >= capacity:
+                conflicts[start] = {'night': night}
+                break
+    return {'first': first, 'last': last, 'conflicts': conflicts,
+            'low_energy': state['people'][owner]['energy'] < spec['energy'],
+            'low_cash': state['cash'] < spec['fee']}
+
+
 def schedule(state, department, body):
     from .engine import RuleError, budget_check, record
     if not state['departments'].get(department):
@@ -139,18 +189,18 @@ def schedule(state, department, body):
     owner, kind = body.get('owner'), body.get('kind')
     spec = contract_quote(state, department, kind, owner)
     start = body.get('start', state['day'])
-    if type(start) is not int or not state['day'] <= start <= state['day'] + 14:
+    options = reservation_options(state, department, owner, spec)
+    if type(start) is not int or not options['first'] <= start <= options['last']:
         raise RuleError('Schedule within the next fourteen nights.')
-    end = start + spec['days'] - 1
-    # Check every day, not only today's assignment; future double bookings matter.
-    for day in range(start, end + 1):
-        if reservations(state, owner, day):
-            raise RuleError('This person is already reserved on one of these nights.')
-        if sum(c['department'] == department for c in reservations(state, day=day)) >= state['departments'][department]:
-            raise RuleError('The department is at capacity on one of these nights.')
-    if state['people'][owner]['energy'] < spec['energy']:
+    conflict = options['conflicts'].get(start)
+    if conflict and 'contract' in conflict:
+        raise RuleError(f"This person is already reserved on night {conflict['night']}.")
+    if conflict:
+        raise RuleError(f"The department is at capacity on night {conflict['night']}.")
+    if options['low_energy']:
         raise RuleError('Rest this person before reserving a new project or stay.')
     budget_check(state, spec['fee'])
+    end = start + spec['days'] - 1
     state['cash'] -= spec['fee']
     state['totals']['expenses'] += spec['fee']
     state['contract_counter'] += 1
@@ -361,7 +411,8 @@ def after_settle(state, report):
 
 def derived(state):
     ensure(state)
-    return {'unlocks': unlocks(state), 'reservations': reservations(state),
+    return {'unlocks': unlocks(state), 'opening_progress': opening_progress(state), 'reservations': reservations(state),
+            'staffing_conflicts': club_staffing_conflicts(state) if state['phase']=='prepare' else [],
             'assignments': {p: assignment(state, p) for p in state['people']},
             'department_upkeep': department_upkeep(state),
             'department_costs': {k: v['price'] * (state['departments'][k] + 1) for k, v in DEPARTMENTS.items()},

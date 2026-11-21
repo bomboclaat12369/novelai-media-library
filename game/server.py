@@ -115,10 +115,28 @@ class Handler(BaseHTTPRequestHandler):
                                   'player_presence':self.server.suite_session.player_key if self.server.suite_session else None,
                                   'restartable':self.server.restartable,'restarting':self.server.restarting,'night_speeds':NIGHT_SPEEDS,
                                   'night_duration':bookings.NIGHT_SECONDS,
+                                  'reservation_horizon':management.RESERVATION_HORIZON,
                                   'packs':PACKS,'upgrades':UPGRADES,'projects':management.PROJECTS,
                                   'stays':management.STAYS,'departments':management.DEPARTMENTS,
                                   'decisions':management.DECISIONS,'profiles':management.PROFILES,**current})
         if path=='/api/state': return self.send(200,self.state_payload())
+        if path=='/api/reservation-options':
+            query=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            try:
+                department,owner,kind=(query[key][0] for key in ('department','owner','kind'))
+            except KeyError:
+                return self.send(400,{'error':'Choose a department, worker and booking.'})
+            with self.server.operation_lock:
+                current=self.server.store.read()
+                state=current['state']
+                if not state or not state['departments'].get(department):
+                    return self.send(400,{'error':'Open this department to plan a reservation.'})
+                try:
+                    spec=management.contract_quote(state,department,kind,owner)
+                except RuleError as exc:
+                    return self.send(400,{'error':str(exc)})
+                options=management.reservation_options(state,department,owner,spec)
+                return self.send(200,{'revision':current['revision'],'token':self.server.token,'options':options})
         if path=='/api/backups': return self.send(200,{'backups':self.server.store.backups(),'save_name':self.server.store.path.name})
         if path=='/api/renderer': return self.send(200,renderer_assets())
         if path=='/api/export':

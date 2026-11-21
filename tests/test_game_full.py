@@ -73,6 +73,50 @@ class IntegratedRules(unittest.TestCase):
         self.assertEqual(s['people']['demo-0']['skills']['club'],0)
         self.assertEqual(s['people']['demo-0']['skills']['studio'],18)
 
+    def test_planner_and_deposit_agree_across_the_full_stay(self):
+        s=self.expanded(); day=s['day']; owner='demo-2'
+        s=self.book(s,'studio',owner,'portrait',day+1)
+        s=self.book(s,'resort','demo-3','retreat',day+6)
+        quote=m.contract_quote(s,'resort','residence',owner)
+        before=copy.deepcopy(s)
+        options=m.reservation_options(s,'resort',owner,quote)
+        self.assertEqual(s,before)
+        self.assertEqual(options['conflicts'][day],{'night':day+1,'contract':s['contracts'][0]['id']})
+        self.assertEqual(options['conflicts'][day+3],{'night':day+6})
+        for start in range(day,options['last']+1):
+            if start in options['conflicts']:
+                with self.assertRaises(g.RuleError): self.book(s,'resort',owner,'residence',start)
+            else:
+                booked=self.book(s,'resort',owner,'residence',start)
+                self.assertEqual(booked['contracts'][-1]['end'],start+3)
+                self.assertEqual(booked['cash'],s['cash']-quote['fee'])
+        self.assertEqual(s,before)
+        with self.assertRaises(g.RuleError): self.book(s,'resort',owner,'residence',options['last']+1)
+        s=g.command(s,self.cat,'cancel_contract',{'contract':s['contracts'][0]['id']})
+        s['departments']['resort']=2
+        self.assertFalse(m.reservation_options(s,'resort',owner,quote)['conflicts'])
+        s['cash']=quote['fee']-1
+        self.assertTrue(m.reservation_options(s,'resort',owner,quote)['low_cash'])
+        with self.assertRaises(g.RuleError): self.book(s,'resort',owner,'residence')
+        s['cash']=quote['fee'];s['people'][owner]['energy']=quote['energy']-.1
+        self.assertTrue(m.reservation_options(s,'resort',owner,quote)['low_energy'])
+        with self.assertRaises(g.RuleError): self.book(s,'resort',owner,'residence')
+
+    def test_return_to_a_filled_room_can_be_resolved_without_reassigning_the_team(self):
+        s=self.book(self.expanded(),'studio','demo-0','portrait')
+        self.assertFalse(m.club_staffing_conflicts(s))
+        s=self.night(s)
+        conflict,=m.club_staffing_conflicts(s)
+        self.assertEqual((conflict['role'],conflict['capacity']),('room',1))
+        self.assertIn('demo-0',conflict['owners'])
+        with self.assertRaises(g.RuleError):g.command(s,self.cat,'start')
+        before=copy.deepcopy(s['people'])
+        s=g.command(s,self.cat,'plan',{'owner':'demo-0','role':'rest'})
+        self.assertFalse(m.club_staffing_conflicts(s))
+        for owner, worker in before.items():
+            if owner!='demo-0':self.assertEqual(s['people'][owner],worker)
+        self.assertEqual(g.command(s,self.cat,'start')['night']['assignments']['demo-0'],'rest')
+
     def test_night_equipment_locked_department_card_shared_energy(self):
         s=self.book(self.expanded(),'resort','demo-2','retreat');s=g.command(s,self.cat,'start')
         with self.assertRaises(g.RuleError):g.command(s,self.cat,'equip',{'owner':'demo-2','card':s['people']['demo-2']['card']})
