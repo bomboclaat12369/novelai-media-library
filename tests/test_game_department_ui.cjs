@@ -101,6 +101,8 @@ async function run(){
    await page.waitForFunction(id=>!save.night||save.night.decisions.find(d=>d.id===id)?.choice!=null,event.id);
    if(event.kind==='resort_private'){
     await nav('resort');await page.locator('.suite-booking [aria-current=step]').waitFor();
+    assert.equal(await page.locator('.department-tracker [aria-current=step]').count(),1);
+    assert.match(await page.locator('.department-tracker').innerText(),/On hold/);
     await page.locator('.department-tracker').screenshot({path:path.join(output,'resort-private-booking.png')});
    }
   }

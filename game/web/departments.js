@@ -119,12 +119,12 @@ function departmentTracker(slot){
  }
  const work=(c.work_log||[]).filter(row=>row.day===save.day),next=work.length;
  const names=contractStageNames(c);
+ const m=c.private_bookings?.at(-1),privateNow=m?.day===save.day&&!m.completed;
  const statuses=names.map((name,i)=>{
   const row=work.find(w=>w.wave===i+1);
-  const current=!row&&i===next&&!!save.night;
-  return `<li ${current?'aria-current="step"':''}><small>${row?(row.worked?'Complete':'Missed'):current?'Current':'Upcoming'}</small><strong>${esc(row?.stage||name)}</strong></li>`;
+  const due=!row&&i===next&&!!save.night;
+  return `<li ${due&&!privateNow?'aria-current="step"':''}><small>${row?(row.worked?'Complete':'Missed'):due?(privateNow?'On hold':'Current'):'Upcoming'}</small><strong>${esc(row?.stage||name)}</strong></li>`;
  }).join('');
- const m=c.private_bookings?.at(-1);
  const rows=m&&m.day===save.day?m.segments.filter(s=>s.label):[];
  const result=rows.length?`<div class="suite-booking"><h3>Private booking · ${m.completed?money(m.value)+' earned':'in progress'}</h3>
   <ol class="contract-stages">${rows.map((s,i)=>`<li ${!m.completed&&i===rows.length-1?'aria-current="step"':''}><small>${!m.completed&&i===rows.length-1?'Current':'Complete'}</small><strong>${esc(s.label.text.replace('{worker}',person(c.owner).name))}</strong></li>`).join('')}</ol></div>`:'';

@@ -20,7 +20,11 @@ root.addEventListener('error',e=>{
   message.textContent='Original artwork unavailable. Your card and progress are preserved.';img.replaceWith(message);
  }
 },true);
-function notify(text){$('#toast').textContent=text;$('#toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),4500);}
+function notify(text,decisionId=''){
+ const toast=$('#toast');
+ toast.textContent=text;toast.dataset.decision=decisionId;toast.classList.add('show');
+ clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove('show'),4500);
+}
 function accept(r){
  if(r.catalog){boot.catalog=r.catalog;AfterHoursCards.update(r.catalog);}
  if(r.token){
@@ -37,7 +41,14 @@ function act(action,body={},quiet=false){
  actionQueue=actionQueue.then(()=>performAct(action,body,quiet)).catch(e=>notify(e.message));return actionQueue;
 }
 function pendingDecision(){return save?.phase==='night'?save.night.decisions.find(d=>!d.choice&&save.night.elapsed>=d.at&&save.night.elapsed<d.until):null;}
-function announceDecision(){const decision=pendingDecision();if(decision&&!announcedDecisions.has(decision.id)){announcedDecisions.add(decision.id);notify('An opportunity is up. Pick an option and the night keeps rolling.');}}
+function announceDecision(){
+ const decision=pendingDecision(),toast=$('#toast');
+ if(decision&&!announcedDecisions.has(decision.id)){
+  announcedDecisions.add(decision.id);notify('An opportunity is up. Pick an option and the night keeps rolling.',decision.id);
+ }else if(!decision&&toast.dataset.decision){
+  clearTimeout(toastTimer);toast.classList.remove('show');delete toast.dataset.decision;
+ }
+}
 async function performAct(action,body={},quiet=false){
  busy=true;
  const id=crypto.randomUUID();
