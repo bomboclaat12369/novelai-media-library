@@ -1,4 +1,16 @@
-LOCAL DUPLICATE REVIEW 2.0.39
+LOCAL DUPLICATE REVIEW 2.0.40
+
+NEW IN 2.0.40 — SPLIT SHOOTS AND MATCH HISTORY
+- Go to Folder Organizer → Auto-match Sets → Review split Sets. Compare both
+  groups, choose the name to keep, and combine them or keep them separate.
+  Choose two Sets lets you compare any local draft with another Set.
+- When a second likely fragment is found during strict matching, its photos
+  wait for review. Add them to the existing Set or create a separate Set.
+- Under Auto-match Sets → Match history choose Sets or Images. Filter for
+  auto-created Set history, Sets containing auto-matched photos, photos ever
+  auto-matched, or suggestions you approved. The search covers the saved
+  inventory and the connected Library. Original batch and photo identities
+  travel with the tracking history.
 
 NEW IN 2.0.39 — APPROVE CROSS-POST GROUPS
 - Open Folder Organizer → Auto-match Sets → Review likely groups. Each group

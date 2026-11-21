@@ -4,12 +4,22 @@ const heldOption=el('option','Set Purgatory');heldOption.value='purgatory';$('se
 const heldLabel=el('label'),heldCheck=el('input');heldCheck.type='checkbox';heldCheck.id='setPurgatory';heldLabel.append(heldCheck,document.createTextNode(' Set Purgatory'));$('setFavoriteRow').after(heldLabel);
 const searchOpenColors=openColors;openColors=function(target=''){searchOpenColors(target);heldLabel.hidden=!target;heldCheck.checked=!!data?.sets.find(g=>g.id===target)?.in_purgatory;};
 function libraryImageURL(owner,id,original=false){return '/api/organizer/library-image?owner='+encodeURIComponent(owner)+'&id='+encodeURIComponent(id)+'&token='+TOKEN+(original?'':'&size=600');}
-async function openManualBrowser(compare=null){
+async function openManualBrowser(compare=null,historyFirst=false){
  await saveDraft();const dialog=el('dialog');dialog.id=compare?'duplicateCompare':'manualBrowser';dialog.style.cssText='width:min(1200px,96vw);height:auto;max-height:94vh;overflow:auto;padding:22px';document.body.append(dialog);dialog.showModal();
  const close=button('Close',()=>dialog.close()),status=el('p'),form=el('form'),query=el('input'),kind=el('select'),scope=el('select'),category=el('select'),placement=el('select'),grid=el('div'),pages=el('div');
  const option=(v,t)=>{const o=el('option',t);o.value=v;return o;};kind.append(option('sets','Sets'),option('images','Images'));scope.append(option('library','Current Media Library'),option('inventory','Saved folder inventory'));placement.append(option('all','All locations'),option('main','Normal Sets / Main'),option('purgatory','Purgatory'),option('unassigned','Images without a Set'));
  kind.setAttribute('aria-label','Search type');scope.setAttribute('aria-label','Search source');category.setAttribute('aria-label','Search category');placement.setAttribute('aria-label','Search placement');query.setAttribute('aria-label','Manual search');query.placeholder='Name, category or description…';query.type='search';query.style.flex='1';
  const run=button('Search',()=>{});run.type='submit';form.className='row';form.style.flexWrap='wrap';form.append(scope,kind,query,category,placement,run);grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px';
+ const origin=el('select');origin.setAttribute('aria-label','Match history');
+ function originChoices(){
+  const value=origin.value;origin.replaceChildren(option('all','All match histories'),
+   option('automatic',kind.value==='sets'?'Auto-created Set history':'Ever auto-matched photos'));
+  if(kind.value==='sets')origin.append(option('contains','Contains auto-matched photos'));
+  origin.append(option('approved','Approved suggestions'));
+  origin.value=[...origin.options].some(o=>o.value===value)?value:'all';
+ }
+ originChoices();if(!compare)run.before(origin);
+ if(historyFirst){scope.value='inventory';origin.value='automatic'}
  dialog.append(el('h2',compare?'Compare before importing':'Find a Set or image manually'),close,el('p',compare?'Choose a library image to compare. Similarity alone does not confirm a duplicate. Your choice is saved and applied with the import.':'Search independently of automatic suggestions. Use a Set as the destination, or add an image to your current selection.'),form,status,grid,pages);
  let compareSerial=0,scanOnly=false,offset=0,serial=0,result=null,owner=compare?.owner||'',sourceId=compare?.rows[0]?.id;
  const sourcePicker=el('select');sourcePicker.setAttribute('aria-label','Incoming image');
@@ -37,14 +47,14 @@ async function openManualBrowser(compare=null){
   comparison.append(button('Keep existing image',()=>decide('keep')),button('Replace existing source',()=>decide('replace')),button('Import separately',()=>decide('separate')));
  }
  async function load(reset=false){const seq=++serial;if(reset)offset=0;run.disabled=true;status.textContent='Searching…';
-  try{const response=await api('manual-search',{job:data.job,character_id:owner,source:scope.value,kind:kind.value,query:query.value,category:category.value,placement:placement.value,offset,...(compare&&scanOnly?{duplicate_source:sourceId}:{})});if(seq!==serial||!dialog.open)return;
+  try{const response=await api('manual-search',{job:data.job,character_id:owner,source:scope.value,kind:kind.value,match_origin:origin.value,query:query.value,category:category.value,placement:placement.value,offset,...(compare&&scanOnly?{duplicate_source:sourceId}:{})});if(seq!==serial||!dialog.open)return;
    if(response.choose_character){grid.replaceChildren();status.textContent='Choose the girl to search.';for(const c of response.choose_character)grid.append(button(c.name,()=>{owner=c.id;load(true);}));return;}
    result=response;owner=result.character_id||owner;const old=category.value;category.replaceChildren(option('','All categories'),option('__none','Uncategorized'),...result.categories.map(c=>option(c.id,c.name)));category.value=old||'';status.textContent=result.total+' results'+(scanOnly?' from the saved duplicate scan. No new scan was run; search all images if needed.':'');grid.replaceChildren();
    for(const row of result.rows){const card=el('article');card.className='card';card.append(el('strong',row.name),el('small',row.placement));if(row.cover){const img=el('img');img.src=scope.value==='library'?libraryImageURL(owner,row.cover):imageURL(row.cover,600);img.loading='lazy';img.alt=row.name;img.style.cssText='height:210px;width:100%;object-fit:contain';img.onclick=()=>zoom(scope.value==='library'?libraryImageURL(owner,row.cover,true):'/api/organizer/original?id='+encodeURIComponent(row.cover)+'&token='+TOKEN,row.name);card.append(img);}card.append(button(compare?'Compare':kind.value==='sets'?'Use this Set':'Add to selection',()=>act(row)));grid.append(card);}
    pages.replaceChildren();for(const [label,delta] of [['Previous',-60],['Next',60]]){const b=button(label,()=>{offset+=delta;load();});b.disabled=offset+delta<0||offset+delta>=result.total;pages.append(b);}
   }catch(e){status.textContent=e.message;}finally{if(seq===serial)run.disabled=false;}
  }
- form.onsubmit=e=>{e.preventDefault();load(true);};scope.onchange=kind.onchange=()=>{category.value='';load(true);};category.onchange=placement.onchange=()=>load(true);dialog.onclose=()=>{serial++;compareSerial++;dialog.remove();if(compare)task(()=>previewTransfer({keepScope:true}));};await load();query.focus();
+ form.onsubmit=e=>{e.preventDefault();load(true);};scope.onchange=kind.onchange=()=>{category.value='';originChoices();load(true);};category.onchange=placement.onchange=origin.onchange=()=>load(true);dialog.onclose=()=>{serial++;compareSerial++;dialog.remove();if(compare)task(()=>previewTransfer({keepScope:true}));};await load();query.focus();
 }
 const searchShowTransfer=showTransfer;showTransfer=async function(plan){await searchShowTransfer(plan);const rows=[...plan.imports];for(const [id,choice] of Object.entries(plan.duplicates||{}))if(!rows.some(r=>r.id===id))rows.push({id,name:images.get(id)?.name||choice.source_sha||id});
  if(rows.length){const compare=button('Compare duplicates before importing',()=>{transferDialog.close();task(()=>openManualBrowser({owner:plan.character_id,rows}));});compare.id='compareImportDuplicates';transferDialog.querySelector('h2').after(compare);}

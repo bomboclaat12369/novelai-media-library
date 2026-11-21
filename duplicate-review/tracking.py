@@ -34,6 +34,7 @@ BULK = {
     'aliases': (['target','keeper','recipe'], ['target','keeper','recipe','accepted'], 'relationship.same_photo'),
 }
 ORGANIZER = {
+    'split_fragments': (['scope','id'], ['scope','id','data'], 'organizer.split_fragment'),
     'individual_imports': (['scope','sha'], ['scope','sha','data'], 'organizer.individual_import'),
     'sets': (['scope','id'], ['scope','id','data'], 'organizer.set'),
     'state': (['scope'], ['scope','data'], 'organizer.evidence'),

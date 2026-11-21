@@ -57,7 +57,7 @@ def make_server(engine, port=0, token=None):
     bulk_html = bulk_html.replace('</body>',update_tag+'</body>')
     organizer_html = organizer_html.replace('__UPDATER__',update_js)
     organizer_html = organizer_html.replace('__ORGANIZER_WORKFLOW__',(Path(__file__).parent/'missing-files.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-workflow.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-search.js').read_text(encoding='utf-8'))
-    review_scripts = ('organizer-session.js', 'organizer-match-review.js', 'organizer-likely.js')
+    review_scripts = ('organizer-session.js', 'organizer-match-review.js', 'organizer-likely.js', 'organizer-splits.js')
     organizer_html = organizer_html.replace('__ORGANIZER_SESSION__','\n'.join((Path(__file__).parent/name).read_text(encoding='utf-8') for name in review_scripts))
 
     autofill_js=(Path(__file__).parent/'no-autofill.js').read_text(encoding='utf-8')
@@ -260,6 +260,9 @@ def make_server(engine, port=0, token=None):
                     result=organizer.manual_search(body)
                 elif path == '/api/organizer/match-review':
                     result=organizer.review_matches(body)
+                elif path == '/api/organizer/split-review':
+                    import organizer_splits
+                    result=organizer_splits.comparison(organizer,body)
                 elif path == '/api/organizer/likely-groups':
                     result=organizer_likely_sets.load_page(organizer,body)
                 elif path == '/api/organizer/prepare-matches':

@@ -57,6 +57,7 @@ async function openMatchReview(period='all'){
   for(const s of page.sets)picker.add(new Option(s.name+' · '+s.count,s.id));
   picker.value=target;picker.onchange=()=>task(async()=>{target=picker.value;offset=0;await render()});
   tools.append(picker,button('Open full Set',()=>task(async()=>{jumping=true;matchedDialog.close();await open('set',target)})));
+  tools.append(button('Compare with another Set',()=>task(()=>openSplitReview(target,async()=>{dirty=true;await render()}))));
   const selected=page.sets.find(s=>s.id===target);
   body.append(el('h3',selected.name));
   const openPhoto=(photo,list)=>{

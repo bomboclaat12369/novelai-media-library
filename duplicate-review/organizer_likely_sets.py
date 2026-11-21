@@ -4,6 +4,7 @@ import uuid
 import tracking
 from likely_sets import RULE, review_queue
 from organizer_auto_sets import matching_inputs, remaining
+from organizer_splits import pending
 
 DISMISSED = 'likely-set-group'
 
@@ -56,6 +57,7 @@ def load_page(organizer, body):
         review = Review(organizer, state, breadth)
         with organizer.db() as db:
             groups, excluded, mixed = matching_inputs(organizer, state, db)
+            excluded.update(i for g in pending(organizer,db,groups,excluded).values() for i in g['members'])
             dismissed = {r[0] for r in db.execute('SELECT id FROM rejected WHERE scope=? AND context=?',
                                                    (organizer.scope, DISMISSED))}
     # All expensive comparisons run on a read-only snapshot outside the writer lock.
@@ -111,6 +113,7 @@ def validate(organizer, action, body, state, db):
     if row is None:
         raise ValueError('This suggestion is no longer pending.')
     groups, excluded, mixed = matching_inputs(organizer, state, db)
+    excluded.update(i for g in pending(organizer,db,groups,excluded).values() for i in g['members'])
     available = set(remaining(organizer, groups)) - excluded
     if not set(row['members']) <= available or mixed.intersection(row['posts'].values()):
         raise ValueError('A photo or source changed. Refresh the likely groups.')

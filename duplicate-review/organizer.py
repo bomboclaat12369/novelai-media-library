@@ -9,6 +9,8 @@ import numpy as np
 import tracking
 import organizer_auto_sets
 import organizer_likely_sets
+import organizer_splits
+from match_history import MatchHistory
 from bulk.sources import natural, original_name, original_order_key, original_sequence
 from engine import load_image, sha256, stat_key, linked
 
@@ -39,6 +41,7 @@ class Organizer:
         self.encoder_type=None;self.recipe=None;self.scope='';self.revision=0;self.discarded=set();self.parked={}
         with self.db() as db:
             db.execute('CREATE TABLE IF NOT EXISTS scope_merges(target TEXT,source TEXT,PRIMARY KEY(target,source))')
+            db.execute('CREATE TABLE IF NOT EXISTS split_fragments(scope TEXT,id TEXT,data TEXT,PRIMARY KEY(scope,id))')
             db.executescript('''CREATE TABLE IF NOT EXISTS state(scope TEXT PRIMARY KEY,data TEXT);
                 CREATE TABLE IF NOT EXISTS category_catalog(scope TEXT PRIMARY KEY,data TEXT);
                 CREATE TABLE IF NOT EXISTS sets(scope TEXT,id TEXT,data TEXT,PRIMARY KEY(scope,id));
@@ -214,7 +217,7 @@ class Organizer:
         with self.db() as db:
             for source in sources:
                 if source==self.scope or db.execute('SELECT 1 FROM scope_merges WHERE target=? AND source=?',(self.scope,source)).fetchone():continue
-                for table,columns in [('sets','id,data'),('posts','id,status'),('rejected','context,id'),('parked','post,hash'),('video_references','sha,data'),('individual_imports','sha,data')]:
+                for table,columns in [('sets','id,data'),('posts','id,status'),('rejected','context,id'),('parked','post,hash'),('video_references','sha,data'),('individual_imports','sha,data'),('split_fragments','id,data')]:
                     for row in db.execute('SELECT '+columns+' FROM '+table+' WHERE scope=?',(source,)).fetchall():
                         if table=='sets':
                             old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,row[0])).fetchone()
@@ -464,12 +467,26 @@ class Organizer:
     def manual_search(self,body):
         with self.lock,self.bulk.lock:
             self.bind();self.check_collection_idle(body)
+            origin=body.get('match_origin','all')
+            kind=body.get('kind','sets')
+            allowed=None
+            if origin!='all':
+                with self.db() as db:history=MatchHistory(self,db)
+                groups=self.sets()
+                allowed=history.matching(self,groups,kind,origin)
             if body.get('source','library')=='library':
                 info=self.import_catalog(body)
                 if not info.get('character_id'):return info
                 catalog=self.engine.library.catalog(info['character_id'])
                 self.search_library_catalog={'owner':info['character_id'],'catalog':catalog,'files':{r['id']:r for r in catalog['files']},'at':time.monotonic()}
                 extra={}
+                if allowed is not None:
+                    if kind=='sets':
+                        extra['media_ids']=[groups[i]['library_id'] for i in allowed if groups[i].get('library_id')]
+                    else:
+                        hashes=set(history.suggested if origin=='approved' else history.placements)
+                        for i in allowed:hashes.update(self.hashes(i))
+                        extra['media_ids']=[r['id'] for r in catalog['files'] if r.get('sha') in hashes]
                 if body.get('duplicate_source'):
                     ident=self.valid_ids([body['duplicate_source']])[0];digest=self.catalog[ident]['sha'];candidates=set()
                     live={r['sha']:r['id'] for r in catalog['files']}
@@ -477,6 +494,7 @@ class Organizer:
                         for a,b in db.execute('SELECT a.sha,b.sha FROM pairs p JOIN files a ON a.id=p.a JOIN files b ON b.id=p.b WHERE p.decision IS NULL AND a.moved=0 AND b.moved=0 AND (a.sha=? OR b.sha=?)',(digest,digest)):
                             other=b if a==digest else a
                             if other in live:candidates.add(live[other])
+                    if 'media_ids' in extra:candidates.intersection_update(extra['media_ids'])
                     extra={'media_ids':sorted(candidates)}
                 result=self.engine.library.request('/api/sets/manual-search',{**body,**extra,'character_id':info['character_id']})
                 expected=(self.bulk.current or {}).get('config',{}).get('library_instance')
@@ -488,6 +506,7 @@ class Organizer:
                 for ident in g['members']:labels.setdefault(ident,[]).append(g)
             source=sets.values() if kind=='sets' else (self.image(i) for i,v in self.catalog.items() if not v.get('quarantine_only') and i not in self.discarded and v.get('media_type','image')=='image')
             for row in source:
+                if allowed is not None and row['id'] not in allowed:continue
                 groups=labels.get(row['id'],[]);cats=row.get('categories',[]) if kind=='sets' else list({c for g in groups for c in g.get('categories',[])})
                 held=bool(row.get('in_purgatory')) if kind=='sets' else any(g.get('in_purgatory') for g in groups)
                 if placement=='purgatory' and not held or placement=='main' and held or placement=='unassigned' and (kind=='sets' or groups):continue
@@ -722,7 +741,8 @@ class Organizer:
             previous_undo=copy.deepcopy(state.get('undo'))
             match_result=None
             likely_action=action in ('approve_likely','dismiss_likely')
-            if likely_action:
+            split_action=action in ('combine_split','separate_split')
+            if likely_action or split_action or (action=='undo' and (state.get('undo') or {}).get('split_review')):
                 self.check_collection_idle(body)
                 self.refresh_library_placement(force=True)
             if action=='auto_sets':
@@ -737,8 +757,8 @@ class Organizer:
                     prepared.collect()
                     if prepared.plan is None:raise ValueError(prepared.status.get('error','Matching stopped.'))
             with self.db() as db:
-                undoing_review=action=='undo' and (state.get('undo') or {}).get('likely_review')
-                if action=='auto_sets' or likely_action or undoing_review:
+                undoing_review=action=='undo' and any((state.get('undo') or {}).get(k) for k in ('likely_review','split_review'))
+                if action=='auto_sets' or likely_action or split_action or undoing_review:
                     db.execute('BEGIN IMMEDIATE')
                     row=db.execute('SELECT data FROM state WHERE scope=?',(self.scope,)).fetchone()
                     state=json.loads(row[0]) if row else {'revision':0,'selection':[]}
@@ -753,9 +773,11 @@ class Organizer:
                     if not prepared.compatible(self,state,db):
                         raise ValueError('The collection or its selection changed. Run matching again to use your latest choices.')
                     match_result=organizer_auto_sets.apply_matches(self,state,db,prepared)
-                    if not match_result['matched']:
+                    if not match_result['matched'] and not match_result.get('held_fragments'):
                         db.commit()
                         return dict(self.summary(), auto_result=match_result)
+                elif split_action:
+                    organizer_splits.apply(self,db,state,body,action)
                 elif action=='pin':
                     ident=self.valid_ids([body.get('id')])[0];hashes=self.hashes(ident)
                     if not isinstance(body.get('pinned'),bool):raise ValueError('Choose star or unstar.')
@@ -947,11 +969,21 @@ class Organizer:
                     if undo['action']=='auto_sets':
                         organizer_auto_sets.undo_matches(self,db,undo)
                     elif undo['action']=='set':
-                        if undo.get('likely_review'):
+                        if undo.get('likely_review') or undo.get('split_review'):
                             current=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,undo['id'])).fetchone()
                             previous=json.loads(undo['previous']) if undo.get('previous') else {}
                             if not current or json.loads(current[0]).get('applied_at')!=previous.get('applied_at'):
                                 raise ValueError('This group has reached the Library. Restore its import checkpoint to undo the transfer.')
+                        if undo.get('split_review'):
+                            if any(db.execute('SELECT 1 FROM sets WHERE scope=? AND id=?',(self.scope,sid)).fetchone() for sid in undo['moved']):
+                                raise ValueError('The retired draft changed. Refresh before undoing.')
+                            if undo.get('fragment'):
+                                key,raw=undo['fragment']
+                                db.execute('INSERT INTO split_fragments VALUES (?,?,?)',(self.scope,key,raw))
+                            if undo.get('split_separate_id'):
+                                db.execute("DELETE FROM rejected WHERE scope=? AND context='split-set-pair' AND id=?",(self.scope,undo['split_separate_id']))
+                            if undo.get('old_draft_target') and state.get('target')==undo['id']:
+                                state['target']=undo['old_draft_target']
                         db.executemany("DELETE FROM rejected WHERE scope=? AND context='auto-hold' AND id=?",((self.scope,h) for h in undo.get('new_auto_holds',[])))
                         db.execute('DELETE FROM sets WHERE scope=? AND id=?',(self.scope,undo['id']))
                         if undo['previous']:db.execute('INSERT INTO sets VALUES (?,?,?)',(self.scope,undo['id'],undo['previous']))
@@ -985,6 +1017,8 @@ class Organizer:
                         for ident in undo['ids']:db.execute('DELETE FROM rejected WHERE scope=? AND context=? AND id=?',(self.scope,undo['context'],ident))
                 else:raise ValueError('Unknown organizer action.')
                 if action=='undo':
+                    if undo.get('split_review'):
+                        tracking.journal().event(db,'decision.undo_split_review',self.scope,{'set':undo.get('id'),'sources':list(undo.get('moved',{})),'separate_pairs':undo.get('ids',[])})
                     if undo.get('likely_review'):
                         tracking.journal().event(db,'decision.undo_likely_group',self.scope,
                                                  {'action':undo['action'],'set':undo.get('id'),'key':undo['likely_review']})
@@ -1117,8 +1151,11 @@ class Organizer:
             self.bind();summary=self.summary()
             with self.db() as db:
                 dispositions={'discarded':[list(r) for r in db.execute('SELECT hash,batch,data FROM discarded')],'parked':[list(r) for r in db.execute('SELECT scope,post,hash FROM parked WHERE scope=?',(self.scope,))]}
+                match_history=MatchHistory(self,db).export()
+                fragments={k:json.loads(v) for k,v in db.execute('SELECT id,data FROM split_fragments WHERE scope=?',(self.scope,))}
             return {'tracking':tracking.export_history(self.engine,self.bulk,self) if include_tracking else None,'format':'folder-organizer-2','collection_id':self.collection_id,'dispositions':dispositions,'source_job':self.bound[0],'config':(self.bulk.current or {}).get('config',{}),'sets':summary['sets'],'individuals':self.individual_imports(include_applied=True),'state':summary['state'],'category_catalog':summary['category_catalog'],
                     'post_review':[{k:p[k] for k in ('id','status')} for p in summary['posts']],'source_catalog':self.catalog,
+                    'match_history':match_history,'split_fragments':fragments,
                     'notice':'Local set drafts and individual import choices; source files stay in place.'}
 
     def transfer(self,action,body):

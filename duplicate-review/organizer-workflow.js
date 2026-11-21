@@ -204,6 +204,8 @@ async function openAutoSets(){
  status.setAttribute('role','status');
  const actions=el('div',undefined,'row');actions.style.flexWrap='wrap';
  const likelyGroups=button('Review likely groups',()=>task(openLikelyGroups));
+ const splits=button('Review split Sets',()=>task(()=>openSplitReview()));
+ const history=button('Match history',()=>task(()=>openManualBrowser(null,true)));
  let token=null,closed=false;
  matchDialog.onclose=()=>{closed=true;if(token)api('cancel-matching',{match_token:token}).catch(()=>{})};
  const close=button('Close',()=>matchDialog.close());
@@ -256,13 +258,16 @@ async function openAutoSets(){
    matches.disabled=!data.sets.some(g=>g.auto_members?.length);
    const review=button('Review unmatched photos',()=>task(reviewUnmatched));
    review.disabled=!counts.remaining;
-   actions.replaceChildren(matches,likelyGroups,review,close);
+   if(counts.held_fragments)status.textContent+=' '+counts.held_fragments+' possible split '+(counts.held_fragments===1?'group is':'groups are')+' waiting in Review split Sets.';
+   actions.replaceChildren(matches,splits,likelyGroups,history,review,close);
   }catch(error){token=null;close.textContent='Close';status.textContent=error.message;actions.replaceChildren(close)}
  }
  if(missing)actions.append(button('Analyze and match',()=>task(()=>run(true)),'primary'));
  if(data.match_analyzed)actions.append(button(missing?'Match analyzed photos':'Match photos',()=>task(()=>run(false)),missing?'small':'primary'));
  if(data.sets.some(g=>g.auto_members?.length))actions.append(button('Review matched photos',()=>task(()=>openMatchReview('all'))));
  if(data.match_stills)actions.append(likelyGroups);
+ if(data.sets.length)actions.append(splits);
+ actions.append(history);
  actions.append(button('Review unmatched photos',()=>task(reviewUnmatched)),close);
  matchDialog.showModal();
 }

@@ -6,6 +6,8 @@ import time
 import uuid
 
 import tracking
+import organizer_splits
+from split_sets import reconcile_plan
 from bulk.sources import original_sequence
 from set_matching import MAX_POST, RULE, evidence_vectors, match_sets
 from shoot_scene import RECIPE as SCENE_RECIPE, SceneEvidence
@@ -76,6 +78,8 @@ class MatchPreparation:
         self.items=organizer.catalog
         self.vectors=organizer.vector_by_id
         self.groups,self.excluded,self.mixed=matching_inputs(organizer,state,db)
+        self.held = organizer_splits.pending(organizer,db,self.groups,self.excluded)
+        self.excluded.update(i for g in self.held.values() for i in g['members'])
         self.sequences=post_sequences(self.items,organizer.posts)
         self.scene = SceneEvidence(self.items, organizer.engine.recovered_original,
                                    organizer.engine.state_dir/'set-scene-cache.sqlite3', organizer.recipe)
@@ -93,7 +97,9 @@ class MatchPreparation:
                 if self.cancel.is_set():raise InterruptedError('Matching stopped.')
                 self.status={'running':True,'phase':'Checking outfits and scene details','done':done,'total':total}
             hits=source_matches(self.items,valid,self.groups,self.excluded,self.mixed,self.scene,progress)
-            self.plan=combine(plan,hits,self.items,valid,self.groups)
+            raw=combine(plan,hits,self.items,valid,self.groups)
+            visible={gid:dict(g,members=[i for i in g['members'] if i not in self.excluded]) for gid,g in self.groups.items()}
+            self.plan=reconcile_plan(raw,self.items,valid,visible,self.mixed)
             self.status={'running':False,'phase':'Matches prepared'}
         except Exception as error:
             self.status={'running':False,'phase':'Matching stopped','error':str(error)}
@@ -106,6 +112,9 @@ class MatchPreparation:
                 or self.scene.analysis_recipe != organizer.recipe):
             return False
         groups,excluded,mixed=matching_inputs(organizer,state,db)
+        held=organizer_splits.pending(organizer,db,groups,excluded)
+        if self.held!=held:return False
+        excluded.update(i for g in held.values() for i in g['members'])
         return (self.groups==groups and self.excluded==excluded and self.mixed==mixed
                 and all(self.scene.stamp(i)==stamp for i,stamp in list(self.scene.verified_stamps.items())))
 
@@ -115,6 +124,8 @@ def apply_matches(organizer, state, db, prepared):
     groups=prepared.groups
     plan=prepared.plan
     before = {}
+    anchors = {}
+    destinations = dict(groups)
     names = {g['name'].casefold() for g in groups.values()}
     ordinal = 1
     stamp = time.time()
@@ -137,6 +148,8 @@ def apply_matches(organizer, state, db, prepared):
                  'created':stamp,'updated':stamp,'colors':[],'categories':[],'favorite':False,'library_id':None}
         db.execute('INSERT INTO sets VALUES (?,?,?)',(organizer.scope,ident,json.dumps(group)))
         before[ident] = None
+        if 'plan_key' in core:anchors[core['plan_key']]=ident
+        destinations[ident]=group
         event['sets'].append({'id':ident,'kind':'new',**record(core)})
     for ident, matches in plan['add'].items():
         old = db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(organizer.scope,ident)).fetchone()
@@ -149,18 +162,22 @@ def apply_matches(organizer, state, db, prepared):
         event['sets'].append({'id':ident,'kind':'extend','matches':{i:record(m) for i,m in matches.items()}})
     added = sum(len(matches) for matches in plan['add'].values())
     created = sum(len(g['members']) for g in plan['new'])
-    if before:
+    held=organizer_splits.hold(organizer,db,plan.get('held_fragments',[]),anchors,destinations)
+    if before or held:
+        if held:event['held_for_split_review']=held
         event['source_hashes'] = {i:organizer.catalog[i]['sha'] for i in {
             i for g in plan['new'] for i in g['members']} | {
             i for matches in plan['add'].values() for i in matches} | {
             a for matches in plan['add'].values() for match in matches.values() for a in match['anchors']}}
         tracking.journal().event(db,'decision.automatic_set_match',organizer.scope,event)
-        state['undo'] = {'action':'auto_sets','previous':before}
+        state['undo'] = {'action':'auto_sets','previous':before,'held_fragments':held}
     return {'created_sets':len(plan['new']), 'new_members':created, 'extended_sets':len(plan['add']),
-            'added_members':added,'matched':created+added,'remaining':len(remaining(organizer,groups))-created-added}
+            'added_members':added,'matched':created+added,'remaining':len(remaining(organizer,groups))-created-added,
+            'held_fragments':len(held)}
 
 
 def undo_matches(organizer, db, undo):
+    db.executemany('DELETE FROM split_fragments WHERE scope=? AND id=?',((organizer.scope,k) for k in undo.get('held_fragments',())))
     for ident, previous in undo['previous'].items():
         row = db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(organizer.scope,ident)).fetchone()
         current = json.loads(row[0]) if row else {}
@@ -195,7 +212,8 @@ def review_page(organizer, body):
     photos={}
     for gid,g in groups.items():
         members=set(g['members'])
-        ids=[i for i in g.get('auto_members',[]) if i in members and (only is None or i in only.get(gid,()))]
+        from_batch=None if only is None else set().union(*(only.get(k,()) for k in [gid,*g.get('merged_sources',())]))
+        ids=[i for i in g.get('auto_members',[]) if i in members and (from_batch is None or i in from_batch)]
         if not ids:continue
         reviewed=set(g.get('auto_reviewed',[]))
         photos[gid]=ids

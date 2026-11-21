@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "id": "workbench-cross-post-group-review-2026-11-20",
+  "id": "workbench-split-sets-match-history-2026-11-21",
   "components": [
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Review likely cross-post groups separately from strict automatic matching. Inspect photos by post, approve the group or just the checked photos, choose the destination Set, dismiss a suggestion or undo a decision. Saved Set decisions can improve the local ordering of suggestions."
+  "workbench_notes": "Review possible split shoots side by side, combine drafts or keep them separate. Matching holds likely second fragments for review. Match history can find automatically created Sets and automatically placed photos after a rename, move, or merge."
 }

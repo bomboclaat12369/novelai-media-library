@@ -1,0 +1,58 @@
+const assert = require('node:assert/strict');
+const {spawn} = require('node:child_process');
+const {once} = require('node:events');
+const {createInterface} = require('node:readline');
+const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwright');
+
+(async()=>{
+ const server=spawn(process.env.NAI_PYTHON||'python3',['duplicate-review/tests/serve_organizer.py','--split-sets'],{stdio:['ignore','pipe','inherit']});
+ let browser;
+ try{
+  const lines=createInterface({input:server.stdout});
+  const info=JSON.parse(await Promise.race([once(lines,'line').then(([line])=>line),once(server,'exit').then(([code])=>{throw Error('Fixture exit '+code)})]));
+  browser=await chromium.launch({executablePath:process.env.NAI_CHROMIUM,headless:true});
+  const page=await browser.newPage({viewport:{width:1280,height:850}});
+  page.setDefaultTimeout(12000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(info.url);await page.waitForFunction(()=>data?.job&&view?.images.length&&!busy);
+  const post=await page.evaluate(()=>currentId);
+  await page.getByRole('button',{name:'Auto-match Sets',exact:true}).click();
+  await page.getByRole('button',{name:'Review split Sets',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'Review split Sets'});
+  await dialog.getByText('Spring Studio · 3 photos',{exact:true}).waitFor();
+  await dialog.getByText('Window Session · 3 photos',{exact:true}).waitFor();
+  await dialog.locator('section button').first().click();await page.locator('#viewerClose').click();
+  await dialog.getByRole('combobox',{name:'Set to keep'}).selectOption('b');
+  await dialog.getByRole('button',{name:'Combine Sets',exact:true}).click();
+  await dialog.getByText('Combined in Window Session.').waitFor();
+  assert.equal(await page.evaluate(()=>data.sets.find(s=>s.id==='b').members.length),6);
+  await dialog.getByRole('button',{name:'Undo last decision'}).click();
+  await dialog.getByText('Spring Studio · 3 photos',{exact:true}).waitFor();
+  await dialog.getByRole('button',{name:'Keep separate'}).click();await dialog.getByText('Saved as separate shoots.').waitFor();
+  await dialog.getByRole('button',{name:'Close',exact:true}).click();
+  assert.equal(await page.evaluate(()=>currentId),post);
+  await page.getByRole('button',{name:'Match history',exact:true}).click();
+  const search=page.locator('#manualBrowser');
+  await search.getByText(/2 results/).waitFor();
+  await search.getByRole('combobox',{name:'Search type'}).selectOption('images');
+  await search.getByText(/6 results/).waitFor();
+  await search.getByRole('combobox',{name:'Match history'}).selectOption('approved');
+  await search.getByText(/0 results/).waitFor();
+  await search.getByRole('button',{name:'Close',exact:true}).click();
+  await page.getByRole('dialog',{name:'Auto-match Sets',exact:true}).getByRole('button',{name:'Close',exact:true}).click();
+  await page.reload();await page.waitForFunction(()=>data?.job&&view?.images.length&&!busy);
+  await page.setViewportSize({width:430,height:760});
+  await page.getByRole('button',{name:'Auto-match Sets',exact:true}).click();
+  await page.getByRole('button',{name:'Review matched photos',exact:true}).click();
+  await page.getByRole('button',{name:'Compare with another Set'}).click();
+  await dialog.getByRole('combobox',{name:'First Set'}).selectOption('a');
+  await dialog.getByRole('combobox',{name:'Second Set'}).selectOption('b');
+  await dialog.getByRole('button',{name:'Compare Sets',exact:true}).click();
+  await dialog.getByRole('button',{name:'Combine Sets',exact:true}).waitFor();
+  assert(await dialog.evaluate(d=>d.scrollWidth<=d.clientWidth+2));
+  await dialog.getByRole('button',{name:'Combine Sets',exact:true}).click();
+  await dialog.getByText(/Combined in (Spring Studio|Window Session)/).waitFor();
+  await dialog.getByRole('button',{name:'Close',exact:true}).click();
+  await page.getByRole('dialog',{name:'Review matched photos'}).getByText(/6 matched photos across 1 Sets/).waitFor();
+  assert.deepEqual(errors,[]);console.log('Split review, undo, saved history filters, context and narrow layout passed.');
+ }finally{if(browser)await browser.close();server.kill()}
+})().catch(error=>{console.error(error);process.exitCode=1});
