@@ -1,4 +1,18 @@
-# After Hours — completed local build
+# After Hours — game development and releases
+
+## Version 1.5.0 — Studio shoots and Resort stays
+
+Studio and Resort now share the illustrated Club presentation from opening
+requirements through active nights. Studio projects offer photo and adult
+film briefs, casting, a two-person feature option and on-set decisions.
+Choose whether to shoot pickups, take a cover commission, release a Club
+publicity preview or deliver an alternate film cut.
+
+Resort hosts match a service plan to a guest’s preferences, handle requests
+and can accept a private suite booking for an extra fee. Satisfied guests
+can return for a premium. The floor shows current work and the morning
+receipt retains the project or stay history. New reservations use these
+rules. Previously booked contracts settle on their original terms.
 
 ## Version 1.4.1 — department planning and receipts
 

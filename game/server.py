@@ -169,6 +169,8 @@ class Handler(BaseHTTPRequestHandler):
                                   'collection_rules':{'rarity_weights':PACK_RARITY_WEIGHTS},
                                   'packs':PACKS,'upgrades':UPGRADES,'projects':management.PROJECTS,
                                   'stays':management.STAYS,'departments':management.DEPARTMENTS,
+                                  'department_play':{'stages':management.ops.STAGES,'plans':management.ops.SERVICE_PLANS,
+                                                     'preferences':management.ops.PREFERENCES},
                                   'decisions':management.DECISIONS,'profiles':management.PROFILES,**current})
         if path=='/api/state': return self.send(200,self.state_payload())
         if path=='/api/reservation-options':
@@ -183,11 +185,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not state or not state['departments'].get(department):
                     return self.send(400,{'error':'Open this department to plan a reservation.'})
                 try:
-                    spec=management.contract_quote(state,department,kind,owner)
+                    selected={key: query[key][0] for key in ('costar','guest','service_plan') if key in query}
+                    spec=management.contract_quote(state,department,kind,owner,selected)
                 except RuleError as exc:
                     return self.send(400,{'error':str(exc)})
                 options=management.reservation_options(state,department,owner,spec)
-                return self.send(200,{'revision':current['revision'],'token':self.server.token,'options':options})
+                return self.send(200,{'revision':current['revision'],'token':self.server.token,'options':options,'quote':spec})
         if path=='/api/backups': return self.send(200,{'backups':self.server.store.backups(),'save_name':self.server.store.path.name})
         if path=='/api/renderer': return self.send(200,renderer_assets())
         if path=='/api/export':
@@ -250,7 +253,7 @@ class Handler(BaseHTTPRequestHandler):
             if root not in file.parents or not file.is_file(): return self.send(404,{'error':'Asset not found.'})
             return self.send(200,file.read_bytes(),mimetypes.guess_type(file.name)[0] or 'application/octet-stream')
         name='index.html' if path in ('/','/game','/game/') else path.lstrip('/')
-        if name not in ('index.html','app.js','style.css','favicon.svg','renderer.js','management-ui.js','venue.js','venue.css','illustrations/characters.json','illustrations/patricia-front.png','illustrations/alice-front.png','illustrations/patricia-side.png','illustrations/alice-side.png'): return self.send(404,{'error':'Not found.'})
+        if name not in ('index.html','app.js','style.css','favicon.svg','renderer.js','management-ui.js','departments.js','venue.js','venue.css','illustrations/characters.json','illustrations/patricia-front.png','illustrations/alice-front.png','illustrations/patricia-side.png','illustrations/alice-side.png'): return self.send(404,{'error':'Not found.'})
         file=WEB/name
         return self.send(200,file.read_bytes(),mimetypes.guess_type(file.name)[0] or 'text/plain')
 

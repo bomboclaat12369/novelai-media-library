@@ -14,10 +14,10 @@ ROOT = Path(__file__).resolve().parents[2]
 TOOLS = "tools/after-hours"
 FILE_LIST = "after-hours-files.json"
 GAME_MODULES = (
-    "__init__ booking_state bookings catalog companion engine evolution flavor library_snapshot "
+    "__init__ booking_state bookings catalog companion department_ops engine evolution flavor library_snapshot "
     "management meeting_rules meetings migrations server stage_labels store videos wardrobe writing"
 ).split()
-WEB_FILES = "index.html app.js management-ui.js renderer.js style.css favicon.svg venue.js venue.css illustrations/characters.json illustrations/patricia-front.png illustrations/alice-front.png illustrations/patricia-side.png illustrations/alice-side.png".split()
+WEB_FILES = "index.html app.js management-ui.js departments.js renderer.js style.css favicon.svg venue.js venue.css illustrations/characters.json illustrations/patricia-front.png illustrations/alice-front.png illustrations/patricia-side.png illustrations/alice-side.png".split()
 VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
 
 

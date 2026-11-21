@@ -31,6 +31,15 @@ class IntegratedRules(unittest.TestCase):
         s=g.command(s,self.cat,'auto');s=g.command(s,self.cat,'start')
         return g.command(s,self.cat,'finish')
 
+    def legacy_night(self, state):
+        # Existing five-minute saves have fixed rounds and the original offers.
+        state=copy.deepcopy(state)
+        g.start_night(state)
+        state['night'].pop('stage_tracking')
+        state['night']['duration']=300
+        m.prepare_night(state)
+        return state
+
     def test_lounge_offer_is_paid_once_and_credited_to_its_host(self):
         state=g.new_game(self.cat,['demo-0','demo-1'],1)
         state=g.command(state,self.cat,'start')
@@ -149,8 +158,8 @@ class IntegratedRules(unittest.TestCase):
         self.assertLess(s['people']['demo-2']['energy'],100)
         self.assertEqual(s['contracts'][0]['card'],s['people']['demo-2']['card'])
 
-    def test_decisions_have_consequences_and_cannot_repeat(self):
-        s=g.command(self.s,self.cat,'start');s=g.command(s,self.cat,'advance',{'seconds':100})
+    def test_legacy_decisions_have_consequences_and_cannot_repeat(self):
+        s=self.legacy_night(self.s);s=g.command(s,self.cat,'advance',{'seconds':100})
         d=s['night']['decisions'][0];old=s['night']['revenue']
         s=g.command(s,self.cat,'decision',{'decision':d['id'],'choice':'accept'})
         self.assertEqual(s['night']['revenue'],old+55)
@@ -164,19 +173,19 @@ class IntegratedRules(unittest.TestCase):
         s=g.command(s,self.cat,'advance',{'seconds':1})
         self.assertEqual(s['night']['elapsed'],201)
 
-    def test_event_wording_varies_and_does_not_reroll_during_night(self):
+    def test_legacy_event_wording_varies_and_does_not_reroll_during_night(self):
         titles=[]
         for day in range(1,17,2):
             s=copy.deepcopy(self.s);s['day']=day
-            s=g.command(s,self.cat,'start')
+            s=self.legacy_night(s)
             presentation=copy.deepcopy(s['night']['decisions'][0]['copy'])
             titles.append(presentation['title'])
             s=g.command(s,self.cat,'advance',{'seconds':100})
             self.assertEqual(s['night']['decisions'][0]['copy'],presentation)
         self.assertEqual(len(set(titles)),8)
 
-    def test_tired_round_replaces_previous_activity(self):
-        s=g.command(self.s,self.cat,'start');s=g.command(s,self.cat,'advance',{'seconds':50})
+    def test_legacy_tired_round_replaces_previous_activity(self):
+        s=self.legacy_night(self.s);s=g.command(s,self.cat,'advance',{'seconds':50})
         owner=next(iter(s['people']));s['people'][owner]['energy']=0
         s=g.command(s,self.cat,'advance',{'seconds':50})
         self.assertEqual(s['night']['activities'][owner]['round'],2)

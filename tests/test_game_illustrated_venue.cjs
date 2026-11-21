@@ -116,7 +116,7 @@ function check(name,condition){assert.ok(condition,name);checks.push(name);}
  check('Desktop events float entirely over the room column',await page.evaluate(()=>{const event=gameRoot.querySelector('.venue-event-overlay').getBoundingClientRect(),room=gameRoot.querySelector('.venue-overview').getBoundingClientRect(),media=gameRoot.querySelector('.venue-media').getBoundingClientRect();return event.left>=room.left-1&&event.right<=room.right+1&&event.right<media.left&&event.bottom<=innerHeight;}));
  await page.screenshot({path:path.join(output,'event-desktop.png'),fullPage:true});
  // Room selection is still presentation-only even while the event overlays it.
- await page.evaluate(()=>{selectedRoom='lounge-0';render();});
+ await page.locator('[data-room="lounge-0"]').evaluate(button=>button.click());
  check('Event choices remain visible while another room is selected',await page.locator('[aria-label="Business opportunity"]').count()>=1);
  await page.setViewportSize({width:390,height:844});
  await page.waitForTimeout(80);

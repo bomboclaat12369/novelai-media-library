@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import random
 from .catalog import stable
-from . import meeting_rules as rules, stage_labels
+from . import department_ops, meeting_rules as rules, stage_labels
 from .meeting_rules import BOOKING_RULES_VERSION
 
 NIGHT_SECONDS = 180
@@ -44,10 +44,26 @@ def prepare_events(state):
         business.append('lounge_round')
     kinds = [rng.choice(business), rng.choice(m.TEAM_CHOICES)]
     rng.shuffle(kinds)
-    return [{'id': f"{state['day']}-venue-{i}", 'kind': kind, 'at': at,
+    events = [{'id': f"{state['day']}-venue-{i}", 'kind': kind, 'at': at,
              'until': min(n['duration'], at + 20 * scale), 'choice': None,
              'copy': flavor.event(kind, state, state['day'] - 1)}
             for i, (kind, at) in enumerate(zip(kinds, times))]
+    active = [c for c in m.reservations(state) if c.get('operations')]
+    # Use the existing two venue decision slots. Favor contracts that have had
+    # fewer opportunities so parallel projects and suites each get a turn.
+    rows = []
+    for dept in ('studio', 'resort'):
+        pool = [c for c in active if c['department'] == dept]
+        if pool:
+            rng.shuffle(pool)
+            rows.append(department_ops.offer_for(state, min(pool, key=lambda c: len(c.get('decisions', [])))))
+    rows.sort(key=lambda row: row['kind'] != 'resort_private')
+    for i, row in enumerate(rows):
+        events[i].update(row)
+        if row['kind'] == 'resort_private':
+            events[i]['at'] = min(events[i]['at'], n['duration'] * .64)
+            events[i]['until'] = events[i]['at'] + 20 * scale
+    return events
 
 
 def initialize(state, catalog, labels):
@@ -424,6 +440,8 @@ def process(state, catalog, labels, interactive):
     from . import management as m
     from .engine import record, resolve_club_round
     n = state['night']; at = n['elapsed']
+    if n.get('suite_contracts'):
+        department_ops.advance_private(state, labels)
     scale = clock_scale(n)
     def handle(decision, new=False):
         if not decision:
@@ -506,6 +524,10 @@ def advance(state, catalog, seconds, labels, interactive):
         boundaries = [target, next_wave_at(n)]
         boundaries.extend(n['next_arrivals'].values())
         boundaries.extend(d['at'] for d in n['decisions'] if d['choice'] is None)
+        if n.get('suite_contracts'):
+            for _, booking in department_ops.current_private(state):
+                if not booking.get('completed'):
+                    boundaries.extend(s['start'] for s in booking['segments'])
         for meeting in n['meetings'].values():
             if 'segments' in meeting and not meeting.get('completed'):
                 boundaries.extend(s[key] for s in meeting['segments'] for key in ('start', 'end'))

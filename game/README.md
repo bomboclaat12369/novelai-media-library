@@ -1,8 +1,8 @@
 # After Hours — Club, Studio & Resort
 
-A complete local main-game build for the Media Library companion. Choose two
-founders, grow the club, collect cards, schedule Studio projects and manage
-multi-night Resort stays on one calendar. The current local build is **1.4.1**.
+Choose two founders, grow the Club, collect cards, direct shoots and host
+Resort guests. All three venues share a roster, a budget and a three-minute
+night. The current local build is **1.5.0**.
 
 ## Play on this Windows computer
 
@@ -67,13 +67,18 @@ companion was not replaced or updated.
 - **Collect and grow:** settle once, open earned/purchased packs, equip cards,
   use extra copies for mastery, optionally recruit and expand. A first pull
   waives that person's hiring fee; it never starts payroll automatically.
-- **Studio:** available from night 4 after 18 club bookings. Opening costs
-  $650 plus $14 upkeep per position. One-, two- and three-night projects have
-  deposits, delivery risk and money rewards. Longer successful projects award
-  Standard vouchers and sometimes an extra card marked as a Studio award.
-- **Resort:** available after two Studio deliveries. Opening costs $1,250 plus
-  $24 upkeep per suite. Two-, three- and four-night packages reserve a host,
-  earn nightly revenue and track satisfaction for checkout bonuses.
+- **Studio.** Open from night 4 after 18 Club bookings for $650 plus $14 upkeep
+  per position. Choose among three photo briefs and two adult films. A feature
+  can reserve a lead and a co-star on the same set. Each night has six steps.
+  On-set choices include pickups, a higher-risk photo cover commission, Club
+  publicity and a paid alternate film cut. Longer successful projects award
+  Standard vouchers and sometimes an extra Studio card.
+- **Resort.** Open after two Studio deliveries for $1,250 plus $24 upkeep per
+  suite. Pick a host, package and service plan for a named guest. Matching
+  service to the guest’s preferences improves satisfaction. Handle guest
+  requests or offer a paid private booking during the stay. It takes the
+  host away from overlapping suite service. Satisfied guests can return and
+  pay a $10 nightly premium.
 
 During preparation, the Club shows what you still need to open the next
 department. Before you pay an opening fee or reservation deposit, you can see
@@ -81,6 +86,11 @@ what you'll have left after the next night's wages and upkeep. Each contract
 quote shows when you get paid. At checkout, the morning report includes the
 guest's satisfaction and the bonus paid. A Studio delivery that earns a card
 lets you open it from the receipt.
+
+Studio and Resort use the Club’s illustrated floor, character view and fixed
+media frame. Each has its own schedule, activity history and receipts. A
+decision appears across the three venues, and the night continues after a
+choice. Contracts already booked in older versions keep their original terms.
 
 One person cannot occupy two departments on the same date. Projects, stays
 and club work advance together with shared money, energy and career skills.

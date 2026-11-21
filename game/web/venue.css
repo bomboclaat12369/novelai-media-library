@@ -101,3 +101,87 @@
 .venue-media-footer select{min-width:0;max-width:72%;text-overflow:ellipsis}
 .clip-player{display:block;width:100%;max-height:70vh;background:#120e13;object-fit:contain}
 dialog select[data-outfit-preview],dialog #pair-clip,dialog #pair-photo{display:block;width:100%;min-width:0;max-width:100%;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis}
+
+/* The three venues share the Club shell. Empty departments show the actual
+   work on offer, while a staffed position uses the Club's portrait stage. */
+.illustrated-layout{color:var(--text)}
+.department-front{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:24px;align-items:start;margin:4px 0 24px}
+.department-front>*{min-width:0}
+.department-preview{position:relative;margin:0;overflow:hidden;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.department-preview>.venue-section-head,.department-preview figcaption{padding:14px 18px}
+.department-preview figcaption{color:var(--muted);font-size:13px;line-height:1.55}
+.department-preview>.room-scene{height:auto;aspect-ratio:2.25;max-height:410px;min-height:180px}
+.department-front h2,.department-reservations>h2,.department-catalog h2,.illustrated-layout .reservation-calendar h2{font:22px Georgia,serif;margin:0 0 14px}
+.department-preview h2{margin:0}
+.department-front .panel,.department-reservations,.reservation-calendar{min-width:0}
+.department-front .panel{margin:0}
+.department-gate .opening-goals{max-width:none;margin:16px 0}
+.department-gate .opening-goals>div{display:grid;grid-template-columns:1fr auto;border:0;gap:5px 14px;padding:5px 0}
+.goal-meter{grid-column:1/-1}
+.goal-meter progress{display:block;appearance:none;width:100%;height:4px;border:0;border-radius:3px;background:#394539;color:var(--green)}
+.goal-meter progress::-webkit-progress-bar{background:#394539;border-radius:3px}
+.goal-meter progress::-webkit-progress-value{background:var(--green);border-radius:3px}
+.goal-meter progress::-moz-progress-bar{background:var(--green)}
+.department-gate>button{margin-top:12px}
+.department-catalog{border-top:1px solid var(--line);padding-top:18px}
+.department-catalog ul{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:12px;margin:0;padding:0}
+.department-catalog li{border-left:2px solid #8f9270;padding:9px 14px;background:#202a22}
+.department-catalog li strong{display:block;font:17px Georgia,serif}
+.department-catalog li span,.department-brief small{display:block;color:var(--muted);font-size:12px;line-height:1.55;margin-top:5px}
+.desk-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px}
+.desk-fields label{display:grid;gap:5px;color:var(--muted);font-size:12px;margin:0}
+.desk-fields select{width:100%;color:var(--text);text-overflow:ellipsis}
+.department-brief{grid-column:1/-1;border-top:1px solid var(--line);padding-top:12px}
+.illustrated-layout .department-desk .quote{background:#19231d;border-color:var(--gold);margin:14px 0}
+.department-reservations{overflow-wrap:anywhere}
+.department-reservations h2:not(:first-child){border-top:1px solid var(--line);margin-top:18px;padding-top:15px}
+.department-reservations .reservation,.department-reservations .completed{background:transparent;padding:10px 0 14px;border:0;border-bottom:1px solid var(--line);margin:0}
+.department-reservations h3,.suite-booking h3{font:17px Georgia,serif;margin:2px 0 6px}
+.department-reservations p,.department-tracker>p{color:var(--muted);font-size:13px}
+.department-reservations button{margin-top:6px}
+.contract-history{margin:8px 0;font-size:12px}
+.contract-history summary{cursor:pointer;color:var(--gold)}
+.contract-history h4{margin:9px 0 3px}
+.contract-history ul{padding-left:18px;margin:0;line-height:1.7;color:var(--muted)}
+.contract-stages{display:flex;gap:9px;overflow-x:auto;list-style:none;padding:0 0 6px;margin:10px 0;scrollbar-width:thin}
+.contract-stages li{flex:1 0 132px;padding:9px 12px;border:1px solid var(--line);border-radius:7px;background:#202b23}
+.contract-stages small,.contract-stages strong{display:block}
+.contract-stages li small{font-size:10px;margin-bottom:4px}
+.contract-stages strong{font-size:13px;font-weight:500}
+.contract-stages [aria-current=step]{border-color:var(--gold);box-shadow:inset 0 -2px var(--gold);background:#383f2e}
+.suite-booking{padding-top:10px}
+.department-preview .department-overlay{left:18px;top:auto;bottom:18px;width:min(440px,calc(100vw - 36px));max-height:75dvh}
+.room-scene-studio{background:#554a40;border-color:#756650;isolation:isolate}
+.room-scene-studio .room-wall{background:repeating-linear-gradient(90deg,#514b40 0 14%,#615846 14.2% 14.7%,#514b40 15%);border-color:#514a3d}
+.room-scene-studio .room-floor{background:repeating-linear-gradient(105deg,#635747 0 6%,#7e6d56 6.1% 6.6%)}
+.shoot-backdrop{position:absolute;left:28%;width:53%;top:9%;bottom:8%;background:linear-gradient(115deg,#cabe9f,#a69b80 65%,#8c846b);border-top:6px solid #50483b;border-radius:3px 3px 25% 2% / 3px 3px 8% 2%}
+.shoot-backdrop:before{content:'';position:absolute;left:-4%;right:-4%;top:-8px;height:5px;border-radius:5px;background:#b5a27b}
+.shoot-softbox{position:absolute;left:12%;top:13%;width:16%;height:69%;background:linear-gradient(90deg,transparent 47%,#30332d 47% 52%,transparent 52%)}
+.shoot-softbox:before{content:'';position:absolute;inset:0 -12% 44%;background:linear-gradient(118deg,#333831 0 31%,#928b74 32% 36%,#e0d5b0 37% 76%,#bfb899 77%);clip-path:polygon(18% 13%,61% 0,95% 19%,100% 67%,68% 96%,28% 100%,0 67%,0 36%);transform:rotate(-12deg)}
+.shoot-softbox:after,.shoot-camera:after{content:'';position:absolute;left:8%;right:8%;bottom:-3%;height:29%;background:#33382f;clip-path:polygon(47% 0,54% 0,100% 100%,94% 100%,53% 17%,54% 98%,48% 98%,47% 17%,6% 100%,0 100%)}
+.shoot-camera{position:absolute;right:9%;bottom:11%;height:51%;width:12%;background:linear-gradient(90deg,transparent 48%,#2e352d 48% 54%,transparent 54%)}
+.shoot-camera:before{content:'';position:absolute;inset:0 0 66%;background:linear-gradient(0deg,#30362f 60%,#43493d 61%);clip-path:polygon(0 37%,25% 38%,25% 14%,46% 14%,51% 0,76% 0,80% 15%,100% 15%,100% 92%,25% 92%,25% 70%,0 74%)}
+.shoot-stool{position:absolute;left:49%;bottom:15%;width:13%;height:27%;background:linear-gradient(83deg,transparent 12%,#584739 13% 18%,transparent 19%),linear-gradient(-83deg,transparent 12%,#584739 13% 18%,transparent 19%)}
+.shoot-stool:before{content:'';display:block;height:22%;background:#84694f;border-radius:45%;box-shadow:0 3px #57483a}
+.room-scene-resort{background:#68624e;--couch:#a89c79;--cushion:#cec0a0;border-color:#837458}
+.room-scene-resort .room-wall{background:repeating-linear-gradient(90deg,#6b6953 0 17%,#77745a 17.3% 17.8%,#6b6953 18%);border-color:#756b50}
+.suite-window{position:absolute;top:6%;left:12%;width:56%;height:64%;overflow:hidden;border:5px solid #9b8968;background:linear-gradient(#687969,#aab397 58%,#c6b28a 60%,#7a9290 61%,#637d77);box-shadow:0 0 0 2px #514f3f}
+.suite-window:before{content:'';position:absolute;inset:18% 0 25%;background:#5a7060;clip-path:polygon(0 45%,15% 56%,35% 80%,50% 73%,67% 92%,82% 77%,100% 64%,100% 100%,0 100%)}
+.suite-window:after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent 32%,#8d8063 32% 33.4%,transparent 33.4% 66%,#8d8063 66% 67.4%,transparent 67.4%)}
+.suite-window b{position:absolute;width:10%;aspect-ratio:1;top:12%;right:16%;border-radius:50%;background:#e0c99b}
+.suite-curtain{position:absolute;left:8%;top:2%;width:10%;height:68%;background:repeating-linear-gradient(90deg,#a99b79 0 20%,#baae8b 22% 40%);clip-path:polygon(0 0,100% 0,58% 69%,76% 100%,0 100%)}
+.room-scene-resort .room-sofa{left:15%;width:49%;height:25%;bottom:18%}
+.room-scene-resort .room-lamp{right:26%}
+.room-scene-resort .room-table{left:35%;bottom:9%;width:19%}
+.room-figure.room-partner,.room-initial.room-partner{right:38%}
+.cast-picker{display:flex;flex-wrap:wrap;gap:5px;justify-content:center;margin-top:8px}
+.cast-picker [aria-pressed=true]{border-color:var(--gold);color:var(--gold)}
+@media(max-width:760px){
+ .illustrated-layout .lounge-heading .actions{max-width:100%;min-width:0;flex-wrap:wrap}
+ .department-front{grid-template-columns:minmax(0,1fr);gap:14px}
+ .department-preview>.room-scene{min-height:140px}
+ .department-front .panel,.department-reservations{padding:16px}
+ .department-preview .department-overlay{inset:12px 12px auto;width:auto;max-height:calc(100dvh - 24px)}
+ .contract-stages li{flex-basis:130px}
+}
+@media(max-width:430px){.desk-fields{grid-template-columns:minmax(0,1fr)}}

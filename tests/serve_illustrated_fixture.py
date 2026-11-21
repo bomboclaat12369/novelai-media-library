@@ -12,10 +12,11 @@ from game.server import build_server, serve
 from game.store import encode
 
 folder = Path(sys.argv[1]).resolve()
+showcase = '--showcase' in sys.argv
 library = folder/'library'
 library.mkdir(parents=True, exist_ok=True)
 owners = ['4759bed86a2645f8a1589d5ef6770918', '744a53a2ad5b4aa59696ea97e7c645f4', 'fixture-third']
-names = ['Patricia', 'Alice', 'Unillustrated guest']
+names = ['Patricia', 'Alice', 'Riley' if showcase else 'Unillustrated guest']
 media = []
 for index, (owner, name) in enumerate(zip(owners, names)):
     for photo in range(2):
@@ -39,12 +40,24 @@ server=build_server(0,data/'career.sqlite3',library)
 def action(name,body):
     server.store.apply(name,body,uuid.uuid4().hex,server.store.read()['revision'])
 action('new',{'selected':owners[:2],'seed':2})
-action('upgrade',{'kind':'rooms'})
-action('plan',{'owner':owners[1],'role':'room'})
-action('start',{})
-state=engine.command(server.store.read()['state'],server.store.catalog,'advance',{'seconds':22,'stop_at_decision':True},labels=server.store.label_pack)
-state['night']['paused']=True
+if '--departments' in sys.argv or showcase:
+    state=server.store.read()['state']
+    state.update(day=7,cash=7400)
+    state['totals'].update(services=32,studio_completed=2)
+    state=engine.command(state,server.store.catalog,'hire',{'owner':owners[2]})
+else:
+    action('upgrade',{'kind':'rooms'})
+    action('plan',{'owner':owners[1],'role':'room'})
+    action('start',{})
+    state=engine.command(server.store.read()['state'],server.store.catalog,'advance',{'seconds':22,'stop_at_decision':True},labels=server.store.label_pack)
+    state['night']['paused']=True
 with server.store.connect() as connection:
     connection.execute('UPDATE save SET body=? WHERE id=1',(encode(state),))
+if showcase:
+    for dept in ('studio', 'resort'):
+        action('department', {'kind': dept})
+    action('schedule', {'department': 'studio', 'kind': 'solo_film', 'owner': owners[0]})
+    action('schedule', {'department': 'resort', 'kind': 'retreat', 'owner': owners[1], 'service_plan': 'dining'})
+    action('auto', {})
 print(json.dumps({'url':f'http://127.0.0.1:{server.server_port}/game/','library':str(library)}),flush=True)
 serve(server)

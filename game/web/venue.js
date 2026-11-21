@@ -7,6 +7,7 @@ const venueSections=new Set();
 const venueViews=new Map();
 const wardrobeSelection=new Map();
 const roomClip=new Map();
+const featuredCast=new Map();
 const clipUrl=id=>'/game/api/video/'+encodeURIComponent(id);
 let venueResizeObserver;
 async function initVenue(){
@@ -20,18 +21,26 @@ root.addEventListener('toggle',event=>{
  if(key){if(event.target.open)venueSections.add(key);else venueSections.delete(key);}
 },true);
 
-function venueSlots(){
+function venueSlots(view=screen){
  const slots=[];
  for(const [role,label,count] of [['room','Private room',save.facilities.rooms],['lounge','Lounge',save.facilities.lounge],['studio','Studio',save.departments.studio],['resort','Guest suite',save.departments.resort]]){
+  if(view!=='club'&&role!==view)continue;
+  if(role==='studio'||role==='resort'){
+   const jobs=save.contracts.filter(c=>c.department===role&&c.start<=save.day&&save.day<=c.end&&(c.status==='active'||(save.night&&c.status==='completed'&&c.end===save.day)));
+   for(let i=0;i<count;i++)slots.push({id:role+'-'+i,label:label+' '+(i+1),owner:jobs[i]?.owner,contract:jobs[i],role,index:i});
+   continue;
+  }
   const owners=Object.keys(save.people).filter(id=>(save.night?.assignments[id]||derived.assignments[id])===role);
   for(let i=0;i<count;i++)slots.push({id:role+'-'+i,label:label+' '+(i+1),owner:owners[i],role,index:i});
  }
  return slots;
 }
-function venueContext(){
- const slots=venueSlots(),chosen=slots.find(slot=>slot.id===selectedRoom)||slots[0];
- if(!chosen)return {slots};
- selectedRoom=chosen.id;
+function venueContext(slots=venueSlots()){
+ const position=slots.find(slot=>slot.id===selectedRooms[screen])||slots[0];
+ if(!position)return {slots};
+ const co=position.contract?.spec.costar;
+ const chosen=co&&featuredCast.get(position.contract.id)===co?{...position,owner:co}:position;
+ selectedRooms[screen]=chosen.id;
  const worker=save.people[chosen.owner],equipped=worker?card(worker.card):null;
  const variants=chosen.owner?ownedFor(chosen.owner).filter(id=>(displayedArt(id)?.image_available??card(id).available)&&card(id).image):[];
  const photo=variants.length?card(variants[(save.night?.wave||0)%variants.length]):equipped;
@@ -116,19 +125,33 @@ function characterView(art,owner){
  return {art:index?art[views[index]]:art,label:labels[views[index]],next:views[(index+1)%views.length],nextLabel:labels[views[(index+1)%views.length]]};
 }
 function roomStatus(slot){
+ if(slot.contract){
+  const c=slot.contract;
+  if(!save.night)return 'Reserved';
+  const visit=c.private_bookings?.at(-1);
+  if(visit?.day===save.day&&!visit.completed)return 'Private booking';
+  return c.operations?(contractStageNames(c)[save.night.wave]||'Complete'):(save.night.paused?'Paused':'In progress');
+ }
  if(!slot.owner)return 'Available';
  if(!save.night)return 'Prepared';
  return derived.meetings?.[slot.owner]?.phase||save.night.activities?.[slot.owner]?.status||'In operation';
 }
+function roomFigure(slot,owner,partner=false){
+ if(!owner)return '';
+ const art=illustration(owner),extra=partner?' room-partner':'';
+ return art?`<img class="room-figure${extra}" data-venue-art-key="${esc(slot.id+':'+owner+':'+art.appearance_id+':'+art.sha256)}" data-venue-src="${esc(art.image)}" alt="" style="--figure-scale:${Math.min(1,art.working_height_cm/165.1)}">`:
+  `<span class="room-initial${extra}">${esc(person(owner).name[0])}</span>`;
+}
 function roomScene(slot){
- const art=illustration(slot.owner),kind=slot.role==='lounge'?1:slot.role==='resort'?2:slot.index%3;
+ const kind=slot.role==='lounge'?1:slot.index%3;
+ const dept=slot.role==='studio'||slot.role==='resort';
  // Authored cutaway scenery follows the reviewed lounge reference. Figures
  // remain separate, complete native PNGs; this is not character animation.
- return `<div class="room-scene room-scene-${kind}" aria-hidden="true">
-  <div class="room-wall"><i class="wall-art"><b></b></i><i class="wall-window"><b></b></i></div>
+ const furniture=dept?departmentScenery(slot.role):`<div class="room-wall"><i class="wall-art"><b></b></i><i class="wall-window"><b></b></i></div>
   <div class="room-floor"></div><div class="room-sofa"><i></i><b></b></div>
-  <div class="room-lamp"><i></i></div><div class="room-plant"><i></i><b></b><em></em></div><div class="room-table"></div>
-  ${art?`<img class="room-figure" data-venue-art-key="${esc(slot.id+':'+art.appearance_id+':'+art.sha256)}" data-venue-src="${esc(art.image)}" alt="" style="--figure-scale:${Math.min(1,art.working_height_cm/165.1)}">`:slot.owner?`<span class="room-initial">${esc(person(slot.owner).name[0])}</span>`:''}
+  <div class="room-lamp"><i></i></div><div class="room-plant"><i></i><b></b><em></em></div><div class="room-table"></div>`;
+ return `<div class="room-scene room-scene-${dept?slot.role:kind}" aria-hidden="true">${furniture}
+  ${roomFigure(slot,slot.contract?.spec.costar,true)}${roomFigure(slot,slot.owner)}
  </div>`;
 }
 function characterPanel(context){
@@ -139,15 +162,15 @@ function characterPanel(context){
   <div class="character-heading"><h2>${esc(name)}</h2>${art?.side?`<span>${view.label[0].toUpperCase()+view.label.slice(1)} · Click to turn</span>`:''}</div>
   ${art?.side?`<button type="button" class="figure-stage figure-turn" data-action="turn-character" data-owner="${esc(chosen.owner)}" aria-label="Show ${esc(name)}’s ${view.nextLabel}">${figure}</button>`:`<div class="figure-stage">${figure}</div>`}
   <div class="character-caption">${worker?`<div class="character-energy"><span>Energy</span><strong>${Math.round(worker.energy)} / 100</strong></div><div class="energy"><span style="width:${Math.max(0,Math.min(100,worker.energy))}%"></span></div><div class="character-actions">${wardrobeButton(chosen.owner)}<button class="ghost small" data-action="inspect" data-card="${esc(equipped.id)}">View equipped card</button></div><small>${esc(specialties[equipped.specialty])} · Career level ${1+Math.floor(worker.xp/100)}</small>`:`<p>${esc(roomStatus(chosen))}</p>`}</div>
- </aside>`;
+ ${chosen.contract?.spec.costar?`<div class="cast-picker" aria-label="View cast member">${[chosen.contract.owner,chosen.contract.spec.costar].map((id,i)=>`<button class="ghost small" data-action="view-cast" data-contract="${chosen.contract.id}" data-owner="${esc(id)}" aria-pressed="${chosen.owner===id}">${i?'Co-star':'Lead'} · ${esc(person(id).name)}</button>`).join('')}</div>`:''}</aside>`;
 }
-function illustratedVenue(){
- const context=venueContext(),{slots,chosen,worker,url,clips,clip,meeting,activity}=context;
+function illustratedVenue(roomList){
+ const context=venueContext(roomList),{slots,chosen,worker,url,clips,clip,meeting,activity}=context;
  if(!chosen)return '<section class="panel">No rooms are available yet.</section>';
  const name=worker?person(chosen.owner).name:'No booking selected';
  return `<section class="illustrated-venue">
-  <div class="venue-stage"><section class="venue-overview" aria-label="Room overview"><div class="venue-section-head"><h2>Your venue</h2><span>${slots.length} positions</span></div>
-   <div class="illustrated-rooms" data-scroll-key="rooms">${slots.map(slot=>`<button class="illustrated-room ${slot.owner?'is-staffed':''}" data-action="select-room" data-room="${esc(slot.id)}" aria-pressed="${slot.id===chosen.id}"><div class="room-title"><strong>${esc(slot.label)}</strong><span>${esc(roomStatus(slot))}</span></div>${roomScene(slot)}<div class="room-name">${slot.owner?esc(person(slot.owner).name):'No team assigned'}<span>${slot.id===chosen.id?'Viewing':'View room →'}</span></div></button>`).join('')}</div>
+  <div class="venue-stage"><section class="venue-overview" aria-label="Room overview"><div class="venue-section-head"><h2>${screen==='studio'?'Production floor':screen==='resort'?'Guest suites':'Your venue'}</h2><span>${slots.length} ${slots.length===1?'position':'positions'}</span></div>
+   <div class="illustrated-rooms" data-scroll-key="rooms">${slots.map(slot=>`<button class="illustrated-room ${slot.owner?'is-staffed':''}" data-action="select-room" data-room="${esc(slot.id)}" aria-pressed="${slot.id===chosen.id}"><div class="room-title"><strong>${esc(slot.label)}${slot.contract?' · '+esc(slot.contract.spec.name):''}</strong><span>${esc(roomStatus(slot))}</span></div>${roomScene(slot)}<div class="room-name">${slot.owner?esc(person(slot.owner).name):'No team assigned'}${slot.contract?.spec.costar?' + '+esc(person(slot.contract.spec.costar).name):''}<span>${slot.id===chosen.id?'Viewing':'View room →'}</span></div></button>`).join('')}</div>
    <p class="venue-footnote">All rooms run together. ${((save.night?.duration??boot.night_duration)/60).toLocaleString()}-minute nights at 1×.</p>
    <div class="venue-event-overlay" aria-live="polite">${opportunities()}</div>
   </section>
@@ -157,7 +180,7 @@ function illustratedVenue(){
     <div class="venue-media-footer">${clips.length?`<select data-room-clip="${esc(chosen.owner)}" aria-label="Booking media"><option value="">Earned photographs</option>${clips.map(c=>`<option value="${esc(c.id)}" ${c.id===clip?.id?'selected':''}>Video · ${esc(c.name)}</option>`).join('')}</select>`:`<span>${url?'From your earned collection':worker?'Your card progress is preserved':'Assign a team member to this room'}</span>`}<span>${worker?ownedFor(chosen.owner).length+' card'+(ownedFor(chosen.owner).length===1?'':'s')+' collected':''}</span></div>
    </article>
   </div>
-  <aside class="booking-tracker" aria-label="Selected booking tracker" data-booking-key="${esc(chosen.id+':'+(meeting?.booking_number||'idle'))}"><div class="venue-section-head"><h2>Booking history <span>· ${esc(name)}</span></h2><span class="live-indicator">${save.night?(save.night.paused?'Paused':'Live'):'Preparation'}</span></div><div class="booking-scroll">${meetingCaption(meeting,activity,worker)}</div></aside>
+  ${chosen.role==='studio'||chosen.role==='resort'?departmentTracker(chosen):`<aside class="booking-tracker" aria-label="Selected booking tracker" data-booking-key="${esc(chosen.id+':'+(meeting?.booking_number||'idle'))}"><div class="venue-section-head"><h2>Booking history <span>· ${esc(name)}</span></h2><span class="live-indicator">${save.night?(save.night.paused?'Paused':'Live'):'Preparation'}</span></div><div class="booking-scroll">${meetingCaption(meeting,activity,worker)}</div></aside>`}
  </section>`;
 }
 function nightControls(){
@@ -267,7 +290,7 @@ function restoreVenuePresentation(previous){
  fitVenuePresentation();
  venueResizeObserver=venueResizeObserver||new ResizeObserver(fitVenuePresentation);
  venueResizeObserver.observe(panel);
- for(const timeline of panel.querySelectorAll('.booking-timeline'))timeline.dataset.scrollKey='stages:'+(timeline.closest('[data-booking-history]')?.dataset.bookingHistory||panel.querySelector('.booking-tracker').dataset.bookingKey);
+ for(const timeline of panel.querySelectorAll('.booking-timeline'))timeline.dataset.scrollKey='stages:'+(timeline.closest('[data-booking-history]')?.dataset.bookingHistory||panel.querySelector('.booking-tracker')?.dataset.bookingKey||'');
  for(const el of panel.querySelectorAll('[data-scroll-key]')){
   const position=previous.scroll.find(item=>item.key===el.dataset.scrollKey);
   if(el.dataset.scrollKey.startsWith('stages:')&&(!position||position.atEnd))el.scrollLeft=el.scrollWidth;

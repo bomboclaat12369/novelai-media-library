@@ -19,6 +19,11 @@ EVENT_TOKENS={
     'team_meal':'cash_cost energy_restore','regular_perk':'cash_cost loyalty_gain',
     'second_worker':'worker partner payout','second_client':'worker payout'}
 GROUP_SLOTS={'second_worker','second_client'}
+DEPARTMENT_TOKENS={
+    'studio_pickup':'worker contract_title energy_cost','studio_press':'worker contract_title energy_cost reputation_gain promotion_nights',
+    'studio_cut':'worker contract_title energy_cost extra_fee','studio_cover':'worker contract_title success_fee chance_cost',
+    'resort_request':'worker guest cash_cost satisfaction_gain',
+    'resort_private':'worker guest payout energy_cost'}
 
 
 def text_tokens(text, allowed):
@@ -59,9 +64,9 @@ def parse(raw):
     else:
         if (not isinstance(data,dict) or set(data)!={'format','schema_version','context_version','pack_id','entries'}
             or data['format']!='after-hours-writing-pack' or type(data['schema_version']) is not int or data['schema_version']!=1
-            or type(data['context_version']) is not int or data['context_version'] not in (2,3)
+            or type(data['context_version']) is not int or data['context_version'] not in (2,3,4)
             or not isinstance(data['pack_id'],str) or not ID.fullmatch(data['pack_id'])):
-            raise ValueError('Choose an event writing pack (schema 1, context 2 or 3) or the group-stage JSON array.')
+            raise ValueError('Choose an event writing pack (schema 1, context 2, 3 or 4) or the group-stage JSON array.')
         key='events-'+data['pack_id']; rows=data['entries']
     if not isinstance(rows,list) or not 1<=len(rows)<=100000: raise ValueError('A pack needs 1–100,000 entries.')
     ids=set()
@@ -72,9 +77,10 @@ def parse(raw):
                 or row['when']!={} or row['dialogue']!=[] or not isinstance(row['slot'],str) or not row['slot'].startswith('event.')):
                 raise ValueError('Invalid event record.')
             kind=row['slot'][6:]
-            if kind not in EVENT_TOKENS or (kind in GROUP_SLOTS)!=(data['context_version']==3):
+            tokens=DEPARTMENT_TOKENS if data['context_version']==4 else EVENT_TOKENS
+            if kind not in tokens or (kind in GROUP_SLOTS)!=(data['context_version']==3):
                 raise ValueError('Unknown event in this writing context.')
-            allowed=set(EVENT_TOKENS[kind].split())
+            allowed=set(tokens[kind].split())
             row['tokens']=text_tokens(row['title'],allowed)|text_tokens(row['text'],allowed)
         ident=row['id']
         if not isinstance(ident,str) or not ID.fullmatch(ident) or ident in ids: raise ValueError('Use a unique, supported ID per entry.')
@@ -135,7 +141,10 @@ class Shelf:
         kind=decision['kind']; rule=DECISIONS[kind]; people=catalog['people']
         values={'payout':rule.get('revenue'),'energy_cost':rule.get('energy'),'cash_cost':rule.get('cost'),
                 'energy_restore':rule.get('restore_energy'),'loyalty_gain':rule.get('loyalty'),
-                'extra_seconds':round(decision.get('extra_time',0)),'reputation_gain':2,'promotion_nights':3,
+                'extra_seconds':round(decision.get('extra_time',0)),'reputation_gain':rule.get('reputation_gain',2),
+                'promotion_nights':rule.get('promotion_nights',3),'extra_fee':rule.get('extra_fee'),
+                'success_fee':rule.get('success_fee'),'chance_cost':rule.get('chance_cost'),
+                'guest':decision.get('guest_name'),'contract_title':decision.get('contract_title'),'satisfaction_gain':rule.get('satisfaction_gain'),
                 'worker':people.get(decision.get('worker'),{}).get('name'),'partner':people.get(decision.get('partner'),{}).get('name')}
         rows=[r for r,_ in self.rows.get('event.'+kind,[]) if all(values.get(k) is not None for k in r['tokens'])]
         if not rows: return

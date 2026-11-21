@@ -7,7 +7,7 @@ from __future__ import annotations
 import copy
 import random
 from .catalog import stable
-from . import evolution, flavor
+from . import department_ops as ops, evolution, flavor
 
 PROFILES = {
     'host': {'name': 'Welcoming', 'focus': 'club', 'bonus': .04},
@@ -18,6 +18,8 @@ PROJECTS = {
     'portrait': {'name': 'Portrait session', 'days': 1, 'fee': 45, 'pay': 205, 'packs': 0, 'energy': 30, 'risk': .05},
     'editorial': {'name': 'Editorial series', 'days': 2, 'fee': 110, 'pay': 480, 'packs': 1, 'energy': 30, 'risk': .12},
     'campaign': {'name': 'Feature campaign', 'days': 3, 'fee': 240, 'pay': 850, 'packs': 1, 'energy': 32, 'risk': .18},
+    'solo_film': {'name': 'Solo film', 'days': 2, 'fee': 125, 'pay': 520, 'packs': 1, 'energy': 32, 'risk': .14},
+    'feature_film': {'name': 'Adult feature', 'days': 3, 'fee': 255, 'pay': 900, 'packs': 1, 'energy': 35, 'risk': .20},
 }
 STAYS = {
     'retreat': {'name': 'Quiet retreat', 'days': 2, 'fee': 60, 'rate': 155, 'energy': 27, 'expectation': 55},
@@ -71,6 +73,7 @@ for _kind, _cost, _energy, _loyalty in (('team_meal', 40, 20, 0), ('regular_perk
                     {'id': 'decline', 'label': 'Keep the cash reserve'}], 'default': 'decline'}
 
 OPPORTUNITIES = ('booking', 'promotion', 'anal_extra', 'extension', 'creampie_extra', 'lounge_round')
+DECISIONS.update(ops.EVENTS)
 TEAM_CHOICES = ('hospitality', 'regular_perk', 'team_meal')
 
 
@@ -105,7 +108,7 @@ def ensure(state):
 def reservations(state, owner=None, day=None):
     day = state['day'] if day is None else day
     return [c for c in state['contracts'] if c['status'] == 'active' and c['start'] <= day <= c['end']
-            and (owner is None or c['owner'] == owner)]
+            and (owner is None or owner in ops.cast(c))]
 
 
 def assignment(state, owner, day=None):
@@ -114,7 +117,7 @@ def assignment(state, owner, day=None):
 
 
 def club_staffing_conflicts(state):
-    reserved = {contract['owner'] for contract in reservations(state)}
+    reserved = {p for contract in reservations(state) for p in ops.cast(contract)}
     conflicts = []
     for role, facility in (('room', 'rooms'), ('lounge', 'lounge')):
         owners = [owner for owner, worker in state['people'].items() if worker['role'] == role and owner not in reserved]
@@ -150,12 +153,13 @@ def resort_checkout_bonus(spec, satisfaction=None):
     return round(spec['rate'] * .3)
 
 
-def contract_quote(state, department, kind, owner):
+def contract_quote(state, department, kind, owner, options=None):
     from .engine import RuleError
     table = PROJECTS if department == 'studio' else STAYS if department == 'resort' else {}
     if kind not in table or owner not in state['people']:
         raise RuleError('Choose a project/package and a member of your team.')
-    spec = table[kind]
+    spec = dict(table[kind])
+    ops.configure_quote(state, department, kind, owner, spec, options or {})
     worker = state['people'][owner]
     bonus = skill_bonus(worker, department)
     quote = {**spec, 'quality_bonus': round(bonus, 3),
@@ -176,7 +180,7 @@ def reservation_options(state, department, owner, spec):
     for contract in state['contracts']:
         if contract['status'] != 'active':
             continue
-        same_worker = contract['owner'] == owner
+        same_worker = any(p in ops.cast(contract) for p in (owner, spec.get('costar')) if p)
         same_department = contract['department'] == department
         if not same_worker and not same_department:
             continue
@@ -196,6 +200,7 @@ def reservation_options(state, department, owner, spec):
                 break
     return {'first': first, 'last': last, 'conflicts': conflicts,
             'low_energy': state['people'][owner]['energy'] < spec['energy'],
+            'low_costar_energy': bool(spec.get('costar') and state['people'][spec['costar']]['energy'] < spec['energy']),
             'low_cash': state['cash'] < spec['fee']}
 
 
@@ -204,27 +209,31 @@ def schedule(state, department, body):
     if not state['departments'].get(department):
         raise RuleError('Open this department in Expansion first.')
     owner, kind = body.get('owner'), body.get('kind')
-    spec = contract_quote(state, department, kind, owner)
+    spec = contract_quote(state, department, kind, owner, body)
     start = body.get('start', state['day'])
     options = reservation_options(state, department, owner, spec)
     if type(start) is not int or not options['first'] <= start <= options['last']:
         raise RuleError('Schedule within the next fourteen nights.')
     conflict = options['conflicts'].get(start)
     if conflict and 'contract' in conflict:
-        raise RuleError(f"This person is already reserved on night {conflict['night']}.")
+        raise RuleError(f"A selected worker is already reserved on night {conflict['night']}.")
     if conflict:
         raise RuleError(f"The department is at capacity on night {conflict['night']}.")
-    if options['low_energy']:
+    if options['low_energy'] or options['low_costar_energy']:
         raise RuleError('Rest this person before reserving a new project or stay.')
     budget_check(state, spec['fee'])
     end = start + spec['days'] - 1
     state['cash'] -= spec['fee']
     state['totals']['expenses'] += spec['fee']
     state['contract_counter'] += 1
-    state['contracts'].append({'id': state['contract_counter'], 'department': department,
+    contract = {'id': state['contract_counter'], 'department': department, 'operations': 1,
         'kind': kind, 'owner': owner, 'start': start, 'end': end, 'status': 'active',
         'spec': spec, 'quality': 0, 'nights': 0, 'revenue': 0, 'satisfaction': 65,
-        'last_day': None, 'card': None})
+        'last_day': None, 'card': None}
+    if department == 'resort':
+        contract['guest'] = spec.pop('guest_offer')
+        contract['satisfaction'] = min(100, spec['expectation'] + (6 if contract['guest']['visit'] > 1 else 3))
+    state['contracts'].append(contract)
     record(state, 'contract_scheduled', department=department, project_kind=kind, owner=owner,
            start=start, end=end, cost=spec['fee'], contract=state['contract_counter'])
 
@@ -310,6 +319,8 @@ def prepare_night(state):
     n['assignments'] = {p: assignment(state, p) for p in state['people']}
     for c in reservations(state):
         c['card'] = state['people'][c['owner']]['card']
+        if c['spec'].get('costar'):
+            c['costar_card'] = state['people'][c['spec']['costar']]['card']
 
 
 def resolve_decision(state, decision, choice, automatic=False):
@@ -319,6 +330,8 @@ def resolve_decision(state, decision, choice, automatic=False):
         return resolve_request(state, decision, choice, automatic)
     spec = DECISIONS[decision['kind']]
     if choice not in [o['id'] for o in spec['options']]: raise RuleError('Choose one of the offered options.')
+    if decision['kind'] in ops.EVENTS:
+        return ops.resolve_offer(state, decision, choice, automatic)
     n = state['night']
     if choice == 'accept':
         team = [(p, w) for p, w in state['people'].items() if assignment(state, p) in spec['roles'] and w['energy'] >= spec['energy']]
@@ -352,32 +365,62 @@ def resolve_decision(state, decision, choice, automatic=False):
 
 
 def advance_wave(state, catalog, wave):
-    """Called in chronological 50-second steps, independent of browser speed."""
+    """Resolve each of the six scheduled shifts at its boundary on the shared clock."""
     from .engine import record, draw
     n = state['night']
     for decision in n['decisions']:
         if n.get('stage_tracking') != 2 and not decision['choice'] and wave * 50 >= decision['until']:
             resolve_decision(state, decision, DECISIONS[decision['kind']]['default'], True)
     for c in reservations(state):
-        worker = state['people'][c['owner']]
         spec = c['spec']; department = c['department']
-        energy = spec['energy'] / 6
-        card = catalog['cards'][c['card']]
-        if card['specialty'] == 'efficiency': energy *= .92
-        worked = worker['energy'] >= energy
-        if worked:
-            worker['energy'] = round(worker['energy'] - energy, 2)
-            worker['xp'] += 4; worker['skills'][department] += 3
-            own = state['owned'][c['card']]; own['xp'] += 3; own['uses'] += 1; own['mastery'] = min(5, own['xp'] // 90)
-        quality = (1 + skill_bonus(worker, department) + (.05 if card['specialty'] in ('service', 'loyalty') else 0)) if worked else .3
+        cast = ops.cast(c)
+        stage = ops.stage_name(c, state['day'], wave)
+        private = next((m for m in reversed(c.get('private_bookings', ())) if m['day'] == state['day']
+                        and m['start'] <= n['elapsed'] < m['end']), None)
+        samples = []
+        for owner in cast:
+            worker = state['people'][owner]
+            card = catalog['cards'][c['card'] if owner == c['owner'] else c['costar_card']]
+            energy = spec['energy'] / 6 * (.92 if card['specialty'] == 'efficiency' else 1)
+            worked = worker['energy'] >= energy
+            if private:
+                # The host and energy are already committed to the paid visit.
+                samples.append((.75, True))
+                stage = 'Private booking in the suite'
+                n['activities'][owner] = {'department': department, 'label': spec['name'], 'status': stage, 'round': wave}
+                continue
+            if worked:
+                worker['energy'] = round(worker['energy'] - energy, 2)
+                worker['xp'] += 4; worker['skills'][department] += 3
+                own = state['owned'][card['id']]; own['xp'] += 3; own['uses'] += 1; own['mastery'] = min(5, own['xp'] // 90)
+                n['energy_spent'][owner] += energy
+            quality = (1 + skill_bonus(worker, department) + (.05 if card['specialty'] in ('service', 'loyalty') else 0)) if worked else .3
+            if worked and card['specialty'] == spec.get('preferred_specialty'):
+                quality += .06
+            samples.append((quality, worked))
+            status = stage if worked else 'Resting · missed this part of the shift'
+            n['activities'][owner] = {'department': department, 'label': spec['name'], 'status': status, 'round': wave}
+        quality = sum(q for q, _ in samples) / len(cast)
+        worked = all(active for _, active in samples)
         c['quality'] += quality
-        n['energy_spent'][c['owner']] += energy if worked else 0
-        n['activities'][c['owner']] = {'department': department, 'label': spec['name'],
-            'status': flavor.activity(department if worked else 'tired', state, c['owner'], wave), 'round': wave}
         if department == 'resort':
             value = round(spec['rate'] / 6 * quality)
             c['revenue'] += value; n['revenue'] += value; n['department_revenue'] += value; n['earnings'][c['owner']] += value
-            c['satisfaction'] = max(0, min(100, round(c['satisfaction'] + (2 + skill_bonus(worker, department) * 8 if worked else -9))))
+            if c.get('guest'):
+                match = spec['service_plan'] == c['guest']['preference']
+                change = 2 if match else 1
+                if not match and wave in (2, 5):
+                    change = -2 if spec['service_plan'] == 'standard' else -3
+                if private:
+                    change = -2
+            else:
+                change = 2 + skill_bonus(state['people'][c['owner']], department) * 8
+            c['satisfaction'] = max(0, min(100, round(c['satisfaction'] + (change if worked else -9))))
+        if c.get('operations'):
+            entry = {'day': state['day'], 'elapsed': n['elapsed'], 'wave': wave, 'stage': stage, 'worked': worked}
+            if department == 'resort':
+                entry.update(earned=value, satisfaction=c['satisfaction'])
+            c.setdefault('work_log', []).append(entry)
         if wave != 6: continue
         if c['last_day'] == state['day']: continue
         c['last_day'] = state['day']; c['nights'] += 1
@@ -385,10 +428,17 @@ def advance_wave(state, catalog, wave):
         c['status'] = 'completed'
         if department == 'studio':
             rng = random.Random(stable((state['seed'], 'project', c['id'])))
-            success = rng.random() <= spec['success_chance'] and c['quality'] / (6 * c['nights']) >= .65
-            payout = round(spec['pay'] * min(1.25, c['quality'] / (6 * c['nights'])) * (1 if success else .55))
+            success = rng.random() <= ops.delivery_chance(c) and c['quality'] / (6 * c['nights']) >= .65
+            payout = round(spec['pay'] * min(1.25, c['quality'] / (6 * c['nights'])) * (1 if success else .55)) + c.get('delivery_extra', 0)
+            if 'cover_fee' in c:
+                c['cover_bonus_paid'] = c['cover_fee'] if success else 0
+                payout += c['cover_bonus_paid']
             c['revenue'] = payout; c['success'] = success
             n['revenue'] += payout; n['department_revenue'] += payout; n['earnings'][c['owner']] += payout
+            if spec.get('costar'):
+                split = payout // 3
+                n['earnings'][c['owner']] -= split
+                n['earnings'][spec['costar']] += split
             if success and spec['packs']:
                 state['pack_vouchers'] += spec['packs']
                 n.setdefault('voucher_rewards', []).append({'source':'studio','contract':c['id'],'amount':spec['packs']})
@@ -403,6 +453,8 @@ def advance_wave(state, catalog, wave):
         else:
             bonus = resort_checkout_bonus(spec, c['satisfaction'])
             c['checkout_bonus_paid'] = bonus
+            if c.get('guest'):
+                c['return_invited'] = c['satisfaction'] >= spec['expectation']
             n['revenue'] += bonus; n['department_revenue'] += bonus; c['revenue'] += bonus
             n['earnings'][c['owner']] += bonus
             state['loyalty'] = max(0, min(100, state['loyalty'] + (3 if bonus else -1)))
@@ -432,9 +484,10 @@ def after_settle(state, report):
 def derived(state):
     ensure(state)
     return {'unlocks': unlocks(state), 'opening_progress': opening_progress(state), 'reservations': reservations(state),
+            'delivery_chances': {c['id']: ops.delivery_chance(c) for c in state['contracts'] if c['status']=='active' and c['department']=='studio'},
             'staffing_conflicts': club_staffing_conflicts(state) if state['phase']=='prepare' else [],
             'assignments': {p: assignment(state, p) for p in state['people']},
-            'department_upkeep': department_upkeep(state),
+            'department_upkeep': department_upkeep(state), 'returning_guests': ops.returning_guests(state) if state['departments'].get('resort') else {},
             'department_costs': {k: v['price'] * (state['departments'][k] + 1) for k, v in DEPARTMENTS.items()},
             'quotes': {d: {p: {k: contract_quote(state, d, k, p) for k in table} for p in state['people']}
                        for d, table in (('studio', PROJECTS), ('resort', STAYS))}}

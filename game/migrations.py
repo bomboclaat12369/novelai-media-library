@@ -155,12 +155,22 @@ def validate(state, catalog):
                 if not finite(spec['pay']) or not integer(spec['packs']): raise ValueError()
             elif not finite(spec['rate']) or not finite(spec['expectation'],0,100): raise ValueError()
             if 'checkout_bonus_paid' in c and not integer(c['checkout_bonus_paid']): raise ValueError()
+            management.ops.validate_contract(c, state)
+            if c.get('operations') and state['phase']=='night' and c['status']=='active' and c['start']<=state['day']<=c['end']:
+                for member, key in zip(management.ops.cast(c), ('card', 'costar_card')):
+                    equipped = c.get(key)
+                    if equipped not in state['owned'] or catalog['cards'][equipped]['owner'] != member:
+                        raise ValueError('Invalid card reserved for this shift.')
         if state['phase']=='night':
             n=state['night']
             if not finite(n['elapsed'],0,300) or not integer(n['wave'],0,6) or type(n['speed']) is not int or n['speed'] not in engine.NIGHT_SPEEDS: raise ValueError()
             if not finite(n['revenue']) or not isinstance(n['decisions'],list): raise ValueError()
             if not finite(n['department_revenue']) or not finite(n['decision_costs']): raise ValueError()
             if any(role not in (*engine.ROLES,'studio','resort') for role in n['assignments'].values()): raise ValueError()
+            suites = n.get('suite_contracts', [])
+            expected = {c['id'] for c in state['contracts'] if any(m['day'] == state['day'] for m in c.get('private_bookings', []))}
+            if not isinstance(suites, list) or not all(type(i) is int for i in suites) or len(suites) != len(expected) or set(suites) != expected:
+                raise ValueError('Invalid suite bookings for this night.')
         meetings.validate(state)
         if state['pending_pack']:
             pack=state['pending_pack']

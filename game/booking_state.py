@@ -1,7 +1,7 @@
 """Read models and recovery checks for independent booking timelines."""
 from __future__ import annotations
 import math
-from . import bookings, meeting_rules as rules, stage_labels
+from . import bookings, department_ops, meeting_rules as rules, stage_labels
 
 
 def phase(segment):
@@ -109,7 +109,14 @@ def validate(state):
             raise ValueError('Group bookings require the current rules.')
         if d['kind']=='second_worker' and (d.get('partner')==d['worker'] or n['assignments'].get(d.get('partner')) not in ('rest','lounge')):
             raise ValueError('Invalid joining worker.')
-        if not d.get('meeting_id') and d['kind'] not in ('promotion', 'lounge_round', 'hospitality', 'regular_perk', 'team_meal'):
+        if d['kind'] in department_ops.EVENTS:
+            department = 'studio' if d['kind'].startswith('studio_') else 'resort'
+            contract = next((c for c in state['contracts'] if c['id'] == d.get('contract')), None)
+            if (type(d.get('contract')) is not int or d.get('department') != department or n['assignments'].get(d.get('worker')) != department
+                    or not contract or not contract.get('operations') or contract['department'] != department or contract['owner'] != d.get('worker')
+                    or not contract['start'] <= state['day'] <= contract['end']):
+                raise ValueError('Invalid department request.')
+        elif not d.get('meeting_id') and d['kind'] not in ('promotion', 'lounge_round', 'hospitality', 'regular_perk', 'team_meal'):
             raise ValueError('This request needs an actual booking.')
     if not isinstance(n['booking_history'], list) or len(n['booking_history']) > 100:
         raise ValueError('Invalid booking history.')
