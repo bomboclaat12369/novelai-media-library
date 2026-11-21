@@ -377,3 +377,29 @@ lounge, rested the covering worker and opened the next night successfully.
 Walker asked After Hours to own routine playtesting and group small issues
 for later. The next gameplay area to assess is collecting with a small
 roster and uneven galleries, including how players track a chosen worker.
+
+## Tracking a character’s collection — 20 November 2026
+
+In two independent disposable starts using the read-only Library catalog
+and seed 19, Mikayla’s first Spotlight pack completed her two-card pool.
+The second gave five extra copies. Nikki’s two Spotlight packs yielded
+ten new cards and brought her to 11 of 216. These are individual openings.
+
+Collection now saves one optional character to follow, including a character
+outside the hired team. It shows distinct cards owned in the current pool
+and groups missing cards by character, rarity and card type. A Duo or
+Evolution counts as one card. Withdrawn owned cards stay in Collection.
+The shop can open on the selected character and compares the chance of at
+least one new card for her in a Standard or Spotlight pack. The calculation
+uses the draw rules’ weights, eligible characters, and actual cards in each
+rarity. Progress recognizes new pack discoveries as their cards are flipped.
+
+A focused browser career checked a two-card pool and a mixed-rarity pool,
+the actual purchase and reveal, duplicate-only packs, and the saved target
+after reload, catalog refresh and restore. The missing view made no requests
+for unearned artwork. Removing an owned card and adding a new one in the
+synthetic catalog kept the original in Collection and counted the addition
+as missing.
+
+The next collecting milestone is making earned pack vouchers easier to
+follow from the night that awarded them to the pack shop.

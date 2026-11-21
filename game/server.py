@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 if __package__ in (None,''):
     sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
 from game.catalog import demo_catalog,read_library,public_catalog
-from game.engine import PACKS,UPGRADES,NIGHT_SPEEDS,RuleError,forecast,upkeep,recurring_cost,hire_cost,upgrade_cost
+from game.engine import PACKS,PACK_RARITY_WEIGHTS,UPGRADES,NIGHT_SPEEDS,RuleError,forecast,upkeep,recurring_cost,hire_cost,upgrade_cost
 from game.store import GameStore,Conflict
 from game import bookings, evolution, management, meetings, stage_labels, wardrobe
 
@@ -116,6 +116,7 @@ class Handler(BaseHTTPRequestHandler):
                                   'restartable':self.server.restartable,'restarting':self.server.restarting,'night_speeds':NIGHT_SPEEDS,
                                   'night_duration':bookings.NIGHT_SECONDS,
                                   'reservation_horizon':management.RESERVATION_HORIZON,
+                                  'collection_rules':{'rarity_weights':PACK_RARITY_WEIGHTS},
                                   'packs':PACKS,'upgrades':UPGRADES,'projects':management.PROJECTS,
                                   'stays':management.STAYS,'departments':management.DEPARTMENTS,
                                   'decisions':management.DECISIONS,'profiles':management.PROFILES,**current})

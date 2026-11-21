@@ -7,7 +7,9 @@ const escapeHTML=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const money=n=>'$'+Math.round(n).toLocaleString();
 const rarities=['Common','Uncommon','Rare','Epic','Legendary'];
 const specialties={tips:'Tips',service:'Booking quality',efficiency:'Energy efficiency',loyalty:'Repeat business'};
-let boot,save,revision=0,derived={},screen='club',selected=new Set(),busy=false,page=0,filter={owner:'',rarity:'',text:''},shownPack=null,revealed=new Set();
+let boot,save,revision=0,derived={},screen='club',selected=new Set(),busy=false,page=0,shownPack=null,revealed=new Set();
+const defaultCollectionFilter={owner:null,status:'owned',rarity:'',text:''};
+let filter={...defaultCollectionFilter},collectionToken=null,spotlightOwner=null;
 let toastTimer,interval,actionQueue=Promise.resolve(),restarting=false,renderDeferred=false;
 const announcedDecisions=new Set();
 const modal=$('#modal');
@@ -19,7 +21,17 @@ root.addEventListener('error',e=>{
  }
 },true);
 function notify(text){$('#toast').textContent=text;$('#toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),4500);}
-function accept(r){if(r.catalog){boot.catalog=r.catalog;AfterHoursCards.update(r.catalog);}if(r.token)boot.token=r.token;if(r.stage_labels)boot.stage_labels=r.stage_labels;if('state'in r){save=r.state;revision=r.revision;derived=r.derived||{};}}
+function accept(r){
+ if(r.catalog){boot.catalog=r.catalog;AfterHoursCards.update(r.catalog);}
+ if(r.token){
+  boot.token=r.token;
+  if(collectionToken!==r.token){
+   collectionToken=r.token;filter={...defaultCollectionFilter};spotlightOwner=null;page=0;
+  }
+ }
+ if(r.stage_labels)boot.stage_labels=r.stage_labels;
+ if('state'in r){save=r.state;revision=r.revision;derived=r.derived||{};}
+}
 function act(action,body={},quiet=false){
  if(restarting)return Promise.resolve();
  actionQueue=actionQueue.then(()=>performAct(action,body,quiet)).catch(e=>notify(e.message));return actionQueue;
@@ -149,15 +161,123 @@ function packBudget(price){
  }
  return `<div class="pack-budget">${rows.join('')}</div>`;
 }
+function packEligible(c){return c.available===undefined||!!c.available;}
+function unrevealedDiscoveries(){
+ const pack=save.pending_pack;
+ if(!pack)return new Set();
+ const unseen=new Set(pack.results.filter(row=>row.new).map(row=>row.id));
+ for(const index of pack.revealed||[])unseen.delete(pack.results[index].id);
+ return unseen;
+}
+function albumCounts(cards,owner,unseen){
+ const tiers=rarities.map(()=>({total:0,owned:0}));
+ let total=0,owned=0,retained=0;
+ for(const c of cards){
+  if(owner&&c.owner!==owner)continue;
+  const found=!!save.owned[c.id]&&!unseen.has(c.id);
+  if(!packEligible(c)){if(found)retained++;continue;}
+  total++;tiers[c.rarity].total++;
+  if(found){owned++;tiers[c.rarity].owned++;}
+ }
+ return {total,owned,retained,tiers};
+}
+function packChance(perSlot,slots){
+ if(perSlot<=0)return '0%';
+ if(perSlot>=1)return '100%';
+ const percent=-100*Math.expm1(slots*Math.log1p(-perSlot));
+ if(percent<0.1)return '<0.1%';
+ if(percent>99.9)return '>99.9%';
+ return percent.toLocaleString(undefined,{maximumFractionDigits:1})+'%';
+}
+function discoveryOdds(owner,counts,ownerCount){
+ const weights=boot.collection_rules?.rarity_weights;
+ if(!owner||!counts.total||!weights)return '';
+ let denominator=0,weightedMissing=0;
+ for(const [tier,line] of counts.tiers.entries()){
+  if(!line.total)continue;
+  denominator+=weights[tier];
+  weightedMissing+=weights[tier]*(line.total-line.owned)/line.total;
+ }
+ const single=weightedMissing/denominator;
+ return `<div class="discovery-odds"><p>Chance of at least one new ${escapeHTML(person(owner).name)} card per pack</p>
+  <dl><div><dt>Standard</dt><dd>${escapeHTML(packChance(single/ownerCount,boot.packs.standard.count))}</dd></div>
+  <div><dt>Spotlight</dt><dd>${escapeHTML(packChance(single,boot.packs.spotlight.count))}</dd></div></dl></div>`;
+}
 function packs(){
- const themes=[...new Set(Object.values(boot.catalog.cards).filter(c=>c.available).flatMap(c=>c.categories))].sort();
- return `<div class="pagehead"><div><div class="eyebrow">Something worth opening</div><h1>Your next favorite is in here.</h1><p>See what each pack leaves in cash after one night of wages and upkeep for your current team.</p></div></div><div class="pack-grid">${Object.entries(boot.packs).map(([id,p])=>{const disabled=save.phase!=='prepare'||save.cash<p.price||(id==='premium'&&!Object.values(boot.catalog.cards).some(c=>c.available&&c.rarity>=3))||(id==='collector'&&!Object.values(boot.catalog.cards).some(c=>c.available&&!save.owned[c.id]))||(id==='themed'&&!themes.length);return `<article class="pack ${id}"><div class="pack-art"><div class="wrapper"><span class="diamond">◇</span><strong>${escapeHTML(p.name)}</strong><small>5 COLLECTIBLE CARDS</small></div></div><h2>${escapeHTML(p.name)}</h2><p>${packDescriptions[id]}</p>${id==='spotlight'?`<select aria-label="Spotlight girl" id="spotlight-target">${Object.values(boot.catalog.people).filter(p=>Object.values(boot.catalog.cards).some(c=>c.available&&c.owner===p.id)).map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}</select>`:id==='themed'?`<select aria-label="Pack category" id="themed-target">${themes.map(t=>`<option>${escapeHTML(t)}</option>`).join('')}</select>`:'<div class="pack-detail">Character odds are balanced independently of image count.</div>'}${disabled?'':packBudget(p.price)}<div class="purchase"><strong class="cost">${money(p.price)}</strong><button class="${id==='premium'?'primary':'ghost'}" data-action="pack" data-pack="${id}" ${disabled?'disabled':''}>Open pack</button></div></article>`;}).join('')}</div><div class="panel" style="margin-top:24px"><h3>What is inside?</h3><p class="note">Standard slots choose a girl uniformly, then use rarity weights of 55 / 27 / 12 / 5 / 1 for Common through Legendary among her available tiers. Missing tiers are removed and weights renormalized. Guaranteed slots draw from the qualifying pool. Spotlight packs use the selected girl's pool; themed packs use the selected category. Duplicates remain useful for mastery. All prices and odds are adjustable balance settings.</p></div>`;
+ const cards=Object.values(boot.catalog.cards),eligible=cards.filter(packEligible);
+ const poolOwners=new Set(eligible.map(c=>c.owner));
+ const owners=Object.values(boot.catalog.people).filter(p=>poolOwners.has(p.id));
+ const target=[spotlightOwner,save.collection_target,owners[0]?.id].find(id=>poolOwners.has(id));
+ const counts=target?albumCounts(eligible,target,unrevealedDiscoveries()):null;
+ const themes=[...new Set(eligible.flatMap(c=>c.categories))].sort();
+ const spotlight=target?`<label>Spotlight character<select aria-label="Spotlight girl" id="spotlight-target">${owners.map(p=>`<option value="${escapeHTML(p.id)}" ${p.id===target?'selected':''}>${escapeHTML(p.name)}</option>`).join('')}</select></label>
+  <p class="spotlight-count">${counts.owned} / ${counts.total} collected · ${counts.total===counts.owned?'All draws are extra copies':(counts.total-counts.owned)+' missing'}</p>
+  ${discoveryOdds(target,counts,owners.length)}
+  <button class="ghost small" data-action="view-collection" data-owner="${escapeHTML(target)}">View ${escapeHTML(person(target).name)}’s collection</button>`:'<p class="note">No eligible Spotlight cards.</p>';
+ return `<div class="pagehead"><div><div class="eyebrow">Something worth opening</div><h1>Your next favorite is in here.</h1><p>See what each pack leaves in cash after one night of wages and upkeep for your current team.</p></div></div>
+ <div class="pack-grid">${Object.entries(boot.packs).map(([id,p])=>{
+  const disabled=save.phase!=='prepare'||save.cash<p.price||!eligible.length||(id==='premium'&&!eligible.some(c=>c.rarity>=3))||(id==='collector'&&!eligible.some(c=>!save.owned[c.id]))||(id==='themed'&&!themes.length);
+  return `<article class="pack ${id}"><div class="pack-art"><div class="wrapper"><span class="diamond">◇</span><strong>${escapeHTML(p.name)}</strong><small>5 COLLECTIBLE CARDS</small></div></div><h2>${escapeHTML(p.name)}</h2><p>${packDescriptions[id]}</p>${id==='spotlight'?spotlight:id==='themed'?`<select aria-label="Pack category" id="themed-target">${themes.map(t=>`<option>${escapeHTML(t)}</option>`).join('')}</select>`:'<div class="pack-detail">Character odds are balanced independently of image count.</div>'}${disabled?'':packBudget(p.price)}<div class="purchase"><strong class="cost">${money(p.price)}</strong><button class="${id==='premium'?'primary':'ghost'}" data-action="pack" data-pack="${id}" ${disabled?'disabled':''}>Open pack</button></div></article>`;}).join('')}</div>
+ <div class="panel" style="margin-top:24px"><h3>What is inside?</h3><p class="note">Standard slots choose a girl uniformly, then use rarity weights of ${boot.collection_rules?.rarity_weights.join(' / ')||'55 / 27 / 12 / 5 / 1'} for Common through Legendary among her available tiers. Missing tiers are removed and weights renormalized. Guaranteed slots draw from the qualifying pool. Spotlight packs use the selected girl's pool; themed packs use the selected category. Duplicates remain useful for mastery. All prices and odds are adjustable balance settings.</p></div>`;
+}
+function cardKind(c){return c.source==='duo'?'Duo':c.source==='evolution'?'Evolution':'Photo';}
+function missingCardsTable(cards){
+ const groups=new Map();
+ for(const c of cards){
+  const type=cardKind(c),key=JSON.stringify([c.owner,c.rarity,type]);
+  const row=groups.get(key);
+  if(row)row.count++;
+  else groups.set(key,{owner:c.owner,tier:c.rarity,type,count:1});
+ }
+ const rows=[...groups.values()].sort((a,b)=>person(a.owner).name.localeCompare(person(b.owner).name)||b.tier-a.tier||a.type.localeCompare(b.type));
+ const pages=Math.max(1,Math.ceil(rows.length/24));page=Math.max(0,Math.min(page,pages-1));
+ const body=rows.slice(page*24,(page+1)*24).map(r=>`<tr><th scope="row">${escapeHTML(person(r.owner).name)}</th><td>${r.type}</td><td>${rarities[r.tier]}</td><td>${r.count}</td></tr>`).join('');
+ const table=`<div class="panel table-wrap missing-collection"><table aria-label="Missing cards by character, type and rarity"><thead><tr><th scope="col">Character</th><th scope="col">Type</th><th scope="col">Rarity</th><th scope="col">Missing</th></tr></thead><tbody>${body}</tbody></table></div>`;
+ return {html:table,pages};
 }
 function collection(){
- let cards=Object.keys(save.owned).map(card).filter(c=>(!filter.owner||c.owner===filter.owner)&&(!filter.rarity||c.rarity===Number(filter.rarity))&&(!filter.text||[c.name,person(c.owner).name,...c.categories,specialties[c.specialty]].join(' ').toLowerCase().includes(filter.text.toLowerCase())));
- cards.sort((a,b)=>b.rarity-a.rarity||a.id.localeCompare(b.id));
- const pages=Math.max(1,Math.ceil(cards.length/24));page=Math.min(page,pages-1);
- return `<div class="pagehead"><div><div class="eyebrow">Built one opening at a time</div><h1>A collection of your own.</h1><p>${Object.keys(save.owned).length} collected in this career.</p></div></div><div class="filters"><input id="search" aria-label="Search collection" placeholder="Search girl, category or specialty…" value="${escapeHTML(filter.text)}"><select id="filter-owner" aria-label="Filter girl"><option value="">All girls</option>${Object.values(boot.catalog.people).map(p=>`<option value="${escapeHTML(p.id)}" ${filter.owner===p.id?'selected':''}>${escapeHTML(p.name)}</option>`).join('')}</select><select id="filter-rarity" aria-label="Filter rarity"><option value="">All rarities</option>${rarities.map((r,i)=>`<option value="${i}" ${filter.rarity===String(i)?'selected':''}>${r}</option>`).join('')}</select></div><div class="card-grid">${cards.slice(page*24,(page+1)*24).map(c=>cardHTML(c,{controls:true})).join('')||'<div class="empty">No cards match these filters.</div>'}</div><div class="pagination"><button class="ghost small" data-page="${page-1}" ${page===0?'disabled':''}>← Previous</button><small>Page ${page+1} of ${pages} · ${cards.length} cards</small><button class="ghost small" data-page="${page+1}" ${page+1>=pages?'disabled':''}>Next →</button></div>`;
+ const owner=filter.owner??save.collection_target??'',missing=filter.status==='missing';
+ const catalog=Object.values(boot.catalog.cards),unseen=unrevealedDiscoveries(),counts=albumCounts(catalog,owner,unseen);
+ const name=owner?person(owner).name:'',left=counts.total-counts.owned,search=filter.text.trim().toLowerCase();
+ const choices=Object.values(boot.catalog.people);
+ const owned=Object.keys(save.owned).filter(id=>!unseen.has(id)).map(card);
+ const cards=(missing?catalog:owned).filter(c=>{
+  if(owner&&c.owner!==owner||filter.rarity!==''&&c.rarity!==Number(filter.rarity))return false;
+  if(missing&&((save.owned[c.id]&&!unseen.has(c.id))||!packEligible(c)))return false;
+  if(!search)return true;
+  const fields=[person(c.owner).name,cardKind(c),rarities[c.rarity],...c.categories,specialties[c.specialty]];
+  if(!missing)fields.push(c.name);
+  return fields.join(' ').toLowerCase().includes(search);
+ });
+ let html='',pages=1;
+ if(!cards.length){
+  page=0;
+  const message=missing&&counts.total&&!left?'Every card in this pack pool is collected.':missing?'No missing cards match these filters.':'No collected cards match these filters.';
+  html=`<div class="empty">${message}</div>`;
+ }else if(missing){
+  ({html,pages}=missingCardsTable(cards));
+ }else{
+  cards.sort((a,b)=>b.rarity-a.rarity||a.id.localeCompare(b.id));
+  pages=Math.ceil(cards.length/24);page=Math.max(0,Math.min(page,pages-1));
+  html=`<div class="card-grid">${cards.slice(page*24,(page+1)*24).map(c=>cardHTML(c,{controls:true})).join('')}</div>`;
+ }
+ const ownerCount=owner&&counts.total?new Set(catalog.filter(packEligible).map(c=>c.owner)).size:0;
+ const tracked=save.collection_target;
+ const buttons=[];
+ if(owner&&boot.collection_rules)buttons.push(`<button class="ghost small" data-action="track-collection" data-owner="${escapeHTML(owner)}" aria-pressed="${owner===tracked}">${owner===tracked?'Untrack '+escapeHTML(name):'Track '+escapeHTML(name)}</button>`);
+ if(!owner&&tracked)buttons.push(`<button class="ghost small" data-action="view-collection" data-owner="${escapeHTML(tracked)}">View ${escapeHTML(person(tracked).name)}’s collection</button>`);
+ if(owner&&counts.total)buttons.push(`<button class="ghost small" data-action="shop-spotlight" data-owner="${escapeHTML(owner)}">View ${escapeHTML(name)}’s Spotlight pack</button>`);
+ const progress=counts.total?`<strong>${counts.owned} / ${counts.total}</strong> collected from the current pack pool · ${left} missing`:'No cards are currently in this pack pool.';
+ return `<div class="pagehead"><div><h1>${owner?escapeHTML(name)+'’s collection':'Your collection'}</h1><p class="collection-count">${progress}</p>
+  ${counts.retained?`<p class="note">${counts.retained} previously collected ${counts.retained===1?'card is':'cards are'} outside the current pack pool.</p>`:''}</div></div>
+  <div class="filters"><select id="filter-owner" aria-label="Filter girl"><option value="">All girls</option>${choices.map(p=>`<option value="${escapeHTML(p.id)}" ${owner===p.id?'selected':''}>${escapeHTML(p.name)}</option>`).join('')}</select>
+   <select id="filter-status" aria-label="Collection view"><option value="owned" ${missing?'':'selected'}>Collected cards</option><option value="missing" ${missing?'selected':''}>Missing cards</option></select>
+   <select id="filter-rarity" aria-label="Filter rarity"><option value="">All rarities</option>${rarities.map((r,i)=>`<option value="${i}" ${filter.rarity===String(i)?'selected':''}>${r}</option>`).join('')}</select>
+   <input id="search" aria-label="Search collection" placeholder="Search character, category or specialty…" value="${escapeHTML(filter.text)}"></div>
+  ${buttons.length?`<div class="collection-actions actions">${buttons.join('')}</div>`:''}
+  ${discoveryOdds(owner,counts,ownerCount)}${html}
+  <div class="pagination">${pages>1?`<button class="ghost small" data-page="${page-1}" ${page===0?'disabled':''}>← Previous</button>`:''}<small>${pages>1?'Page '+(page+1)+' of '+pages+' · ':''}${cards.length} ${missing?'missing':'collected'} ${cards.length===1?'card':'cards'}</small>
+  ${pages>1?`<button class="ghost small" data-page="${page+1}" ${page+1>=pages?'disabled':''}>Next →</button>`:''}</div>`;
 }
 const upgradeText={rooms:['◇','A new private room adds one simultaneous assignment. More rooms need more staff to earn their keep.'],lounge:['♧','Add a lounge position for another working girl. Good for a varied evening and a broader team.'],recovery:['☾','Add 2 energy recovery after working, or 6 after resting and training, per level. A busy team still benefits from rest rotations.'],reception:['⌘','Improve booking acceptance by 1.8 percentage points per level. Useful when demand is quieter.']};
 function legacyExpansion(){return `<div class="pagehead"><div><div class="eyebrow">Room to become something more</div><h1>Build beyond the beginning.</h1><p>Grow the club from two founders into a team with real variety, capacity, and a rest rotation.</p></div></div><div class="upgrade-grid">${Object.entries(boot.upgrades).map(([id,u])=>{const l=save.facilities[id],max=l>=u.max;return `<article class="upgrade"><span class="level">${id==='rooms'||id==='lounge'?'POSITIONS':'LEVEL'} ${l} / ${u.max}</span><span class="symbol">${upgradeText[id][0]}</span><h2>${escapeHTML(u.name)}</h2><p>${upgradeText[id][1]}</p><div class="panel-line"><span>Added upkeep</span><strong>${money(facilityUpkeep(id))} / night</strong></div>${!max&&save.phase==='prepare'&&save.cash>=derived.upgrade_costs[id]?budgetLine('After purchase, wages & upkeep',save.cash-derived.upgrade_costs[id]-derived.recurring-facilityUpkeep(id)):''}<div class="actions"><button class="primary" data-action="upgrade" data-kind="${id}" ${max||save.phase!=='prepare'||save.cash<derived.upgrade_costs[id]?'disabled':''}>${max?'Prototype maximum':`Upgrade · ${money(derived.upgrade_costs[id])}`}</button></div></article>`;}).join('')}</div><div class="panel" style="margin-top:22px"><h3>A shared future</h3><p class="note">The resort and studio are planned later departments sharing this same roster and calendar. This prototype focuses on making the growing club and card loop work first.</p></div>`;}
@@ -219,6 +339,20 @@ root.addEventListener('click',async e=>{
  if(b.dataset.page!==undefined){page=Number(b.dataset.page);render();return;}
  const action=b.dataset.action;if(!action)return;
  if(await managementClick(b,action))return;
+ if(action==='track-collection'){
+  const owner=b.dataset.owner;
+  filter.owner=owner;spotlightOwner=null;
+  await act('track_collection',{owner:save.collection_target===owner?null:owner});
+  return;
+ }
+ if(action==='view-collection'){
+  filter={...defaultCollectionFilter,owner:b.dataset.owner};page=0;
+  screen='collection';render();window.scrollTo(0,0);return;
+ }
+ if(action==='shop-spotlight'){
+  spotlightOwner=b.dataset.owner;screen='packs';page=0;render();
+  $('#spotlight-target')?.focus();return;
+ }
  if(action==='select-starter'){if(selected.has(b.dataset.owner))selected.delete(b.dataset.owner);else if(selected.size<2)selected.add(b.dataset.owner);else notify('Choose two founders. Deselect one to change your team.');render();return;}
  if(action==='reveal-card'){await act('reveal',{index:Number(b.dataset.index)});showPack();return;}
  if(action==='reveal-all'){await act('reveal',{all:true});showPack();return;}
@@ -255,6 +389,7 @@ root.addEventListener('change',e=>{
  else if(el.dataset.equip)act('equip',{owner:el.dataset.equip,card:el.value});
  else if(el.id==='pricing')act('price',{pricing:el.value});
  else if(el.id==='speed')act('speed',{speed:Number(el.value)});
+ else if(el.id==='spotlight-target'){spotlightOwner=el.value;render();}
  else if(el.id.startsWith('filter-')){filter[el.id.slice(7)]=el.value;page=0;render();}
 });
 let searchTimer;

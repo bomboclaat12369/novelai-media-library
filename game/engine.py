@@ -10,6 +10,7 @@ from . import meetings, stage_labels, bookings
 
 VERSION = '1.2.0-local'
 NIGHT_SPEEDS = (1, 2, 4, 8)
+PACK_RARITY_WEIGHTS = (55, 27, 12, 5, 1)
 PACKS = {'standard': {'name':'Standard','price':100,'count':5},
          'spotlight': {'name':'Girl spotlight','price':200,'count':5},
          'themed': {'name':'Themed','price':200,'count':5},
@@ -284,7 +285,7 @@ def draw(pool, rng, minimum=0):
     tiers = sorted({c['rarity'] for c in owner_pool if c['rarity']>=minimum})
     if not tiers:
         tiers = [max(c['rarity'] for c in owner_pool)]
-    tier = rng.choices(tiers,weights=[(55,27,12,5,1)[t] for t in tiers])[0]
+    tier = rng.choices(tiers,weights=[PACK_RARITY_WEIGHTS[t] for t in tiers])[0]
     return rng.choice([c for c in owner_pool if c['rarity']==tier])
 
 
@@ -327,6 +328,15 @@ def command(original,catalog,action,body=None,labels=None):
     state['journal']=[]
     if m.command(state,catalog,action,body): pass
     elif action=='auto': auto_assign(state)
+    elif action=='track_collection':
+        if 'owner' not in body: raise RuleError('Choose a collection to track.')
+        owner=body['owner']
+        if owner is not None and (not isinstance(owner,str) or owner not in catalog['people']):
+            raise RuleError('Choose a character from this catalog.')
+        if state.get('collection_target')!=owner:
+            if owner is None: state.pop('collection_target',None)
+            else: state['collection_target']=owner
+            record(state,'collection_target_changed',owner=owner)
     elif action=='plan':
         prep_only(state)
         owner=body.get('owner');role=body.get('role')

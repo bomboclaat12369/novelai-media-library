@@ -82,3 +82,9 @@
 .opening-goals dt{color:var(--muted)}.opening-goals dd{margin:0;font-variant-numeric:tabular-nums}
 .staffing-conflicts{margin-bottom:14px}.staffing-conflicts h2{font-size:20px;margin-bottom:10px}
 .staffing-conflicts .actions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px}.staffing-conflicts p{margin:4px 0}
+.collection-actions{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.discovery-odds{margin:12px 0 16px}.discovery-odds p{margin:0 0 6px;color:var(--muted);font-size:13px}
+.discovery-odds dl{margin:0;display:flex;flex-wrap:wrap;gap:8px 18px}
+.discovery-odds dl>div{display:flex;gap:7px;align-items:baseline}.discovery-odds dt{font-size:13px}
+.discovery-odds dd{margin:0;font-weight:600;font-variant-numeric:tabular-nums}
+.missing-collection tbody th{font-weight:500;text-align:left;color:var(--text)}

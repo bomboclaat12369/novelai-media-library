@@ -38,6 +38,8 @@ def validate(state, catalog):
 
     try:
         wardrobe.validate(state)
+        if 'collection_target' in state and state['collection_target'] not in catalog['people']:
+            raise ValueError('Unknown collection target.')
         if not integer(state['day'], 1) or not finite(state['cash'], -10**12): raise ValueError()
         if state['phase'] not in ('prepare', 'night'): raise ValueError()
         if type(state['preferred_night_speed']) is not int or state['preferred_night_speed'] not in engine.NIGHT_SPEEDS:
