@@ -155,6 +155,15 @@ def apply(organizer,db,state,body,action):
         if db.execute("INSERT OR IGNORE INTO rejected VALUES (?,'split-set-pair',?)",(organizer.scope,key)).rowcount!=1:
             raise ValueError('These Sets were already kept separate.')
         state['undo']={'action':'reject','context':'split-set-pair','ids':[key],'split_review':True}
+        if body.get('hold_for_review') is True:
+            previous=state['undo']['review_sets']={}
+            for group in (first,second):
+                gid=group['id']
+                row=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(organizer.scope,gid)).fetchone()
+                previous[gid]=row[0] if row else None
+                organizer.set_review_status(db,group,True,action)
+                group['updated']=time.time()
+                db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(organizer.scope,gid,json.dumps(group)))
     else:
         source_ids = source['members']
         present = set(source_ids)
@@ -213,6 +222,9 @@ def apply(organizer,db,state,body,action):
                 if obj.get('kind')=='set' and obj.get('id')==source['id']:
                     obj['id']=gid
         group['updated'] = time.time()
+        if body.get('hold_for_review') is True or (action=='combine_split' and source.get('under_review')):
+            organizer.set_review_status(db,group,True,action)
+            undo['set_review']=True
         db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(organizer.scope,gid,json.dumps(group)))
         state['undo'] = undo
     tracking.journal().event(db,'decision.'+action,organizer.scope,

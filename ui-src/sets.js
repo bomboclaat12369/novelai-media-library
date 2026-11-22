@@ -88,6 +88,10 @@
     .naiSetTile .naiSetReminderBadge{font-size:8px;padding:2px 3px}
     .naiSetTile.naiSetHasReminders{border-color:#bba273}
     .naiSetHasReminders .naiSetCoverStatus{display:none}
+    .naiReviewSetRow{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 0;border-bottom:1px solid #45435a}
+    .naiReviewSetRow>strong{flex:1;min-width:100px;overflow-wrap:anywhere}
+    .naiHeldSetPreview{flex-basis:100%;display:flex;gap:4px;overflow:hidden}
+    .naiHeldSetPreview img{width:48px;height:52px;object-fit:contain;background:#101221;border-radius:4px}
     .naiSetQuick .naiSetReminders{margin:8px 0}
     .naiSetQuick .naiSetReminders label{flex-direction:row;align-items:center;gap:7px}
     .naiSetBreadcrumb{flex-wrap:wrap}
@@ -580,9 +584,10 @@
     if(root.naiViewerOnly)return;
     try{await refreshLibrary();}catch(e){alert(e.message);return;}
     const owner=currentCharacter();if(!owner){alert('Choose a character first.');return;}
-    const dialog=setDialog('Manage Sets',`<input id="naiManageSetSearch" type="search" placeholder="Search Sets…" aria-label="Search Sets to manage"><div class="naiSetBrowserActions"><button id="naiToolsNewSet">+ New Set</button><button id="naiToolsCategories">Manage categories</button><button id="naiToolsBrowse">Browse thumbnails</button><button id="naiToolsRecent">Recent Set items</button><button id="naiToolsScanSets">Scan for Sets</button></div><div id="naiSetToolsList"></div>`);
+    const dialog=setDialog('Manage Sets',`<input id="naiManageSetSearch" type="search" placeholder="Search Sets…" aria-label="Search Sets to manage"><div class="naiSetBrowserActions"><button id="naiToolsNewSet">+ New Set</button><button id="naiToolsCategories">Manage categories</button><button id="naiToolsBrowse">Browse thumbnails</button><button id="naiToolsReviewSets">Sets under review</button><button id="naiToolsRecent">Recent Set items</button><button id="naiToolsScanSets">Scan for Sets</button></div><div id="naiSetToolsList"></div>`);
     dialog.wrap.querySelector('.naiSetQuick').classList.add('naiSetToolsDialog');
     dialog.save.remove();dialog.wrap.querySelector('.modalFoot [data-close]').textContent='Close';
+    dialog.wrap.querySelector('#naiToolsReviewSets').onclick=openReviewSets;
     const search=dialog.wrap.querySelector('#naiManageSetSearch'),list=dialog.wrap.querySelector('#naiSetToolsList');
     const evolution=document.createElement('select');
     evolution.setAttribute('aria-label','Filter Sets by evolution status');
@@ -616,6 +621,61 @@
     dialog.wrap.querySelector('#naiToolsBrowse').onclick=()=>go(showSetBrowser);
     dialog.wrap.querySelector('#naiToolsRecent').onclick=()=>go(openRecentSetItems);
   }
+
+  async function openReviewSets() {
+    if(root.naiViewerOnly)return;
+    const owner=charSelect.value;
+    const dialog=setDialog('Sets under review', '<input type="search" aria-label="Search Sets under review" placeholder="Search by Set name"><div class="naiReviewSetList"></div>');
+    dialog.wrap.querySelector('.naiSetQuick').classList.add('naiSetToolsDialog');
+    dialog.save.remove();
+    dialog.wrap.querySelector('.modalFoot [data-close]').textContent='Close';
+    const list=dialog.wrap.querySelector('.naiReviewSetList');
+    const search=dialog.wrap.querySelector('input');
+    const status=dialog.wrap.querySelector('[role=status]');
+    let groups=[];
+    function render() {
+      list.replaceChildren();
+      const matches=groups.filter(group=>searchText(group).includes(search.value.trim().toLowerCase()));
+      for(const group of matches) {
+        const row=document.createElement('section');
+        row.className='naiReviewSetRow';row.dataset.reviewSetId=group.id;
+        const title=document.createElement('strong');
+        title.textContent=group.target_set_id?'Additions to '+(setById(group.id)?.name||group.name):group.name;
+        const count=document.createElement('span');
+        count.className='muted';count.textContent=group.media_ids.length+' file'+(group.media_ids.length===1?'':'s');
+        const edit=document.createElement('button');
+        edit.textContent='Review files';edit.onclick=()=>openSetManager(group.id,[],group);
+        const promote=document.createElement('button');
+        promote.className='primary';promote.textContent=group.target_set_id?'Apply additions':'Promote to regular Set';
+        promote.onclick=async()=>{
+          edit.disabled=promote.disabled=true;
+          try {
+            await postSet('/api/review-sets/'+group.id+'/promote',{review_revision:group.review_revision});
+            groups=groups.filter(item=>item.id!==group.id);
+            await applySetChanges();render();status.textContent=group.name+' is a regular Set.';
+          } catch(error) {status.textContent=error.message;edit.disabled=promote.disabled=false;}
+        };
+        row.append(title,count,edit,promote);
+        const preview=document.createElement('div');preview.className='naiHeldSetPreview';
+        for(const id of group.media_ids.slice(0,6)){
+          const media=mediaById(id);
+          if(!media)continue;
+          const img=document.createElement('img');img.alt=media.original_name||'Set file';preview.append(img);
+          root.naiLoadThumbnail(id,img);
+        }
+        if(preview.childElementCount)row.append(preview);
+        list.append(row);
+      }
+      if(!matches.length)list.textContent=groups.length?'No matching Sets.':'No Sets under review.';
+    }
+    search.oninput=render;
+    status.textContent='Loading…';
+    try {
+      const result=await gmRequest({path:'/api/review-sets?character_id='+encodeURIComponent(owner)});
+      groups=result.sets;status.textContent='';render();
+    } catch(error) {status.textContent=error.message;}
+  }
+  root.naiOpenReviewSets=openReviewSets;
 
   function showSetBrowser(){setPurgatory=false;openSetId=null;setsView=true;favoriteSetsOnly=false;defaultSetSearch();restoreSetSearch();renderSetsView();}
 
@@ -741,6 +801,13 @@
     heldButton.textContent='Set Purgatory '+setsForCurrentCharacter(true).filter(s=>s.in_purgatory).length;
     heldButton.classList.toggle('hidden',suppressSets);heldButton.classList.toggle('active',setsView&&!openSetId&&setPurgatory);
     setsButton.classList.toggle('active',setsView&&!openSetId&&!favoriteSetsOnly&&!setPurgatory);
+    let reviewButton=root.getElementById('naiSetsUnderReview');
+    if(!reviewButton){
+      reviewButton=document.createElement('button');reviewButton.type='button';reviewButton.id='naiSetsUnderReview';
+      reviewButton.className='cat naiSetsCat';reviewButton.textContent='Sets under review';
+      reviewButton.onclick=event=>{event.stopImmediatePropagation();openReviewSets();};heldButton.after(reviewButton);
+    }
+    reviewButton.classList.toggle('hidden',suppressSets||!!root.naiViewerOnly);
     let recentButton=root.getElementById('naiRecentSetItemsCat');
     if(!recentButton){
       recentButton=document.createElement('button');recentButton.type='button';recentButton.id='naiRecentSetItemsCat';recentButton.className='cat naiSetsCat';
@@ -1145,7 +1212,7 @@
     return map;
   }
 
-  async function openSetManager(initialSetId=null, initialIds=[]) {
+  async function openSetManager(initialSetId=null, initialIds=[], reviewGroup=null, defaultUnderReview=false) {
     if(root.naiViewerOnly)return;
     try { await root.naiRequireCollections?.(); await refreshLibrary(); } catch (err) { alert(err?.message || String(err)); return; }
     const character = currentCharacter();
@@ -1153,7 +1220,8 @@
     const images = (library.media || []).filter(m => m.character_id === character.id);
     const sets = setsForCurrentCharacter();
 
-    let editingId = initialSetId && sets.some(s => s.id === initialSetId) ? initialSetId : null;
+    let editingId = reviewGroup?.id || (initialSetId && sets.some(s => s.id === initialSetId) ? initialSetId : null);
+    let reviewTarget=null;
     let selected = new Set();
     let coverId = null;
     let coverSource = 'auto';
@@ -1163,7 +1231,7 @@
     wrap.innerHTML = `
       <div class="modal large" style="width:min(1180px,96vw);height:min(850px,92vh)">
         <div class="modalHead">
-          <div class="modalTitle">${editingId?'Edit Set contents':'Create Set'} — ${escapeHtml(editingId?setById(editingId)?.name:character.name)}</div>
+          <div class="modalTitle">${reviewGroup?'Edit Set under review':editingId?'Edit Set contents':'Create Set'} — ${escapeHtml(reviewGroup?.name || (editingId?setById(editingId)?.name:character.name))}</div>
           <button type="button" data-close>✕</button>
         </div>
         <div class="naiSetManagerBody">
@@ -1172,7 +1240,7 @@
               <label for="naiSetNameInput">Set name<input type="text" id="naiSetNameInput" placeholder="e.g. Pink bikini" /></label>
               <button type="button" class="danger" id="naiDeleteSetBtn">Delete set</button>
             </div>
-            <div class="muted">Click a selected thumbnail to remove it from this Set; click Save set to apply. Removed Set-only files return to Main. Use the pin to choose the cover. Media can belong to one Set. Adding to a Set moves membership from any previous Set and preserves main Images placement.</div>
+            <div class="muted" id="naiSetManagerHelp">Click a selected thumbnail to remove it from this Set; click Save set to apply. Removed Set-only files return to Main. Use the pin to choose the cover. Media can belong to one Set. Adding to a Set moves membership from any previous Set and preserves main Images placement.</div>
             <div class="naiSetSearchRow">
               <input type="search" id="naiGroupSearch" placeholder="Search filenames…" aria-label="Search media">
               <select id="naiGroupMediaType" aria-label="Media type"><option value="all">Images & videos</option><option value="image">Images</option><option value="video">Videos</option></select>
@@ -1211,7 +1279,19 @@
     const deleteBtn = wrap.querySelector('#naiDeleteSetBtn');
     const summary = wrap.querySelector('#naiSetSelectionSummary');
     const membership = setMembershipMap();
-    root.naiGroupManagerSelection=()=>({setId:editingId,baseMediaIds:[...selected],coverId,coverSource,kind:'set'});
+    const destination=root.naiSetDestination(!!reviewGroup||defaultUnderReview);
+    const reviewId=crypto.randomUUID().replaceAll('-','');
+    const help=wrap.querySelector('#naiSetManagerHelp'),regularHelp=help.textContent;
+    const saveButton=wrap.querySelector('#naiSaveSetBtn');
+    nameInput.parentElement.after(destination);
+    const showDestination=()=>{
+      const held=destination.value==='under_review';
+      help.textContent=held?'Choose the files that belong to this shoot. You can promote it later from Sets under review.':regularHelp;
+      saveButton.textContent=held?'Save under review':'Save set';
+    };
+    destination.onchange=showDestination;
+    root.naiGroupManagerSelection=()=>({setId:editingId,baseMediaIds:[...selected],coverId,coverSource,kind:'set',
+      underReview:destination.value==='under_review',reviewId,reviewRevision:reviewGroup?.review_revision,reviewTarget:reviewTarget?.id});
     const search=wrap.querySelector('#naiGroupSearch'), mediaType=wrap.querySelector('#naiGroupMediaType');
     const category=wrap.querySelector('#naiGroupCategory'),filterButton=wrap.querySelector('#naiGroupFiltersBtn'),filterPanel=wrap.querySelector('#naiGroupFilterPanel');
     const favorite=wrap.querySelector('#naiGroupFavorite'),featured=wrap.querySelector('#naiGroupFeatured'),replacement=wrap.querySelector('#naiGroupReplacement'),setFilter=wrap.querySelector('#naiGroupMembership'),selectedOnly=wrap.querySelector('#naiGroupSelectedOnly');
@@ -1220,7 +1300,22 @@
       const additions=[...selected].filter(id=>!currentIds.has(id));
       const queries=additions.map(mediaById).filter(m=>m?.media_type==='image');
       if(!queries.length)return alert('Select an image that is not already in this Set to find where it belongs.');
-      root.naiFindMatchingSets({queries,chooseLabel:'Use Set in editor',onChoose:async id=>{await refreshLibrary();chooseSet(id);for(const mid of additions)selected.add(mid);wrap.querySelector('.modalTitle').textContent='Edit Set contents — '+(setById(id)?.name||'Set');paintGallery();}});
+      root.naiFindMatchingSets({queries,initialHeld:destination.value==='under_review',chooseLabel:'Use Set in editor',onChoose:async(id,query,choice)=>{
+        await refreshLibrary();
+        if(choice?.group?.under_review){
+          await openSetManager(id,additions,choice.group);return;
+        }
+        reviewTarget=choice?.held?setById(id):null;
+        if(reviewTarget){
+          chooseSet(null);selected=new Set(additions);nameInput.value=reviewTarget.name;
+          destination.value='under_review';destination.hidden=true;nameInput.readOnly=true;showDestination();
+          wrap.querySelector('.modalTitle').textContent='Hold additions to '+reviewTarget.name;
+        }else{
+          reviewGroup=null;chooseSet(id);for(const mid of additions)selected.add(mid);
+          wrap.querySelector('.modalTitle').textContent='Edit Set contents — '+(setById(id)?.name||'Set');
+        }
+        paintGallery();
+      }});
     };
     const showOtherSets=wrap.querySelector('#naiShowOtherSetMedia');showOtherSets.onchange=()=>{gallery.scrollTop=0;paintGallery();};
     setFilter.onchange=()=>{if(setFilter.value==='in'||setFilter.value==='other')showOtherSets.checked=true;refilter();};
@@ -1259,13 +1354,18 @@
 
     function chooseSet(id) {
       editingId = id || null;
-      const set = editingId ? setsForCurrentCharacter().find(s => s.id === editingId) : null;
-      selected = new Set(set?.media_ids || initialIds);
+      const set = reviewGroup || (editingId ? setsForCurrentCharacter().find(s => s.id === editingId) : null);
+      const chosen=reviewGroup?[...reviewGroup.media_ids,...initialIds]:set?.media_ids||initialIds;
+      selected = new Set(chosen.filter(id=>!reviewGroup || mediaById(id)));
+      destination.hidden=!!editingId;
+      if(editingId)destination.value=reviewGroup?'under_review':'regular';
+      showDestination();
+      if(reviewGroup && selected.size!==set.media_ids.length)help.textContent+=' Unavailable files will be removed when you save.';
       coverId = set?.cover_media_id || set?.media_ids?.[0] || initialIds[0] || null;
       coverSource = set?.cover_media_id ? (set.cover_source || 'unknown') : 'auto';
       nameInput.value = set?.name || '';
-      nameInput.parentElement.hidden=!!editingId;
-      deleteBtn.style.display = set ? '' : 'none';
+      nameInput.parentElement.hidden=!!editingId && (!reviewGroup || !!reviewGroup.target_set_id);
+      deleteBtn.style.display = set && !reviewGroup ? '' : 'none';
 
       paintGallery();
     }
@@ -1412,9 +1512,12 @@
           media_ids:[...selected],
           cover_media_id:coverId, cover_source:coverSource,
         };
-        if (!editingId) payload.character_id = character.id;
-        else delete payload.name;
-        const path = editingId ? `/api/sets/${encodeURIComponent(editingId)}` : '/api/sets';
+        const held=destination.value==='under_review';
+        if (!editingId) {payload.character_id=character.id;if(held)payload.review_id=reviewId;}
+        else if(!reviewGroup || reviewGroup.target_set_id)delete payload.name;
+        if(reviewGroup)payload.review_revision=reviewGroup.review_revision;
+        const base=held?'/api/review-sets':'/api/sets';
+        const path=reviewTarget?base+'/'+reviewTarget.id+'/add':editingId?base+'/'+encodeURIComponent(editingId):base;
         await gmRequest({
           method:'POST', path,
           headers:{'Content-Type':'application/json'},
@@ -1425,6 +1528,7 @@
         root.naiRenderNormalGrid(library);
         root.naiRefreshSelectedMetadata?.();
         scheduleSync(false, 0);
+        if(held)await openReviewSets();
       } catch (err) {
         alert(err?.message || String(err));
       } finally {

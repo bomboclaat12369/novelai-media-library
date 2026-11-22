@@ -20,6 +20,12 @@ async function openManualBrowser(compare=null,historyFirst=false){
  }
  originChoices();if(!compare)run.before(origin);
  if(historyFirst){scope.value='inventory';origin.value='automatic'}
+ const reviewPlacement=option('under_review','Sets under review');
+ function reviewLocation(){
+  if(scope.value==='inventory')placement.append(reviewPlacement);
+  else if(reviewPlacement.parentNode){if(placement.value==='under_review')placement.value='all';reviewPlacement.remove()}
+ }
+ reviewLocation();scope.addEventListener('change',reviewLocation);
  dialog.append(el('h2',compare?'Compare before importing':'Find a Set or image manually'),close,el('p',compare?'Choose a library image to compare. Similarity alone does not confirm a duplicate. Your choice is saved and applied with the import.':'Search independently of automatic suggestions. Use a Set as the destination, or add an image to your current selection.'),form,status,grid,pages);
  let compareSerial=0,scanOnly=false,offset=0,serial=0,result=null,owner=compare?.owner||'',sourceId=compare?.rows[0]?.id;
  const sourcePicker=el('select');sourcePicker.setAttribute('aria-label','Incoming image');

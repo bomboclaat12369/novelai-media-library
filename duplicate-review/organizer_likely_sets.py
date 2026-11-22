@@ -49,7 +49,10 @@ def load_page(organizer, body):
         organizer.check_collection_idle(body)
         state = organizer.state()
         if body.get('session'):
-            return page(organizer, session(organizer, body, state), body)
+            review = session(organizer, body, state)
+            if 'source_post' in body:
+                return source_page(organizer, review, body, state)
+            return page(organizer, review, body)
         organizer.refresh_library_placement(force=True)
         breadth = body.get('breadth','closest')
         if breadth not in ('closest','broader','partial'):
@@ -71,6 +74,44 @@ def load_page(organizer, body):
             del organizer.likely_reviews[next(iter(organizer.likely_reviews))]
         organizer.likely_reviews[review.token] = review
         return page(organizer, review, body)
+
+
+def matching_posts(organizer, row):
+    keys = list(row['posts'].values())
+    for link in row['source_links']:
+        keys.extend([link['source']] if 'source' in link else link.get('sources', []))
+    return [key for key in dict.fromkeys(keys) if key in organizer.posts]
+
+
+def reviewable_photos(organizer, state, db):
+    groups, excluded, mixed = matching_inputs(organizer, state, db)
+    excluded.update(i for g in pending(organizer, db, groups, excluded).values() for i in g['members'])
+    return groups, excluded, mixed, set(remaining(organizer, groups)) - excluded
+
+
+def source_page(organizer, review, body, state):
+    row = next((r for r in review.rows if r['key'] == body.get('key')), None)
+    source = body['source_post']
+    if row is None or source not in matching_posts(organizer, row):
+        raise ValueError('Choose a matching post for this group.')
+    with organizer.db() as db:
+        groups, _, mixed, available = reviewable_photos(organizer, state, db)
+    if source in mixed:
+        raise ValueError('This post changed. Refresh the likely groups.')
+    assigned = {i: g['name'] for g in groups.values() for i in g['members']}
+    post = organizer.posts[source]
+    visible = set(organizer.post_ids(source)) - set(row['members'])
+    ordered = organizer.ordered(post['ids'], 'original', source)
+    others = [(n, i) for n, i in enumerate(ordered, 1) if i in visible
+              and not organizer.catalog[i].get('quarantine_only') and organizer.catalog[i].get('media_type', 'image') == 'image']
+    limit = 24
+    offset = min(max(0, int(body.get('post_offset', 0)) // limit) * limit, (max(0, len(others) - 1) // limit) * limit)
+    photos = []
+    for pos, ident in others[offset:offset + limit]:
+        reason = '' if ident in available else ('In ' + assigned[ident] if ident in assigned else 'Unavailable for this group')
+        photos.append(dict(organizer.image(ident), source_position=pos, unavailable_reason=reason,
+                           display_name=organizer.original_name(ident, source)))
+    return {'photos': photos, 'offset': offset, 'total': len(others), 'limit': limit}
 
 
 def page(organizer, review, body):
@@ -108,6 +149,8 @@ def page(organizer, review, body):
             reason = f'The same surviving photo links nearby images in {labels[0]} and {labels[1]}.'
     answer.update(key=row['key'], proposed_target=row['target'], destination=chosen, new_name=new_name(groups),
                   alternatives=row['alternatives'], source_reason=reason,
+                  source_posts=[{'id': key, 'label': organizer.posts[key].get('label') or key}
+                                for key in matching_posts(organizer, row)],
                   photos=[photo(i) for i in row['members']], references=[photo(i) for i in refs])
     return answer
 
@@ -117,9 +160,7 @@ def validate(organizer, action, body, state, db):
     row = next((r for r in review.rows if r['key'] == body.get('key')), None)
     if row is None:
         raise ValueError('This suggestion is no longer pending.')
-    groups, excluded, mixed = matching_inputs(organizer, state, db)
-    excluded.update(i for g in pending(organizer,db,groups,excluded).values() for i in g['members'])
-    available = set(remaining(organizer, groups)) - excluded
+    groups, excluded, mixed, available = reviewable_photos(organizer, state, db)
     if not set(row['members']) <= available or mixed.intersection(row['posts'].values()):
         raise ValueError('A photo or source changed. Refresh the likely groups.')
     old_target = row['target']
@@ -134,8 +175,13 @@ def validate(organizer, action, body, state, db):
         return review, row, {}
     ids = organizer.valid_ids(body.get('ids',[]))
     target = str(body.get('target') or '')
-    if not ids or not set(ids) <= set(row['members']):
+    extras = set(ids) - set(row['members'])
+    if not ids:
         raise ValueError('Select photos from this group.')
+    if extras:
+        visible = {i for post in matching_posts(organizer, row) if post not in mixed for i in organizer.post_ids(post)}
+        if not extras <= visible & available:
+            raise ValueError('Select available photos from this group or its matching posts.')
     if target and (target not in groups or groups[target].get('in_purgatory')):
         raise ValueError('Choose an available destination Set.')
     if not target and len(ids) < 2:
@@ -143,16 +189,29 @@ def validate(organizer, action, body, state, db):
     for i in ids + row['references']:
         organizer.original_path(i)
     previous = groups.get(target,{})
-    name = previous.get('name') or str(body.get('name') or '').strip() or new_name(groups)
-    if not target and any(g['name'].casefold() == name.casefold() for g in groups.values()):
+    details = body.get('set_details', {})
+    if not isinstance(details, dict):
+        raise ValueError('Choose valid Set details.')
+    name = str(details.get('name', previous.get('name') or body.get('name') or new_name(groups))).strip()
+    if not name or len(name) > 250:
+        raise ValueError('Give the Set a name (up to 250 characters).')
+    if name.casefold() != str(previous.get('name', '')).casefold() and any(
+            g['name'].casefold() == name.casefold() for g in groups.values() if g['id'] != target):
         raise ValueError('That Set name is in use. Choose it as the destination or use another name.')
-    return review, row, {'ids': ids, 'target': target, 'name': name, 'colors': previous.get('colors',[]),
-                         'categories': previous.get('categories',[]), 'favorite': previous.get('favorite',False)}
+    choices = {'ids': ids, 'target': target, 'name': name, 'colors': details.get('colors', previous.get('colors', [])),
+               'categories': details.get('categories', previous.get('categories', [])),
+               'favorite': details.get('favorite', previous.get('favorite', False))}
+    if target and 'in_purgatory' in details:
+        choices['in_purgatory'] = organizer.favorite(details['in_purgatory'])
+    return review, row, choices
 
 
 def record(organizer, db, review, row, action, selected, target=None):
     identities = set(row['posts']) | {w['id'] for values in row['reference_evidence'].values() for w in values}
-    evidence = {**row, 'rule': row.get('rule_version', RULE), 'breadth':review.breadth, 'analysis_recipe': review.recipe, 'ranking': review.training,
+    additions = {i: [p for p in matching_posts(organizer, row) if p in organizer.catalog[i].get('sources', {})]
+                 for i in selected if i not in row['members']}
+    identities.update(additions)
+    evidence = {**row, 'manual_post_additions': additions, 'rule': row.get('rule_version', RULE), 'breadth':review.breadth, 'analysis_recipe': review.recipe, 'ranking': review.training,
                 'inventory': organizer.bound[0], 'collection': organizer.collection_id,
                 'source_hashes': {i: organizer.catalog[i]['sha'] for i in identities},
                 'selected': list(selected), 'destination': target}

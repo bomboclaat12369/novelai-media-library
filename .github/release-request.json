@@ -1,9 +1,11 @@
 {
   "schema": 1,
-  "id": "workbench-whole-shoot-framing-2026-11-21",
+  "id": "suite-confirmed-sets-under-review-2026-11-21",
   "components": [
+    "standalone",
+    "runtime",
     "workbench"
   ],
   "publish": true,
-  "workbench_notes": "Auto-match Sets recognizes shoots across changes in framing and fills qualifying partial Sets. When the remaining photos need your input, Review likely groups → Finish partial Sets lets you compare and approve same-post companions together."
+  "workbench_notes": "Save confirmed shoots to Sets under review. They stay in Workbench through imports until you promote them. Likely groups also lets you browse matching posts in original order and edit Set details before approval."
 }

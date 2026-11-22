@@ -22,12 +22,16 @@ const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/play
   await dialog.getByText('Window Session · 3 photos',{exact:true}).waitFor();
   await dialog.locator('section button').first().click();await page.locator('#viewerClose').click();
   await dialog.getByRole('combobox',{name:'Set to keep'}).selectOption('b');
+  await dialog.getByRole('checkbox',{name:/Hold resulting/}).check();
   await dialog.getByRole('button',{name:'Combine Sets',exact:true}).click();
   await dialog.getByText('Combined in Window Session.').waitFor();
   assert.equal(await page.evaluate(()=>data.sets.find(s=>s.id==='b').members.length),6);
+  assert.equal(await page.evaluate(()=>data.sets.find(s=>s.id==='b').under_review),true);
   await dialog.getByRole('button',{name:'Undo last decision'}).click();
   await dialog.getByText('Spring Studio · 3 photos',{exact:true}).waitFor();
+  await dialog.getByRole('checkbox',{name:/Hold resulting/}).check();
   await dialog.getByRole('button',{name:'Keep separate'}).click();await dialog.getByText('Saved as separate shoots.').waitFor();
+  assert.equal(await page.evaluate(()=>data.sets.filter(s=>s.under_review).length),2);
   await dialog.getByRole('button',{name:'Close',exact:true}).click();
   assert.equal(await page.evaluate(()=>currentId),post);
   await page.getByRole('button',{name:'Match history',exact:true}).click();

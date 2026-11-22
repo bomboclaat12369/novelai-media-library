@@ -205,7 +205,9 @@ class OutfitMatcher:
                 self.contexts.pop(expired, None)
             ident = uuid.uuid4().hex
             self.jobs[ident] = {'id': ident, 'character_id': owner, 'matching_mode': mode, 'scan': scan, 'running': True, 'phase': 'Preparing Set scan' if scan else 'Preparing ' + mode + ' search', 'done': 0, 'total': len(candidates), 'results': [], 'individual_results': [], 'scan_results': [], 'assigned_ids': [], 'issues': []}
-            self.contexts[ident] = {'owner': owner, 'media': copy.deepcopy(candidates), 'stamps': {}, 'query_id': (media_id or source_id) if not scan else '', 'target_set_id': target_set_id, 'example_ids': list(dict.fromkeys(example_ids)), 'example_bytes': example_bytes}
+            self.contexts[ident] = {'owner': owner, 'media': copy.deepcopy(candidates), 'stamps': {}, 'query_id': (media_id or source_id) if not scan else '', 'target_set_id': target_set_id, 'example_ids': list(dict.fromkeys(example_ids)), 'example_bytes': example_bytes,
+                                    'held_ids': {mid for group in self.store.data.get('review_sets', [])
+                                                 if group['character_id'] == owner for mid in group['media_ids']}}
             if video_source:
                 self.contexts[ident]['media'][video_source['id']]=video_source
                 self.contexts[ident]['stamps'][video_source['id']]=self._stamp(video_source)
@@ -464,7 +466,8 @@ class OutfitMatcher:
         coverage=[]
         photoshoot = self.jobs[ident]['matching_mode'] == 'photoshoot'
         grouped = {mid for group in sets for mid in group.get('media_ids', [])}
-        ungrouped = [mid for mid in candidates if mid not in grouped]
+        held = self.contexts[ident].get('held_ids', set())
+        ungrouped = [mid for mid in candidates if mid not in grouped and mid not in held]
         try:
             if not candidates or (scan and (not ungrouped or not grouped.intersection(candidates))):
                 self.update(ident, phase='No ungrouped images to scan' if scan and not ungrouped else 'No existing Set images to compare' if scan else 'No library images to compare', unsearchable_sets=len(sets), indexed_images=0)
@@ -476,7 +479,7 @@ class OutfitMatcher:
             issues = [];vectors = {};scenes = {}
             self.vector_cache = {mid: value for mid, value in self.vector_cache.items() if mid in candidates}
             self.scene_vector_cache = {mid: value for mid, value in self.scene_vector_cache.items() if mid in candidates}
-            with sqlite3.connect(self.cache / 'embeddings.sqlite') as db:
+            with closing(sqlite3.connect(self.cache / 'embeddings.sqlite')) as db, db:
                 db.execute('CREATE TABLE IF NOT EXISTS embeddings (key TEXT PRIMARY KEY, vector BLOB NOT NULL)')
                 self.update(ident, phase='Checking scene cache; indexing new Photoshoot images' if photoshoot else 'Checking image cache; indexing new library images', done=0, total=len(candidates))
                 for index, (mid, media) in enumerate(candidates.items()):
@@ -603,7 +606,7 @@ class OutfitMatcher:
             raise ValueError('A matching image changed or was removed. Search again before assigning it.')
         return current
 
-    def assign_scan(self, body):
+    def assign_scan(self, body, under_review=False):
         ident, mid, sid = str(body.get('job_id', '')), str(body.get('media_id', '')), str(body.get('set_id', ''))
         with self.lock, self.store.lock:
             job, context = self._completed(ident)
@@ -619,11 +622,15 @@ class OutfitMatcher:
                 self._validate_match_media(context, example)
                 if example not in target.get('media_ids', []):
                     raise ValueError('The suggested Set changed. Search again before assigning.')
-            item = self.store.update_set(sid, add_media_ids=[mid], preserve_placement=True)
+            self.store._check_review_members(context['owner'], [mid], sid if under_review else None)
+            if under_review:
+                item = self.store.hold_set_additions(sid, [mid])
+            else:
+                item = self.store.update_set(sid, add_media_ids=[mid], preserve_placement=True)
             job['assigned_ids'].append(mid)
             return copy.deepcopy(item)
 
-    def create_from_matches(self, body):
+    def create_from_matches(self, body, under_review=False):
         ident = str(body.get('job_id', ''))
         ids = body.get('media_ids', [])
         if not isinstance(ids, list) or not ids or any(not isinstance(mid, str) for mid in ids):
@@ -652,12 +659,17 @@ class OutfitMatcher:
                 target = self.store.set_item(target_id)
                 if not query_id or not target or target.get('character_id') != context['owner'] or query_id not in target.get('media_ids', []):
                     raise ValueError('The query image is no longer in this Set.')
+                self.store._check_review_members(context['owner'], ids, target_id if under_review else None)
+                if under_review:
+                    return self.store.hold_set_additions(target_id, ids)
                 return copy.deepcopy(self.store.update_set(target_id, add_media_ids=ids, preserve_placement=True))
             if query_id:
                 if any(query_id in group.get('media_ids', []) for group in memberships):
                     raise ValueError('The query already belongs to a Set. Search again to add matches to that Set.')
                 ids.append(query_id)
-            return copy.deepcopy(self.store.create_set(context['owner'], str(body.get('name', '')), ids, preserve_placement=True))
+            self.store._check_review_members(context['owner'], ids)
+            return copy.deepcopy(self.store.create_set(context['owner'], str(body.get('name', '')), ids,
+                                 preserve_placement=True, under_review=under_review, review_id=body.get('review_id')))
 
 
 class BattleRankings:
@@ -2223,7 +2235,7 @@ class LibraryStore:
         with closing(sqlite3.connect(self.tracking.path)) as db, db:
             TrackingJournal.identity(db,'library.root',str(self.root.resolve()),ident)
             if not db.execute("SELECT 1 FROM tracking_meta WHERE key='library_backfill'").fetchone():
-                for table in ('media', 'rapid_queue', 'sets', 'characters'):
+                for table in ('media', 'rapid_queue', 'sets', 'review_sets', 'characters'):
                     for item in self.data.get(table, []):
                         TrackingJournal.observe(db, 'library.' + table, item['id'], item, legacy=True)
                 for entry in self.data.get('undo_history', []):
@@ -2251,7 +2263,7 @@ class LibraryStore:
     def _tracking_changes(self, media_ids=None):
         events = list(self._tracking_queue)
         context={**TrackingJournal.context()};context.setdefault('operation_id',uuid.uuid4().hex)
-        for table in ('media', 'rapid_queue', 'sets', 'characters'):
+        for table in ('media', 'rapid_queue', 'sets', 'review_sets', 'characters'):
             if table == 'media' and media_ids is not None:
                 before = {i: self._saved_data['media'][self._saved_positions[i]] for i in media_ids}
                 after = {i: self.data['media'][self._saved_positions[i]] for i in media_ids}
@@ -2516,7 +2528,7 @@ class LibraryStore:
         """Recheck derived Set state against current membership before committing it."""
         media = {m["id"]: m for m in self.data.get("media", [])}
         changed = False
-        for group in self.data.get("sets", []):
+        for group in (*self.data.get("sets", []), *self.data.get("review_sets", [])):
             evolution = group.get('after_hours_evolution')
             if isinstance(evolution, dict) and type(evolution.get('version')) is int and evolution['version'] == 1:
                 # Check before removing departed members: even a four-to-three change needs another review.
@@ -2540,6 +2552,8 @@ class LibraryStore:
                 next_cover = choices[0] if choices else None
                 if cover != next_cover:
                     group["cover_media_id"] = next_cover
+                    if group.get('under_review'):
+                        group['review_revision'] = uuid.uuid4().hex
                     changed = True
         return changed
 
@@ -2848,12 +2862,25 @@ class LibraryStore:
             result[key]=flag
         return result
 
+    @staticmethod
+    def importable_organizer_sets(drafts):
+        deferred={i for g in drafts if g.get('under_review') for i in g.get('members',[])}
+        groups=[]
+        for draft in drafts:
+            if not draft.get('saved') or draft.get('under_review'):continue
+            removed=draft.get('removed_members',[])
+            if not draft.get('library_id') and not draft.get('members') and deferred.intersection(removed):continue
+            group=copy.deepcopy(draft)
+            group['removed_members']=[i for i in removed if i not in deferred]
+            groups.append(group)
+        return groups
+
     def organizer_preview(self,body):
         draft=body.get('draft',{});owner=str(body.get('character_id',''))
         if draft.get('format')!='folder-organizer-2':raise ValueError('Unsupported organizer export.')
         with self.lock:
             if not self.character(owner):raise ValueError('Choose the destination character.')
-            groups=[copy.deepcopy(g) for g in draft.get('sets',[]) if g.get('saved')]
+            groups=self.importable_organizer_sets(draft.get('sets',[]))
             if len(groups)>10000:raise ValueError('Too many draft sets.')
             namespace=str(draft.get('scope') or hashlib.sha256(json.dumps(draft.get('config',{}).get('roots',[]),sort_keys=True).encode()).hexdigest())+':'+owner
             linked=self.data.get('organizer_links',{}).get(namespace,{})
@@ -3293,10 +3320,11 @@ class LibraryStore:
         if item.get('crop_top', 0) + item.get('crop_bottom', 0) >= .95:
             raise ValueError('Crop removes too much of the image.')
 
+    @TrackingJournal.action('manual')
     def resolve_rapid(self, body):
         owner, action = str(body.get('character_id', '')), body.get('action')
         ids = body.get('media_ids', [])
-        if action not in ('save', 'main', 'purgatory', 'review', 'set', 'new_set', 'discard') or not isinstance(ids, list) or not ids or any(not isinstance(mid, str) for mid in ids):
+        if action not in ('save', 'main', 'purgatory', 'review', 'set', 'new_set', 'new_review_set', 'review_set_add', 'discard') or not isinstance(ids, list) or not ids or any(not isinstance(mid, str) for mid in ids):
             raise ValueError('Choose queue files and an action.')
         ids = list(dict.fromkeys(ids))
         with self.lock:
@@ -3306,8 +3334,13 @@ class LibraryStore:
             group = self.set_item(str(body.get('set_id', ''))) if action == 'set' else None
             if action == 'set' and (not group or group['character_id'] != owner):
                 raise ValueError('Choose a Set for this character.')
+            if action == 'review_set_add':
+                target_id = str(body.get('set_id', ''))
+                group = self.review_set_item(target_id) or self.set_item(target_id)
+                if not group or group['character_id'] != owner:
+                    raise ValueError('Choose a Set for this character.')
             name = str(body.get('name', '')).strip()
-            if action == 'new_set' and not name:
+            if action in ('new_set', 'new_review_set') and not name:
                 raise ValueError('Enter a Set name.')
             before = copy.deepcopy(self.data)
             promoted, duplicates = [], []
@@ -3322,7 +3355,7 @@ class LibraryStore:
                     if existing:
                         duplicates.append(item['id'])
                         continue  # Never change a previously imported image through a duplicate queue copy.
-                    item['in_review'] = action == 'review' or (action == 'save' and item.get('in_review', False))
+                    item['in_review'] = action == 'review' or (action in ('save', 'new_review_set', 'review_set_add') and item.get('in_review', False))
                     item['in_purgatory'] = action == 'purgatory'
                     item['main_explicit'] = action != 'purgatory' and (action == 'main' or bool(item.get('rapid_main')) or (action == 'save' and not item.get('categories') and not item['in_review']))
                     main = not item['in_review'] and not item['in_purgatory'] and (item['main_explicit'] or self._main_categories(item))
@@ -3337,14 +3370,19 @@ class LibraryStore:
                     promoted.append(item['id'])
                 # Remove pending references before any Set helper persists the transaction.
                 self.data['rapid_queue'] = [m for m in self.data.get('rapid_queue', []) if m['id'] not in ids]
-                if action == 'new_set' and promoted:
-                    group = self.create_set(owner, name, promoted, preserve_placement=True, colors=body.get("colors"), aliases=body.get("aliases"), notes=body.get("notes"))
+                if action in ('new_set', 'new_review_set') and promoted:
+                    group = self.create_set(owner, name, promoted, preserve_placement=True, colors=body.get("colors"),
+                                            aliases=body.get("aliases"), notes=body.get("notes"),
+                                            under_review=action == 'new_review_set', review_id=body.get('review_id'))
+                elif action == 'review_set_add' and promoted:
+                    group = self.hold_set_additions(group['id'], promoted)
                 elif action == 'set' and promoted:
                     self.update_set(group['id'], add_media_ids=promoted, preserve_placement=True)
-                self.save()
+                else:
+                    self.save()
             except Exception:
                 self.data = before
-                self.save()
+                self._media_lookup = None
                 raise
             # Only private pending copies are removed; source-folder files are never touched.
             for item in items:
@@ -3488,7 +3526,7 @@ class LibraryStore:
 
     def public_library(self) -> dict[str, Any]:
         with self.lock:
-            return json.loads(json.dumps({**{k: v for k, v in self.data.items() if k not in ("undo_history", "duplicate_replacements", "duplicate_cleanups", "rapid_queue", "rapid_states", "_tracking_store", "_tracking_pending", "_tracking_batch")}, "revision": self.revision}))
+            return json.loads(json.dumps({**{k: v for k, v in self.data.items() if k not in ("undo_history", "duplicate_replacements", "duplicate_cleanups", "rapid_queue", "rapid_states", "review_sets", "_tracking_store", "_tracking_pending", "_tracking_batch")}, "revision": self.revision}))
 
     def duplicate_catalog(self, character_id: str = "") -> dict[str, Any]:
         """Only live image records; filesystem leftovers are never reference images."""
@@ -3498,8 +3536,9 @@ class LibraryStore:
             characters={c['id']:c for c in self.data['characters']}
             categories={c['id']:{v['id']:v['name'] for v in c.get('categories',[])} for c in self.data['characters']}
             memberships={}
+            held_media = {mid for group in self.data.get('review_sets', []) for mid in group['media_ids']}
             for group in self.data.get('sets',[]):
-                for mid in group.get('media_ids',[]):memberships.setdefault(mid,[]).append(group['name'])
+                for mid in group.get('media_ids',[]):memberships.setdefault(mid,[]).append(group)
             if character_id:
                 if character_id != "*" and not self.character(character_id):
                     raise ValueError("Choose an existing character")
@@ -3515,7 +3554,9 @@ class LibraryStore:
                                   "in_purgatory": bool(item.get("in_purgatory")),
                                   "character_id": item["character_id"],
                                   "character_name": characters.get(item['character_id'],{}).get('name','Unknown'),
-                                  "sets": memberships.get(item['id'],[])})
+                                  "set_under_review": item['id'] in held_media,
+                                  "sets": [g['name'] for g in memberships.get(item['id'],[])],
+                                  "set_ids": [g['id'] for g in memberships.get(item['id'],[])]})
             return {"library_id": library_id, "stable_library_id":self.data["_tracking_store"], "root": str(self.root.resolve()), "revision": self.revision,
                     "characters": [{"id": c["id"], "name": c["name"]} for c in self.data["characters"]],
                     "coverage_version": 2, "library_cleanup": True, "files": files}
@@ -3796,14 +3837,16 @@ class LibraryStore:
             return {'rows':rows[offset:offset+60],'total':len(rows),'offset':offset,'categories':copy.deepcopy(categories),'character_id':owner,'library_instance':self.tracking.diagnostics()['instance']}
 
     @TrackingJournal.action("manual")
-    def manual_group(self,body):
+    def manual_group(self,body,under_review=False):
         with self.lock:
             owner=str(body.get('character_id',''));ids=body.get('media_ids',[])
             if not isinstance(ids,list) or not ids or len(ids)>15000:raise ValueError('Choose images first.')
             ids=self._validate_set_media(owner,ids)
             if any(mid in g.get('media_ids',[]) for g in self.data.get('sets',[]) for mid in ids):raise ValueError('An image now belongs to a Set. Search again; nothing was moved.')
             if any(self.media_item(mid).get('media_type')!='image' for mid in ids):raise ValueError('Choose still images.')
-            return self.create_set(owner,str(body.get('name','')),ids,preserve_placement=True)
+            self._check_review_members(owner, ids)
+            return self.create_set(owner,str(body.get('name','')),ids,preserve_placement=True,
+                                   under_review=under_review, review_id=body.get('review_id'))
 
     def matching_preferences(self, character_id, mode=None):
         with self.lock:
@@ -4226,6 +4269,8 @@ class LibraryStore:
                 raise ValueError("This character contains images or videos. Remove or move them before deleting the character.")
             if any(s.get("character_id") == character_id and s.get("media_ids") for s in self.data.get("sets", [])):
                 raise ValueError("This character contains set images.")
+            if any(s['character_id'] == character_id for s in self.data.get('review_sets', [])):
+                raise ValueError('This character has Sets under review. Review those Sets first.')
             self.data["characters"] = [c for c in self.data["characters"] if c["id"] != character_id]
             self.data["sets"] = [s for s in self.data.get("sets", []) if s.get("character_id") != character_id]
             self.save()
@@ -4259,10 +4304,12 @@ class LibraryStore:
                     continue
                 if name is None:
                     owner["set_categories"] = [c for c in categories if c["id"] != category_id]
-                    for item in self.data.get("sets", []):
+                    for item in (*self.data.get("sets", []), *self.data.get("review_sets", [])):
                         if item.get("character_id") == owner["id"] and category_id in item.get("categories", []):
                             item["categories"] = [c for c in item["categories"] if c != category_id]
                             item["updated_at"] = now_iso()
+                            if item.get('under_review'):
+                                item['review_revision'] = uuid.uuid4().hex
                 else:
                     name = name.strip()
                     if not name:
@@ -4544,6 +4591,7 @@ class LibraryStore:
         source: dict[str, Any],
         content_type: str | None = None,
         pending: bool = False,
+        review_set_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         # Hashing can read a large video for many seconds. Do it before taking the
         # library lock so playback, metadata reads, and other UI requests remain
@@ -4567,8 +4615,16 @@ class LibraryStore:
             if not c:
                 raise KeyError("Character not found")
             categories = self._validate_categories(character_id, categories, media_type)
+            review_group = self.review_set_item(review_set_id) if review_set_id else None
+            if review_set_id and (not review_group or review_group['character_id'] != character_id):
+                raise ValueError('This Set is no longer under review. Reopen it before uploading.')
             for existing in (self.data.get("rapid_queue", []) if pending else self.data["media"]):
                 if existing.get("character_id") == character_id and existing.get("sha256") == sha:
+                    if review_group:
+                        self._check_review_members(character_id, [existing['id']], review_set_id, review_group.get('target_set_id'))
+                        target = self.set_item(review_group['target_set_id']) if review_group.get('target_set_id') else None
+                        if not target or existing['id'] not in target['media_ids']:
+                            self._append_review_members(review_group, [existing['id']])
                     self._source_observation(existing, source, original_name)
                     changed = True
                     if existing.get("media_type") == "video":
@@ -4651,11 +4707,18 @@ class LibraryStore:
             if not pending:
                 item["main_added_at"] = item["created_at"]
             item['category_added_at'] = {key:item['created_at'] for key in categories}
-            if source.get("organizer_pending"):
+            if review_group:
+                self._append_review_members(review_group, [media_id])
+            if review_group or source.get("organizer_pending"):
                 item["in_all"]=False;item["in_videos"]=False;item.pop("main_added_at",None)
             self._apply_resolution_flag(item)
             self.data.setdefault("rapid_queue" if pending else "media", []).append(item)
-            self.save()
+            try:
+                self.save()
+            except Exception:
+                if review_group:
+                    destination.unlink(missing_ok=True)
+                raise
             if media_type == "image":
                 self._queue_image_thumbnail(destination, media_id, c["name"])
             return item, False
@@ -4792,6 +4855,7 @@ class LibraryStore:
         categories: list[str],
         source: dict[str, Any],
         content_type: str | None,
+        *, review_set_id: str | None = None,
     ) -> tuple[dict[str, Any], bool, dict[str, float]]:
         timing: dict[str, float] = {}
         backend_started = time.perf_counter()
@@ -4806,7 +4870,10 @@ class LibraryStore:
         timing["temp_write"] = round((time.perf_counter() - phase) * 1000, 1)
 
         phase = time.perf_counter()
-        item, duplicate = self._register_file(temp, original_name, character_id, categories, source, content_type)
+        try:
+            item, duplicate = self._register_file(temp, original_name, character_id, categories, source, content_type, review_set_id=review_set_id)
+        finally:
+            temp.unlink(missing_ok=True)
         timing["register"] = round((time.perf_counter() - phase) * 1000, 1)
         timing["backend_total"] = round((time.perf_counter() - backend_started) * 1000, 1)
         return item, duplicate, timing
@@ -5037,9 +5104,127 @@ class LibraryStore:
             kept_sets.append(item)
         self.data["sets"] = kept_sets
 
+    def review_set_item(self, ident):
+        return next((s for s in self.data.get('review_sets', []) if s['id'] == ident), None)
+
+    def review_sets(self, owner):
+        with self.lock:
+            if not self.character(owner):
+                raise ValueError('Choose a character first.')
+            return {'sets': copy.deepcopy([s for s in self.data.get('review_sets', []) if s['character_id'] == owner])}
+
+    def _check_review_members(self, owner, members, review_id=None, regular_id=None):
+        selected = set(members)
+        for table, permitted in (('sets', regular_id), ('review_sets', review_id)):
+            for group in self.data.get(table, []):
+                if (group['character_id'] == owner and group['id'] != permitted
+                        and selected.intersection(group.get('media_ids', []))):
+                    raise ValueError(f'A selected file already belongs to “{group["name"]}”. Review its membership first.')
+
+    @TrackingJournal.action('manual')
+    def edit_review_set(self, ident, body):
+        with self.lock:
+            group = self.review_set_item(ident)
+            if not group:
+                raise KeyError('Set under review no longer available')
+            if body.get('review_revision') != group['review_revision']:
+                raise ValueError('This Set changed. Reopen Sets under review before editing it.')
+            owner = group['character_id']
+            raw = body.get('media_ids', group['media_ids'])
+            if not isinstance(raw, list):
+                raise ValueError('Choose the files for this Set.')
+            members = self._validate_set_media(owner, raw)
+            self._check_review_members(owner, members, ident, group.get('target_set_id'))
+            name = title_case_label(body.get('name', group['name']))
+            if not name:
+                raise ValueError('Enter a Set name.')
+            cover = body.get('cover_media_id', group.get('cover_media_id'))
+            source = body.get('cover_source', group.get('cover_source', 'unknown'))
+            if source not in ('manual', 'auto', 'unknown'):
+                raise ValueError('Invalid cover source.')
+            if cover not in members:
+                cover, source = next(iter(members), None), 'auto'
+            details = self._set_details(body.get('aliases'), body.get('colors'), body.get('notes'))
+            if 'categories' in body:
+                details['categories'] = self._validate_set_categories(owner, body['categories'])
+            name = self._unique_set_name(owner, name, ident)
+            group.update(details)
+            group.update(name=name, colors=set_name_colors(name, group.get('colors', [])), media_ids=members,
+                         cover_media_id=cover, cover_source=source, updated_at=now_iso(), review_revision=uuid.uuid4().hex)
+            self.save()
+            return copy.deepcopy(group)
+
+    @TrackingJournal.action('manual')
+    def hold_set_additions(self, ident, media_ids):
+        """Record proposed additions separately even when the destination is already a regular Set."""
+        with self.lock:
+            group = self.review_set_item(ident)
+            target = self.set_item(ident)
+            if not group and not target:
+                raise KeyError('Choose an existing Set.')
+            if not isinstance(media_ids, list) or not media_ids:
+                raise ValueError('Select files for this Set.')
+            owner = (group or target)['character_id']
+            members = self._validate_set_media(owner, media_ids)
+            current = set(target['media_ids']) if target else set()
+            additions = [mid for mid in members if mid not in current]
+            self._check_review_members(owner, additions, ident, ident if target else None)
+            if not additions and not group:
+                raise ValueError('These files already belong to the regular Set.')
+            if not group:
+                stamp = now_iso()
+                group = {'id':ident, 'target_set_id':ident, 'character_id':owner, 'kind':'set', 'name':target['name'],
+                         'media_ids':[], 'cover_source':'auto', 'categories':[], 'favorite':False, 'under_review':True,
+                         'confirmed_at':stamp, 'created_at':stamp}
+                self.data.setdefault('review_sets', []).append(group)
+            if self._append_review_members(group, additions):
+                self.save()
+            return copy.deepcopy(group)
+
+    @staticmethod
+    def _append_review_members(group, additions):
+        merged = list(dict.fromkeys(group['media_ids'] + additions))
+        if group['media_ids'] == merged:
+            return False
+        group.update(media_ids=merged, cover_media_id=group.get('cover_media_id') or merged[0],
+                     updated_at=now_iso(), review_revision=uuid.uuid4().hex)
+        return True
+
+    @TrackingJournal.action('manual')
+    def promote_review_set(self, ident, revision):
+        with self.lock:
+            held = self.review_set_item(ident)
+            regular = self.set_item(ident)
+            if not held:
+                if revision and regular and regular.get('promoted_review_revision') == revision:
+                    return copy.deepcopy(regular)
+                raise KeyError('Set under review no longer available')
+            if not revision or revision != held['review_revision']:
+                raise ValueError('This Set changed. Reopen Sets under review before promoting it.')
+            owner = held['character_id']
+            members = self._validate_set_media(owner, held['media_ids'])
+            target_id = held.get('target_set_id')
+            if bool(target_id) != bool(regular):
+                raise ValueError('The original Set changed. Review the held files before continuing.')
+            self._check_review_members(owner, members, ident, target_id)
+            stamp = now_iso()
+            if regular:
+                previous = set(regular['media_ids'])
+                members = [mid for mid in members if mid not in previous]
+                regular['media_ids'] = regular['media_ids'] + members
+            else:
+                regular = {key:value for key,value in held.items() if key not in ('review_revision','under_review')}
+                self.data['sets'].append(regular)
+            for mid in members:
+                self.media_item(mid)['set_added_at'] = stamp
+            regular.update(updated_at=stamp, promoted_at=stamp, promoted_review_revision=revision)
+            self.data['review_sets'].remove(held)
+            self.save()
+            return copy.deepcopy(regular)
+
     def _unique_set_name(self, character_id: str, name: str, except_set_id: str | None = None) -> str:
         names = {str(s.get("name", "")).strip().casefold()
-                 for s in self.data.get("sets", [])
+                 for s in (*self.data.get("sets", []), *self.data.get("review_sets", []))
                  if s.get("character_id") == character_id and s.get("kind", "set") == "set"
                  and s.get("id") != except_set_id}
         if name.casefold() not in names:
@@ -5049,7 +5234,7 @@ class LibraryStore:
         return f"{name} {suffix}"
 
     @TrackingJournal.action("manual")
-    def create_set(self, character_id: str, name: str, media_ids: list[Any], cover_media_id: Any = None, kind: str = "set", preserve_placement: bool = False, cover_source: Any = None, categories: Any = None, aliases: Any = None, colors: Any = None, notes: Any = None) -> dict[str, Any]:
+    def create_set(self, character_id: str, name: str, media_ids: list[Any], cover_media_id: Any = None, kind: str = "set", preserve_placement: bool = False, cover_source: Any = None, categories: Any = None, aliases: Any = None, colors: Any = None, notes: Any = None, *, under_review=False, review_id=None) -> dict[str, Any]:
         if kind != "set":
             raise ValueError("Only Sets are supported")
         name = title_case_label(name)
@@ -5060,12 +5245,22 @@ class LibraryStore:
             if not self.character(character_id):
                 raise KeyError("Character not found")
             categories = self._validate_set_categories(character_id, [] if categories is None else categories)
-            name = self._unique_set_name(character_id, name)
             members = self._validate_set_media(character_id, list(media_ids or []))
-            if kind == "set":
+            if under_review:
+                if review_id is not None and not re.fullmatch(r'[0-9a-f]{32}', str(review_id)):
+                    raise ValueError('Invalid review Set identity.')
+                existing = self.review_set_item(review_id)
+                if existing and existing['character_id'] == character_id and existing['media_ids'] == members:
+                    return copy.deepcopy(existing)
+                if existing or (review_id and self.set_item(review_id)):
+                    raise ValueError('This Set was already changed. Reopen Sets under review.')
+                self._check_review_members(character_id, members)
+            name = self._unique_set_name(character_id, name)
+            if not under_review:
                 self._detach_set_members(character_id, members)
             joined_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-            for media_id in members:
+            # Holding a shoot records its relationships without changing individual placement.
+            for media_id in ([] if under_review else members):
                 media = self.media_item(media_id)
                 was_in_main = self._in_main(media) if media else False
                 if media and (media.get("in_purgatory") or media.get("in_review")):
@@ -5096,9 +5291,12 @@ class LibraryStore:
             }
             item.update(details)
             item["colors"]=set_name_colors(name,item.get("colors",[]))
-            self.data.setdefault("sets", []).append(item)
+            if under_review:
+                item.update(id=review_id or item['id'], under_review=True, confirmed_at=stamp,
+                            review_revision=uuid.uuid4().hex)
+            self.data.setdefault("review_sets" if under_review else "sets", []).append(item)
             self.save()
-            return item
+            return copy.deepcopy(item) if under_review else item
 
     @TrackingJournal.action("manual")
     def update_set(self, set_id: str, name: Any = None, media_ids: Any = None, cover_media_id: Any = None, preserve_placement: bool = False, add_media_ids: Any = None, cover_source: Any = None, favorite: Any = None, categories: Any = None, remove_media_ids: Any = None, aliases: Any = None, colors: Any = None, notes: Any = None, in_purgatory: Any = None, possible_duo: Any = None, possible_evolution: Any = None) -> dict[str, Any]:
@@ -5232,6 +5430,9 @@ class LibraryStore:
             if not item:
                 raise KeyError("Set not found")
             self.data["sets"] = [s for s in self.data.get("sets", []) if s.get("id") != set_id]
+            held = self.review_set_item(set_id)
+            if held and held.pop('target_set_id', None):
+                held.update(updated_at=now_iso(), review_revision=uuid.uuid4().hex)
             self._release_set_members(item.get("media_ids", []))
             self.save()
             return {"ok": True, "set_id": set_id}
@@ -6086,6 +6287,10 @@ class MediaHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            if path == "/api/review-sets":
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._send_json(200, self.store.review_sets(query.get('character_id', [''])[0]))
+                return
             if path == "/api/rapid-review":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 self._send_json(200, self.store.rapid_queue(query.get('character_id', [''])[0]))
@@ -6131,7 +6336,7 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/checkpoints":
                 self._send_json(200,self.store.checkpoint_list());return
             if path == "/api/health":
-                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "set_preferences": True, "character_profiles": True, "image_set_battles": True, "outfit_matching": True, "outfit_library_scan": True, "photoshoot_matching": True, "persistent_rapid_review": True, "organizer_individual_imports": True, "set_examples": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
+                self._send_json(200, {"ok": True, "version": API_VERSION, "duplicate_review": 1, "standalone_library": True, "coordinated_updates": True, "independent_updates": True, "set_categories": True, "set_removal": True, "sets_under_review": True, "set_preferences": True, "character_profiles": True, "image_set_battles": True, "outfit_matching": True, "outfit_library_scan": True, "photoshoot_matching": True, "persistent_rapid_review": True, "organizer_individual_imports": True, "set_examples": True, "resolution_flags": True, "mixed_collections": True, "video_set_only": True, "chunked_uploads": True, "automatic_video_thumbnails": True, "undo_history": True, "replacement_flags": True, "featured_flags": True, "library_root": str(self.store.root)})
                 return
             if path == "/api/duplicate-review/catalog":
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -6336,15 +6541,15 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/sets/match-cancel":
                 self._send_json(200, self.store.outfit_matcher.cancel(str(self._read_json().get('id', ''))))
                 return
-            if path == "/api/sets/scan-assign":
-                self._send_json(200, self.store.outfit_matcher.assign_scan(self._read_json()))
+            if path in ("/api/sets/scan-assign", "/api/review-sets/scan-assign"):
+                self._send_json(200, self.store.outfit_matcher.assign_scan(self._read_json(), path.startswith('/api/review-sets/')))
                 return
-            if path in ("/api/sets/manual-search","/api/sets/manual-group"):
+            if path in ("/api/sets/manual-search","/api/sets/manual-group","/api/review-sets/manual-group"):
                 body=self._read_json()
-                self._send_json(200,self.store.manual_search(body) if path.endswith("manual-search") else self.store.manual_group(body))
+                self._send_json(200,self.store.manual_search(body) if path.endswith("manual-search") else self.store.manual_group(body, path.startswith('/api/review-sets/')))
                 return
-            if path == "/api/sets/matching-create":
-                self._send_json(200, self.store.outfit_matcher.create_from_matches(self._read_json()))
+            if path in ("/api/sets/matching-create", "/api/review-sets/matching-create"):
+                self._send_json(200, self.store.outfit_matcher.create_from_matches(self._read_json(), path.startswith('/api/review-sets/')))
                 return
             if path == "/api/sets/find-matches":
                 self._send_json(200, self.store.outfit_matcher.start(self._read_json()))
@@ -6356,8 +6561,22 @@ class MediaHandler(BaseHTTPRequestHandler):
                 body = self._read_json()
                 self._send_json(200, self.store.bulk_set_categories(str(body.get("character_id", "")), body.get("set_ids"), body.get("categories"), str(body.get("action", ""))))
                 return
-            if path == "/api/sets":
+            review = re.fullmatch(r"/api/review-sets/([0-9a-f]+)(?:/(add|promote))?", path)
+            if review:
                 body = self._read_json()
+                ident, action = review.groups()
+                if action == 'promote':
+                    result = self.store.promote_review_set(ident, body.get('review_revision'))
+                elif action == 'add':
+                    result = self.store.hold_set_additions(ident, body.get('media_ids'))
+                else:
+                    result = self.store.edit_review_set(ident, body)
+                self._send_json(200, result)
+                return
+            if path in ("/api/sets", "/api/review-sets"):
+                body = self._read_json()
+                if path == '/api/review-sets' and not isinstance(body.get('media_ids', []), list):
+                    raise ValueError('Choose the files for this Set.')
                 item = self.store.create_set(
                     str(body.get("character_id", "")),
                     str(body.get("name", "")),
@@ -6368,6 +6587,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     body.get("cover_source"),
                     body.get("categories"),
                     body.get("aliases"), body.get("colors"), body.get("notes"),
+                    under_review=path == '/api/review-sets', review_id=body.get('review_id'),
                 )
                 self._send_json(200, item)
                 return
@@ -6413,7 +6633,8 @@ class MediaHandler(BaseHTTPRequestHandler):
                     raise ValueError("Expected upload object")
                 self._send_json(200, self.store.chunk_upload(upload.group(1), upload.group(2), body))
                 return
-            if path == "/api/import/file":
+            held_upload = re.fullmatch(r'/api/review-sets/([0-9a-f]+)/import-file', path)
+            if path == "/api/import/file" or held_upload:
                 import_started = time.perf_counter()
                 fields = self._read_multipart()
                 multipart_done = time.perf_counter()
@@ -6439,7 +6660,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                     character_id,
                     list(categories) if isinstance(categories, list) else [],
                     {"kind": "url", "url": source_url} if source_url else {"kind": "local", "original_name": filename},
-                    content_type,
+                    content_type, review_set_id=held_upload.group(1) if held_upload else None,
                 )
                 finished = time.perf_counter()
                 debug_timing = {

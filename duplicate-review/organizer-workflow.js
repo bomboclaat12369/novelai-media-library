@@ -88,6 +88,7 @@ async function showTransfer(plan){
   const label=el('label'),input=el('input');input.type='checkbox';input.checked=value;input.onchange=()=>task(async()=>{change(input.checked);await previewTransfer({keepScope:true})});label.append(input,document.createTextNode(' '+labelText));scope.append(label);
  }
  transferDialog.append(scope);
+ if(plan.under_review_count)transferDialog.append(el('p','Staying in Workbench until promoted: '+plan.under_review_count+' in Sets under review.'));
  const list=el('div');list.style.cssText='max-height:40vh;overflow:auto';
  for(const g of plan.sets)list.append(el('p',g.name+' — '+g.action+' · '+g.count+' items'));
  const names={main:'Main',categories:'Selected categories',review:'Review first',purgatory:'Purgatory'};
@@ -206,14 +207,21 @@ async function openAutoSets(){
  const likelyGroups=button('Review likely groups',()=>task(openLikelyGroups));
  const splits=button('Review split Sets',()=>task(()=>openSplitReview()));
  const history=button('Match history',()=>task(()=>openManualBrowser(null,true)));
+ const heldSets=button('Sets under review',()=>{
+  matchDialog.close();$('search').value='';$('setsTab').click();
+  $('setFilter').value='under_review';$('setFilter').dispatchEvent(new Event('change',{bubbles:true}));
+ });
  let token=null,closed=false;
  matchDialog.onclose=()=>{closed=true;if(token)api('cancel-matching',{match_token:token}).catch(()=>{})};
  const close=button('Close',()=>matchDialog.close());
+ const holdLabel=el('label'),holdNew=el('input');holdNew.type='checkbox';
+ holdLabel.append(holdNew,document.createTextNode(' Keep new auto-matched Sets under review'));
  matchDialog.replaceChildren(el('h2','Auto-match Sets'),
   el('p','Match photos by outfit, scene details, and original post order. Workbench creates draft Sets and fills existing Sets. You can review each match under its destination Set.'),
-  status,actions);
+  holdLabel,status,actions);
  status.textContent=missing?data.match_analyzed+' photos have saved analysis. '+missing+' still need analysis.':'The saved visual analysis is ready.';
  async function run(analyze){
+  holdNew.disabled=true;
   actions.replaceChildren(close);
   try{
    await saveDraft();
@@ -246,7 +254,7 @@ async function openAutoSets(){
    if(progress.error)throw Error(progress.error);
    const matchToken=token;token=null;close.textContent='Close';
    status.textContent='Saving draft matches…';
-   const result=await api('auto_sets',{job:sourceJob,revision,match_token:matchToken});
+   const result=await api('auto_sets',{job:sourceJob,revision,match_token:matchToken,hold_for_review:holdNew.checked});
    const counts=result.auto_result;
    const position=captureSession();
    await refresh();
@@ -260,6 +268,7 @@ async function openAutoSets(){
    review.disabled=!counts.remaining;
    if(counts.held_fragments)status.textContent+=' '+counts.held_fragments+' possible split '+(counts.held_fragments===1?'group is':'groups are')+' waiting in Review split Sets.';
    actions.replaceChildren(matches,splits,likelyGroups,history,review,close);
+   if(data.sets.some(g=>g.under_review))close.before(heldSets);
   }catch(error){token=null;close.textContent='Close';status.textContent=error.message;actions.replaceChildren(close)}
  }
  if(missing)actions.append(button('Analyze and match',()=>task(()=>run(true)),'primary'));
@@ -268,6 +277,7 @@ async function openAutoSets(){
  if(data.match_stills)actions.append(likelyGroups);
  if(data.sets.length)actions.append(splits);
  actions.append(history);
+ if(data.sets.some(g=>g.under_review))actions.append(heldSets);
  actions.append(button('Review unmatched photos',()=>task(reviewUnmatched)),close);
  matchDialog.showModal();
 }

@@ -119,6 +119,24 @@ class OutfitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'already belongs'):
             self.m.create_from_matches({'job_id':result['id'],'media_ids':[self.purgatory['id']],'name':'Again'})
 
+    def test_held_scan_and_individual_suggestions_keep_review_and_regular_sets_separate(self):
+        self.add_ungrouped()
+        scan = self.scan()
+        search = self.run_search(media_id=self.main['id'])
+        assignment = {'job_id':scan['id'], 'media_id':self.purgatory['id'], 'set_id':self.second['id']}
+        held = self.m.assign_scan(assignment, under_review=True)
+        self.assertTrue(held['under_review'])
+        self.assertEqual(self.second['media_ids'], [self.b['id']])
+        self.assertTrue(self.purgatory['in_purgatory'])
+        with self.assertRaises(ValueError):
+            self.m.assign_scan(assignment)
+        group = self.m.create_from_matches({'job_id':search['id'], 'media_ids':[self.review['id']],
+            'query_media_id':self.main['id'], 'name':'New shoot'}, under_review=True)
+        self.assertEqual(set(group['media_ids']), {self.main['id'], self.review['id']})
+        self.assertTrue(self.review['in_review'])
+        self.assertNotIn(group['id'], [s['id'] for s in self.store.public_library()['sets']])
+        self.assertFalse(self.scan()['scan_results'])
+
     def test_scan_scope_cache_manual_assignment_and_stale_guard(self):
         self.add_ungrouped();before=self.store.db_path.read_bytes();result=self.scan()
         self.assertEqual({r['media_id'] for r in result['scan_results']},{self.main['id'],self.review['id'],self.purgatory['id']})

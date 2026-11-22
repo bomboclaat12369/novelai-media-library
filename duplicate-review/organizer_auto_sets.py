@@ -35,6 +35,7 @@ def remaining(organizer, groups=None):
 def exclusions(organizer, groups, state, db):
     ignored = set(state.get('selection', [])) | organizer.discarded
     ignored.update(i for g in groups.values() for i in g.get('removed_members', []))
+    ignored.update(i for g in groups.values() if g.get('under_review') for i in g['members'])
     rejected = {row[0] for row in db.execute('SELECT id FROM rejected WHERE scope=?', (organizer.scope,))}
     parked = set().union(*organizer.parked.values()) if organizer.parked else set()
     deferred = {r[0] for r in db.execute("SELECT id FROM posts WHERE scope=? AND status='deferred'", (organizer.scope,))}
@@ -120,7 +121,7 @@ class MatchPreparation:
 
 
 @tracking.journal().action('automatic')
-def apply_matches(organizer, state, db, prepared):
+def apply_matches(organizer, state, db, prepared, hold_new=False):
     groups=prepared.groups
     plan=prepared.plan
     before = {}
@@ -146,6 +147,8 @@ def apply_matches(organizer, state, db, prepared):
         ids = core['members']
         group = {'id':ident,'name':name,'members':ids,'auto_members':ids,'auto_pending':ids,
                  'created':stamp,'updated':stamp,'colors':[],'categories':[],'favorite':False,'library_id':None}
+        if hold_new:
+            organizer.set_review_status(db,group,True,'hold_new_auto_drafts')
         db.execute('INSERT INTO sets VALUES (?,?,?)',(organizer.scope,ident,json.dumps(group)))
         before[ident] = None
         if 'plan_key' in core:anchors[core['plan_key']]=ident
@@ -217,7 +220,9 @@ def review_page(organizer, body):
         if not ids:continue
         reviewed=set(g.get('auto_reviewed',[]))
         photos[gid]=ids
-        entries.append({'id':gid,'name':g['name'],'count':len(ids),'reviewed':len(reviewed.intersection(ids))})
+        entries.append({'id':gid,'name':g['name'],'count':len(ids),'reviewed':len(reviewed.intersection(ids)),
+                        'under_review':bool(g.get('under_review')),'members':len(members),
+                        'unconfirmed_in_set':len(members.intersection(g.get('auto_members',[]))-reviewed)})
     entries.sort(key=lambda e:(e['reviewed']==e['count'],e['name'].casefold(),e['id']))
     target=body.get('target')
     if target not in photos:target=entries[0]['id'] if entries else None

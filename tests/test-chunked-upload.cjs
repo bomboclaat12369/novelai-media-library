@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const {webcrypto, createHash} = require('node:crypto');
 const repo = path.resolve(__dirname,'..');
 const config = JSON.parse(fs.readFileSync(path.join(repo,process.env.NAI_RELEASE_CONFIG || 'release-userscript.json')));
-const source = fs.readFileSync(path.join(repo,config.parts.find(p=>p.endsWith('.review-core.txt'))),'utf8');
+const source = fs.readFileSync(path.join(repo,config.parts.find(p=>(p.endsWith('.review-core.txt') || p.endsWith('/review-core.js')))),'utf8');
 const code = source.slice(source.indexOf('  let chunkUploadsAvailable'),source.indexOf('  async function uploadFileResilient'));
 
 function fixture({stall=false, retry=false}={}) {

@@ -19,7 +19,12 @@ likelyStyle.textContent = `
  .likely-photos .match-photo img{height:145px}
  .likely-photos label{display:flex;gap:6px;align-items:center;padding-top:5px;cursor:pointer}
  .likely-photos label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- .likely-photos .omitted{opacity:.56}
+ .likely-photos .omitted{opacity:.65}
+ .likely-post-browser{margin:16px 0;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+ .likely-post-browser summary{cursor:pointer;font-weight:600}
+ .likely-post-controls,.likely-post-caption{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:.65em 0}
+ .likely-post-controls select{min-width:0;max-width:100%}.likely-source button{margin-left:.6em}
+ .likely-photos .unavailable{color:var(--muted);font-size:.8em}
  @media(max-width:640px){.likely-photos{grid-template-columns:repeat(2,minmax(0,1fr))}.likely-header,.likely-footer{padding:8px}.likely-photos .match-photo img{height:108px}}
 `;
 document.head.append(likelyStyle);
@@ -118,7 +123,7 @@ async function openLikelyGroups(){
    return;
   }
   status.textContent='Group '+(index+1)+' of '+page.total+' · '+page.photos_left+' suggested photos left';
-  const state=choices.get(page.key)||{selected:new Set(page.photos.map(p=>p.id)),target:page.destination};
+  const state=choices.get(page.key)||{selected:new Set(page.photos.map(p=>p.id)),target:page.destination,details:new Map()};
   if(!state.named)state.name=page.new_name;
   choices.set(page.key,state);
   const destination=el('div',undefined,'likely-destination'), label=el('label','Destination Set');
@@ -127,15 +132,33 @@ async function openLikelyGroups(){
   const candidates=new Set([page.proposed_target,...page.alternatives]);
   for(const set of data.sets.filter(s=>!s.in_purgatory).sort((a,b)=>Number(candidates.has(b.id))-Number(candidates.has(a.id))||a.name.localeCompare(b.name))){
    const note=set.id===page.proposed_target?' · suggested':candidates.has(set.id)?' · possible match':'';
-   picker.add(new Option(set.name+note,set.id));
+   picker.add(new Option(set.name+note+(set.under_review?' · under review':''),set.id));
   }
   picker.value=state.target;
   picker.onchange=()=>task(async()=>{state.target=picker.value;await load(index,state.target)});
   destination.append(label,picker);
+  let name;
   if(!state.target){
-   const name=el('input');name.value=state.name;name.setAttribute('aria-label','New Set name');
-   name.maxLength=250;name.oninput=()=>{state.name=name.value;state.named=!!name.value.trim()};destination.append(name);
+   name=el('input');name.value=state.name;name.setAttribute('aria-label','New Set name');
+   name.maxLength=250;name.oninput=()=>{state.name=name.value;state.named=true;if(state.details.has(''))state.details.get('').name=name.value};destination.append(name);
   }
+  destination.append(button('Set details',()=>{
+   const target=state.target, previous=state.details.get(target);
+   openColors(target);
+   if(!target)$('setEditName').value=state.name;
+   if(previous){
+    $('setEditName').value=previous.name;
+    $('setColors').value=previous.colors.join(', ');
+    renderCategoryChoices(previous.categories);
+    $('setFavorite').checked=previous.favorite;
+    if(target)$('setPurgatory').checked=previous.in_purgatory;
+   }
+   $('saveSetColors').textContent='Apply to group';
+   applyPendingSetDetails=values=>{
+    state.details.set(target,values);
+    if(!target){state.named=true;state.name=values.name;name.value=values.name}
+   };
+  }));
   body.append(destination);
   body.append(el('p','Uncheck any photos that don’t belong. Approving saves the checked photos to your Workbench draft.','muted'));
   if(page.source_reason)body.append(el('p',page.source_reason));
@@ -149,27 +172,77 @@ async function openLikelyGroups(){
   for(const photo of page.photos){
    if(!sections.has(photo.source_key)){
     const heading=el('h3',photo.source_label||'Source post','likely-source'),grid=el('div',undefined,'likely-photos');
+    if(page.source_posts?.some(post=>post.id===photo.source_key)){
+     const viewPost=button('View post',()=>openPost(photo.source_key),'small');
+     viewPost.setAttribute('aria-label','View post '+photo.source_label);heading.append(viewPost);
+    }
     body.append(heading,grid);sections.set(photo.source_key,grid);
    }
+   sections.get(photo.source_key).append(photoChoice(photo,page.photos));
+  }
+  function photoChoice(photo,list){
    const figure=el('figure',undefined,'match-photo'), check=el('input');
-   check.type='checkbox';check.checked=state.selected.has(photo.id);
-   const caption=el('label'), text=el('span',(photo.source_position?'#'+photo.source_position+' · ':'')+photo.name);
-   text.title=photo.name;caption.append(check,text);
+   check.type='checkbox';check.checked=state.selected.has(photo.id);check.disabled=!!photo.unavailable_reason;
+   const caption=el('label'), text=el('span',(photo.source_position?'#'+photo.source_position+' · ':'')+(photo.display_name||photo.name));
+   text.title=photo.display_name||photo.name;caption.append(check,text);
    check.setAttribute('aria-label','Include '+photo.name);
    figure.classList.toggle('omitted',!check.checked);
    check.onchange=()=>{
     if(check.checked)state.selected.add(photo.id);else state.selected.delete(photo.id);
     figure.classList.toggle('omitted',!check.checked);updateApprove();
    };
-   figure.append(photoButton(photo,page.photos,600),caption);sections.get(photo.source_key).append(figure);
+   figure.append(photoButton(photo,list,600),caption);
+   if(photo.unavailable_reason)figure.append(el('small',photo.unavailable_reason,'unavailable'));
+   return figure;
   }
+  const browser=el('details',undefined,'likely-post-browser'), postPicker=el('select');
+  const controls=el('div',undefined,'likely-post-controls'), postStatus=el('span'), extraGrid=el('div',undefined,'likely-photos');
+  const posts=page.source_posts||[], groupKey=page.key;
+  let request=0, displayed='', currentPage=null;
+  postPicker.setAttribute('aria-label','Matching post');
+  for(const post of posts)postPicker.add(new Option(post.label,post.id));
+  if(!posts.some(p=>p.id===state.post))state.post=posts[0]?.id;
+  postPicker.value=state.post||'';
+  const back=button('Previous photos',()=>showPost(currentPage.offset-currentPage.limit),'small');
+  const more=button('Next photos',()=>showPost(currentPage.offset+currentPage.limit),'small');
+  postStatus.setAttribute('role','status');controls.append(postPicker,back,more,postStatus);
+  browser.append(el('summary','Browse matching posts'),controls,extraGrid);
+  if(posts.length)body.append(browser);
+  async function showPost(at){
+   const source=postPicker.value, serial=++request;
+   state.post=source;state.postOffset=at;displayed=source;
+   back.disabled=more.disabled=true;extraGrid.replaceChildren();postStatus.textContent='Loading photos…';
+   try{
+    const result=await api('likely-groups',{job,session,key:groupKey,source_post:source,post_offset:at});
+    if(serial!==request||!browser.isConnected||closed)return;
+    currentPage=result;state.postOffset=result.offset;
+    postStatus.textContent=result.total?(result.offset+1)+'–'+(result.offset+result.photos.length)+' of '+result.total+' other photos':'No other photos in this post.';
+    back.disabled=!result.offset;more.disabled=result.offset+result.limit>=result.total;
+    for(const photo of result.photos)extraGrid.append(photoChoice(photo,result.photos));
+   }catch(error){if(serial===request&&browser.isConnected){postStatus.textContent=error.message;displayed='';extraGrid.append(button('Retry',()=>showPost(at)))}}
+  }
+  function openPost(source){
+   const changed=state.post!==source;
+   postPicker.value=source;browser.open=true;
+   if(changed||!displayed)showPost(changed?0:state.postOffset||0);
+   browser.scrollIntoView({block:'nearest'});postPicker.focus();
+  }
+  browser.ontoggle=()=>{
+   state.browsing=browser.open;
+   if(browser.open&&!displayed)showPost(state.postOffset||0);
+  };
+  postPicker.onchange=()=>showPost(0);
+  if(state.browsing)browser.open=true;
   const dismiss=button('Dismiss group',()=>task(()=>decide('dismiss_likely')));
   const approve=button('Approve group',()=>task(()=>decide('approve_likely')),'primary');
-  footer.append(dismiss,approve);
+  const hold=button('Approve and hold for review',()=>task(()=>decide('approve_likely',true)));
+  hold.title='Save the checked photos to this Set and keep the Set in Workbench until promoted.';
+  footer.append(dismiss,hold,approve);
   function updateApprove(){
    const count=state.selected.size;
-   approve.textContent=count===page.photos.length?'Approve group ('+count+')':'Approve selected ('+count+')';
-   approve.disabled=count<(state.target?1:2);
+   const entireGroup=count===page.photos.length&&page.photos.every(photo=>state.selected.has(photo.id));
+   approve.textContent=(entireGroup?'Approve group (':'Approve selected (')+count+')';
+   hold.disabled=approve.disabled=count<(state.target?1:2);
   }
   updateApprove();
   const explanation=el('details'),cal=page.training;
@@ -178,9 +251,10 @@ async function openLikelyGroups(){
    ' separate Sets, the first cross-post reference matched the shoot '+Math.round(100*cal.baseline)+'% before tuning and '+
    Math.round(100*cal.candidate)+'% after tuning, averaged per Set.':'Workbench is using the standard outfit and setting weights. It checks possible adjustments using confirmed Sets from different posts.';
   explanation.append(el('p',wording));body.append(explanation);
-  async function decide(action){
+  async function decide(action,holdForReview=false){
    try{
-    const result=await mutate(action,{session,key:page.key,ids:[...state.selected],target:state.target,name:state.name});
+    const result=await mutate(action,{session,key:page.key,ids:[...state.selected],target:state.target,
+     name:state.name,set_details:state.details.get(state.target),hold_for_review:holdForReview});
    if(!result)return;
     dirty=true;choices.delete(page.key);
     if(closed){await refreshPost();return}

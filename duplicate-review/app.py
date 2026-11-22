@@ -54,10 +54,11 @@ def make_server(engine, port=0, token=None):
     update_js = (Path(__file__).parent / 'update-ui.js').read_text(encoding='utf-8')
     update_tag = '<script nonce="__TOKEN__">'+update_js+'</script>'
     html = html.replace('</body>',update_tag+'</body>')
-    bulk_html = bulk_html.replace('</body>',update_tag+'</body>')
+    bulk_review_js = (Path(__file__).parent/'bulk'/'set-review.js').read_text(encoding='utf-8')
+    bulk_html = bulk_html.replace('</body>','<script nonce="__TOKEN__">'+bulk_review_js+'</script>'+update_tag+'</body>')
     organizer_html = organizer_html.replace('__UPDATER__',update_js)
     organizer_html = organizer_html.replace('__ORGANIZER_WORKFLOW__',(Path(__file__).parent/'missing-files.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-workflow.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-search.js').read_text(encoding='utf-8'))
-    review_scripts = ('organizer-session.js', 'organizer-match-review.js', 'organizer-likely.js', 'organizer-splits.js')
+    review_scripts = ('organizer-session.js', 'organizer-match-review.js', 'organizer-likely.js', 'organizer-splits.js','organizer-set-decisions.js')
     organizer_html = organizer_html.replace('__ORGANIZER_SESSION__','\n'.join((Path(__file__).parent/name).read_text(encoding='utf-8') for name in review_scripts))
 
     autofill_js=(Path(__file__).parent/'no-autofill.js').read_text(encoding='utf-8')
@@ -165,7 +166,7 @@ def make_server(engine, port=0, token=None):
                 if url.path == '/api/bulk/context':
                     return self.send(200, bulk.context())
                 if url.path == '/api/bulk/group':
-                    return self.send(200, bulk.detail(params['id'][0]))
+                    return self.send(200, organizer.evaluation_detail(params['id'][0]))
                 if url.path == '/api/bulk/origin-audit':
                     return self.send(200, bulk.origin_audit(int(params['offset'][0]) if 'offset' in params else None,params.get('q',[''])[0],int(params.get('page',[0])[0]),params.get('mode',['suggested'])[0],params.get('filter',['all'])[0],params.get('target',[None])[0]))
                 if url.path == '/api/bulk/neighbors':
@@ -313,6 +314,8 @@ def make_server(engine, port=0, token=None):
                     result = bulk.split(body)
                 elif path == '/api/bulk/review':
                     result = bulk.review(body)
+                elif path == '/api/bulk/review-set':
+                    result = organizer.review_evaluation(body)
                 elif path == '/api/scan':
                     engine.start(body.get('incoming', []), body.get('reference', []), body.get('mode', 'balanced'),
                                  body.get('library_character',''), body.get('library_id',''), body.get('workers',8), body.get('scan_kind','folders'))

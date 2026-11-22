@@ -70,7 +70,13 @@ class IndividualHTTPTests(unittest.TestCase):
         self.engine.library=LibraryClient(self.library_server.server_port);bulk.current['config']['character_id']=self.owner['id'];bulk.persist()
         self.server=make_server(self.engine,token='test-solo');self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
     def tearDown(self):
-        self.server.shutdown();self.server.server_close();self.thread.join();self.library_server.shutdown();self.library_server.server_close();self.library_thread.join();self.temp.cleanup()
+        self.server.shutdown();self.server.server_close();self.thread.join()
+        self.library_server.shutdown();self.library_server.server_close();self.library_thread.join()
+        if self.store._thumbnail_worker:
+            self.store._thumbnail_queue.join()
+            self.store._thumbnail_queue.put(None)
+            self.store._thumbnail_worker.join(timeout=5)
+        self.temp.cleanup()
     def request(self,route,body=None,raw=False):
         request=Request('http://127.0.0.1:'+str(self.server.server_port)+'/api/organizer/'+route,data=json.dumps(body).encode() if body is not None else None,headers={'X-Review-Token':'test-solo','Content-Type':'application/json'})
         with urlopen(request) as response:return response.read() if raw else json.load(response)
@@ -86,6 +92,97 @@ class IndividualHTTPTests(unittest.TestCase):
         self.assertTrue(all(m['in_all'] and m['favorite'] for m in self.store.data['media']));self.assertFalse(self.request('state')['individuals'])
         self.assertTrue(self.server.organizer.individual_imports(include_applied=True)[0]['applied_at']);self.assertTrue(result['checkpoint'])
         self.assertTrue(all(Path(self.server.organizer.catalog[i]['path']).is_file() for i in self.ids[2:5]))
+
+    def test_set_review_stays_local_through_import_and_promotes_same_draft(self):
+        org=self.server.organizer;job=self.request('state')['job']
+        def decide(action,**fields):
+            return self.request(action,dict(job=job,revision=org.state()['revision'],**fields))
+        photos=self.ids[6:10]
+        result=decide('save',ids=photos[:3],name='Window shoot',favorite=True,colors=['blue'],hold_for_review=True)
+        group=next(g for g in result['sets'] if g['name']=='Window Shoot')
+        gid=group['id']
+        decide('save',ids=photos[3:],target=gid)
+        self.assertTrue(org.sets()[gid]['under_review'])
+        self.assertEqual(org.sets()[gid]['members'],photos)
+        self.assertEqual(org.manual_search({'source':'inventory','placement':'under_review','kind':'sets','job':job})['rows'][0]['id'],gid)
+        self.assertFalse({gid}.intersection(g['id'] for g in org.manual_search({'source':'inventory','placement':'main','kind':'sets','job':job})['rows']))
+        decide('queue_individuals',ids=photos[:1],options={'destination':'main'},character_id=self.owner['id'])
+        plan=self.request('transfer-preview',{'job':job})
+        self.assertEqual((plan['under_review_count'],plan['sets'],[r['id'] for r in plan['imports']]),(1,[],photos[:1]))
+        exported=org.export()
+        direct=self.store.organizer_preview({'character_id':self.owner['id'],'draft':exported})
+        self.assertFalse(direct['sets'])
+        for r in plan['imports']:self.request('transfer-import',{'job':job,'token':plan['token'],'id':r['id']})
+        self.request('transfer-apply',{'job':job,'token':plan['token']})
+        self.assertEqual(len(self.store.data['media']),1)
+        self.assertFalse(self.store.data['sets'])
+        decide('set_review',target=gid,under_review=False)
+        with self.assertRaisesRegex(ValueError,'Preview again'):
+            org.transfer('apply',{'job':job,'token':plan['token']})
+        eligible=self.request('transfer-preview',{'job':job})
+        self.assertEqual([s['name'] for s in eligible['sets']],['Window Shoot'])
+        decide('undo')
+        with self.assertRaisesRegex(ValueError,'Preview again'):
+            org.transfer('import',{'job':job,'token':eligible['token'],'id':photos[1]})
+        decide('set_review',target=gid,under_review=False)
+        final=self.request('transfer-preview',{'job':job})
+        for r in final['imports']:self.request('transfer-import',{'job':job,'token':final['token'],'id':r['id']})
+        receipt=self.request('transfer-apply',{'job':job,'token':final['token']})
+        saved=self.store.set_item(receipt['mapping'][gid])
+        self.assertTrue(saved['favorite'])
+        self.assertEqual(len(saved['media_ids']),4)
+        self.assertEqual(org.sets()[gid]['members'],photos)
+        self.assertEqual(org.sets()[gid]['colors'],group['colors'])
+        with self.assertRaisesRegex(ValueError,'reached the Library'):org.mutate('undo',{'job':job,'revision':org.state()['revision']})
+        self.assertIn('decision.set_review_status',{e['kind'] for e in org.export()['tracking']['events']})
+
+    def test_holding_a_move_preserves_previously_imported_memberships(self):
+        org=self.server.organizer;job=self.request('state')['job']
+        def act(action,**fields):
+            return org.mutate(action,dict(job=job,revision=org.state()['revision'],**fields))
+        def transfer():
+            plan=org.transfer('preview',{'job':job})
+            for row in plan['imports']:org.transfer('import',{'job':job,'token':plan['token'],'id':row['id']})
+            return org.transfer('apply',{'job':job,'token':plan['token']})
+        photos=self.ids[6:9]
+        act('save',ids=photos,name='Original shoot')
+        original=next(iter(transfer()['mapping'].values()))
+        previous=list(self.store.set_item(original)['media_ids'])
+        move=dict(ids=photos[:1],name='Possible second shoot',hold_for_review=True)
+        decision=act('save',**move)
+        self.assertTrue(decision['confirmation_required'])
+        result=act('save',**move,membership_confirmation=decision['membership_confirmation'])
+        gid=next(g['id'] for g in result['sets'] if g.get('under_review'))
+        act('queue_individuals',ids=photos[:1],options={'destination':'main'},character_id=self.owner['id'])
+        transfer()
+        self.assertEqual(self.store.set_item(original)['media_ids'],previous)
+        self.assertEqual(len(self.store.data['sets']),1)
+        act('set_review',target=gid,under_review=False)
+        second=transfer()['mapping'][gid]
+        self.assertEqual(self.store.set_item(second)['media_ids'],previous[:1])
+        self.assertEqual(self.store.set_item(original)['media_ids'],previous[1:])
+
+    def test_library_held_files_are_protected_in_workbench_matching(self):
+        from organizer_auto_sets import matching_inputs
+        org=self.server.organizer;org.summary();photos=self.ids[6:9]
+        mids=[]
+        for ident in photos:
+            path=Path(org.catalog[ident]['path'])
+            media,_=self.store.import_bytes(path.read_bytes(),path.name,self.owner['id'],[],{},'image/jpeg')
+            mids.append(media['id'])
+        held=self.engine.library.request('/api/review-sets',{'character_id':self.owner['id'],'name':'Native review','media_ids':mids})
+        self.assertNotIn(held['id'],[g['id'] for g in self.engine.library.request('/api/library')['sets']])
+        org.refresh_library_placement(force=True)
+        with org.db() as db:
+            groups,excluded,_=matching_inputs(org,org.state(),db)
+        self.assertTrue(set(photos)<=excluded)
+        self.assertNotIn(held['id'],{g.get('library_id') for g in groups.values()})
+        self.engine.library.request('/api/review-sets/'+held['id']+'/promote',{'review_revision':held['review_revision']})
+        org.refresh_library_placement(force=True)
+        with org.db() as db:
+            _,excluded,_=matching_inputs(org,org.state(),db)
+        self.assertTrue(set(photos)<=excluded)
+        self.assertEqual(org.library_placement['set_ids_by_sha'][org.catalog[photos[0]]['sha']],{held['id']})
 
     def test_missing_runtime_capability_blocks_before_copy(self):
         org=self.server.organizer;state=org.summary();org.mutate('queue_individuals',{'job':state['job'],'revision':state['state']['revision'],'ids':[self.ids[3]],'options':{},'character_id':self.owner['id']})

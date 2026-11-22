@@ -185,7 +185,7 @@ test('a second payload execution cannot create a second library host', () => {
   const source = read(config.parts.find(p => /userscript-.*\.part01\.txt$/.test(p)));
   assert.match(source, /const existingHost = document\.getElementById\('nai-media-host'\)/);
   assert.match(source, /naiMediaDuplicateSuppressed/);
-  assert.match(source, /return;\n  }\n  document\.documentElement\.dataset\.naiMediaPayloadInstance/);
+  assert.match(source, /return;\r?\n  }\r?\n  document\.documentElement\.dataset\.naiMediaPayloadInstance/);
 });
 
 test('the active drag cleanup layer does not synthesize page-wide drag events', () => {
@@ -210,7 +210,7 @@ test('the UI patches reset viewer state and expose bulk image editing', () => {
   assert.match(ui, /All \$\{count\} files in this Rapid Review queue are shown/);
   assert.doesNotMatch(ui, /Permanently delete/);
   const release = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-standalone.json'));
-  const review = read(release.parts.find(p => p.endsWith('.review-core.txt')));
+  const review = read(release.parts.find(p => (p.endsWith('.review-core.txt') || p.endsWith('/review-core.js'))));
   assert.doesNotMatch(review, /\? Review/);
   assert.match(review, /setTextIfChanged\(review, `Review /);
   assert.doesNotMatch(review, /naiFavVideosCat270/);
@@ -224,7 +224,7 @@ test('the UI patches reset viewer state and expose bulk image editing', () => {
 // Exercise the production queue functions, including the DOM attachment guard.
 function reviewQueueFixture() {
   const release = JSON.parse(read(process.env.NAI_RELEASE_CONFIG || 'release-standalone.json'));
-  const source = read(release.parts.find(p => p.endsWith('.review-core.txt')));
+  const source = read(release.parts.find(p => (p.endsWith('.review-core.txt') || p.endsWith('/review-core.js'))));
   class Element {
     constructor(tag) { this.tagName = tag; this.children = []; this.listeners = {}; this.dataset={}; this.style={setProperty(){}}; }
     get isConnected() { return this.connected === true || !!this.parent?.isConnected; }

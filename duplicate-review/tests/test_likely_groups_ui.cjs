@@ -5,7 +5,7 @@ const {createInterface} = require('node:readline');
 const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/playwright');
 
 (async()=>{
-  const server=spawn(process.env.NAI_PYTHON||'python3',['duplicate-review/tests/serve_organizer.py','--likely-sets'],{stdio:['ignore','pipe','inherit']});
+  const server=spawn(process.env.NAI_PYTHON||'python3',['duplicate-review/tests/serve_organizer.py','--likely-sets','--likely-post-details'],{stdio:['ignore','pipe','inherit']});
   let browser;
   try{
     const lines=createInterface({input:server.stdout});
@@ -40,6 +40,17 @@ const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/play
     assert(all>=3);
     await dialog.getByRole('textbox',{name:'New Set name'}).fill('Cross post test');
     await checks.last().uncheck();
+    await dialog.getByRole('button',{name:'Approve and hold for review'}).click();
+    await page.waitForFunction(()=>data.sets.some(s=>s.name==='Cross Post Test'&&s.under_review)&&!busy);
+    assert.equal(await page.evaluate(()=>data.sets.find(s=>s.name==='Cross Post Test').members.length),all-1);
+    await dialog.getByRole('button',{name:'Undo last review'}).click();
+    await page.waitForFunction(()=>!data.sets.some(s=>s.name==='Cross Post Test')&&!busy);
+    while(await picker.inputValue()!==''){
+      await dialog.getByRole('button',{name:'Next group'}).click();
+      await page.waitForFunction(()=>!busy);
+    }
+    await dialog.getByRole('textbox',{name:'New Set name'}).fill('Cross post test');
+    await checks.last().uncheck();
     await dialog.getByRole('button',{name:'Approve selected ('+(all-1)+')',exact:true}).click();
     await page.waitForFunction(()=>data.sets.some(s=>s.name==='Cross Post Test')&&!busy);
     const saved=await page.evaluate(()=>data.sets.find(s=>s.name==='Cross Post Test'));
@@ -47,7 +58,41 @@ const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/play
     assert(!saved.auto_members?.length);
     await dialog.getByRole('button',{name:'Undo last review'}).click();
     await page.waitForFunction(()=>!data.sets.some(s=>s.name==='Cross Post Test')&&!busy);
-    const status=dialog.getByRole('status');
+    await picker.selectOption('');
+    await page.waitForFunction(()=>!busy);
+    const proposed=await dialog.locator('.match-photo input:checked').count();
+    await dialog.getByRole('button',{name:/^View post /}).first().click();
+    const postBrowser=dialog.locator('.likely-post-browser');
+    const extra=postBrowser.getByRole('checkbox',{name:'Include Extra portrait.jpg'});
+    await extra.waitFor();assert.equal(await extra.isChecked(),false);
+    await postBrowser.getByRole('button',{name:'Enlarge Extra portrait.jpg'}).click();
+    await page.locator('#viewerClose').click();
+    await extra.check();
+    const posts=postBrowser.getByRole('combobox',{name:'Matching post'});
+    const other=await posts.evaluate(e=>[...e.options].find(o=>o.value!==e.value)?.value);
+    if(other){await posts.selectOption(other);await extra.waitFor();assert(await extra.isChecked())}
+    await dialog.getByRole('button',{name:'Set details',exact:true}).click();
+    const details=page.locator('#colorDetails');
+    await details.getByRole('textbox',{name:'Set name',exact:true}).fill('Cancelled edit');
+    await details.getByRole('button',{name:'Cancel'}).click();
+    assert.notEqual(await dialog.getByRole('textbox',{name:'New Set name'}).inputValue(),'Cancelled edit');
+    await dialog.getByRole('button',{name:'Set details',exact:true}).click();
+    await details.getByRole('textbox',{name:'Set name',exact:true}).fill('Post approval');
+    await details.locator('#setFavorite').check();
+    await details.locator('#setColors').fill('Ivory');
+    await details.locator('#newSetCategory').fill('Editorial');
+    await details.getByRole('button',{name:'Create',exact:true}).click();
+    await details.getByRole('checkbox',{name:'Editorial'}).waitFor();
+    await details.getByRole('button',{name:'Apply to group'}).click();
+    assert(!await page.evaluate(()=>data.sets.some(s=>s.name==='Post Approval')));
+    await dialog.getByRole('button',{name:'Approve selected ('+(proposed+1)+')',exact:true}).click();
+    await page.waitForFunction(()=>data.sets.some(s=>s.name==='Post Approval')&&!busy);
+    const custom=await page.evaluate(()=>data.sets.find(s=>s.name==='Post Approval'));
+    assert.equal(custom.members.length,proposed+1);assert(custom.favorite);
+    assert.deepEqual(custom.colors,['Ivory']);assert.equal(custom.categories.length,1);
+    await dialog.getByRole('button',{name:'Undo last review'}).click();
+    await page.waitForFunction(()=>!data.sets.some(s=>s.name==='Post Approval')&&!busy);
+    const status=dialog.locator('.likely-status');
     const first=await status.textContent();
     await dialog.getByRole('button',{name:'Dismiss group'}).click();
     await page.waitForFunction(()=>!busy);
@@ -78,6 +123,6 @@ const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/play
     assert(await dialog.evaluate(d=>d.scrollWidth<=d.clientWidth+2));
     await page.waitForLoadState('networkidle');
     assert.deepEqual(errors,[]);
-    console.log('Verified cross-post approval, photo exclusions, previews, destinations, Undo, dismissal, both ranges and mobile layout.');
+    console.log('Verified matching-post browsing, preview, selections, Set details, approval, Undo, review ranges and mobile layout.');
   }finally{if(browser)await browser.close();server.kill()}
 })().catch(err=>{console.error(err);process.exitCode=1});

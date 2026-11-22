@@ -77,18 +77,21 @@ async function openSplitReview(start='',afterChange=null){
   if(p.right.can_retire)keep.add(new Option(p.left.name,p.left.id));
   if(!p.fragment&&p.left.can_retire)keep.add(new Option(p.right.name,p.right.id));
   keep.value=p.keep;label.append(keep);
+  const holdLabel=el('label'),hold=el('input');hold.type='checkbox';
+  holdLabel.append(hold,document.createTextNode(p.fragment?' Hold resulting Set for review':' Hold resulting Set(s) for review'));
+  holdLabel.title=p.fragment?'Applies to the Set you create or add to.':'Keeping the shoots separate holds both Sets. Combining them holds the combined Set.';
   async function decide(action){
    if(saving)return;saving=true;for(const b of actions.querySelectorAll('button'))b.disabled=true;
    try{
     if(data.state.revision!==p.revision)throw Error('The collection changed. Reopen this comparison.');
     const chosen=keep.selectedOptions[0]?.textContent;
-    await mutate(action,{left:p.left.id,right:p.right.id,keep:keep.value,stamp:p.stamp});
+    await mutate(action,{left:p.left.id,right:p.right.id,keep:keep.value,stamp:p.stamp,hold_for_review:hold.checked});
     dirty=true;left=right=start='';resetPages();
     notice=action==='combine_split'?'Combined in '+chosen+'.':'Saved as separate shoots.';
     await render();
    }catch(e){status.textContent=e.message}finally{saving=false;for(const b of actions.querySelectorAll('button'))b.disabled=false}
   }
-  actions.append(label,button(p.fragment?'Add group to Set':'Combine Sets',()=>task(()=>decide('combine_split')),'primary'),
+  actions.append(label,holdLabel,button(p.fragment?'Add group to Set':'Combine Sets',()=>task(()=>decide('combine_split')),'primary'),
                  button(p.fragment?'Create separate Set':'Keep separate',()=>task(()=>decide('separate_split'))));
   body.append(actions);
  }

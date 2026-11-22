@@ -54,12 +54,26 @@ async function openMatchReview(period='all'){
   body.replaceChildren(tools);
   if(!page.sets.length){status.textContent='No current matches in this view.';return}
   const picker=el('select');picker.setAttribute('aria-label','Destination Set');
-  for(const s of page.sets)picker.add(new Option(s.name+' · '+s.count,s.id));
+  for(const s of page.sets)picker.add(new Option(s.name+' · '+s.count+(s.under_review?' · under review':''),s.id));
   picker.value=target;picker.onchange=()=>task(async()=>{target=picker.value;offset=0;await render()});
   tools.append(picker,button('Open full Set',()=>task(async()=>{jumping=true;matchedDialog.close();await open('set',target)})));
   tools.append(button('Compare with another Set',()=>task(()=>openSplitReview(target,async()=>{dirty=true;await render()}))));
   const selected=page.sets.find(s=>s.id===target);
   body.append(el('h3',selected.name));
+  const decision=el('div',undefined,'match-tools');
+  if(selected.under_review)decision.append(el('span','Set under review'));
+  if(!selected.under_review||selected.unconfirmed_in_set){
+   const hold=button('Confirm Set and hold for review',()=>task(()=>setPlacement(true)));
+   hold.title='Confirm the whole Set ('+selected.members+' photos) and keep it in Workbench until promoted.';
+   decision.append(hold);
+  }
+  if(selected.under_review)decision.append(button('Promote to regular Set',()=>task(()=>setPlacement(false))));
+  body.append(decision);
+  if(selected.members>page.photos.length)decision.append(el('small','Whole Set · '+selected.members+' photos','muted'));
+  async function setPlacement(held){
+   try{await mutate('set_review',{target,under_review:held,match_review:true});dirty=true;await render()}
+   catch(e){status.textContent=e.message}
+  }
   const openPhoto=(photo,list)=>{
    for(const item of list)images.set(item.id,item);
    viewerIds=list.map(i=>i.id);viewerAt=viewerIds.indexOf(photo.id);drawViewer();$('viewer').showModal();

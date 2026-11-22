@@ -1,4 +1,14 @@
-LOCAL DUPLICATE REVIEW 2.0.41
+LOCAL DUPLICATE REVIEW 2.0.42
+
+NEW IN 2.0.42 — SETS UNDER REVIEW
+- In a post, select the photos, choose or name a Set, and click Save for
+  review. In Review matched photos, Confirm Set and hold for review keeps
+  the whole shoot together. Review likely groups, split decisions and the
+  bulk evaluation screen also offer a hold option.
+- Open Sets and choose Sets under review to revisit a shoot. Promote to
+  regular Set makes the same draft eligible for your next Import to library.
+  The import preview shows how many Sets are staying in Workbench. You can
+  still queue an individual photo from one of those shoots for Main.
 
 NEW IN 2.0.41 — MATCH SHOOTS ACROSS CHANGES IN FRAMING
 - Match photos can recognize one shoot across wide views and tight crops in

@@ -154,8 +154,10 @@ class Organizer:
         self.matrix=np.stack([self.vector_by_id[i] for i in self.vector_ids]) if self.vector_ids else np.zeros((0,2304),np.float32)
         self.order_cache={}
 
-    def state(self):
-        with self.db() as db:row=db.execute('SELECT data FROM state WHERE scope=?',(self.scope,)).fetchone()
+    def state(self,db=None):
+        if db is None:
+            with self.db() as connection:return self.state(connection)
+        row=db.execute('SELECT data FROM state WHERE scope=?',(self.scope,)).fetchone()
         return json.loads(row[0]) if row else {'revision':0,'selection':[]}
 
     def put_state(self,db,state):
@@ -403,8 +405,9 @@ class Organizer:
                 main[digest]=main.get(digest,False) or bool(visible)
                 if row.get('in_review'):review.add(digest)
                 if row.get('in_purgatory'):purgatory.add(digest)
-                if row.get('flagged_for_removal') or row.get('in_review') or row.get('in_purgatory'):held.add(digest)
-                if row.get('id') in live_members:set_ids_by_sha.setdefault(digest,set()).update(live_members[row['id']])
+                if row.get('flagged_for_removal') or row.get('in_review') or row.get('in_purgatory') or row.get('set_under_review'):held.add(digest)
+                current_sets=set(row.get('set_ids',[]))|live_members.get(row.get('id'),set())
+                if current_sets:set_ids_by_sha.setdefault(digest,set()).update(current_sets)
             result.update(main=main,review=review,purgatory=purgatory,held_hashes=held,set_ids_by_sha=set_ids_by_sha)
         except (ValueError,OSError,KeyError,TypeError):
             # Disconnected or changed library is unknown, never "not in Main".
@@ -456,8 +459,10 @@ class Organizer:
             if focus_id is not None:offset=ids.index(focus_id)
             offset=max(0,min(int(offset),max(0,len(ids)-1)))//60*60
             if remember:
-                state=self.state();state.update(view={'kind':kind,'id':ident,'offset':offset,'order':order})
-                with self.db() as db:self.put_state(db,state)
+                with self.db() as db:
+                    db.execute('BEGIN IMMEDIATE')
+                    state=self.state(db);state.update(view={'kind':kind,'id':ident,'offset':offset,'order':order})
+                    self.put_state(db,state)
             sets=self.sets();labels={}
             for g in sets.values():
                 for i in g['members']:labels.setdefault(i,[]).append(g['name'])
@@ -509,11 +514,12 @@ class Organizer:
                 if allowed is not None and row['id'] not in allowed:continue
                 groups=labels.get(row['id'],[]);cats=row.get('categories',[]) if kind=='sets' else list({c for g in groups for c in g.get('categories',[])})
                 held=bool(row.get('in_purgatory')) if kind=='sets' else any(g.get('in_purgatory') for g in groups)
-                if placement=='purgatory' and not held or placement=='main' and held or placement=='unassigned' and (kind=='sets' or groups):continue
+                under_review=bool(row.get('under_review')) if kind=='sets' else any(g.get('under_review') for g in groups)
+                if placement=='under_review' and not under_review or placement=='main' and (held or under_review) or placement=='purgatory' and (not held or under_review) or placement=='unassigned' and (kind=='sets' or groups):continue
                 if category and (bool(cats) if category=='__none' else category not in cats):continue
                 text=' '.join([row['name'],row.get('path',''),*row.get('colors',[]),*[names.get(c,'') for c in cats],*[g['name'] for g in groups]]).casefold()
                 if not all(t in text for t in terms):continue
-                rows.append({'id':row['id'],'name':row['name'],'count':len(row['members']) if kind=='sets' else 1,'cover':next(iter(row['members']),None) if kind=='sets' else row['id'],'sets':[{'id':g['id'],'name':g['name']} for g in groups],'in_purgatory':held,'placement':'Set Purgatory' if held else 'Saved inventory'})
+                rows.append({'id':row['id'],'name':row['name'],'count':len(row['members']) if kind=='sets' else 1,'cover':next(iter(row['members']),None) if kind=='sets' else row['id'],'sets':[{'id':g['id'],'name':g['name']} for g in groups],'in_purgatory':held,'placement':'Sets under review' if under_review else 'Set Purgatory' if held else 'Saved inventory'})
             rows.sort(key=lambda x:(x['name'].casefold(),x['id']));offset=max(0,int(body.get('offset',0)))
             return {'rows':rows[offset:offset+60],'total':len(rows),'offset':offset,'categories':categories}
 
@@ -694,7 +700,7 @@ class Organizer:
         choices={'tab':('posts','sets'),'sourceFilter':('all','instagram','forum'),
             'filter':('pending','all','remaining','large','ignored','deferred','reviewed'),
             'postSort':('default','nameAsc','nameDesc','most','fewest','remaining'),
-            'setFilter':('all','favorites','uncategorized','categorized','purgatory'),
+            'setFilter':('all','favorites','uncategorized','categorized','purgatory','under_review'),
             'setSort':('default','nameAsc','nameDesc','createdAsc','createdDesc','updatedDesc'),
             'order':('similar','original','filename')}
         for key,options in choices.items():
@@ -713,6 +719,39 @@ class Organizer:
                 result['view']={'kind':view['kind'],'id':view['id'][:500],'offset':int(n)}
         return result
 
+    def evaluation_set(self,proposal_id):
+        return next((g for g in self.sets().values() if g.get('evaluation_source',{}).get('proposal')==proposal_id),None)
+
+    def evaluation_detail(self,ident):
+        with self.lock,self.bulk.lock:
+            self.bind()
+            result=self.bulk.detail(ident)
+            group=self.evaluation_set(ident)
+            result['folder_set']={'id':group['id'],'name':group['name'],'under_review':bool(group.get('under_review'))} if group else None
+            result['organizer_revision']=self.state()['revision']
+            return result
+
+    def review_evaluation(self,body):
+        with self.lock,self.bulk.lock:
+            self.bind();self.check_collection_idle(body)
+            proposal=next((g for g in self.bulk.current.get('proposals',[]) if g['id']==body.get('proposal')),None)
+            if not proposal:raise ValueError('Reopen a current evaluation draft.')
+            existing=self.evaluation_set(proposal['id'])
+            if existing:
+                if body.get('target')!=existing['id']:raise ValueError('This proposal already has a saved Set. Reopen it to see your decision.')
+                result=self.mutate('set_review',{'job':body['job'],'revision':body['revision'],'target':existing['id'],'under_review':body.get('under_review')})
+            else:
+                if body.get('target') or body.get('under_review') is not True:raise ValueError('Reopen this draft before saving.')
+                ids=self.valid_ids(body.get('ids',[]))
+                if len(ids)<2 or not set(ids)<=set(proposal['members']):raise ValueError('Choose at least two photos from this proposal.')
+                if body.get('categories') and not set(body['categories'])<={c['id'] for c in self.category_catalog().get('categories',[])}:
+                    self.category_action('load_categories',{'job':body['job']})
+                fields={k:body[k] for k in ('job','revision','ids','name','colors','categories','notes','membership_confirmation') if k in body}
+                fields.update(hold_for_review=True,proposal=proposal['id'],favorite=False)
+                result=self.mutate('save_evaluation',fields)
+            if result.get('confirmation_required'):return result
+            return self.evaluation_detail(proposal['id'])
+
     @tracking.journal().action("manual")
     def mutate(self,action,body):
         with self.lock,self.bulk.lock:
@@ -721,24 +760,27 @@ class Organizer:
             state=self.state()
             if action=='session':
                 ui=self.session_preferences(body.get('ui'))
-                if ui.get('savedAt',0)<state.get('ui',{}).get('savedAt',0):return {'saved':False,'stale':True}
-                state['ui']=ui
-                with self.db() as db:self.put_state(db,state)
+                with self.db() as db:
+                    db.execute('BEGIN IMMEDIATE');state=self.state(db)
+                    if ui.get('savedAt',0)<state.get('ui',{}).get('savedAt',0):return {'saved':False,'stale':True}
+                    self.put_state(db,dict(state,ui=ui))
                 return {'saved':True}
             if action=='draft':
-                if 'new_name' in body:state['new_name']=str(body['new_name'])[:200]
+                fields={}
+                if 'new_name' in body:fields['new_name']=str(body['new_name'])[:200]
                 if 'suggestion_reference' in body:
                     reference=body['suggestion_reference']
                     if reference:self.valid_ids([reference])
-                    state['suggestion_reference']=reference or ''
-                state['selection']=self.valid_ids(body.get('ids',[]));state['target']=str(body.get('target',''))
-                if 'new_favorite' in body:state['new_favorite']=self.favorite(body['new_favorite'])
-                if 'new_colors' in body:state['new_colors']=self.colors(body['new_colors'])
-                if 'new_categories' in body:state['new_categories']=self.categories(body['new_categories'],state.get('new_categories',[]))
-                with self.db() as db:self.put_state(db,state)
+                    fields['suggestion_reference']=reference or ''
+                fields['selection']=self.valid_ids(body.get('ids',[]));fields['target']=str(body.get('target',''))
+                if 'new_favorite' in body:fields['new_favorite']=self.favorite(body['new_favorite'])
+                if 'new_colors' in body:fields['new_colors']=self.colors(body['new_colors'])
+                with self.db() as db:
+                    db.execute('BEGIN IMMEDIATE');state=self.state(db)
+                    if 'new_categories' in body:fields['new_categories']=self.categories(body['new_categories'],state.get('new_categories',[]))
+                    self.put_state(db,dict(state,**fields))
                 return {'saved':True}
             if int(body.get('revision',-1))!=state.get('revision',0):raise ValueError('Review changed in another window. Reload before saving.')
-            previous_undo=copy.deepcopy(state.get('undo'))
             match_result=None
             likely_action=action in ('approve_likely','dismiss_likely')
             split_action=action in ('combine_split','separate_split')
@@ -757,22 +799,19 @@ class Organizer:
                     prepared.collect()
                     if prepared.plan is None:raise ValueError(prepared.status.get('error','Matching stopped.'))
             with self.db() as db:
-                undoing_review=action=='undo' and any((state.get('undo') or {}).get(k) for k in ('likely_review','split_review'))
-                if action=='auto_sets' or likely_action or split_action or undoing_review:
-                    db.execute('BEGIN IMMEDIATE')
-                    row=db.execute('SELECT data FROM state WHERE scope=?',(self.scope,)).fetchone()
-                    state=json.loads(row[0]) if row else {'revision':0,'selection':[]}
-                    if int(body.get('revision',-1))!=state.get('revision',0):
-                        raise ValueError('Review changed in another window. Reopen Auto-match Sets.')
-                    previous_undo=copy.deepcopy(state.get('undo'))
+                db.execute('BEGIN IMMEDIATE')
+                state=self.state(db)
+                if int(body.get('revision',-1))!=state.get('revision',0):
+                    raise ValueError('Review changed in another window. Reload before saving.')
+                previous_undo=copy.deepcopy(state.get('undo'))
                 if likely_action:
                     review,offer,choices=organizer_likely_sets.validate(self,action,body,state,db)
                     if action=='approve_likely':
-                        body=choices
+                        body={**choices,'hold_for_review':body.get('hold_for_review',False)}
                 if action=='auto_sets':
                     if not prepared.compatible(self,state,db):
                         raise ValueError('The collection or its selection changed. Run matching again to use your latest choices.')
-                    match_result=organizer_auto_sets.apply_matches(self,state,db,prepared)
+                    match_result=organizer_auto_sets.apply_matches(self,state,db,prepared,hold_new=body.get('hold_for_review') is True)
                     if not match_result['matched'] and not match_result.get('held_fragments'):
                         db.commit()
                         return dict(self.summary(), auto_result=match_result)
@@ -812,7 +851,12 @@ class Organizer:
                     db.execute('INSERT INTO rejected VALUES (?,?,?)',(self.scope,context,offer['key']))
                     state['undo']={'action':'reject','context':context,'ids':[offer['key']],'likely_review':offer['key']}
                     organizer_likely_sets.record(self,db,review,offer,'dismissed_likely',[])
-                elif action in ('save','approve_likely'):
+                elif action in ('save','approve_likely','save_evaluation'):
+                    if action=='save_evaluation':
+                        proposal=next((g for g in self.bulk.current.get('proposals',[]) if g['id']==body.get('proposal')),None)
+                        if not proposal or self.evaluation_set(proposal['id']) or body.get('target') or len(set(body.get('ids',[])))<2 or not set(body['ids'])<=set(proposal['members']):
+                            raise ValueError('This proposal changed. Reopen the evaluation.')
+                        if len(str(body.get('notes','')))>5000:raise ValueError('Notes are too long.')
                     ids=self.valid_ids(body.get('ids',[]))
                     if not ids:raise ValueError('Select at least one image.')
                     target=str(body.get('target',''));allsets=self.sets(include_discarded=True);previous=allsets.get(target)
@@ -854,14 +898,27 @@ class Organizer:
                     stamp=time.time()
                     favorite=self.favorite(body.get('favorite',(previous or {}).get('favorite',state.get('new_favorite',False))))
                     group=dict(previous or {},id=ident,name=name,colors=set_name_colors(name,colors),categories=categories,favorite=favorite,members=members,updated=stamp,library_id=(previous or {}).get('library_id'))
+                    if likely_action and 'in_purgatory' in body:
+                        if body['in_purgatory'] != bool(group.get('in_purgatory')):
+                            group.update(in_purgatory=body['in_purgatory'], purgatory_edited=True)
                     group['removed_members']=[i for i in group.get('removed_members',[]) if i not in ids]
-                    for field in ('auto_members','auto_pending','auto_reviewed'):
-                        if field in group:group[field]=[i for i in group[field] if i not in ids]
+                    confirmed=set(ids).intersection(group.get('auto_members',[]))
+                    if confirmed:
+                        group['auto_reviewed']=list(dict.fromkeys([*group.get('auto_reviewed',[]),*sorted(confirmed)]))
                     if previous is None:group['created']=stamp
+                    if action=='save_evaluation':
+                        group.update(evaluation_source={'inventory':self.bound[0],'proposal':proposal['id'],
+                            'original_members':list(proposal.get('original_members',proposal['members']))},notes=str(body.get('notes','')))
+                    if body.get('hold_for_review') is True:
+                        self.set_review_status(db,group,True,action)
+                    if group.get('under_review'):
+                        state['undo']['set_review']=True
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,ident,json.dumps(group)))
                     if likely_action:
                         state['undo'].update(selection=state.get('selection',[]),likely_review=offer['key'])
                         organizer_likely_sets.record(self,db,review,offer,'approved_likely',ids,ident)
+                    elif action=='save_evaluation':
+                        state['undo']['selection']=state.get('selection',[])
                     else:
                         state.update(selection=[],target='',new_name='',new_colors=[],new_categories=[],new_favorite=False)
                 elif action in ('set_colors','set_details'):
@@ -877,6 +934,24 @@ class Organizer:
                     if 'in_purgatory' in body and self.favorite(body['in_purgatory'])!=bool(group.get('in_purgatory')):group['purgatory_edited']=True
                     group.update(name=name,colors=set_name_colors(name,colors),categories=categories,favorite=favorite,in_purgatory=self.favorite(body.get('in_purgatory',group.get('in_purgatory',False))),updated=time.time())
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)))
+                elif action=='set_review':
+                    target=str(body.get('target',''))
+                    group=self.sets(include_discarded=True).get(target)
+                    held=body.get('under_review')
+                    if not group or not isinstance(held,bool):
+                        raise ValueError('Choose a current Set and a review decision.')
+                    if not held and not group.get('under_review'):
+                        raise ValueError('Choose a Set under review to promote.')
+                    old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
+                    # A whole-Set decision covers every current automatic member, including other pages.
+                    if held:
+                        confirmed=set(group.get('auto_members',[])).intersection(group['members'])
+                        group['auto_reviewed']=list(dict.fromkeys([*group.get('auto_reviewed',[]),*sorted(confirmed)]))
+                    self.set_review_status(db,group,held,'confirm_set' if held else 'promote_set')
+                    group['updated']=time.time()
+                    db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)))
+                    state['undo']={'action':'set','id':target,'previous':old[0] if old else None,
+                                   'selection':state.get('selection',[]),'set_review':True,'match_review':bool(body.get('match_review'))}
                 elif action=='confirm_matches':
                     target=str(body.get('target',''))
                     old=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,target)).fetchone()
@@ -969,7 +1044,7 @@ class Organizer:
                     if undo['action']=='auto_sets':
                         organizer_auto_sets.undo_matches(self,db,undo)
                     elif undo['action']=='set':
-                        if undo.get('likely_review') or undo.get('split_review'):
+                        if undo.get('likely_review') or undo.get('split_review') or undo.get('set_review'):
                             current=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,undo['id'])).fetchone()
                             previous=json.loads(undo['previous']) if undo.get('previous') else {}
                             if not current or json.loads(current[0]).get('applied_at')!=previous.get('applied_at'):
@@ -1014,11 +1089,21 @@ class Organizer:
                         db.execute('DELETE FROM posts WHERE scope=? AND id=?',(self.scope,undo['id']))
                         if undo['previous']:db.execute('INSERT INTO posts VALUES (?,?,?)',(self.scope,undo['id'],undo['previous']))
                     elif undo['action']=='reject':
+                        for sid,raw in undo.get('review_sets',{}).items():
+                            row=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,sid)).fetchone()
+                            if not row or json.loads(row[0]).get('applied_at')!=(json.loads(raw) if raw else {}).get('applied_at'):
+                                raise ValueError('A reviewed Set reached the Library. Restore its import checkpoint to undo the transfer.')
+                            db.execute('DELETE FROM sets WHERE scope=? AND id=?',(self.scope,sid))
+                            if raw:db.execute('INSERT INTO sets VALUES (?,?,?)',(self.scope,sid,raw))
                         for ident in undo['ids']:db.execute('DELETE FROM rejected WHERE scope=? AND context=? AND id=?',(self.scope,undo['context'],ident))
                 else:raise ValueError('Unknown organizer action.')
                 if action=='undo':
+                    if undo.get('set_review'):
+                        previous=json.loads(undo['previous']) if undo.get('previous') else {}
+                        tracking.journal().event(db,'decision.undo_set_review',self.scope,
+                            {'set':undo['id'],'under_review':bool(previous.get('under_review')),'members':previous.get('members',[])})
                     if undo.get('split_review'):
-                        tracking.journal().event(db,'decision.undo_split_review',self.scope,{'set':undo.get('id'),'sources':list(undo.get('moved',{})),'separate_pairs':undo.get('ids',[])})
+                        tracking.journal().event(db,'decision.undo_split_review',self.scope,{'set':undo.get('id'),'sources':list(undo.get('moved',{})),'separate_pairs':undo.get('ids',[]),'placement_restored':list(undo.get('review_sets',{}))})
                     if undo.get('likely_review'):
                         tracking.journal().event(db,'decision.undo_likely_group',self.scope,
                                                  {'action':undo['action'],'set':undo.get('id'),'key':undo['likely_review']})
@@ -1029,11 +1114,22 @@ class Organizer:
                 state['revision']=state.get('revision',0)+1;self.put_state(db,state)
             if likely_action:
                 review.revision=state['revision']
-                review.rows.remove(offer)
+                touched = set(choices.get('ids', [])) - set(offer['members'])
+                review.rows = [row for row in review.rows if row is not offer and not touched.intersection(row['members'])]
             self.load_dispositions()
             summary=self.summary()
             if match_result is not None:summary['auto_result']=match_result
             return summary
+
+    def set_review_status(self,db,group,held,reason):
+        previous=bool(group.get('under_review'))
+        if not held and group.get('in_purgatory'):
+            group.update(in_purgatory=False,purgatory_edited=True)
+        group['under_review']=held
+        tracking.journal().event(db,'decision.set_review_status',self.scope,{
+            'set':group['id'],'from_under_review':previous,'under_review':held,'reason':reason,
+            'inventory':self.bound[0],'collection':self.collection_id,'members':list(group['members']),
+            'hashes':{i:self.catalog[i]['sha'] for i in group['members'] if i in self.catalog}})
 
     def prepare_matches(self,body):
         with self.lock,self.bulk.lock:
@@ -1165,6 +1261,7 @@ class Organizer:
             if self.job['running'] or self.engine.status['running'] or (self.bulk.current or {}).get('running'):
                 raise ValueError('Pause analysis before applying drafts.')
             if action=='preview':
+                starting_revision=self.state()['revision']
                 library=self.engine.library.request('/api/library')
                 owner=str(body.get('character_id') or self.category_catalog().get('character_id') or (self.bulk.current or {}).get('config',{}).get('character_id') or '')
                 if not owner:
@@ -1176,7 +1273,8 @@ class Organizer:
                 # history and UI state can exceed the companion's JSON limit.
                 # Full provenance still travels through tracking.transfer on Apply.
                 draft={'format':'folder-organizer-2','scope':self.scope,'category_catalog':self.category_catalog()}
-                draft['sets']=[g for g in self.sets().values() if g.get('saved')] if body.get('include_sets',True) else []
+                groups=list(self.sets().values())
+                draft['sets']=runtime_helpers()['LibraryStore'].importable_organizer_sets(groups) if body.get('include_sets',True) else []
                 draft['individuals']=self.individual_imports() if body.get('include_individuals',True) else []
                 if any(not r['id'] for r in draft['individuals']):raise ValueError('A queued image is unavailable or discarded. Restore it or remove it from the import queue before applying.')
                 if len({r['id'] for r in draft['individuals']})!=len(draft['individuals']):raise ValueError('Queued copies now share a keeper. Select that image and save its import choices again to combine them.')
@@ -1185,23 +1283,27 @@ class Organizer:
                 hashes={r['sha'] for r in draft['source_catalog'].values()}
                 draft['state']={'duplicate_choices':{h:v for h,v in self.state().get('duplicate_choices',{}).items() if h in hashes}}
                 result=self.engine.library.request('/api/organizer/preview',{'character_id':owner,'draft':draft})
+                result['under_review_count']=sum(bool(g.get('under_review')) for g in groups)
                 if draft['individuals'] and 'individuals' not in result:raise ValueError('Update the Media Library companion to use individual Workbench imports. Nothing has been imported.')
                 if (any(g.get('purgatory_edited') for g in draft['sets']) or draft['state'].get('duplicate_choices')) and 'duplicates' not in result:raise ValueError('Update and restart the companion to apply Set Purgatory and duplicate choices. Nothing has been imported.')
                 automatic={i for g in draft['sets'] for i in g.get('auto_members',[]) if i in g['members']}
                 protected=[c['id'] for c in result.get('conflicts',[]) if c['id'] in automatic]
                 if protected:result['protected_auto_conflicts']=len(protected)
-                self.transfer_plan={'token':result['token'],'revision':self.state()['revision'],'scope':self.scope,'individuals':draft['individuals'],'protected_auto_conflicts':protected}
+                if starting_revision!=self.state()['revision']:raise ValueError('Drafts changed. Preview again to resume safely.')
+                self.transfer_plan={'token':result['token'],'revision':starting_revision,'scope':self.scope,'individuals':draft['individuals'],'protected_auto_conflicts':protected}
                 return result
             plan=getattr(self,'transfer_plan',{})
             if plan.get('token')!=body.get('token') or plan.get('scope')!=self.scope or plan.get('revision')!=self.state()['revision']:
                 raise ValueError('Drafts changed. Preview again to resume safely.')
-            if action=='import':return self.engine.library.request('/api/organizer/import',{'token':body['token'],'id':body.get('id')})
-            if action!='apply':raise ValueError('Unknown transfer action.')
-            if plan.get('protected_auto_conflicts') and body.get('conflicts','move')!='skip':
+            if action not in ('import','apply'):raise ValueError('Unknown transfer action.')
+            if action=='apply' and plan.get('protected_auto_conflicts') and body.get('conflicts','move')!='skip':
                 raise ValueError('An automatic match already belongs to another Library Set. Choose Skip conflicts to preserve its membership.')
-            tracking.transfer(self.engine,self.bulk,self)
-            result=self.engine.library.request('/api/organizer/apply',{'token':body['token'],'conflicts':body.get('conflicts','move')})
+            if action=='apply':tracking.transfer(self.engine,self.bulk,self)
             with self.db() as db:
+                db.execute('BEGIN IMMEDIATE')
+                if plan['revision']!=self.state(db)['revision']:raise ValueError('Drafts changed. Preview again to resume safely.')
+                if action=='import':return self.engine.library.request('/api/organizer/import',{'token':body['token'],'id':body.get('id')})
+                result=self.engine.library.request('/api/organizer/apply',{'token':body['token'],'conflicts':body.get('conflicts','move')})
                 for row in plan.get('individuals',[]):
                     outcome=result.get('individuals',{}).get(row['id'])
                     if not outcome:continue

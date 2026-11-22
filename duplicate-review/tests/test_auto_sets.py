@@ -123,6 +123,26 @@ class OrganizerAutoSetTests(unittest.TestCase):
         with self.org.db() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM tracking_events WHERE kind='decision.undo_automatic_set_match'").fetchone()[0],1)
 
+    def test_batch_holds_new_drafts_and_whole_set_confirmation_survives_restart(self):
+        result=self.act('auto_sets',hold_for_review=True)
+        held=[g for g in result['sets'] if g.get('under_review')]
+        self.assertEqual(len(held),2)
+        g=held[0];sid=g['id']
+        self.assertFalse(g.get('auto_reviewed'))
+        self.act('set_review',target=sid,under_review=True,match_review=True)
+        self.org=Organizer(self.engine,self.bulk);self.org.bind()
+        group=self.org.sets()[sid]
+        self.assertEqual(set(group['auto_reviewed']),set(g['auto_members']))
+        self.assertEqual(self.act('auto_sets')['auto_result']['matched'],0)
+        self.assertEqual(self.org.page('unmatched','unmatched')['total'],4)
+        row=next(r for r in self.org.review_matches({'job':'fixture-job','target':sid})['sets'] if r['id']==sid)
+        self.assertTrue(row['under_review'])
+        self.assertEqual(row['reviewed'],row['members'])
+        self.act('set_review',target=sid,under_review=False)
+        self.assertEqual(self.org.sets()[sid]['auto_members'],g['auto_members'])
+        self.act('undo')
+        self.assertEqual(self.org.sets()[sid],group)
+
     def test_pending_library_additions_are_removable_and_removed_photos_stay_manual(self):
         # Leave just one unassigned near the two confirmed Library exemplars.
         for n in range(3,6):self.org.vector_by_id[self.ids[n]]=descriptor(n)

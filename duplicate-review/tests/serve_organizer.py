@@ -15,6 +15,9 @@ with tempfile.TemporaryDirectory() as temp:
     if '--likely-sets' in sys.argv:
         from test_likely_sets import split_source_posts
         split_source_posts(bulk,ids)
+        if '--likely-post-details' in sys.argv:
+            from test_likely_sets import add_post_extra
+            add_post_extra(bulk)
     if "--large" in sys.argv or "--focus" in sys.argv or "--resume" in sys.argv:
         from test_organizer_evidence import add_large_post
         add_large_post(bulk,ids)

@@ -8,8 +8,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from test_organizer import fixture
+from engine import sha256, stat_key
 from organizer import Organizer
 from organizer_likely_sets import load_page
 from likely_sets import propose, ranking_weights, review_queue
@@ -27,6 +29,22 @@ def split_source_posts(bulk, ids):
         row['sources'] = {post: origin}
         row['origins'] = [origin]
     bulk.persist()
+
+
+def add_post_extra(bulk, name='Extra portrait', sources=None):
+    catalog = bulk.current['source_catalog']
+    if sources is None:
+        sources = {p: origin for item in catalog.values() for p, origin in item.get('sources', {}).items()
+                   if origin.get('kind') in ('forum', 'instagram') and not origin.get('quarantine')}
+    folder = Path(bulk.current['config']['roots'][0])
+    path = folder / (name + '.jpg')
+    Image.new('RGB', (80, 120), (50, 90, len(name))).save(path)
+    digest = sha256(path)
+    origins = {p: dict(origin, key=p, path=str(path)) for p, origin in sources.items()}
+    catalog[digest] = dict(id=digest, sha=digest, path=str(path), stamp=stat_key(path),
+                           sources=origins, origins=list(origins.values()), copies=[])
+    bulk.persist()
+    return digest
 
 
 class RankingTests(unittest.TestCase):
@@ -162,6 +180,55 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(self.org.sets(),baseline)
         self.assertEqual(self.org.state()['selection'],[self.ids[2]])
 
+    def test_post_browsing_and_details_are_one_undoable_approval(self):
+        extra = add_post_extra(self.bulk)
+        unrelated = add_post_extra(self.bulk, 'Unrelated', {'lonely': {'kind':'forum','label':'Different post'}})
+        self.org.bind()
+        category = self.org.category_action('create_category', {'job':self.job,'name':'Editorial'})['category']['id']
+        page = self.find(lambda p: not p['destination'])
+        signed = {'session':page['session'], 'key':page['key']}
+        ids = [p['id'] for p in page['photos']]
+        before = self.org.sets()
+        self.assertGreaterEqual(len(page['source_posts']), 2)
+        for post in page['source_posts']:
+            photos = self.get(**signed, source_post=post['id'])['photos']
+            self.assertNotIn(unrelated, [p['id'] for p in photos])
+            self.assertFalse(set(ids).intersection(p['id'] for p in photos))
+        post = page['photos'][0]['source_key']
+        extra_page = self.get(**signed, source_post=post)
+        self.assertTrue(any(p['id'] == extra and not p['unavailable_reason'] for p in extra_page['photos']))
+        with self.assertRaises(ValueError): self.get(**signed, source_post='lonely')
+        with self.assertRaises(ValueError): self.act('approve_likely', **signed, ids=[*ids, unrelated])
+        with self.assertRaises(ValueError): self.act('approve_likely', **signed, ids=[*ids, extra], set_details={'colors':'invalid'})
+        self.assertEqual(self.org.sets(), before)
+        self.act('approve_likely', **signed, ids=[ids[0], extra], set_details={
+            'name':'Edited shoot','colors':['Blue'],'favorite':True,'categories':[category]})
+        saved = next(g for g in self.org.sets().values() if g['name'] == 'Edited Shoot')
+        self.assertEqual(saved['members'], [ids[0], extra])
+        self.assertTrue(saved['favorite'])
+        self.assertEqual(saved['colors'], ['Blue'])
+        self.assertEqual(saved['categories'], [category])
+        with self.org.db() as db:
+            evidence = json.loads(db.execute("SELECT payload FROM tracking_events WHERE kind='decision.approved_likely_group'").fetchone()[0])
+        self.assertEqual(set(evidence['manual_post_additions']), {extra})
+        self.assertIn(post, evidence['manual_post_additions'][extra])
+        self.assertEqual(evidence['source_hashes'][extra], extra)
+        self.act('undo')
+        self.assertEqual(self.org.sets(), before)
+        match = self.find(lambda p: bool(p['destination']))
+        target = match['destination']
+        original = before[target]
+        selected = match['photos'][0]['id']
+        self.act('approve_likely', session=match['session'], key=match['key'], ids=[selected], target=target,
+                 set_details={'name':'Reviewed original', 'favorite':True})
+        updated = self.org.sets()[target]
+        self.assertEqual(updated['name'], 'Reviewed Original')
+        self.assertEqual(updated['members'], original['members'] + [selected])
+        self.assertEqual(updated['categories'], original['categories'])
+        self.assertEqual(updated['library_id'], original['library_id'])
+        self.act('undo')
+        self.assertEqual(self.org.sets(), before)
+
     def test_finish_partial_sets_uses_one_destination_and_approval_with_undo(self):
         with self.org.db() as db:
             group = {'id':'partial', 'name':'Partial', 'members':self.ids[9:11], 'auto_members':self.ids[9:11]}
@@ -177,6 +244,16 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(set(self.org.sets()['partial']['auto_members']), set(self.ids[9:11]))
         self.act('undo')
         self.assertEqual(self.org.sets(), before)
+
+    def test_approve_checked_photos_as_a_held_set(self):
+        page=self.get()
+        members=[p['id'] for p in page['photos']][:2]
+        self.act('approve_likely',session=page['session'],key=page['key'],ids=members,target='',name='Held shoot',hold_for_review=True)
+        group=next(g for g in self.org.sets().values() if g['name']=='Held Shoot')
+        self.assertTrue(group['under_review'])
+        self.assertEqual(group['members'],members)
+        self.act('undo')
+        self.assertNotIn(group['id'],self.org.sets())
 
     def test_dismiss_survives_restart_and_undo_and_does_not_reject_photos(self):
         page=self.get()
