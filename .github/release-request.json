@@ -1,11 +1,7 @@
 {
   "schema": 1,
-  "id": "suite-confirmed-sets-under-review-2026-11-21",
-  "components": [
-    "standalone",
-    "runtime",
-    "workbench"
-  ],
+  "id": "workbench-matching-post-photo-review-2026-11-21",
+  "components": ["workbench"],
   "publish": true,
-  "workbench_notes": "Save confirmed shoots to Sets under review. They stay in Workbench through imports until you promote them. Likely groups also lets you browse matching posts in original order and edit Set details before approval."
+  "workbench_notes": "Compare larger, full-brightness photos in Likely groups and Finish partial Sets. Adjust Photo size for both galleries. Browse matching posts can group visually similar photos or select every available photo in the post across all pages before you approve."
 }

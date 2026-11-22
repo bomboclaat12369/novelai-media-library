@@ -37,7 +37,7 @@ class Organizer:
         self.library_placement=None
         self.match_preparation=None
         self.likely_reviews={}
-        self.bound=None;self.catalog={};self.posts={};self.order_cache={};self.vector_by_id={};self.quick={}
+        self.bound=None;self.catalog={};self.posts={};self.order_cache={};self.vector_by_id={};self.quick={};self.photo_sizes={}
         self.encoder_type=None;self.recipe=None;self.scope='';self.revision=0;self.discarded=set();self.parked={}
         with self.db() as db:
             db.execute('CREATE TABLE IF NOT EXISTS scope_merges(target TEXT,source TEXT,PRIMARY KEY(target,source))')
@@ -97,10 +97,14 @@ class Organizer:
         self.load_vectors()
         self.load_dispositions()
         with self.engine.db() as db:
-            sketches={r['sha']:r['sketch'] for r in db.execute('SELECT sha,sketch FROM cache WHERE sketch IS NOT NULL')}
+            sketches={r['sha']:r for r in db.execute('SELECT sha,sketch,w,h FROM cache WHERE sketch IS NOT NULL')}
+        self.photo_sizes={}
         self.quick={}
         for ident,r in cat.items():
-            raw=sketches.get(r['sha'])
+            cached=sketches.get(r['sha'])
+            if cached is None:continue
+            if cached['w'] and cached['h']:self.photo_sizes[ident]=(cached['w'],cached['h'])
+            raw=cached['sketch']
             if raw and len(raw)==3072:
                 a=np.frombuffer(raw,dtype=np.uint8).reshape(32,32,3).astype(np.float32)/255
                 # Broad color/layout ordering only, never a duplicate or membership decision.
@@ -420,7 +424,7 @@ class Organizer:
         in_main=None if main is None else main.get(r.get('sha'),False)
         in_review=None if main is None else r.get('sha') in self.library_placement['review']
         in_purgatory=None if main is None else r.get('sha') in self.library_placement['purgatory']
-        return {'id':ident,'library_present':present,'in_main':in_main,'in_review':in_review,'in_purgatory':in_purgatory,'name':re.split(r'[\\/]',r['path'])[-1],'path':r['path'],'media_type':r.get('media_type','image'),'frame_seconds':r.get('frame_seconds'),'quarantined':bool(r.get('quarantine_only')),
+        return {'id':ident,'dimensions':self.photo_sizes.get(ident),'library_present':present,'in_main':in_main,'in_review':in_review,'in_purgatory':in_purgatory,'name':re.split(r'[\\/]',r['path'])[-1],'path':r['path'],'media_type':r.get('media_type','image'),'frame_seconds':r.get('frame_seconds'),'quarantined':bool(r.get('quarantine_only')),
                 'sources':list(r.get('sources',{})),'origins':r.get('origins',[]),'reference':bool(r.get('reference')),'discarded':ident in self.discarded}
 
     def pinned_ids(self,state=None):

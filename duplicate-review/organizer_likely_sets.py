@@ -100,18 +100,29 @@ def source_page(organizer, review, body, state):
         raise ValueError('This post changed. Refresh the likely groups.')
     assigned = {i: g['name'] for g in groups.values() for i in g['members']}
     post = organizer.posts[source]
-    visible = set(organizer.post_ids(source)) - set(row['members'])
-    ordered = organizer.ordered(post['ids'], 'original', source)
-    others = [(n, i) for n, i in enumerate(ordered, 1) if i in visible
-              and not organizer.catalog[i].get('quarantine_only') and organizer.catalog[i].get('media_type', 'image') == 'image']
+    order = body.get('post_order', 'original')
+    if order not in ('original', 'similar'):
+        raise ValueError('Choose original post order or visual grouping.')
+    original = organizer.ordered(post['ids'], 'original', source)
+    positions = {ident: pos for pos, ident in enumerate(original, 1)}
+    post_ids = organizer.post_ids(source)
+    visible = set(post_ids)
+    visible_photos = [i for i in original if i in visible and not organizer.catalog[i].get('quarantine_only')
+                      and organizer.catalog[i].get('media_type', 'image') == 'image']
+    extras = set(visible_photos) - set(row['members'])
+    ordered = original if order == 'original' else organizer.ordered(post_ids, 'similar', source)
+    others = [i for i in ordered if i in extras]
     limit = 24
     offset = min(max(0, int(body.get('post_offset', 0)) // limit) * limit, (max(0, len(others) - 1) // limit) * limit)
     photos = []
-    for pos, ident in others[offset:offset + limit]:
+    for ident in others[offset:offset + limit]:
         reason = '' if ident in available else ('In ' + assigned[ident] if ident in assigned else 'Unavailable for this group')
-        photos.append(dict(organizer.image(ident), source_position=pos, unavailable_reason=reason,
+        photos.append(dict(organizer.image(ident), source_position=positions[ident], unavailable_reason=reason,
                            display_name=organizer.original_name(ident, source)))
-    return {'photos': photos, 'offset': offset, 'total': len(others), 'limit': limit}
+    result = {'photos': photos, 'offset': offset, 'total': len(others), 'limit': limit}
+    if body.get('include_selectable'):
+        result['selectable_ids'] = [i for i in visible_photos if i in available]
+    return result
 
 
 def page(organizer, review, body):

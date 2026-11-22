@@ -30,7 +30,7 @@ const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/play
       await dialog.getByRole('button',{name:'Next group'}).click();
       await page.waitForFunction(()=>!busy);
     }
-    assert((await dialog.locator('h3').count())>=2);
+    assert(new Set(await dialog.locator('.likely-source').allTextContents()).size>=2);
     await dialog.getByText('How suggestions are ranked',{exact:true}).click();
     await dialog.getByText(/Workbench is using the standard outfit and setting weights|Workbench tuned outfit and setting weights/).waitFor();
     await dialog.getByRole('button',{name:/Enlarge/}).first().click();
@@ -119,10 +119,79 @@ const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/play
     await page.waitForFunction(()=>!busy);
     await picker.selectOption('library:existing');
     await page.waitForFunction(()=>document.querySelector('#likelyGroupsDialog .match-examples img')&&!busy);
+    const tiles=postBrowser.locator('figure');
+    const postResponse=async action=>{
+      const [response]=await Promise.all([
+        page.waitForResponse(r=>r.url().endsWith('/api/organizer/likely-groups')&&r.request().postDataJSON()?.source_post),
+        action()
+      ]);
+      const result=await response.json();
+      await tiles.first().waitFor();
+      return result;
+    };
+    const initialPost=await postResponse(()=>dialog.getByRole('button',{name:/^View post /}).first().click());
+    const bulk=postBrowser.getByRole('button',{name:'Select entire post',exact:true});
+    const visual=postBrowser.getByRole('button',{name:'Group similar images',exact:true});
+    assert(initialPost.total>initialPost.limit);
+    const proposedChecks=dialog.locator('.likely-suggestions input[type=checkbox]');
+    const originalChecks=await proposedChecks.evaluateAll(els=>els.filter(e=>e.checked).map(e=>e.value));
+    const here=originalChecks.find(id=>initialPost.selectable_ids.includes(id));
+    assert(here);
+    await dialog.locator('.likely-suggestions input[value="'+here+'"]').uncheck();
+    const expectIds=new Set([...originalChecks,...initialPost.selectable_ids]);
+    await bulk.click();
+    assert(await dialog.locator('.likely-suggestions input[value="'+here+'"]').isChecked());
+    await dialog.getByRole('button',{name:'Approve selected ('+expectIds.size+')',exact:true}).waitFor();
+    await postResponse(()=>postBrowser.getByRole('button',{name:'Next photos'}).click());
+    await postBrowser.getByRole('checkbox',{name:'Include Gallery 29.jpg'}).waitFor();
+    assert(await postBrowser.getByRole('checkbox',{name:'Include Gallery 29.jpg'}).isDisabled());
+    assert(await postBrowser.getByRole('checkbox',{name:'Include Gallery 28.jpg'}).isChecked());
+    const sorted=await postResponse(()=>visual.click());
+    assert.equal(await visual.getAttribute('aria-pressed'),'true');
+    assert.notDeepEqual(sorted.photos.map(p=>p.id),initialPost.photos.map(p=>p.id));
+    const shown=await postBrowser.locator('input[type=checkbox]').evaluateAll(els=>els.map(e=>[e.value,e.checked]));
+    for(const [id,checked] of shown)assert.equal(checked,expectIds.has(id));
+    await postBrowser.getByRole('button',{name:'Deselect entire post',exact:true}).click();
+    const remaining=originalChecks.filter(id=>!initialPost.selectable_ids.includes(id));
+    assert.deepEqual(await proposedChecks.evaluateAll(els=>els.filter(e=>e.checked).map(e=>e.value)),remaining);
+    assert.equal(await postBrowser.locator('input:checked').count(),0);
+    const restored=await postResponse(()=>visual.click());
+    assert.deepEqual(restored.photos.map(p=>p.id),initialPost.photos.map(p=>p.id));
+    await page.setViewportSize({width:1920,height:1080});
+    const pictures=dialog.locator('.likely-suggestions .match-photo img, .likely-post-browser .match-photo img');
+    for(const img of [pictures.first(),tiles.first().locator('img')]){
+      const display=await img.evaluate(e=>{
+        let opaque=true;for(let p=e;p;p=p.parentElement)opaque&&=getComputedStyle(p).opacity==='1'&&getComputedStyle(p).filter==='none';
+        return {opaque,fit:getComputedStyle(e).objectFit,height:e.clientHeight,src:e.src};
+      });
+      assert(display.opaque);assert.equal(display.fit,'contain');assert(display.height>200);assert.match(display.src,/size=1000/);
+    }
+    const suggestions=dialog.locator('.likely-suggestions');
+    const left=await suggestions.boundingBox(), right=await postBrowser.boundingBox();
+    assert(left.x+left.width<=right.x+1);assert(Math.abs(left.y-right.y)<3);
+    const landscape=await postBrowser.getByRole('img',{name:'Gallery 01.jpg',exact:true}).boundingBox();
+    const portrait=await postBrowser.getByRole('img',{name:'Gallery 00.jpg',exact:true}).boundingBox();
+    assert(landscape.width>landscape.height&&landscape.width>portrait.width);
+    assert(portrait.height>portrait.width);
+    const widthBefore=(await tiles.first().boundingBox()).width;
+    const slider=dialog.getByRole('slider',{name:'Photo size'});
+    await slider.focus();await slider.press('End');
+    assert((await tiles.first().boundingBox()).width>widthBefore);
+    assert.equal(await page.evaluate(()=>localStorage.getItem('organizer-likely-photo-size')),'420');
     await page.setViewportSize({width:430,height:760});
     assert(await dialog.evaluate(d=>d.scrollWidth<=d.clientWidth+2));
+    assert((await postBrowser.boundingBox()).y>(await suggestions.boundingBox()).y);
+    const priorMembers=await page.evaluate(()=>data.sets.find(s=>s.id==='library:existing').members);
+    const combined=new Set([...priorMembers,...expectIds]);
+    await bulk.click();
+    await dialog.getByRole('button',{name:'Approve selected ('+expectIds.size+')',exact:true}).click();
+    await page.waitForFunction(n=>data.sets.find(s=>s.id==='library:existing').members.length===n&&!busy,combined.size);
+    const members=await page.evaluate(()=>data.sets.find(s=>s.id==='library:existing').members);
+    assert.deepEqual(new Set(members),combined);
+    await dialog.getByRole('button',{name:'Undo last review'}).click();
+    await page.waitForFunction(n=>data.sets.find(s=>s.id==='library:existing').members.length===n&&!busy,priorMembers.length);
     await page.waitForLoadState('networkidle');
     assert.deepEqual(errors,[]);
-    console.log('Verified matching-post browsing, preview, selections, Set details, approval, Undo, review ranges and mobile layout.');
+    console.log('Verified full-brightness comparisons, adjustable galleries, whole-post selection, visual grouping, approval, Undo and mobile layout.');
   }finally{if(browser)await browser.close();server.kill()}
 })().catch(err=>{console.error(err);process.exitCode=1});

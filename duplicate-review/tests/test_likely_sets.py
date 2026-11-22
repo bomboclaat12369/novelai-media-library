@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from test_organizer import fixture
-from engine import sha256, stat_key
+from engine import fingerprint, sha256, stat_key
 from organizer import Organizer
 from organizer_likely_sets import load_page
 from likely_sets import propose, ranking_weights, review_queue
@@ -31,20 +31,38 @@ def split_source_posts(bulk, ids):
     bulk.persist()
 
 
-def add_post_extra(bulk, name='Extra portrait', sources=None):
+def add_post_extra(bulk, name='Extra portrait', sources=None, color=None, size=(80, 120)):
     catalog = bulk.current['source_catalog']
     if sources is None:
         sources = {p: origin for item in catalog.values() for p, origin in item.get('sources', {}).items()
                    if origin.get('kind') in ('forum', 'instagram') and not origin.get('quarantine')}
     folder = Path(bulk.current['config']['roots'][0])
     path = folder / (name + '.jpg')
-    Image.new('RGB', (80, 120), (50, 90, len(name))).save(path)
+    Image.new('RGB', size, color or (50, 90, len(name))).save(path)
     digest = sha256(path)
     origins = {p: dict(origin, key=p, path=str(path)) for p, origin in sources.items()}
     catalog[digest] = dict(id=digest, sha=digest, path=str(path), stamp=stat_key(path),
                            sources=origins, origins=list(origins.values()), copies=[])
     bulk.persist()
     return digest
+
+
+def add_review_gallery(engine, bulk):
+    # Alternating scenes in original order, all on the same matching posts.
+    ids = []
+    with engine.db() as db:
+        for n in range(30):
+            color = (20 + n, 70, 200) if n % 2 else (200, 70 + n, 20)
+            ident = add_post_extra(bulk, f'Gallery {n:02d}', color=color,
+                                   size=(320, 160) if n % 2 else (160, 320))
+            path = Path(bulk.current['source_catalog'][ident]['path'])
+            width, height, ph, mh, sketch = fingerprint(path)
+            db.execute('INSERT INTO cache(path,stamp,algorithm,sha,w,h,ph,mh,sketch,size,pixel) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                       (str(path), stat_key(path), 1, ident, width, height, ph, mh, sketch, path.stat().st_size, ident))
+            ids.append(ident)
+    bulk.current['source_catalog'][ids[-1]]['existing_sets'] = ['existing']
+    bulk.persist()
+    return ids
 
 
 class RankingTests(unittest.TestCase):
@@ -151,6 +169,37 @@ class ReviewTests(unittest.TestCase):
             page = self.get(session=first['session'],offset=n)
             if predicate(page):return page
         self.fail('Expected a reviewable group')
+
+    def test_whole_post_selection_and_visual_order_span_pages(self):
+        gallery = add_review_gallery(self.engine, self.bulk)
+        self.org.bind()
+        group = self.find(lambda p: not p['destination'])
+        post = group['photos'][0]['source_key']
+        signed = dict(session=group['session'], key=group['key'], source_post=post)
+        first = self.get(**signed, include_selectable=True)
+        second = self.get(**signed, post_offset=first['limit'])
+        original = first['photos'] + second['photos']
+        eligible = set(first['selectable_ids'])
+        self.assertEqual(len(gallery), len(set(gallery)))
+        self.assertGreater(len(original), first['limit'])
+        self.assertTrue(set(gallery[:-1]) <= eligible)
+        self.assertNotIn(gallery[-1], eligible)
+        self.assertNotIn('selectable_ids', second)
+        proposed = {p['id'] for p in group['photos']}
+        post_ids = self.org.post_ids(post)
+        self.assertTrue(proposed.intersection(post_ids) <= eligible)
+        self.assertFalse(eligible - set(post_ids))
+        positions = {p['id']: p['source_position'] for p in original}
+        similar = self.get(**signed, post_order='similar', include_selectable=True)
+        tail = self.get(**signed, post_order='similar', post_offset=first['limit'])
+        visually_ordered = similar['photos'] + tail['photos']
+        expected = [i for i in self.org.ordered(post_ids, 'similar', post) if i in positions]
+        self.assertEqual([p['id'] for p in visually_ordered], expected)
+        self.assertNotEqual(expected, list(positions))
+        self.assertEqual({p['id']:p['source_position'] for p in visually_ordered}, positions)
+        self.assertEqual(similar['selectable_ids'], first['selectable_ids'])
+        self.assertTrue(next(p for p in original if p['id'] == gallery[-1])['unavailable_reason'])
+        with self.assertRaises(ValueError): self.get(**signed, post_order='unrecognized')
 
     def test_partial_approval_is_manual_transaction_and_keeps_original_review_context(self):
         self.act('draft',ids=[self.ids[2]],new_name='Work in progress')
