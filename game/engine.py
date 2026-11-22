@@ -8,7 +8,7 @@ from . import management as m
 from . import evolution, flavor, wardrobe
 from . import meetings, stage_labels, bookings
 
-VERSION = '1.5.0-local'
+VERSION = '1.6.0-local'
 NIGHT_SPEEDS = (1, 2, 4, 8)
 PACK_RARITY_WEIGHTS = (55, 27, 12, 5, 1)
 PACKS = {'standard': {'name':'Standard','price':100,'count':5},
@@ -75,8 +75,12 @@ def upkeep(state):
     return 20 + sum(state['facilities'][kind] * rule['upkeep'] for kind, rule in UPGRADES.items())
 
 
+def recurring_costs(state):
+    return {'payroll':len(state['people'])*30, 'upkeep':upkeep(state) + m.department_upkeep(state)}
+
+
 def recurring_cost(state):
-    return len(state['people'])*30 + upkeep(state) + m.department_upkeep(state)
+    return sum(recurring_costs(state).values())
 
 
 def budget_check(state, cost):
@@ -240,9 +244,10 @@ def settle(state):
     if state['phase'] != 'night' or state['night']['wave'] != 6:
         raise RuleError('This night is not ready to settle.')
     night = state['night']
-    expense = recurring_cost(state)
+    costs = recurring_costs(state)
     training_cost = sum(night['assignments'][p]=='train' for p in state['people'])*15
-    expense += training_cost + night['decision_costs']
+    costs.update(training=training_cost, decisions=night['decision_costs'])
+    expense = sum(costs.values())
     for owner, worker in state['people'].items():
         role=night['assignments'][owner]
         recovery = (70 + state['facilities']['recovery']*6) if role in ('rest','train') else (28 + state['facilities']['recovery']*2)
@@ -251,7 +256,7 @@ def settle(state):
             worker['xp'] += 22
             worker['skills'][worker['training']] += 35
     state['cash'] += night['revenue']-expense
-    report = {'day':state['day'],'revenue':night['revenue'],'expenses':expense,
+    report = {'day':state['day'],'revenue':night['revenue'],'expenses':expense,'costs':costs,
               'profit':night['revenue']-expense,'served':night['served'],'missed':night['missed'],
               'earnings':night['earnings'],'demand':night['demand'],
               'department_revenue':night['department_revenue'], 'training_cost':training_cost,

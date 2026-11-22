@@ -66,6 +66,24 @@ class DepartmentOperations(unittest.TestCase):
         self.assertTrue(restored)
         self.assertTrue({'studio_cut','studio_pickup','studio_press','resort_request','resort_private'}<=offers)
         film, stay=self.state['contracts']
+        reports=self.state['reports']
+        for r in reports:
+            costs=r['costs']
+            self.assertEqual(costs,{'payroll':120,'upkeep':engine.recurring_costs(self.state)['upkeep'],
+                                    'training':r['training_cost'],'decisions':r['decision_costs']})
+            self.assertEqual(r['expenses'],sum(costs.values()))
+            self.assertEqual(r['profit'],r['revenue']-r['expenses'])
+            by_venue={role:sum(r['earnings'][p] for p in r['assignments'] if r['assignments'][p]==role)
+                      for role in ('room','lounge','studio','resort')}
+            self.assertEqual(sum(by_venue.values()),r['revenue'])
+            self.assertEqual(by_venue['studio']+by_venue['resort'],r['department_revenue'])
+        self.assertEqual(reports[-1]['earnings']['demo-0']+reports[-1]['earnings']['demo-1'],film['revenue'])
+        self.assertEqual(sum(r['earnings']['demo-2'] for r in reports[:2]),stay['revenue'])
+        legacy_reports=json.loads(json.dumps(self.state))
+        del legacy_reports['reports'][0]['costs']
+        migrations.validate(legacy_reports,self.cat)
+        legacy_reports['reports'][1]['costs']['payroll']+=1
+        with self.assertRaises(engine.RuleError):migrations.validate(legacy_reports,self.cat)
         self.assertEqual([len(c['work_log']) for c in (film,stay)],[18,12])
         self.assertEqual(self.state['people']['demo-1']['skills']['studio'],54)
         self.assertEqual((film['delivery_extra'],stay['service_cost']),(55,18))

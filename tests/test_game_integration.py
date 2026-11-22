@@ -94,6 +94,31 @@ class CompanionRoutes(unittest.TestCase):
         self.assertEqual(self.req('GET','/game/api/image/a?original=1')[0],404)
         self.assertEqual(self.req('GET','/game/api/image/a')[0],200)
 
+    def test_earned_clip_playback_after_set_move_and_new_career(self):
+        clip=b'fixture clip bytes'
+        (self.lib/'clip.mp4').write_bytes(clip)
+        self.data['media']+=[{'id':'clip','character_id':'a','stored_rel':'clip.mp4','media_type':'video'},
+                             {**self.data['media'][0],'id':'z-second-photo'}]
+        self.data['sets']=[{'id':'first-set','character_id':'a','media_ids':['clip','a']}]
+        library=self.lib/'library.json'
+        library.write_text(json.dumps(self.data))
+        route='/game/api/video/clip'
+        self.boot()
+        self.assertEqual(self.req('GET',route)[0],403)
+        earned=self.action('new',{'selected':['a','b']},0,'choose-founders')
+        self.assertEqual(earned['derived']['videos']['a'][0]['id'],'clip')
+        self.data['sets'][0]['media_ids']=['clip','z-second-photo']
+        library.write_text(json.dumps(self.data))
+        status,raw=self.req('POST','/game/api/refresh',{'revision':earned['revision']})
+        self.assertEqual(status,200,raw)
+        self.assertEqual(self.req('GET',route,headers={'Range':'bytes=2-6'}),(206,clip[2:7]))
+        status,raw=self.req('POST','/game/api/new-career',{'revision':json.loads(raw)['revision']})
+        self.assertEqual(status,200,raw)
+        self.boot()
+        newer=self.action('new',{'selected':['a','b']},0,'choose-founders')
+        self.assertEqual(newer['derived']['videos'],{})
+        self.assertEqual(self.req('GET',route)[0],403)
+
     def test_new_career_preserves_paid_pack_and_reopens_fresh_catalog(self):
         self.boot();self.action('new',{'selected':['a','b']},0,'choose-founders')
         original=self.action('pack',{'pack':'standard'},1,'buy-one-pack')['state']

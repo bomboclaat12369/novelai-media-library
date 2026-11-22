@@ -123,7 +123,7 @@ async function check() {
         if (award && !openedAward) {
             await page.reload();
             const activity=page.locator('[data-venue-section=activity]');
-            await activity.locator('summary').click();
+            await activity.locator(':scope > summary').click();
             await activity.getByRole('button',{name:/View awarded card/}).click();
             assert.ok((await page.locator('dialog[open] .source-detail').innerText()).includes(catalog.cards[award.special_card].name));
             await page.getByRole('button',{name:'Close card'}).click();
@@ -189,9 +189,9 @@ async function check() {
     const report = current.state.reports.at(-1);
     await page.reload();
     const section = page.locator('[data-venue-section=activity]');
-    assert.match(await section.locator('summary').textContent(),/1 Studio project · 1 Resort checkout/);
-    await section.locator('summary').click();
-    const receipts = section.locator('.contract-receipts li');
+    assert.match(await section.locator(':scope > summary').textContent(),/1 Studio project · 1 Resort checkout/);
+    await section.locator(':scope > summary').click();
+    const receipts = section.locator('.contract-receipts > li');
     assert.equal(await receipts.count(),2);
     for (const c of finished) {
         const receipt = receipts.filter({hasText:catalog.people[c.owner].name});
@@ -212,9 +212,8 @@ async function check() {
     await page.setViewportSize({width:390,height:844});
     assert.ok(await receipts.evaluateAll(els=>els.every(el=>el.getBoundingClientRect().right<=innerWidth)));
     await section.getByRole('button',{name:'View reports'}).click();
-    const detail=page.locator('details').filter({has:page.locator('summary',{hasText:'Night '+report.day+' · planning and decisions'})});
-    await detail.locator('summary').click();
-    assert.equal(await detail.locator('.contract-receipts li').count(),2);
+    const detail=page.locator('.report-receipts');
+    assert.equal(await detail.locator('.contract-receipts > li').count(),2);
     assert.equal(await detail.locator('.receipt-plan').count(),0);
     assert.equal((await get('state')).revision,current.revision);
     // Someone covers the lounge while its usual host delivers a Studio project.

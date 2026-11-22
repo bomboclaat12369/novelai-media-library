@@ -22,6 +22,18 @@ def encode(value):
     return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False)
 
 
+def saved_state(db):
+    row = db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
+    return (row[0],json.loads(row[1])) if row else (0,None)
+
+
+def flush_journal(db, state):
+    events = state.get('journal', [])
+    state['journal'] = []
+    db.executemany('INSERT INTO events(at,body) VALUES (?,?)', [(time.time(),encode(event)) for event in events])
+    return events
+
+
 def merge_catalog(previous, current, owned):
     """Keep career balance and acquired sequences. Only the live reader supplies artwork."""
     if not isinstance(previous.get('cards'), dict) or not isinstance(previous.get('people'), dict):
@@ -74,11 +86,13 @@ class GameStore:
                 CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,digest TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY,at REAL NOT NULL,body TEXT NOT NULL);''')
             row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
-            state=migrations.migrate(json.loads(row[1])) if row else None
             if row and json.loads(row[1]).get('schema') != migrations.SCHEMA:
                 before=self.path.with_name(self.path.name+'.before-schema-2')
                 if not before.exists():
                     with closing(sqlite3.connect(before)) as target: db.backup(target)
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
+            state=migrations.migrate(json.loads(row[1])) if row else None
             old=db.execute("SELECT value FROM meta WHERE key='catalog'").fetchone()
             self.source_catalog=catalog
             if old:
@@ -92,13 +106,17 @@ class GameStore:
             db.execute("INSERT OR REPLACE INTO meta VALUES ('catalog_stamp',?)",(self.catalog_stamp,))
             if row:
                 migrations.validate(state,catalog)
+                # A pre-receipt career can still prove an unlock against its
+                # last locally saved catalog even if today's Set has changed.
+                if old:
+                    self.award_videos(state,saved)
+                self.award_videos(state,catalog)
                 migrations.recover_management_receipts(state)
                 wardrobe.reconcile(state,catalog)
                 if any('voucher_rewards' not in r for r in state['reports']):
                     past=db.execute("SELECT body FROM events WHERE json_extract(body,'$.kind')='milestone_earned' ORDER BY id")
                     migrations.recover_reward_receipts(state,(json.loads(item[0]) for item in past))
-                events=state.pop('journal',[]);state['journal']=[]
-                db.executemany('INSERT INTO events(at,body) VALUES (?,?)',[(time.time(),encode(e)) for e in events])
+                flush_journal(db,state)
                 if encode(state)!=row[1]:
                     db.execute('UPDATE save SET revision=?,body=? WHERE id=1',(row[0]+1,encode(state)))
             db.execute("INSERT OR REPLACE INTO meta VALUES ('clock_tick',?)",(str(time.monotonic()),))
@@ -116,9 +134,45 @@ class GameStore:
     def read(self):
         with self.lock,self.connect() as db:
             self.sync_labels()
+            db.execute('BEGIN')
             self.sync_catalog(db)
-            row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
-            return {'revision':row[0],'state':json.loads(row[1])} if row else {'revision':0,'state':None}
+            revision,state=saved_state(db)
+            # Other open careers can change the source's manual pairings.
+            # Commit a newly visible reward before returning it to a player.
+            if state and self.catalog.get('videos') and next(videos.new_awards(self.catalog,state,self.video_pairs.read()),None):
+                db.commit()
+                db.execute('BEGIN IMMEDIATE')
+                self.sync_catalog(db)
+                revision,state=saved_state(db)
+                self.award_videos(state,self.catalog)
+                revision=self.save_awards(db,state,revision)
+            return {'revision':revision,'state':state}
+
+    def award_videos(self,state,catalog):
+        if state and catalog.get('videos'):
+            videos.reconcile(catalog,state,self.video_pairs.read())
+
+    @staticmethod
+    def save_awards(db,state,revision):
+        if state and state.get('journal'):
+            flush_journal(db,state)
+            revision+=1
+            db.execute('UPDATE save SET revision=?,body=? WHERE id=1',(revision,encode(state)))
+        return revision
+
+    def set_video_pairing(self,clip,photo,previous):
+        with self.lock,self.connect() as db:
+            db.execute('ATTACH DATABASE ? AS links',(str(self.video_pairs.path),))
+            db.execute('BEGIN IMMEDIATE')
+            self.sync_catalog(db)
+            self.video_pairs.validate_link(self.catalog,clip,photo)
+            self.video_pairs.write(db,'links',clip,photo,previous)
+            revision,state=saved_state(db)
+            if state:
+                pairs=dict(db.execute('SELECT clip,photo FROM links.pairs'))
+                videos.reconcile(self.catalog,state,{**pairs,clip:previous})
+                videos.reconcile(self.catalog,state,pairs)
+                self.save_awards(db,state,revision)
 
     def sync_labels(self):
         self.writing.sync()
@@ -177,8 +231,7 @@ class GameStore:
             self.sync_labels()
             self.sync_catalog(db)
             duplicate=db.execute('SELECT digest FROM requests WHERE id=?',(request_id,)).fetchone()
-            row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()
-            revision,state=(row[0],json.loads(row[1])) if row else (0,None)
+            revision,state=saved_state(db)
             if duplicate:
                 if duplicate[0]!=digest: raise Conflict('A request ID was reused for a different action.')
                 return {'revision':revision,'state':state,'replayed':True}
@@ -198,10 +251,10 @@ class GameStore:
             else:
                 if action=='advance': raise engine.RuleError('The server owns the game clock.')
                 state=engine.command(state,self.catalog,action,body,labels=self)
-            events=state.pop('journal',[]);state['journal']=[]
+            self.award_videos(state,self.catalog)
+            events=flush_journal(db,state)
             db.execute('INSERT OR REPLACE INTO save VALUES (1,?,?)',(revision+1,encode(state)))
             db.execute('INSERT INTO requests VALUES (?,?)',(request_id,digest))
-            db.executemany('INSERT INTO events(at,body) VALUES (?,?)',[(time.time(),encode(e)) for e in events])
             if action in ('new','start','tick','pause','speed','finish','decision'):
                 db.execute("INSERT OR REPLACE INTO meta VALUES ('clock_tick',?)",(str(time.monotonic()),))
             db.commit()
@@ -260,8 +313,9 @@ class GameStore:
             db.execute("UPDATE meta SET value=? WHERE key='catalog'",(encode(merged),))
             if row:
                 wardrobe.reconcile(state,merged)
-                events=state.pop('journal',[]);state['journal']=[]
-                db.executemany('INSERT INTO events(at,body) VALUES (?,?)',[(time.time(),encode(e)) for e in events])
+                self.award_videos(state,self.catalog)
+                self.award_videos(state,merged)
+                flush_journal(db,state)
                 db.execute('UPDATE save SET revision=?,body=? WHERE id=1',(revision+1,encode(state)))
             db.execute('INSERT INTO events(at,body) VALUES (?,?)',(time.time(),encode({'kind':'catalog_refreshed','added':added})))
             stamp=uuid.uuid4().hex
@@ -290,6 +344,9 @@ class GameStore:
             migrations.validate(state,cat)
             migrations.recover_management_receipts(state)
             wardrobe.reconcile(state,cat)
+            if backup is not None:
+                self.award_videos(state,payload['catalog'])
+            self.award_videos(state,cat)
             if state.get('night'): state['night']['paused']=True
             history=payload.get('history',[])
             if not isinstance(history,list) or len(history)>2000000 or any(not isinstance(e,dict) for e in history): raise ValueError()
@@ -311,6 +368,7 @@ class GameStore:
 
     def export(self):
         with self.lock,self.connect() as db:
+            self.read()
             db.execute('BEGIN')
             self.sync_catalog(db)
             row=db.execute('SELECT revision,body FROM save WHERE id=1').fetchone()

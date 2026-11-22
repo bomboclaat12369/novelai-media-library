@@ -1,5 +1,19 @@
 # After Hours — game development and releases
 
+## Version 1.6.0 — staff schedules, Night Reports and earned clips
+
+The team roster shows tonight’s actual assignment, including film leads,
+co-stars and Resort hosts, along with each worker’s seven-night schedule.
+Night Reports show the revenue each venue received and the costs of the
+shift. Each completed shoot or stay shows its return after the deposit
+and direct guest costs, and what that earned per staff-night. Older reports
+display the detail supported by their recorded figures.
+
+A career keeps a clip it earned if the Library Set or manual photo pairing
+later changes. Awards travel with save exports and backups. Playback still
+uses the eligible local clip for that character. A new career uses the
+current matches to earn its own clips.
+
 ## Version 1.5.0 — Studio shoots and Resort stays
 
 Studio and Resort now share the illustrated Club presentation from opening

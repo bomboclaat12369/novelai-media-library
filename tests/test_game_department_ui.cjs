@@ -19,7 +19,10 @@ async function run(){
  const page=await browser.newPage({viewport:{width:1440,height:960},locale:'en-US'}),errors=[];
  page.on('pageerror',error=>errors.push(error.message));
  await page.goto(url);
- const nav=name=>page.locator('.nav [data-screen="'+name+'"]').click();
+ const nav=async name=>{
+  await page.locator('.nav [data-screen="'+name+'"]').click();
+  await page.locator('.layout[data-page="'+name+'"]').waitFor();
+ };
  const size=async(width,height)=>{
   await page.setViewportSize({width,height});
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
@@ -72,6 +75,20 @@ async function run(){
  await page.getByRole('button',{name:'Enlarge booking photograph'}).click();
  assert.ok(await page.locator('.enlarged-booking-media img').isVisible());
  await page.getByRole('button',{name:'Close photograph'}).click();
+ await nav('team');
+ const staffCard=name=>page.locator('article.staff').filter({has:page.getByRole('heading',{name,exact:true})});
+ assert.match(await staffCard('Patricia').locator('.staff-reservation').innerText(),/Adult feature[\s\S]*Lead · Nights 7–9/);
+ assert.match(await staffCard('Unillustrated guest').locator('.staff-reservation').innerText(),/Co-star · Nights 7–9/);
+ assert.match(await staffCard('Alice').locator('.staff-reservation').innerText(),/Quiet retreat[\s\S]*Host · Nights 7–8/);
+ assert.equal(await page.locator('.staffinfo [data-plan]').count(),0);
+ assert.equal(await page.locator('.layout').evaluate(el=>getComputedStyle(el).backgroundColor),base);
+ await page.locator('.team-calendar summary').click();
+ const week=page.locator('.team-calendar table');
+ assert.equal(await week.getByRole('columnheader').count(),8);
+ assert.equal(await week.getByRole('row',{name:/Unillustrated guest/}).getByRole('cell',{name:'Studio · Adult feature'}).count(),3);
+ assert.equal(await week.getByRole('row',{name:/Alice/}).getByRole('cell',{name:'Resort · Quiet retreat'}).count(),2);
+ assert.equal(await week.locator('.proposed-night').count(),0);
+ await snapshot('team-staff-schedule');await size(390,844);await noOverflow();await size(1440,960);
  await page.getByRole('button',{name:'Open for the night',exact:false}).click();
  await page.waitForFunction(()=>save.phase==='night');
  await page.getByLabel('Night speed').selectOption('8');
@@ -93,7 +110,7 @@ async function run(){
    const event=await page.evaluate(()=>pendingDecision());
    if(!event)continue;
    if(event.department){
-    await nav(event.department==='studio'?'resort':'studio');
+    await nav(event.kind==='studio_cut'?'team':event.kind==='resort_request'?'reports':event.department==='studio'?'resort':'studio');
     assert.ok(await page.locator('.venue-event-overlay .decision').isVisible());
     handled.add(event.kind);
    }
@@ -118,7 +135,50 @@ async function run(){
  assert.equal(await regular.count(),2);
  await page.locator('[data-contract-choice=guest]').selectOption(await regular.nth(1).getAttribute('value'));
  await page.waitForFunction(()=>gameRoot.querySelector('.department-brief').innerText.includes('Visit 2'));
+ await nav('team');
+ const returned=staffCard('Alice').locator('[data-plan]');
+ assert.ok(await returned.isEnabled());
+ assert.equal(await returned.inputValue(),await page.evaluate(id=>save.people[id].role,alice));
+ assert.equal(await staffCard('Patricia').locator('[data-plan]').count(),0);
+ await page.evaluate(()=>clearInterval(interval));
+ await page.getByRole('button',{name:/Open for the night/}).click();
+ await page.waitForFunction(()=>save.phase==='night');
+ await page.getByRole('button',{name:'Finish night',exact:true}).click();
+ await page.waitForFunction(()=>save.phase==='prepare'&&save.day===10);
+ await nav('reports');
+ const report=await page.evaluate(()=>save.reports.at(-1));
+ assert.equal(await page.locator('#booking-report-night').inputValue(),String(report.day));
+ const cash=n=>'$'+Math.round(n).toLocaleString('en-US');
+ const readLines=locator=>locator.locator('div').evaluateAll(rows=>Object.fromEntries(rows.map(row=>[row.querySelector('dt').textContent,row.querySelector('dd').textContent])));
+ for(const day of [9,8,7]){
+  await page.getByLabel('Report night').selectOption(String(day));
+  const r=await page.evaluate(day=>save.reports.find(row=>row.day===day),day);
+  const amounts={Club:0,Studio:0,Resort:0},venueFor={room:'Club',lounge:'Club',studio:'Studio',resort:'Resort'};
+  for(const [owner,role] of Object.entries(r.assignments))if(venueFor[role])amounts[venueFor[role]]+=r.earnings[owner];
+  assert.equal(Object.values(amounts).reduce((a,b)=>a+b,0),r.revenue);
+  assert.deepEqual(await readLines(page.locator('.venue-revenue')),Object.fromEntries(Object.entries(amounts).map(([k,v])=>[k,cash(v)])));
+  assert.deepEqual(await readLines(page.locator('.night-costs')),{'Wages':cash(r.costs.payroll),'Venue upkeep':cash(r.costs.upkeep),'Training':cash(r.costs.training),'Business decisions':cash(r.costs.decisions)});
+  assert.match(await page.locator('.report-heading h2').innerText(),new RegExp('Night '+day));
+  if(day===7)continue;
+  const contract=await page.evaluate(day=>save.contracts.find(c=>c.end===day),day);
+  const staffNights=day===9?6:2;
+  const rate=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:0,maximumFractionDigits:2})
+   .format((contract.revenue-contract.spec.fee-(contract.service_cost||0))/staffNights);
+  const receipt=page.locator('.report-receipts .receipt-staff-time');
+  assert.equal(await receipt.locator('strong').textContent(),rate+' per staff-night');
+  assert.ok((await receipt.innerText()).includes(staffNights+' staff-nights'));
+ }
+ assert.deepEqual(await page.evaluate(()=>venueRevenue({revenue:110,department_revenue:70,earnings:{a:55},assignments:{a:'studio'}})),{club:40,departments:70});
+ assert.equal(await page.evaluate(()=>venueRevenue({revenue:110})),null);
+ await page.getByLabel('Report night').selectOption('9');
+ await snapshot('night-reports');
+ await size(390,844);await snapshot('night-reports-phone');
+ for(const name of ['packs','collection','expansion','saves','reports']){
+  await nav(name);await noOverflow();
+  assert.equal(await page.locator('.layout').evaluate(el=>getComputedStyle(el).backgroundColor),base);
+  assert.ok(await page.getByRole('button',{name:'Restart game',exact:true}).isVisible());
+ }
  await noOverflow();assert.deepEqual(errors,[]);
- console.log('Checked the locked, staffed, and running departments, phone layouts, casting, cross-venue decisions, private booking stages, and return reservations.');
+ console.log('Checked staff schedules, cross-venue decisions, return guests, nightly venue totals, two- and six-staff-night receipts, and phone navigation.');
 }
 run().catch(error=>{console.error(error.stack);process.exitCode=1;}).finally(async()=>{await browser?.close();server.kill();});

@@ -87,6 +87,16 @@ quote shows when you get paid. At checkout, the morning report includes the
 guest's satisfaction and the bonus paid. A Studio delivery that earns a card
 lets you open it from the receipt.
 
+**Your team** shows the actual lead, co-star or host, the reserved dates and
+each worker’s usual Club assignment. Open **Staff schedule** for the next
+seven nights. In **Night reports**, choose a night to see how much revenue
+each venue received and what the business spent on wages, upkeep, training
+and decisions. Each completed contract shows its return after the deposit
+and direct guest costs, divided by the nights each person was reserved.
+A three-night film with two cast members uses six staff-nights. Wages and
+upkeep appear in the night totals. Older reports show the breakdown their
+saved figures support.
+
 Studio and Resort use the Club’s illustrated floor, character view and fixed
 media frame. Each has its own schedule, activity history and receipts. A
 decision appears across the three venues, and the night continues after a
@@ -168,6 +178,12 @@ from **Booking media** in the room. Playback uses the same fixed portrait frame.
 For clips without a collectible Set match, open **Saves & catalog → Edit video
 pairings**, choose a clip and a photo of the same character, then save. Pairings
 are stored beside the local career files and apply to careers using that Library.
+Once earned, a clip stays with that career through a Set move or pairing
+change, including after export and restore. Playback requires an eligible
+local clip for the same character. A fresh career earns clips from the
+current Set and pairing. On upgrade, an existing career can recover matches
+from its last saved Library snapshot and the current Library. An older JSON
+export contains no historical video links.
 
 Open Patricia’s **Wardrobe** from her room or her team card. All 19 outfits
 show their names and goals while locked. Guaranteed career unlocks run from

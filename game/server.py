@@ -74,7 +74,7 @@ class Handler(BaseHTTPRequestHandler):
                                 'meetings':meetings.views(s,self.server.store.catalog),
                                 'evolutions':evolution.progress(self.server.store.catalog,s['owned']),
                                 'wardrobe':wardrobe.views(s,self.server.store.catalog),
-                                'videos':videos.library_views(self.server.store.catalog,s,self.server.store.video_pairs.read()),
+                                'videos':videos.library_views(self.server.store.catalog,s),
                                 'duos':evolution.duo_views(self.server.store.catalog,s['owned']),**management.derived(s)}
         result['stage_labels']=self.server.store.label_info()
         return result
@@ -102,7 +102,8 @@ class Handler(BaseHTTPRequestHandler):
         vid=urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).split('/api/video/',1)[-1]
         with self.server.operation_lock:
             store=self.server.store
-            clip=videos.unlocked(store.catalog,store.read()['state'],store.video_pairs.read()).get(vid)
+            current=store.read()['state']
+            clip=videos.unlocked(store.catalog,current).get(vid)
             if not clip: return self.send(403,{'error':'Collect a matching photo to unlock this video.'})
             file=Path(clip['original']).resolve()
             if not self.server.library_root or self.server.library_root not in file.parents:
@@ -320,7 +321,7 @@ class Handler(BaseHTTPRequestHandler):
                 if path=='/api/video-pairings':
                     store=self.server.store
                     if 'clip' in request:
-                        store.video_pairs.set(store.catalog,request['clip'],request.get('photo'),request.get('previous'))
+                        store.set_video_pairing(request['clip'],request.get('photo'),request.get('previous'))
                     return self.send(200,{'editor':store.video_pairs.editor(store.catalog),**self.state_payload()})
                 if path=='/api/stage-labels':
                     self.server.store.import_labels(raw)

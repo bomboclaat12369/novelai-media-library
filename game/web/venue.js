@@ -201,7 +201,7 @@ function venueActivity(night, last){
  const body = night
   ? `<ul class="timeline">${(night.log.length?night.log:['Guests will arrive throughout the night.']).map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`
   : `<p>${last?`Night ${last.day} finished at ${money(last.profit)} after costs.`:'Your first evening’s results will appear here.'}</p>
-     ${contractReceipts(last, contracts, true)}${voucherReceipts(last)}${vouchers?'<button class="primary small" data-screen="packs">Open pack shop →</button> ':''}<button class="ghost small" data-screen="reports">View reports →</button>`;
+     ${last?nightlyRevenue(last):''}${contractReceipts(last, contracts, true)}${voucherReceipts(last)}${vouchers?'<button class="primary small" data-screen="packs">Open pack shop →</button> ':''}<button class="ghost small" data-screen="reports">View reports →</button>`;
  return `<details class="venue-log panel" data-venue-section="activity" ${venueSections.has('activity')?'open':''}>
   <summary>${heading} <span>${caption}</span></summary>${body}</details>`;
 }
@@ -211,7 +211,8 @@ function staffingConflicts(){
  const returns=contractsEndingOn(save.day-1);
  const rows=groups.map(group=>{
   const description=group.role==='room'?'Private rooms':'Lounge';
-  const returned=returns.filter(c=>group.owners.includes(c.owner)).map(c=>esc(person(c.owner).name)+' is back from the '+esc(boot.departments[c.department].name)+'.');
+  const returned=returns.flatMap(c=>[c.owner,c.spec.costar].filter(owner=>owner&&group.owners.includes(owner))
+   .map(owner=>esc(person(owner).name)+' is back from the '+esc(boot.departments[c.department].name)+'.'));
   const choices=group.owners.map(owner=>`<button class="ghost small" data-action="rest-for-coverage" data-owner="${esc(owner)}">Rest ${esc(person(owner).name)}</button>`);
   return `<div><strong>${description} · ${group.owners.length} assigned to ${group.capacity} ${group.capacity===1?'position':'positions'}</strong>
    ${returned.length?`<p>${returned.join(' ')}</p>`:''}<div class="actions">${choices.join('')}</div></div>`;

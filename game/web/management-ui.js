@@ -10,14 +10,37 @@ root.addEventListener('toggle',event=>{
  if(id){if(event.target.open)openBookingHistory.add(id);else openBookingHistory.delete(id);}
 },true);
 const esc=escapeHTML,dis=v=>v?'disabled':'';
+function staffAssignment(owner){
+ const worker=save.people[owner];
+ const booked=derived.reservations.find(c=>c.owner===owner||c.spec.costar===owner);
+ if(booked){
+  const department=boot.departments[booked.department].name;
+  const duty=booked.department==='resort'?'Host':booked.owner===owner?'Lead':'Co-star';
+  const dates=booked.start===booked.end?'Night '+booked.start:'Nights '+booked.start+'–'+booked.end;
+  return `<div class="staff-reservation"><small>Tonight’s assignment · ${esc(department)}</small>
+   <strong>${esc(booked.spec.name)}</strong><span>${duty} · ${dates}</span>
+   <small>When unreserved · ${esc(assignmentNames[worker.role])}</small></div>`;
+ }
+ const roles=[['room','Private room'],['lounge','Lounge'],['rest','Rest & recover'],['train','Training · $15']];
+ return `<label for="role-${esc(owner)}">Tonight’s assignment</label>
+  <select id="role-${esc(owner)}" data-plan="${esc(owner)}" ${dis(save.phase!=='prepare')}>${roles.map(([id,name])=>`<option value="${id}" ${worker.role===id?'selected':''}>${name}</option>`).join('')}</select>`;
+}
+function teamHeader(){
+ const roles=Object.values(save.night?.assignments||derived.assignments);
+ const assigned=role=>roles.filter(value=>value===role).length;
+ return `<header class="lounge-heading"><div><div class="eyebrow">Staff / Night ${save.day}</div><h1>Your team</h1></div>
+  <div class="actions">${nightControls()}${boot.restartable?'<button class="ghost small" data-action="restart-game">Restart game</button>':''}</div></header>
+  <div class="lounge-summary"><span>Cash <strong>${money(save.cash)}</strong></span>
+  <span>Private rooms assigned <strong>${assigned('room')} / ${save.facilities.rooms}</strong></span>
+  <span>Lounge assigned <strong>${assigned('lounge')} / ${save.facilities.lounge}</strong></span></div>
+  ${staffingConflicts()}<div class="venue-event-overlay team-event" aria-live="polite">${opportunities()}</div>`;
+}
 function initManagementUI(){
  const baseSaves=saves;saves=()=>baseSaves()+writingPanel();
  const baseCollection=collection;collection=()=>baseCollection()+earnedClipsPanel(filter.owner??save.collection_target);
- const reportsBeforeBookings=reports;reports=()=>reportsBeforeBookings()+voucherHistory()+bookingReports();
  navigation.splice(1,0,['studio','◈','Studio'],['resort','☼','Resort']);navigation.push(['saves','↺','Saves & catalog']);
  const oldPacks=packs;packs=()=>`<section class="panel voucher"><div><h3>Earned pack rewards</h3><p>${save.pack_vouchers} Standard ${save.pack_vouchers===1?'voucher':'vouchers'} available · one free Standard pack each.</p></div><button data-action="voucher" ${dis(save.phase!=='prepare'||!save.pack_vouchers)}>Redeem a voucher</button></section>`+oldPacks()+voucherHistory();
  const oldTeam=team;team=()=>oldTeam()+development();
- const oldReports=reports;reports=()=>oldReports()+`<section class="panel"><h2>Department results</h2><p>${save.totals.studio_completed} Studio deliveries · ${save.totals.resort_completed} Resort checkouts · ${money(save.totals.contract_revenue)} department revenue.</p><p class="note">Night reports include department earnings, wages, upkeep and business decisions. Deposits are recorded separately when scheduling; capital purchases are in the full history.</p></section>`+save.reports.slice(-3).reverse().map(r=>`<details class="panel"><summary>Night ${r.day} · planning and decisions</summary><p>Department revenue ${money(r.department_revenue)} · training ${money(r.training_cost)} · business choices ${money(r.decision_costs)}.</p>${contractReceipts(r, contractsEndingOn(r.day))}<ul>${(r.activity||[]).map(t=>`<li>${esc(t)}</li>`).join('')}</ul></details>`).join('');
 }
 function head(kicker,title,text){return `<div class="pagehead"><div><div class="eyebrow">${kicker}</div><h1>${title}</h1><p>${text}</p></div></div>`;}
 function meetingCaption(meeting,activity,worker){
@@ -55,6 +78,61 @@ function studioCardReward(id){
  return `<button class="ghost small" data-action="inspect" data-card="${esc(id)}">View awarded card · ${esc(awarded.name)}</button>`;
 }
 
+function venueRevenue(report){
+ const amounts={club:0,studio:0,resort:0};
+ const destinations={room:'club',lounge:'club',studio:'studio',resort:'resort'};
+ const valid=n=>Number.isSafeInteger(n)&&n>=0;
+ const roles=report.assignments,paid=report.earnings,dept=report.department_revenue;
+ const hasDept=valid(dept)&&valid(report.revenue)&&dept<=report.revenue;
+ if(dept!=null&&!hasDept)return null;
+ if(roles&&paid){
+  let complete=Object.keys(roles).every(id=>valid(paid[id]));
+  for(const [id,value] of Object.entries(paid)){
+   const venue=destinations[roles[id]];
+   if(!valid(value)||(!venue&&value!==0)){complete=false;break;}
+   if(venue)amounts[venue]+=value;
+  }
+  if(complete&&Object.values(amounts).reduce((sum,n)=>sum+n,0)===report.revenue
+     &&(!hasDept||amounts.studio+amounts.resort===dept))return amounts;
+ }
+ if(!hasDept)return null;
+ if(dept===0)return {club:report.revenue,studio:0,resort:0};
+ return {club:report.revenue-dept,departments:dept};
+}
+function nightlyRevenue(report){
+ const split=venueRevenue(report);
+ if(!split)return '<p class="note">This older report records total revenue only.</p>';
+ const names={club:'Club',studio:'Studio',resort:'Resort',departments:'Studio and Resort combined'};
+ return `<dl class="venue-revenue" aria-label="Revenue by venue">${Object.entries(split).map(([key,value])=>
+  `<div><dt>${names[key]}</dt><dd>${money(value)}</dd></div>`).join('')}</dl>`;
+}
+function nightReports(){
+ const recent=save.reports.slice().reverse(),r=recent.find(row=>row.day===bookingReportDay)||recent[0];
+ const header=`<header class="lounge-heading"><h1>Night reports</h1><a href="/game/api/export?download=1">Export save &amp; history ↗</a></header>`;
+ if(!r)return header+'<section class="panel"><h2>Your first night</h2><p>Open the Club for a night to see what it earned.</p></section>';
+ const stats=`<div class="lounge-summary"><span>Career revenue <strong>${money(save.totals.revenue)}</strong></span><span>Career expenses <strong>${money(save.totals.expenses)}</strong></span>
+  <span>${save.totals.services} Club ${save.totals.services===1?'booking':'bookings'} · ${save.totals.studio_completed} Studio ${save.totals.studio_completed===1?'delivery':'deliveries'} · ${save.totals.resort_completed} ${save.totals.resort_completed===1?'checkout':'checkouts'}</span>
+  <span>${save.totals.packs} ${save.totals.packs===1?'pack':'packs'} opened</span></div>`;
+ const picker=`<label class="report-picker">Report night <select id="booking-report-night">${recent.map(row=>`<option value="${row.day}" ${row===r?'selected':''}>Night ${row.day} · ${esc(row.demand)}</option>`).join('')}</select></label>`;
+ const costs=r.costs?[['Wages',r.costs.payroll],['Venue upkeep',r.costs.upkeep],['Training',r.costs.training],['Business decisions',r.costs.decisions]]:
+  [['Training',r.training_cost],['Business decisions',r.decision_costs]].filter(([,v])=>Number.isFinite(v));
+ const costLines=costs.map(([name,value])=>`<div><dt>${name}</dt><dd>${money(value)}</dd></div>`).join('');
+ const contracts=contractsEndingOn(r.day),vouchers=voucherReceipts(r);
+ const decisions=(r.decisions||[]).filter(d=>d.choice).map(d=>`<li><strong>${esc(d.copy?.title||boot.decisions[d.kind]?.title||d.kind)}</strong> · ${d.choice==='accept'?'Accepted':'Passed'}${d.automatic?' automatically':''}${d.result?' · '+esc(d.result):''}</li>`).join('');
+ const records=recent.map(row=>`<tr><th scope="row">${row.day}</th><td>${esc(row.demand)}</td><td>${money(row.revenue)}</td><td>${money(row.expenses)}</td><td>${money(row.profit)}</td><td>${row.served} completed · ${row.missed} missed</td></tr>`).join('');
+ return header+stats+`<section class="panel night-balance"><div class="report-heading"><h2>Night ${r.day} · ${money(r.profit)} after costs</h2>${picker}</div>
+  <div class="report-columns"><div><h3>Revenue received · ${money(r.revenue)}</h3>${nightlyRevenue(r)}<p class="note">Studio fees arrive on delivery. Resort lodging pays each night.</p></div>
+  <div><h3>Operating costs · ${money(r.expenses)}</h3><dl class="night-costs">${costLines}</dl>${!r.costs?'<p class="note">This older report combines wages and upkeep in its total.</p>':''}</div></div></section>
+  ${contracts.length||vouchers?`<section class="panel report-receipts"><h2>Completed work and rewards</h2>${contractReceipts(r,contracts)}${vouchers}</section>`:''}
+  <details class="panel report-decisions" data-venue-section="report-${r.day}" ${venueSections.has('report-'+r.day)?'open':''}><summary>Night ${r.day} · planning and decisions</summary>
+   ${decisions?`<h3>Decisions</h3><ul>${decisions}</ul>`:''}
+   ${r.activity?.length?`<h3>Shift log</h3><ul>${r.activity.map(t=>`<li>${esc(t)}</li>`).join('')}</ul>`:''}</details>
+  ${bookingReports(r)}
+  <details class="panel report-history" data-venue-section="past-reports" ${venueSections.has('past-reports')?'open':''}><summary>Previous nights · ${recent.length} reports</summary>
+   <div class="table-wrap"><table><thead><tr><th>Night</th><th>Demand</th><th>Revenue</th><th>Expenses</th><th>After costs</th><th>Club bookings</th></tr></thead><tbody>${records}</tbody></table></div>
+   <p class="note">The last 40 nights are available here. Your export keeps the full transaction history.</p></details>`;
+}
+
 function contractReceipts(report, contracts, showTonight=false){
  if(!contracts.length)return '';
  const roles = assignmentNames;
@@ -76,9 +154,14 @@ function contractReceipts(report, contracts, showTonight=false){
   }
   if(Number.isFinite(c.spec.fee))lines.push(['After '+money(c.spec.fee)+' deposit', money(c.revenue-c.spec.fee)]);
   if(c.service_cost)lines.push(['After deposit and guest requests',money(c.revenue-c.spec.fee-c.service_cost)]);
+  const castSize=c.spec.costar?2:1,staffNights=c.nights*castSize;
+  const directReturn=c.revenue-c.spec.fee-(c.service_cost||0);
+  const perNight=Number.isFinite(directReturn)&&staffNights>0?new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',
+   minimumFractionDigits:0,maximumFractionDigits:2}).format(directReturn/staffNights):null;
+  const staffTime=perNight?`<p class="receipt-staff-time"><strong>${perNight} per staff-night</strong> · ${staffNights} ${staffNights===1?'staff-night':'staff-nights'} (${castSize} ${castSize===1?'person':'people'} × ${c.nights} ${c.nights===1?'night':'nights'}). After direct costs, before wages and upkeep.</p>`:'';
   const rewards = [];
   if(studio && c.success && Number.isSafeInteger(c.spec.packs) && c.spec.packs>0 &&
-     !(showTonight&&report.voucher_rewards?.some(r=>r.contract===c.id)))
+     !report.voucher_rewards?.some(r=>r.contract===c.id))
    rewards.push(c.spec.packs+' Standard '+(c.spec.packs===1?'voucher':'vouchers'));
   if(c.special_card)rewards.push(studioCardReward(c.special_card));
   const role = derived.assignments?.[c.owner];
@@ -91,16 +174,14 @@ function contractReceipts(report, contracts, showTonight=false){
   const guest=c.guest?`<p>${esc(c.guest.name)} · ${c.return_invited?'wants to book another stay':'checked out'}</p>`:'';
   return `<li><strong>${esc(cast)} · ${esc(title)}</strong><small>${outcome}</small>
    <dl>${lines.map(([label,value])=>`<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}</dl>
-   ${guest}${rewards.length?`<p>${rewards.join(' · ')}</p>`:''}${contractHistory(c)}${plan}</li>`;
+   ${staffTime}${guest}${rewards.length?`<p>${rewards.join(' · ')}</p>`:''}${contractHistory(c)}${plan}</li>`;
  });
  return `<ul class="contract-receipts" aria-label="Completed contracts">${rows.join('')}</ul>`;
 }
 
-function bookingReports(){
- const available=save.reports.filter(r=>Array.isArray(r.booking_history));
- if(!available.length)return '';
- const report=available.find(r=>r.day===bookingReportDay)||available.at(-1);
- return `<section class="panel"><h2>Booking histories</h2><label>Night<select id="booking-report-night">${available.slice().reverse().map(r=>`<option value="${r.day}" ${r.day===report.day?'selected':''}>Night ${r.day}</option>`).join('')}</select></label>${report.booking_history.map(meeting=>{
+function bookingReports(report){
+ if(!Array.isArray(report.booking_history))return '';
+ return `<section class="panel"><h2>Club booking histories · Night ${report.day}</h2>${report.booking_history.map(meeting=>{
   const name=person(meeting.owner).name;
   const partner=meeting.group?.partner?person(meeting.group.partner).name:'';
   const rows=meeting.segments.filter(s=>s.label).map(s=>{
@@ -232,7 +313,7 @@ function reservationControls(dept,owner,kind,start,quote){
 }
 function nightRange(start,end){return start===end?'night '+start:'nights '+start+'–'+end;}
 function contractTerms(dept,quote,start){
- const end=start+quote.days-1;
+ const end=start+quote.days-1,castSize=quote.costar?2:1,staffNights=castSize*quote.days;
  let terms;
  if(dept==='studio'){
   const rewards=[];
@@ -248,7 +329,8 @@ function contractTerms(dept,quote,start){
    <p>Night ${end} checkout · ${bonus} at ${quote.expectation}/100 satisfaction or higher.</p>`;
  }
  return `<div class="quote"><p><strong>${quote.days===1?'Night '+start:'Nights '+start+'–'+end}</strong></p>
-  <p>Deposit due now ${money(quote.fee)} · ${quote.energy} energy/night</p>${terms}</div>`;
+  <p>Deposit due now ${money(quote.fee)} · ${quote.energy} energy/night</p>
+  <p>Reserves ${staffNights} ${staffNights===1?'staff-night':'staff-nights'} (${castSize} ${castSize===1?'person':'people'} × ${quote.days} ${quote.days===1?'night':'nights'}).</p>${terms}</div>`;
 }
 function canOpenDepartment(dept){
  return derived.unlocks[dept] && save.cash >= derived.department_costs[dept];
@@ -268,7 +350,7 @@ function openingGoals(dept,bars=false){
 }
 function studio(){return departmentUI('studio');}function resort(){return departmentUI('resort');}
 function calendarUI(owner,start,duration,costar){
- const preview=save.phase==='prepare',first=preview?Math.max(save.day,start-1):save.day;
+ const preview=!!owner&&save.phase==='prepare',first=preview?Math.max(save.day,start-1):save.day;
  const days=Array.from({length:7},(_,i)=>first+i),last=days[days.length-1],booked=new Map();
  for(const contract of save.contracts){
   if(contract.status!=='active'||contract.end<first||contract.start>last)continue;
@@ -287,7 +369,10 @@ function calendarUI(owner,start,duration,costar){
   return `<tr><th scope="row">${esc(person(id).name)}</th>${cells}</tr>`;
  }).join('');
  const proposed=[owner,costar].filter(Boolean).map(id=>esc(person(id).name)).join(' and ');
- return `<section class="panel table-wrap reservation-calendar"><h2>Shared availability</h2><table><caption>${preview?'Proposed dates for '+proposed+' are highlighted. ':''}Unreserved nights show the current team plan.</caption><thead><tr><th scope="col">Team member</th>${days.map(day=>`<th scope="col" class="${inRange(day)?'range-night':''}">Night ${day}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></section>`;
+ const table=`<table><caption>${preview?'Proposed dates for '+proposed+' are highlighted. ':''}Unreserved nights show the current team plan.</caption><thead><tr><th scope="col">Team member</th>${days.map(day=>`<th scope="col" class="${inRange(day)?'range-night':''}">Night ${day}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+ if(owner)return `<section class="panel table-wrap reservation-calendar"><h2>Shared availability</h2>${table}</section>`;
+ return `<details class="panel team-calendar" data-venue-section="team-schedule" ${venueSections.has('team-schedule')?'open':''}>
+  <summary>Staff schedule · Nights ${first}–${last}</summary><div class="table-wrap reservation-calendar">${table}</div></details>`;
 }
 function expansion(){return legacyExpansion().replace(/<div class="panel" style="margin-top:22px"><h3>A shared future[\s\S]*$/,'')+`<div class="upgrade-grid">${Object.entries(boot.departments).map(([id,d])=>`<article class="upgrade"><span class="level">${save.departments[id]} / 6 POSITIONS</span><h2>${d.name}</h2>${save.departments[id]?'':openingGoals(id)}<p>${money(d.upkeep)} added upkeep/night</p><button data-action="department" data-kind="${id}" ${dis(save.phase!=='prepare'||!derived.unlocks[id]||save.departments[id]>=6||save.cash<derived.department_costs[id])}>${save.departments[id]?'Expand':'Open'} · ${money(derived.department_costs[id])}</button></article>`).join('')}</div><section class="panel"><h2>Keep the evening fresh</h2><p>Promotion costs $150: +3 reputation and +3.5 percentage points of club booking acceptance for four nights. Most useful with a larger staffed venue.</p><p>${save.promotion_until>=save.day?`Active through night ${save.promotion_until}.`:'No active campaign.'}</p><button data-action="marketing" ${dis(save.phase!=='prepare'||save.cash<150||save.promotion_until>=save.day+3)}>Book campaign · $150</button><p class="note">Earn one voucher at your first 30 bookings, first Studio delivery and first Resort checkout. Every further 250 club bookings earns two. No mandatory reset.</p></section>`;}
 async function loadBackups(){const r=await fetch('/game/api/backups');if(r.ok){const d=await r.json();backupRows=d.backups;saveFilename=d.save_name;}}
@@ -309,7 +394,7 @@ function saves(){
  <button data-action="refresh-catalog" ${dis(save.phase!=='prepare')}>Refresh catalog read-only</button>
  <p class="note">Rarity, mastery and discovery history stay fixed. Missing files retain their cards. Imported save paths cannot choose source media.</p>
  <h3>Optional stories</h3><p class="note">Narrative history is reserved separately. Story import, relationships and generation remain deferred and never block business progression.</p>
- </section></div>`+(!boot.catalog.demo?'<section class="panel"><h2>Video rewards</h2><p>Collect a photo to unlock the videos in its Set. Pair other clips with a photo here. Pairings apply to careers using this Library on this computer.</p><button data-action="clip-editor">Edit video pairings</button></section>':'')+stageLabelsPanel();
+ </section></div>`+(!boot.catalog.demo?'<section class="panel"><h2>Video rewards</h2><p>Collect a photo to unlock videos in its Set. You can pair other clips with a photo for all careers using this Library. A career keeps the clips it has earned when you reorganize a Set or change a pairing.</p><button data-action="clip-editor">Edit video pairings</button></section>':'')+stageLabelsPanel();
 }
 function earnedClipsPanel(owner){
  const rows=Object.entries(derived.videos||{}).filter(([id])=>!owner||owner===id);

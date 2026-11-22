@@ -58,6 +58,12 @@ if showcase:
         action('department', {'kind': dept})
     action('schedule', {'department': 'studio', 'kind': 'solo_film', 'owner': owners[0]})
     action('schedule', {'department': 'resort', 'kind': 'retreat', 'owner': owners[1], 'service_plan': 'dining'})
+    for _ in range(2):
+        action('auto', {})
+        action('start', {})
+        action('finish', {})
+    action('schedule', {'department': 'studio', 'kind': 'feature_film', 'owner': owners[0], 'costar': owners[2]})
+    action('schedule', {'department': 'resort', 'kind': 'weekend', 'owner': owners[1]})
     action('auto', {})
 print(json.dumps({'url':f'http://127.0.0.1:{server.server_port}/game/','library':str(library)}),flush=True)
 serve(server)

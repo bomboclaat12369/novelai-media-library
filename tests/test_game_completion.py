@@ -106,16 +106,85 @@ class Completion(unittest.TestCase):
                    'e':{'source':'evolution','owner':'p','available':True,'forms':[{'media_id':x,'key':x} for x in ('first','target','last')]}}
             cat={'people':{'p':{},'q':{}},'cards':cards,'videos':{'set':{'owner':'p','name':'Clip','photos':['target']},
                  'loose':{'owner':'p','name':'Loose','photos':[]}}}
-            s={'owned':{'e':{'mastery':0},'other':{}}}
+            s={'day':1,'owned':{'e':{'mastery':0},'other':{}}}
             with self.assertRaises(ValueError): book.set(cat,'loose','other',None)
             book.set(cat,'loose','a',None)
-            self.assertFalse(videos.unlocked(cat,s,book.read()))
-            s['owned']['e']['mastery']=2;self.assertEqual(set(videos.unlocked(cat,s,book.read())),{'set'})
-            s['owned']['a']={};self.assertEqual(len(videos.unlocked(cat,s,book.read())),2)
+            videos.reconcile(cat,s,book.read())
+            self.assertFalse(videos.unlocked(cat,s))
+            s['owned']['e']['mastery']=2
+            videos.reconcile(cat,s,book.read())
+            self.assertEqual(set(videos.unlocked(cat,s)),{'set'})
+            s['owned']['a']={}
+            videos.reconcile(cat,s,book.read())
+            self.assertEqual(set(videos.unlocked(cat,s)),{'loose','set'})
             self.assertEqual(videos.Pairings(tmp,'test').read(),{'loose':'a'})
             self.assertFalse(videos.Pairings(tmp,'other-library').read())
             with self.assertRaises(ValueError): book.set(cat,'loose',None,None)
             book.set(cat,'loose',None,'a');self.assertFalse(book.read())
+            videos.reconcile(cat,s,book.read())
+            videos.validate_receipts(s,cat)
+            self.assertEqual(s['earned_videos']['p']['set'],{'card':'e','photo':'target','via':'set'})
+            self.assertEqual(len(s['journal']),2)
+
+    def test_video_rewards_survive_moves_restore_and_only_belong_to_the_earning_career(self):
+        cat=catalog.demo_catalog()
+        for card in cat['cards'].values():
+            card.update(source='library',available=True)
+        owner='demo-0'
+        starter=engine.starter(cat,owner)
+        later=next(k for k,c in cat['cards'].items() if c['owner']==owner and k!=starter)
+        cat['videos']={'v':{'owner':owner,'name':'Set clip','photos':[starter]},
+                       'loose':{'owner':owner,'name':'Paired clip','photos':[]}}
+        creation={'selected':[owner,'demo-1'],'seed':9}
+        def available(store):
+            return set(videos.unlocked(store.catalog,store.read()['state']))
+        def refresh(store,live):
+            store.refresh_catalog(live,store.read()['revision'])
+        with tempfile.TemporaryDirectory() as tmp:
+            store=GameStore(Path(tmp)/'career.sqlite3',cat)
+            store.apply('new',creation,'new-career',0)
+            self.assertEqual(available(store),{'v'})
+            store.set_video_pairing('loose',starter,None)
+            store.set_video_pairing('loose',None,starter)
+            self.assertEqual(available(store),{'v','loose'})
+            self.assertEqual(store.read()['revision'],store.apply('new',creation,'new-career',0)['revision'])
+            # The last local catalog is still evidence when upgrading an older career.
+            legacy=GameStore(Path(tmp)/'older.sqlite3',cat)
+            legacy.apply('new',creation,'old-career',0)
+            with legacy.connect() as db:
+                db.execute("UPDATE save SET body=json_remove(body,'$.earned_videos')")
+                db.execute("DELETE FROM events WHERE json_extract(body,'$.kind')='video_earned'")
+            moved=copy.deepcopy(cat)
+            moved['videos']['v']['photos']=[later]
+            upgraded=GameStore(legacy.path,moved)
+            self.assertEqual(available(upgraded),{'v'})
+            self.assertEqual(upgraded.read()['state']['cash'],600)
+            refresh(store,moved)
+            fresh=store.new_career(moved)
+            fresh.apply('new',creation,'fresh-start',0)
+            self.assertEqual(available(fresh),set())
+            # A pairing made from another career is recorded the first time this one sees it.
+            fresh.set_video_pairing('loose',starter,None)
+            self.assertEqual(available(upgraded),{'v','loose'})
+            fresh.set_video_pairing('loose',None,starter)
+            self.assertEqual(available(upgraded),{'v','loose'})
+            export=store.export()
+            self.assertNotIn('videos',export['catalog'])
+            self.assertEqual(sum(e.get('kind')=='video_earned' for e in export['history']),2)
+            hidden=copy.deepcopy(moved)
+            hidden['videos']['v']['owner']='demo-1'
+            del hidden['videos']['loose']
+            refresh(store,hidden)
+            self.assertEqual(available(store),set())
+            restored=store.restore(export)
+            self.assertEqual(available(restored),set())
+            refresh(restored,moved)
+            self.assertEqual(available(restored),{'v','loose'})
+            self.assertEqual(restored.read()['state']['earned_videos'],export['save']['state']['earned_videos'])
+            self.assertEqual(sum(e.get('kind')=='video_earned' for e in restored.export()['history']),2)
+            bad=copy.deepcopy(export)
+            bad['save']['state']['earned_videos'][owner]['v']['card']=later
+            with self.assertRaises(engine.RuleError):store.restore(bad)
 
     def test_offline_words_cannot_change_participants_or_payments(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -2,7 +2,7 @@
 from __future__ import annotations
 import copy
 import math
-from . import engine, evolution, management, meetings, wardrobe
+from . import engine, evolution, management, meetings, videos, wardrobe
 
 SCHEMA = 2
 
@@ -97,6 +97,12 @@ def validate(state, catalog):
     try:
         wardrobe.validate(state)
         for report in state['reports']:
+            if 'costs' in report:
+                costs=report['costs']
+                if (not isinstance(costs,dict) or set(costs)!={'payroll','upkeep','training','decisions'}
+                        or not all(finite(v) for v in costs.values()) or sum(costs.values())!=report['expenses']
+                        or costs['training']!=report['training_cost'] or costs['decisions']!=report['decision_costs']):
+                    raise ValueError('Invalid nightly expenses.')
             rewards=report.get('voucher_rewards',[])
             if not isinstance(rewards,list): raise ValueError('Invalid voucher history.')
             for reward in rewards:
@@ -106,6 +112,7 @@ def validate(state, catalog):
                 raise ValueError('Invalid voucher source.')
         if 'collection_target' in state and state['collection_target'] not in catalog['people']:
             raise ValueError('Unknown collection target.')
+        videos.validate_receipts(state,catalog)
         if not integer(state['day'], 1) or not finite(state['cash'], -10**12): raise ValueError()
         if state['phase'] not in ('prepare', 'night'): raise ValueError()
         if type(state['preferred_night_speed']) is not int or state['preferred_night_speed'] not in engine.NIGHT_SPEEDS:
