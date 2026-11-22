@@ -266,6 +266,9 @@ def make_server(engine, port=0, token=None):
                     result=organizer_splits.comparison(organizer,body)
                 elif path == '/api/organizer/likely-groups':
                     result=organizer_likely_sets.load_page(organizer,body)
+                elif path == '/api/organizer/post-merge-preview':
+                    import organizer_post_merge
+                    result=organizer_post_merge.preview(organizer,body)
                 elif path == '/api/organizer/prepare-matches':
                     result=organizer.prepare_matches(body)
                 elif path == '/api/organizer/cancel-matching':

@@ -145,6 +145,12 @@ const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/play
     await postResponse(()=>postBrowser.getByRole('button',{name:'Next photos'}).click());
     await postBrowser.getByRole('checkbox',{name:'Include Gallery 29.jpg'}).waitFor();
     assert(await postBrowser.getByRole('checkbox',{name:'Include Gallery 29.jpg'}).isDisabled());
+    const assigned=postBrowser.locator('figure').filter({has:page.getByRole('checkbox',{name:'Include Gallery 29.jpg'})});
+    const band=assigned.locator('.likely-membership');
+    assert.match(await band.textContent(),/^In .+/);
+    const badgeBox=await band.boundingBox(),imageBox=await assigned.locator('img').boundingBox();
+    assert(badgeBox.y+badgeBox.height<=imageBox.y+1);
+    assert.equal(await assigned.evaluate(e=>getComputedStyle(e).borderTopWidth),'2px');
     assert(await postBrowser.getByRole('checkbox',{name:'Include Gallery 28.jpg'}).isChecked());
     const sorted=await postResponse(()=>visual.click());
     assert.equal(await visual.getAttribute('aria-pressed'),'true');
@@ -178,6 +184,18 @@ const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/play
     await slider.focus();await slider.press('End');
     assert((await tiles.first().boundingBox()).width>widthBefore);
     assert.equal(await page.evaluate(()=>localStorage.getItem('organizer-likely-photo-size')),'420');
+    const rowSlider=postBrowser.getByRole('slider',{name:'Matching post photos per row'});
+    const rowLength=()=>tiles.evaluateAll(cards=>cards.filter(c=>Math.abs(c.offsetTop-cards[0].offsetTop)<2).length);
+    const suggestionWidth=(await suggestions.locator('figure').first().boundingBox()).width;
+    await rowSlider.focus();await rowSlider.press('Home');
+    for(let count=1;count<=4;count++){
+      await rowSlider.press('ArrowRight');
+      assert.equal(await rowLength(),count);
+    }
+    assert.equal((await suggestions.locator('figure').first().boundingBox()).width,suggestionWidth);
+    assert.equal(await page.evaluate(()=>localStorage.getItem('organizer-likely-post-columns')),'4');
+    await postResponse(()=>postBrowser.getByRole('button',{name:'Next photos'}).click());
+    assert.equal(await rowLength(),4);
     await page.setViewportSize({width:430,height:760});
     assert(await dialog.evaluate(d=>d.scrollWidth<=d.clientWidth+2));
     assert((await postBrowser.boundingBox()).y>(await suggestions.boundingBox()).y);
@@ -190,6 +208,24 @@ const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/play
     assert.deepEqual(new Set(members),combined);
     await dialog.getByRole('button',{name:'Undo last review'}).click();
     await page.waitForFunction(n=>data.sets.find(s=>s.id==='library:existing').members.length===n&&!busy,priorMembers.length);
+    await picker.selectOption('');await page.waitForFunction(()=>!busy);
+    const mergePage=await postResponse(()=>dialog.getByRole('button',{name:/^View post /}).first().click());
+    assert.equal(await rowSlider.inputValue(),'4');
+    const mergeButton=postBrowser.getByRole('button',{name:'Merge into one Set…',exact:true});
+    const mergeDialog=page.getByRole('dialog',{name:'Merge into one Set',exact:true});
+    const survivor=await page.evaluate(()=>data.sets.find(s=>s.id==='library:existing'));
+    const checkedNow=await proposedChecks.evaluateAll(els=>els.filter(e=>e.checked).map(e=>e.value));
+    const finalMembers=new Set([...survivor.members,...mergePage.selectable_ids,...checkedNow]);
+    await mergeButton.click();
+    await mergeDialog.getByText(survivor.name+' · '+finalMembers.size+' photos after merging').waitFor();
+    await mergeDialog.getByRole('button',{name:'Cancel'}).click();
+    assert.deepEqual(await page.evaluate(()=>data.sets.find(s=>s.id==='library:existing').members),survivor.members);
+    await mergeButton.click();
+    await mergeDialog.getByRole('button',{name:'Merge into '+survivor.name,exact:true}).click();
+    await page.waitForFunction(n=>!busy&&data.sets.find(s=>s.id==='library:existing').members.length===n,finalMembers.size);
+    assert.deepEqual(new Set(await page.evaluate(()=>data.sets.find(s=>s.id==='library:existing').members)),finalMembers);
+    await dialog.getByRole('button',{name:'Undo last review'}).click();
+    await page.waitForFunction(n=>!busy&&data.sets.find(s=>s.id==='library:existing').members.length===n,survivor.members.length);
     await page.waitForLoadState('networkidle');
     assert.deepEqual(errors,[]);
     console.log('Verified full-brightness comparisons, adjustable galleries, whole-post selection, visual grouping, approval, Undo and mobile layout.');

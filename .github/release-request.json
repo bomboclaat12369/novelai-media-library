@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "id": "workbench-matching-post-photo-review-2026-11-21",
+  "id": "workbench-matching-post-merge-columns-2026-11-22",
   "components": ["workbench"],
   "publish": true,
-  "workbench_notes": "Compare larger, full-brightness photos in Likely groups and Finish partial Sets. Adjust Photo size for both galleries. Browse matching posts can group visually similar photos or select every available photo in the post across all pages before you approve."
+  "workbench_notes": "Browse matching posts can merge the whole open post and checked photos into one Set. Preview the destination, participating Sets and photo count, then merge or hold for review with one Undo. Assigned photos have a prominent Set-name label and border. Photos per row lets you set the post gallery to 1–8 columns or Auto."
 }

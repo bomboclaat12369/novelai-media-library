@@ -14,6 +14,7 @@ from test_organizer import fixture
 from engine import fingerprint, sha256, stat_key
 from organizer import Organizer
 from organizer_likely_sets import load_page
+import organizer_post_merge
 from likely_sets import propose, ranking_weights, review_queue
 from set_matching import WEIGHTS
 import tracking
@@ -161,7 +162,7 @@ class ReviewTests(unittest.TestCase):
         return load_page(self.org,dict(job=self.job,**body))
 
     def act(self, action, **body):
-        return self.org.mutate(action,dict(job=self.job,revision=self.org.state().get('revision',0),**body))
+        return self.org.mutate(action,{'job':self.job,'revision':self.org.state().get('revision',0),**body})
 
     def find(self, predicate):
         first = self.get()
@@ -200,6 +201,119 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(similar['selectable_ids'], first['selectable_ids'])
         self.assertTrue(next(p for p in original if p['id'] == gallery[-1])['unavailable_reason'])
         with self.assertRaises(ValueError): self.get(**signed, post_order='unrecognized')
+
+    def test_matching_post_merges_complete_drafts_and_undo_restores_them(self):
+        group = self.find(lambda p: not p['destination'])
+        post = group['photos'][0]['source_key']
+        members = [p['id'] for p in group['photos']]
+        origin = self.org.catalog[members[0]]['sources'][post]
+        in_post = [add_post_extra(self.bulk, f'Shoot frame {n:02d}', {post:origin},
+                                  color=(12+n*15, 64, 150)) for n in range(12)]
+        outside = add_post_extra(self.bulk, 'Other post frame', {'elsewhere':{'kind':'forum','label':'Other post'}})
+        protected = add_post_extra(self.bulk, 'Purgatory frame', {post:origin})
+        self.org.bind()
+        self.act('save', name='Shoot 031', ids=in_post[:8])
+        self.act('save', name='Second draft', ids=[*in_post[8:], outside], favorite=True, colors=['Silver'])
+        self.act('save', name='Parked Set', ids=[protected])
+        ids_by_name = {g['name']:k for k,g in self.org.sets().items()}
+        keep,retired = ids_by_name['Shoot 031'], ids_by_name['Second Draft']
+        self.act('set_details', target=ids_by_name['Parked Set'], in_purgatory=True)
+        self.act('set_review', target=retired, under_review=True)
+        group = self.find(lambda p: set(members) == {i['id'] for i in p['photos']})
+        selected = [members[0], next(p['id'] for p in group['photos'] if p['source_key'] != post)]
+        signed = dict(job=self.job,session=group['session'],key=group['key'],source_post=post,ids=selected,target='')
+        before = self.org.sets()
+        preview = organizer_post_merge.preview(self.org,signed)
+        self.assertEqual(preview['target'],keep)
+        self.assertEqual({g['id'] for g in preview['sets']},{keep,retired})
+        self.assertEqual(preview['other_members'],1)
+        self.assertEqual(preview['skipped'],1)
+        self.assertTrue(preview['under_review'])
+        self.assertEqual(self.org.sets(),before)
+        with self.assertRaisesRegex(ValueError,'preview'):
+            self.act('merge_likely_post', **signed, stamp='stale')
+        with self.assertRaises(ValueError):
+            organizer_post_merge.preview(self.org,dict(signed,source_post='elsewhere'))
+        with self.assertRaises(ValueError):
+            organizer_post_merge.preview(self.org,dict(signed,ids=[outside]))
+        self.assertEqual(self.org.sets(),before)
+        self.act('merge_likely_post',**signed,stamp=preview['stamp'])
+        merged = self.org.sets()[keep]
+        expected = (set(self.org.post_ids(post)) | set(selected) | {outside}) - {protected}
+        self.assertEqual(set(merged['members']),expected)
+        self.assertEqual(len(merged['members']),preview['count'])
+        self.assertEqual(merged['members'][:8],in_post[:8])
+        self.assertEqual(merged['name'],'Shoot 031')
+        self.assertTrue(merged['favorite'] and merged['under_review'])
+        self.assertIn('Silver',merged['colors'])
+        self.assertIn(retired,merged['merged_sources'])
+        self.assertNotIn(retired,self.org.sets())
+        self.assertEqual(self.org.sets()[ids_by_name['Parked Set']],before[ids_by_name['Parked Set']])
+        with self.assertRaises(ValueError): self.act('merge_likely_post',**signed,stamp=preview['stamp'])
+        with self.org.db() as db:
+            event=json.loads(db.execute("SELECT payload FROM tracking_events WHERE kind='decision.merge_matching_post'").fetchone()[0])
+        self.assertEqual(event['post'],post)
+        self.assertEqual(event['sets_before'][retired]['members'],before[retired]['members'])
+        self.assertEqual(event['sets_before'][keep]['members'],before[keep]['members'])
+        self.assertEqual(set(event['hashes']),expected)
+        self.act('undo')
+        self.assertEqual(self.org.sets(),before)
+
+    def test_merge_resolves_current_library_membership_before_adding_the_post(self):
+        group = self.find(lambda p: not p['destination'])
+        photo = group['photos'][0]
+        post = photo['source_key']
+        origin = self.org.catalog[photo['id']]['sources'][post]
+        extra = add_post_extra(self.bulk, 'Newly linked frame', {post:origin})
+        self.org.bind()
+        group = self.find(lambda p: p['key'] == group['key'])
+        signed = dict(job=self.job, session=group['session'], key=group['key'], source_post=post,
+                      ids=[p['id'] for p in group['photos']])
+        before = self.org.sets()
+        library_id = 'library:existing'
+        self.assertNotIn(extra,before[library_id]['members'])
+        self.org.refresh_library_placement(force=True)
+        placement = copy.deepcopy(self.org.library_placement)
+        placement['set_ids_by_sha'] = {i:{'existing'} for i in [*self.ids[:2],extra]}
+        placement['set_names'] = {'existing':'Existing shoot','new-library-id':'Second Library Set'}
+        with patch.object(self.org,'refresh_library_placement'), patch.object(self.org,'library_placement',placement):
+            browse = self.get(session=group['session'], key=group['key'], source_post=post)
+            self.assertEqual(next(p for p in browse['photos'] if p['id']==extra)['set_names'],['Existing shoot'])
+            plan = organizer_post_merge.preview(self.org,signed)
+            self.assertEqual(plan['target'],library_id)
+            self.assertEqual(plan['skipped'],0)
+            placement['set_ids_by_sha'][extra].add('new-library-id')
+            with self.assertRaisesRegex(ValueError,'Second Library Set'):
+                self.act('merge_likely_post',**signed,stamp=plan['stamp'])
+            self.assertEqual(self.org.sets(),before)
+            placement['set_ids_by_sha'][extra].remove('new-library-id')
+            self.act('merge_likely_post',**signed,stamp=plan['stamp'])
+            self.assertIn(extra,self.org.sets()[library_id]['members'])
+            with self.org.db() as db:
+                event=json.loads(db.execute("SELECT payload FROM tracking_events WHERE kind='decision.merge_matching_post'").fetchone()[0])
+            self.assertEqual(event['library_memberships'][extra],['existing'])
+            self.assertNotIn(extra,event['sets_before'][library_id]['members'])
+            self.act('undo')
+            self.assertEqual(self.org.sets(),before)
+
+    def test_post_merge_explicit_hold_new_set_and_changed_preview(self):
+        group = self.find(lambda p: not p['destination'])
+        post = group['photos'][0]['source_key']
+        checked = [p['id'] for p in group['photos'] if p['source_key'] != post]
+        signed = dict(job=self.job, session=group['session'], key=group['key'], source_post=post,
+                      ids=checked, name='Under Review Post')
+        before = self.org.sets()
+        preview = organizer_post_merge.preview(self.org,signed)
+        self.assertFalse(preview['sets'])
+        with self.assertRaisesRegex(ValueError,'preview'):
+            self.act('merge_likely_post',**dict(signed,ids=checked[:-1]),stamp=preview['stamp'])
+        self.assertEqual(self.org.sets(),before)
+        self.act('merge_likely_post',**signed,stamp=preview['stamp'],hold_for_review=True)
+        created = next(g for g in self.org.sets().values() if g['name']=='Under Review Post')
+        self.assertTrue(created['under_review'])
+        self.assertEqual(len(created['members']),preview['count'])
+        self.act('undo')
+        self.assertEqual(self.org.sets(),before)
 
     def test_partial_approval_is_manual_transaction_and_keeps_original_review_context(self):
         self.act('draft',ids=[self.ids[2]],new_name='Work in progress')

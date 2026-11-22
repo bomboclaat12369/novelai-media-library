@@ -9,6 +9,7 @@ import numpy as np
 import tracking
 import organizer_auto_sets
 import organizer_likely_sets
+import organizer_post_merge
 import organizer_splits
 from match_history import MatchHistory
 from bulk.sources import natural, original_name, original_order_key, original_sequence
@@ -396,9 +397,10 @@ class Organizer:
             expected=config.get('library_instance')
             # Sections store tracking's instance ID, not the catalog's store ID.
             if expected and self.engine.library.request('/api/tracking/status')['instance']!=expected:return
-            main={};review=set();purgatory=set();held=set();set_ids_by_sha={}
+            main={};review=set();purgatory=set();held=set();set_ids_by_sha={};held_sets=set();set_names={}
             live_members={}
             for group in catalog.get('sets',[]):
+                if group.get('name'):set_names[group['id']]=group['name']
                 for media_id in group.get('media_ids',[]):
                     live_members.setdefault(media_id,set()).add(group['id'])
             for row in catalog['files']:
@@ -410,9 +412,12 @@ class Organizer:
                 if row.get('in_review'):review.add(digest)
                 if row.get('in_purgatory'):purgatory.add(digest)
                 if row.get('flagged_for_removal') or row.get('in_review') or row.get('in_purgatory') or row.get('set_under_review'):held.add(digest)
+                if row.get('set_under_review'):held_sets.add(digest)
+                set_names.update(zip(row.get('set_ids',[]),row.get('sets',[])))
                 current_sets=set(row.get('set_ids',[]))|live_members.get(row.get('id'),set())
                 if current_sets:set_ids_by_sha.setdefault(digest,set()).update(current_sets)
-            result.update(main=main,review=review,purgatory=purgatory,held_hashes=held,set_ids_by_sha=set_ids_by_sha)
+            result.update(main=main,review=review,purgatory=purgatory,held_hashes=held,set_ids_by_sha=set_ids_by_sha,
+                          held_set_hashes=held_sets,set_names=set_names)
         except (ValueError,OSError,KeyError,TypeError):
             # Disconnected or changed library is unknown, never "not in Main".
             pass
@@ -786,9 +791,10 @@ class Organizer:
                 return {'saved':True}
             if int(body.get('revision',-1))!=state.get('revision',0):raise ValueError('Review changed in another window. Reload before saving.')
             match_result=None
+            unavailable_targets=set()
             likely_action=action in ('approve_likely','dismiss_likely')
             split_action=action in ('combine_split','separate_split')
-            if likely_action or split_action or (action=='undo' and (state.get('undo') or {}).get('split_review')):
+            if likely_action or split_action or action=='merge_likely_post' or (action=='undo' and (state.get('undo') or {}).get('split_review')):
                 self.check_collection_idle(body)
                 self.refresh_library_placement(force=True)
             if action=='auto_sets':
@@ -821,6 +827,8 @@ class Organizer:
                         return dict(self.summary(), auto_result=match_result)
                 elif split_action:
                     organizer_splits.apply(self,db,state,body,action)
+                elif action=='merge_likely_post':
+                    review,offer,reviewed_ids,unavailable_targets=organizer_post_merge.apply(self,db,state,body)
                 elif action=='pin':
                     ident=self.valid_ids([body.get('id')])[0];hashes=self.hashes(ident)
                     if not isinstance(body.get('pinned'),bool):raise ValueError('Choose star or unstar.')
@@ -1116,10 +1124,12 @@ class Organizer:
                 elif action!='pin' and previous_undo and state.get('undo')!=previous_undo:
                     state['undo_stack']=(state.get('undo_stack',[])+[previous_undo])[-19:]
                 state['revision']=state.get('revision',0)+1;self.put_state(db,state)
-            if likely_action:
+            if likely_action or action=='merge_likely_post':
                 review.revision=state['revision']
-                touched = set(choices.get('ids', [])) - set(offer['members'])
-                review.rows = [row for row in review.rows if row is not offer and not touched.intersection(row['members'])]
+                if likely_action:reviewed_ids=choices.get('ids',[])
+                touched = set(reviewed_ids) - set(offer['members'])
+                review.rows = [row for row in review.rows if row is not offer and row['target'] not in unavailable_targets
+                               and not touched.intersection(row['members'])]
             self.load_dispositions()
             summary=self.summary()
             if match_result is not None:summary['auto_result']=match_result

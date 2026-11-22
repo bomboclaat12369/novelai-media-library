@@ -21,11 +21,36 @@ def local_draft(group):
     return bool(group and not (group.get('library_id') or group.get('applied_at') or group.get('in_purgatory')))
 
 
-def destination(a,b):
+def destination(*groups):
     def priority(g):
         confirmed = set(g['members'])-set(g.get('auto_members',())) | set(g.get('auto_reviewed',()))
-        return (not bool(g.get('library_id')),not bool(confirmed),g.get('created') or 0,g['name'].casefold(),g['id'])
-    return min((a,b),key=priority)['id']
+        return (not bool(g.get('library_id') or g.get('applied_at')),not bool(confirmed),g.get('created') or 0,g['name'].casefold(),g['id'])
+    return min(groups,key=priority)['id']
+
+
+def combined_group(target, sources, retired):
+    groups = [target, *sources]
+    def union(field):
+        return list(dict.fromkeys(value for group in groups for value in group.get(field, ())))
+    result = dict(target)
+    for field in ('members','auto_members','auto_reviewed','auto_pending','categories','colors'):
+        result[field] = union(field)
+    result['merged_sources'] = list(dict.fromkeys([*union('merged_sources'), *retired]))
+    result['favorite'] = any(g.get('favorite') for g in groups)
+    included = set(result['members'])
+    result['removed_members'] = [i for i in union('removed_members') if i not in included]
+    return result
+
+
+def redirect_retired(state, retired, keep, undo):
+    if state.get('target') in retired:
+        undo['old_draft_target'] = state['target']
+        state['target'] = keep
+    if state.get('ui',{}).get('sidebarSet') in retired:
+        state['ui']['sidebarSet'] = keep
+    for view in (state.get('view',{}),state.get('ui',{}).get('view',{})):
+        if view.get('kind') == 'set' and view.get('id') in retired:
+            view['id'] = keep
 
 
 def pending(organizer, db, groups, excluded):
@@ -189,17 +214,7 @@ def apply(organizer,db,state,body,action):
             gid = target['id']
             prev = db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(organizer.scope,gid)).fetchone()
             raw = prev[0] if prev else None
-            group = dict(target)
-            def union(field):
-                return list(dict.fromkeys(target.get(field,[])+source.get(field,[])))
-            group['members'] = union('members')
-            for field in ('auto_members','auto_reviewed','auto_pending','categories','colors','merged_sources'):
-                group[field] = union(field)
-            if not fragment:
-                group['merged_sources'] = list(dict.fromkeys([*group['merged_sources'],source['id']]))
-            group['favorite'] = bool(target.get('favorite') or source.get('favorite'))
-            included = set(group['members'])
-            group['removed_members'] = [i for i in union('removed_members') if i not in included]
+            group = combined_group(target, [source], [] if fragment else [source['id']])
         undo = {'action':'set','id':gid,'previous':raw,'selection':state.get('selection',[]),'split_review':True,'moved':{}}
         if fragment:
             old = db.execute('SELECT data FROM split_fragments WHERE scope=? AND id=?',(organizer.scope,right)).fetchone()
@@ -213,14 +228,7 @@ def apply(organizer,db,state,body,action):
                 raise ValueError('The source draft is no longer available.')
             undo['moved'][source['id']] = old[0]
             db.execute('DELETE FROM sets WHERE scope=? AND id=?',(organizer.scope,source['id']))
-            if state.get('target')==source['id']:
-                undo['old_draft_target'] = source['id']
-                state['target'] = gid
-            if state.get('ui',{}).get('sidebarSet')==source['id']:
-                state['ui']['sidebarSet']=gid
-            for obj in (state.get('view',{}),state.get('ui',{}).get('view',{})):
-                if obj.get('kind')=='set' and obj.get('id')==source['id']:
-                    obj['id']=gid
+            redirect_retired(state, {source['id']}, gid, undo)
         group['updated'] = time.time()
         if body.get('hold_for_review') is True or (action=='combine_split' and source.get('under_review')):
             organizer.set_review_status(db,group,True,action)

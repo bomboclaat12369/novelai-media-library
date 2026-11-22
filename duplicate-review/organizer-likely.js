@@ -23,6 +23,9 @@ likelyStyle.textContent = `
  .likely-photos .match-photo{--ratio:clamp(.4,var(--frame-ratio,.75),2.5);padding:3px;border-radius:6px;max-width:100%;
   flex:var(--ratio) 1 min(100%,calc(var(--photo-size) * 1.4 * var(--ratio)),calc(var(--photo-size) * 1.65))}
  .likely-photos .match-photo:has(input:checked){border-color:var(--accent)}
+ .likely-photos .likely-enlarge{display:block;width:100%;padding:0;border:0;background:#0c1015}
+ .likely-post-browser .match-photo.assigned{border:2px solid #78bbd7}
+ .likely-membership{display:block;margin:-2px -2px 3px;padding:3px 6px;border-radius:3px 3px 0 0;background:#294759;color:#eef9ff;font-size:.92em;font-weight:700;line-height:1.2;overflow-wrap:anywhere}
  .likely-photos .match-photo img{width:100%;height:auto;aspect-ratio:var(--ratio);max-height:min(70dvh,calc(var(--photo-size) * 1.8));object-fit:contain}
  .likely-photos label{display:flex;gap:6px;align-items:center;padding:4px 3px;cursor:pointer}
  .likely-photos input[type=checkbox]{width:18px;height:18px;flex:0 0 18px;margin:0;accent-color:var(--accent)}
@@ -34,7 +37,17 @@ likelyStyle.textContent = `
  .likely-post-browser summary{cursor:pointer;font-weight:600}
  .likely-post-controls{display:flex;gap:5px;align-items:center;flex-wrap:wrap;padding:6px 0}
  .likely-post-controls select{min-width:0;max-width:100%}
+ .likely-post-columns{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+ .likely-post-columns input{width:88px;min-width:0;padding:0;accent-color:var(--accent)}
+ .likely-post-columns output{min-width:2.2em;text-align:center}
+ .likely-post-browser .likely-photos.fixed-columns{display:grid;grid-template-columns:repeat(var(--post-columns),minmax(0,1fr))}
+ .likely-post-browser .fixed-columns .match-photo img{max-height:70dvh}
  .likely-post-controls [aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
+ .likely-post-merge-button{border-color:var(--accent);color:var(--accent)}
+ .likely-merge-dialog{width:min(470px,94vw);max-height:85dvh;overflow:auto}
+ .likely-merge-dialog h2{margin:0}
+ .likely-merge-dialog ul{margin:8px 0;padding-inline-start:22px}
+ .likely-merge-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:14px}
  .likely-photos .unavailable{color:var(--muted);font-size:.8em}
  @media(min-width:960px) and (min-height:520px){
   #likelyGroupsDialog .match-body:has(.likely-post-browser[open]){display:flex;flex-direction:column;overflow:hidden}
@@ -51,6 +64,36 @@ likelyStyle.textContent = `
 `;
 document.head.append(likelyStyle);
 document.body.append(likelyDialog);
+
+function confirmMatchingPostMerge(plan){
+ const dialog=el('dialog',undefined,'likely-merge-dialog');
+ const title=el('h2','Merge into one Set');
+ dialog.setAttribute('aria-label',title.textContent);
+ const total=el('p');total.append(el('strong',plan.name+' · '+plan.count+' photos after merging in this collection'));
+ const counts=el('ul');counts.append(el('li',plan.from_post+' from '+plan.post));
+ if(plan.checked_elsewhere)counts.append(el('li',plan.checked_elsewhere+' checked from other matching posts'));
+ if(plan.other_members)counts.append(el('li',plan.other_members+' additional photos already in the Sets being kept together'));
+ dialog.append(title,total,counts);
+ if(plan.sets.length){
+  const sets=el('ul');
+  for(const group of plan.sets){
+   sets.append(el('li',(group.id===plan.target?'Keep ':'Merge in ')+group.name+' ('+group.count+')'));
+  }
+  dialog.append(sets);
+ }else dialog.append(el('p','This creates a new Workbench Set.'));
+ if(plan.skipped)dialog.append(el('p',plan.skipped+' unavailable photos from the post will stay out.'));
+ const hold=el('input'),label=el('label');
+ hold.type='checkbox';hold.checked=hold.disabled=plan.under_review;
+ label.append(hold,document.createTextNode(' Keep merged Set under review'));
+ const actions=el('div',undefined,'likely-merge-actions');
+ const cancel=button('Cancel',()=>dialog.close());
+ actions.append(cancel,button('Merge into '+plan.name,()=>dialog.close('merge'),'primary'));
+ dialog.append(label,actions);document.body.append(dialog);
+ return new Promise(resolve=>{
+  dialog.onclose=()=>{const result=dialog.returnValue==='merge'?hold.checked:null;dialog.remove();resolve(result)};
+  dialog.showModal();cancel.focus();
+ });
+}
 
 async function openLikelyGroups(){
  const job = data.job, choices = new Map();
@@ -86,7 +129,7 @@ async function openLikelyGroups(){
   drawViewer();$('viewer').showModal();
  }
  function photoFigure(photo,list){
-  const figure=el('figure',undefined,'match-photo'),b=button('',()=>preview(photo,list)),im=el('img');
+  const figure=el('figure',undefined,'match-photo'),b=button('',()=>preview(photo,list),'likely-enlarge'),im=el('img');
   function setFrame(width,height){
    if(width>0&&height>0)figure.style.setProperty('--frame-ratio',String(width/height));
   }
@@ -227,7 +270,10 @@ async function openLikelyGroups(){
     updateSelection();
    };
    figure.append(caption);
-   if(photo.unavailable_reason)figure.append(el('small',photo.unavailable_reason,'unavailable'));
+   if(photo.set_names?.length){
+    figure.classList.add('assigned');
+    figure.prepend(el('span','In '+photo.set_names.join(', '),'likely-membership'));
+   }else if(photo.unavailable_reason)figure.append(el('small',photo.unavailable_reason,'unavailable'));
    return figure;
   }
   const browser=el('details',undefined,'likely-post-browser'), postPicker=el('select');
@@ -252,8 +298,26 @@ async function openLikelyGroups(){
    }
    updateSelection();
   },'small');
-  bulkSelect.title='Change the selection for every available photo in this post, across all pages.';
-  postStatus.setAttribute('role','status');controls.append(postPicker,similar,bulkSelect,back,more,postStatus);
+  bulkSelect.title='Select available photos across all pages. Use Merge into one Set to include assigned photos.';
+  const merge=button('Merge into one Set…',()=>task(mergePost),'small likely-post-merge-button');
+  merge.title='Combine the whole open post and checked photos with their existing Sets.';
+  const columnsLabel=el('label','Photos per row','likely-post-columns');
+  const columns=el('input'), columnCount=el('output');
+  columns.type='range';columns.min='0';columns.max='8';columns.step='1';
+  columns.setAttribute('aria-label','Matching post photos per row');
+  columns.title='Auto follows Photo size. Choose 1 to 8 for a fixed number per row.';
+  columns.value=localStorage.getItem('organizer-likely-post-columns')||'0';
+  function applyColumns(){
+   const count=columns.valueAsNumber;
+   extraGrid.classList.toggle('fixed-columns',count>0);
+   extraGrid.style.setProperty('--post-columns',String(count||1));
+   columnCount.textContent=count?String(count):'Auto';
+   columns.setAttribute('aria-valuetext',count?String(count)+' per row':'Auto');
+  }
+  columns.oninput=applyColumns;
+  columns.onchange=()=>localStorage.setItem('organizer-likely-post-columns',columns.value);
+  applyColumns();columnsLabel.append(columns,columnCount);
+  postStatus.setAttribute('role','status');controls.append(postPicker,similar,bulkSelect,merge,columnsLabel,back,more,postStatus);
   browser.append(el('summary','Browse matching posts'),controls,extraGrid);
   if(posts.length)comparison.append(browser);
   async function showPost(at){
@@ -261,7 +325,7 @@ async function openLikelyGroups(){
    if(source!==displayed)selectableIds=null;
    state.post=source;state.postOffset=at;displayed=source;
    browser.scrollTop=0;
-   currentPage=null;bulkSelect.disabled=back.disabled=more.disabled=true;
+   currentPage=null;merge.disabled=bulkSelect.disabled=back.disabled=more.disabled=true;
    similar.setAttribute('aria-pressed',String(state.postOrder==='similar'));
    extraGrid.replaceChildren();postStatus.textContent='Loading photos…';
    try{
@@ -296,6 +360,7 @@ async function openLikelyGroups(){
   function updateSelection(){
    for(const check of comparison.querySelectorAll('input[type=checkbox]'))check.checked=state.selected.has(check.value);
    bulkSelect.disabled=!currentPage||!selectableIds?.length;
+   merge.disabled=!currentPage;
    const allInPost=selectableIds?.length&&selectableIds.every(id=>state.selected.has(id));
    bulkSelect.textContent=allInPost?'Deselect entire post':'Select entire post';
    const count=state.selected.size;
@@ -310,6 +375,33 @@ async function openLikelyGroups(){
    ' separate Sets, the first cross-post reference matched the shoot '+Math.round(100*cal.baseline)+'% before tuning and '+
    Math.round(100*cal.candidate)+'% after tuning, averaged per Set.':'Workbench is using the standard outfit and setting weights. It checks possible adjustments using confirmed Sets from different posts.';
   explanation.append(el('p',wording));suggestions.append(explanation);
+  async function mergePost(){
+   const serial=request, payload={session,key:groupKey,source_post:postPicker.value,ids:[...state.selected],
+    target:state.target,name:state.name,set_details:state.details.get(state.target)};
+   try{
+    const plan=await api('post-merge-preview',{job,...payload});
+    if(closed||!browser.isConnected||serial!==request)return;
+    if(state.target!==payload.target||state.name!==payload.name||state.selected.size!==payload.ids.length||
+       !payload.ids.every(id=>state.selected.has(id))){
+     toast('Your selection changed. Open Merge into one Set again.');return;
+    }
+    const hold=await confirmMatchingPostMerge(plan);
+    if(hold===null)return;
+    await mutate('merge_likely_post',{...payload,stamp:plan.stamp,hold_for_review:hold});
+    dirty=true;choices.delete(groupKey);
+    for(const [key,saved] of choices){
+     if(saved.target&&!data.sets.some(g=>g.id===saved.target&&!g.in_purgatory))choices.delete(key);
+    }
+    if(closed){await refreshPost();return}
+    await load(index);toast('Merged into '+plan.name+' · '+plan.count+' photos');
+   }catch(e){
+    if(closed)return;
+    postStatus.textContent=e.message;
+    if(!footer.querySelector('[data-reload]')){
+     const reload=button('Refresh groups',()=>task(restart));reload.dataset.reload='1';footer.prepend(reload);
+    }
+   }
+  }
   async function decide(action,holdForReview=false){
    try{
     const result=await mutate(action,{session,key:page.key,ids:[...state.selected],target:state.target,
