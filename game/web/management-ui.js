@@ -135,13 +135,13 @@ function nightReports(){
  const costs=r.costs?[['Wages',r.costs.payroll],['Venue upkeep',r.costs.upkeep],['Training',r.costs.training],['Business decisions',r.costs.decisions]]:
   [['Training',r.training_cost],['Business decisions',r.decision_costs]].filter(([,v])=>Number.isFinite(v));
  const costLines=costs.map(([name,value])=>`<div><dt>${name}</dt><dd>${money(value)}</dd></div>`).join('');
- const contracts=contractsEndingOn(r.day),vouchers=voucherReceipts(r);
+ const contracts=contractsEndingOn(r.day),vouchers=voucherReceipts(r),unlocks=bookingUnlocks(r);
  const decisions=(r.decisions||[]).filter(d=>d.choice).map(reportDecision).join('');
  const records=recent.map(row=>`<tr><th scope="row">${row.day}</th><td>${esc(row.demand)}</td><td>${money(row.revenue)}</td><td>${money(row.expenses)}</td><td>${money(row.profit)}</td><td>${row.served} completed · ${row.missed} missed</td></tr>`).join('');
  return header+stats+`<section class="panel night-balance"><div class="report-heading"><h2>Night ${r.day} · ${money(r.profit)} after costs</h2>${picker}</div>
   <div class="report-columns"><div><h3>Revenue received · ${money(r.revenue)}</h3>${nightlyRevenue(r)}<p class="note">Studio fees arrive on delivery. Resort lodging pays each night.</p></div>
   <div><h3>Operating costs · ${money(r.expenses)}</h3><dl class="night-costs">${costLines}</dl>${!r.costs?'<p class="note">This older report combines wages and upkeep in its total.</p>':''}</div></div></section>
-  ${contracts.length||vouchers?`<section class="panel report-receipts"><h2>Completed work and rewards</h2>${contractReceipts(r,contracts)}${vouchers}</section>`:''}
+  ${contracts.length||vouchers||unlocks?`<section class="panel report-receipts"><h2>Completed work and rewards</h2>${unlocks}${contractReceipts(r,contracts)}${vouchers}</section>`:''}
   <details class="panel report-decisions" data-venue-section="report-${r.day}" ${venueSections.has('report-'+r.day)?'open':''}><summary>Night ${r.day} · planning and decisions</summary>
    ${decisions?`<h3>Decisions</h3><ul>${decisions}</ul>`:''}
    ${r.activity?.length?`<h3>Shift log</h3><ul>${r.activity.map(t=>`<li>${esc(t)}</li>`).join('')}</ul>`:''}</details>
@@ -151,6 +151,14 @@ function nightReports(){
    <p class="note">The last 40 nights are available here. Your export keeps the full transaction history.</p></details>`;
 }
 
+function bookingUnlocks(report){
+ return (report?.booking_unlocks||[]).map(kind=>{
+  const goal=derived.booking_goals?.[kind],spec=boot.projects[kind]||boot.stays[kind];
+  if(!goal||!spec)return '';
+  return `<p class="booking-unlock"><strong>New booking · ${esc(spec.name)}</strong> · ${goal.target} ${esc(goal.unit)}
+   <button class="ghost small" data-action="plan-unlocked-booking" data-kind="${esc(kind)}">View at the ${esc(boot.departments[goal.department].name)} →</button></p>`;
+ }).join('');
+}
 function contractReceipts(report, contracts, showTonight=false){
  if(!contracts.length)return '';
  const roles = assignmentNames;
@@ -162,6 +170,7 @@ function contractReceipts(report, contracts, showTonight=false){
   const lines = [[studio?'Delivery payout':'Entire stay', money(c.revenue)]];
   if(c.delivery_extra)lines.push(['Alternate cuts included',money(c.delivery_extra)]);
   if(c.cover_fee)lines.push(['Cover commission included',money(c.cover_bonus_paid||0)]);
+  if(c.license_fee)lines.push(['Photo license included',money(c.license_fee)]);
   const privatePay=(c.private_bookings||[]).filter(m=>m.completed).reduce((sum,m)=>sum+m.value,0);
   if(privatePay)lines.push(['Private bookings included',money(privatePay)]);
   if(!studio){
@@ -169,6 +178,7 @@ function contractReceipts(report, contracts, showTonight=false){
    if(Number.isFinite(nightlyPay))lines.push(['Checkout night', money(nightlyPay)]);
    lines.push(['Guest satisfaction', c.satisfaction+'/100 · target '+c.spec.expectation]);
    if(Number.isFinite(c.checkout_bonus_paid))lines.push(['Checkout bonus included', money(c.checkout_bonus_paid)]);
+   if(Number.isFinite(c.farewell_bonus_paid))lines.push(['VIP farewell included · target '+c.farewell_target,money(c.farewell_bonus_paid)]);
   }
   if(Number.isFinite(c.spec.fee))lines.push(['After '+money(c.spec.fee)+' deposit', money(c.revenue-c.spec.fee)]);
   if(c.service_cost)lines.push(['After deposit and guest requests',money(c.revenue-c.spec.fee-c.service_cost)]);
@@ -178,9 +188,10 @@ function contractReceipts(report, contracts, showTonight=false){
    minimumFractionDigits:0,maximumFractionDigits:2}).format(directReturn/staffNights):null;
   const staffTime=perNight?`<p class="receipt-staff-time"><strong>${perNight} per staff-night</strong> · ${staffNights} ${staffNights===1?'staff-night':'staff-nights'} (${castSize} ${castSize===1?'person':'people'} × ${c.nights} ${c.nights===1?'night':'nights'}). After direct costs, before wages and upkeep.</p>`:'';
   const rewards = [];
-  if(studio && c.success && Number.isSafeInteger(c.spec.packs) && c.spec.packs>0 &&
+  const paidVouchers=c.delivery_vouchers??c.spec.packs;
+  if(studio && c.success && Number.isSafeInteger(paidVouchers) && paidVouchers>0 &&
      !report.voucher_rewards?.some(r=>r.contract===c.id))
-   rewards.push(c.spec.packs+' Standard '+(c.spec.packs===1?'voucher':'vouchers'));
+   rewards.push(paidVouchers+' Standard '+(paidVouchers===1?'voucher':'vouchers'));
   if(c.special_card)rewards.push(studioCardReward(c.special_card));
   const role = derived.assignments?.[c.owner];
   let plan = '';
@@ -296,6 +307,11 @@ function reservationLookupFor(department,owner,kind){
 function reservationControls(dept,owner,kind,start,quote){
  const button=disabled=>`<button class="primary full" data-action="schedule" data-department="${dept}" ${dis(disabled)}>Reserve &amp; pay deposit</button>`;
  if(save.phase!=='prepare')return '<p class="note">Reservations reopen after tonight.</p>'+button(true);
+ const goal=derived.booking_goals?.[kind];
+ if(goal&&goal.current<goal.target){
+  const tip=dept==='resort'?'Choose a returning guest in the Guest menu and complete their stay.':'Only successful deliveries count toward the commission.';
+  return `<p class="reservation-check" role="status">Reservations unlock after ${goal.target} ${esc(goal.unit)}. ${tip}</p>`+button(true);
+ }
  if(!Number.isInteger(boot.reservation_horizon))return button(save.cash<quote.fee);
  const lookup=reservationLookupFor(dept,owner,kind);
  if(lookup.error)return `<p class="note">${esc(lookup.error)} <button class="ghost small" data-action="retry-reservation">Try again</button></p>`+button(true);
@@ -335,7 +351,7 @@ function contractTerms(dept,quote,start){
  let terms;
  if(dept==='studio'){
   const rewards=[];
-  if(quote.packs)rewards.push(`${quote.packs} Standard voucher on successful delivery.`);
+  if(quote.packs)rewards.push(`${quote.packs} Standard ${quote.packs===1?'voucher':'vouchers'} on successful delivery.`);
   if(quote.days>=2)rewards.push('20% chance of an extra card on successful delivery.');
   terms=`<p>Paid on delivery, night ${end}. A successful project earns an estimated ${money(quote.estimated_pay)} · <strong>${money(quote.estimated_pay-quote.fee)} after the deposit</strong>.</p>
    <p>${Math.round(quote.success_chance*100)}% delivery chance with sufficient work completed. Rework pays 55% of the quality-adjusted fee.</p>
@@ -493,7 +509,13 @@ async function managementClick(b,a){
  }
  if(a==='select-room'){selectedRooms[screen]=b.dataset.room;render();return true;}
  if(a==='view-cast'){featuredCast.set(Number(b.dataset.contract),b.dataset.owner);render();return true;}
- if(a==='department-desk'){const desk=$('#department-desk');desk?.focus({preventScroll:true});desk?.scrollIntoView({block:'start'});return true;}
+ if(a==='plan-unlocked-booking'||a==='department-desk'){
+  if(a==='plan-unlocked-booking'){
+   const kind=b.dataset.kind,dept=derived.booking_goals[kind].department;
+   quoteKind[dept]=kind;screen=dept;page=0;render();
+  }
+  const desk=$('#department-desk');desk?.focus({preventScroll:true});desk?.scrollIntoView({block:'start'});return true;
+ }
  if(a==='use-reservation-start'){quoteStart[b.dataset.department]=Number(b.dataset.start);render();return true;}
  if(a==='rest-for-coverage'){await act('plan',{owner:b.dataset.owner,role:'rest'});return true;}
  if(a==='retry-reservation'){reservationLookup=null;render();return true;}

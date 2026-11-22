@@ -1,5 +1,21 @@
 # After Hours — game development and releases
 
+## Version 1.7.0 — earned Studio commissions and VIP stays
+
+Six successful Studio shoots unlock the four-night high-budget commission.
+It has a $350 deposit, a $1,450 base production fee and two vouchers on
+successful delivery. The client can license the photos for $80 at settlement
+in exchange for one of the delivery vouchers.
+
+Three completed stays with returning guests unlock the three-night VIP
+package. New and returning guests can book it. Its $240 base deposit
+reserves a suite at $300 per night. An optional farewell costs $60 and
+earns an extra $160 at checkout with at least 90/100 satisfaction.
+
+Both booking desks show progress from past careers and preview the terms.
+The night report links to each newly earned booking. Existing offline
+writing packs still work, with two optional events for the new bookings.
+
 ## Version 1.6.2 — recovery during a shoot or guest stay
 
 Taking a financial recovery break partway through a Studio shoot or Resort

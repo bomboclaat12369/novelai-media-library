@@ -51,7 +51,7 @@ def recover_reward_receipts(state, history):
     for contract in state['contracts']:
         report = missing.get(contract['end'])
         if report and contract['department']=='studio' and contract['status']=='completed' and contract.get('success') is True:
-            amount = contract['spec'].get('packs',0)
+            amount = contract.get('delivery_vouchers', contract['spec'].get('packs', 0))
             if type(amount) is int and amount > 0:
                 report['voucher_rewards'].append({'source':'studio','contract':contract['id'],'amount':amount})
     seen = set()
@@ -97,6 +97,9 @@ def validate(state, catalog):
     try:
         wardrobe.validate(state)
         for report in state['reports']:
+            unlocks = report.get('booking_unlocks', [])
+            if not isinstance(unlocks, list) or any(k not in management.BOOKING_GOALS for k in unlocks) or len(set(unlocks)) != len(unlocks):
+                raise ValueError('Invalid booking unlock receipt.')
             if 'costs' in report:
                 costs=report['costs']
                 if (not isinstance(costs,dict) or set(costs)!={'payroll','upkeep','training','decisions'}

@@ -196,12 +196,13 @@ function venueActivity(night, last){
  if(resort)counts.push(resort+' Resort '+(resort===1?'checkout':'checkouts'));
  const vouchers=!night&&last?.voucher_rewards?.reduce((sum,r)=>sum+r.amount,0);
  if(vouchers)counts.push(vouchers+' '+(vouchers===1?'voucher':'vouchers'));
+ if(!night&&last?.booking_unlocks?.length)counts.push(last.booking_unlocks.length===1?'New booking unlocked':'New bookings unlocked');
  const heading = counts.length ? 'Night '+last.day+' · '+counts.join(' · ') : 'Across the venue';
  const caption = night ? 'Live activity & results' : (counts.length?'Payouts & tonight’s team':'Recent results');
  const body = night
   ? `<ul class="timeline">${(night.log.length?night.log:['Guests will arrive throughout the night.']).map(text=>`<li>${esc(text)}</li>`).join('')}</ul>`
   : `<p>${last?`Night ${last.day} finished at ${money(last.profit)} after costs.`:'Your first evening’s results will appear here.'}</p>
-     ${last?nightlyRevenue(last):''}${contractReceipts(last, contracts, true)}${voucherReceipts(last)}${vouchers?'<button class="primary small" data-screen="packs">Open pack shop →</button> ':''}<button class="ghost small" data-screen="reports">View reports →</button>`;
+     ${bookingUnlocks(last)}${last?nightlyRevenue(last):''}${contractReceipts(last, contracts, true)}${voucherReceipts(last)}${vouchers?'<button class="primary small" data-screen="packs">Open pack shop →</button> ':''}<button class="ghost small" data-screen="reports">View reports →</button>`;
  return `<details class="venue-log panel" data-venue-section="activity" ${venueSections.has('activity')?'open':''}>
   <summary>${heading} <span>${caption}</span></summary>${body}</details>`;
 }

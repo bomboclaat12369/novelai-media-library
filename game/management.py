@@ -20,12 +20,15 @@ PROJECTS = {
     'campaign': {'name': 'Feature campaign', 'days': 3, 'fee': 240, 'pay': 850, 'packs': 1, 'energy': 32, 'risk': .18},
     'solo_film': {'name': 'Solo film', 'days': 2, 'fee': 125, 'pay': 520, 'packs': 1, 'energy': 32, 'risk': .14},
     'feature_film': {'name': 'Adult feature', 'days': 3, 'fee': 255, 'pay': 900, 'packs': 1, 'energy': 35, 'risk': .20},
+    'commission': {'name': 'High-budget commission', 'days': 4, 'fee': 350, 'pay': 1450, 'packs': 2, 'energy': 36, 'risk': .22},
 }
 STAYS = {
     'retreat': {'name': 'Quiet retreat', 'days': 2, 'fee': 60, 'rate': 155, 'energy': 27, 'expectation': 55},
     'weekend': {'name': 'Signature weekend', 'days': 3, 'fee': 110, 'rate': 190, 'energy': 32, 'expectation': 65},
     'residence': {'name': 'Private residence', 'days': 4, 'fee': 220, 'rate': 240, 'energy': 38, 'expectation': 78},
+    'vip': {'name': 'VIP stay', 'days': 3, 'fee': 240, 'rate': 300, 'energy': 38, 'expectation': 82},
 }
+BOOKING_GOALS = {'commission': ('studio', 6, 'successful Studio shoots'), 'vip': ('resort', 3, 'completed return visits')}
 DEPARTMENTS = {
     'studio': {'name': 'Studio', 'price': 650, 'upkeep': 14, 'capacity': 1},
     'resort': {'name': 'Resort', 'price': 1250, 'upkeep': 24, 'capacity': 1},
@@ -142,6 +145,26 @@ def unlocks(state):
             for department, goals in opening_progress(state).items()}
 
 
+def booking_goals(state):
+    counts = dict.fromkeys(BOOKING_GOALS, 0)
+    tonight = counts.copy()
+    for contract in state['contracts']:
+        if contract['status'] != 'completed':
+            continue
+        if contract['department'] == 'studio' and contract.get('success') is True:
+            kind = 'commission'
+        elif contract['department'] == 'resort' and contract.get('guest', {}).get('visit', 0) > 1:
+            kind = 'vip'
+        else:
+            continue
+        counts[kind] += 1
+        if contract['end'] == state['day']:
+            tonight[kind] += 1
+    return {kind: {'department': dept, 'current': counts[kind], 'target': target, 'unit': unit,
+                   'earned_tonight': counts[kind] - tonight[kind] < target <= counts[kind]}
+            for kind, (dept, target, unit) in BOOKING_GOALS.items()}
+
+
 def department_upkeep(state):
     return sum(DEPARTMENTS[k]['upkeep'] * level for k, level in state.get('departments', {}).items())
 
@@ -170,7 +193,7 @@ def contract_quote(state, department, kind, owner, options=None):
     return quote
 
 
-def reservation_options(state, department, owner, spec):
+def reservation_options(state, department, owner, spec, kind=None):
     """First conflict in each possible stay, including nights beyond the last start."""
     first = state['day']
     last = first + RESERVATION_HORIZON
@@ -201,6 +224,7 @@ def reservation_options(state, department, owner, spec):
                 conflicts[start] = {'night': night}
                 break
     return {'first': first, 'last': last, 'conflicts': conflicts,
+            'goal': booking_goals(state)[kind] if kind in BOOKING_GOALS else None,
             'low_energy': state['people'][owner]['energy'] < spec['energy'],
             'low_costar_energy': bool(spec.get('costar') and state['people'][spec['costar']]['energy'] < spec['energy']),
             'low_cash': state['cash'] < spec['fee']}
@@ -213,7 +237,10 @@ def schedule(state, department, body):
     owner, kind = body.get('owner'), body.get('kind')
     spec = contract_quote(state, department, kind, owner, body)
     start = body.get('start', state['day'])
-    options = reservation_options(state, department, owner, spec)
+    options = reservation_options(state, department, owner, spec, kind)
+    goal = options['goal']
+    if goal and goal['current'] < goal['target']:
+        raise RuleError(f"{spec['name']} requires {goal['target']} {goal['unit']} ({goal['current']}/{goal['target']}).")
     if type(start) is not int or not options['first'] <= start <= options['last']:
         raise RuleError('Schedule within the next fourteen nights.')
     conflict = options['conflicts'].get(start)
@@ -431,7 +458,7 @@ def advance_wave(state, catalog, wave):
         if department == 'studio':
             rng = random.Random(stable((state['seed'], 'project', c['id'])))
             success = rng.random() <= ops.delivery_chance(c) and c['quality'] / (6 * c['nights']) >= .65
-            payout = round(spec['pay'] * min(1.25, c['quality'] / (6 * c['nights'])) * (1 if success else .55)) + c.get('delivery_extra', 0)
+            payout = round(spec['pay'] * min(1.25, c['quality'] / (6 * c['nights'])) * (1 if success else .55)) + c.get('delivery_extra', 0) + c.get('license_fee', 0)
             if 'cover_fee' in c:
                 c['cover_bonus_paid'] = c['cover_fee'] if success else 0
                 payout += c['cover_bonus_paid']
@@ -441,9 +468,10 @@ def advance_wave(state, catalog, wave):
                 split = payout // 3
                 n['earnings'][c['owner']] -= split
                 n['earnings'][spec['costar']] += split
-            if success and spec['packs']:
-                state['pack_vouchers'] += spec['packs']
-                n.setdefault('voucher_rewards', []).append({'source':'studio','contract':c['id'],'amount':spec['packs']})
+            vouchers = c.get('delivery_vouchers', spec['packs'])
+            if success and vouchers:
+                state['pack_vouchers'] += vouchers
+                n.setdefault('voucher_rewards', []).append({'source':'studio','contract':c['id'],'amount':vouchers})
             if success and spec['days'] >= 2 and rng.random() < .2:
                 pool = [x for x in catalog['cards'].values() if x['owner'] == c['owner'] and x.get('available')
                         and x.get('source') not in evolution.SET_CARDS]
@@ -455,12 +483,19 @@ def advance_wave(state, catalog, wave):
         else:
             bonus = resort_checkout_bonus(spec, c['satisfaction'])
             c['checkout_bonus_paid'] = bonus
+            farewell = 0
+            if 'farewell_fee' in c:
+                farewell = c['farewell_fee'] if c['satisfaction'] >= c['farewell_target'] else 0
+                c['farewell_bonus_paid'] = farewell
             if c.get('guest'):
                 c['return_invited'] = c['satisfaction'] >= spec['expectation']
-            n['revenue'] += bonus; n['department_revenue'] += bonus; c['revenue'] += bonus
-            n['earnings'][c['owner']] += bonus
+            n['revenue'] += bonus + farewell; n['department_revenue'] += bonus + farewell; c['revenue'] += bonus + farewell
+            n['earnings'][c['owner']] += bonus + farewell
             state['loyalty'] = max(0, min(100, state['loyalty'] + (3 if bonus else -1)))
-            n['log'].append(spec['name'] + f": checkout · satisfaction {c['satisfaction']}/100 · bonus ${bonus}")
+            summary = spec['name'] + f": checkout · satisfaction {c['satisfaction']}/100 · bonus ${bonus}"
+            if 'farewell_fee' in c:
+                summary += f' · farewell ${farewell}'
+            n['log'].append(summary)
         state['totals'][department + '_completed'] += 1
         record(state, 'contract_completed', contract=c['id'], department=department, revenue=c['revenue'], satisfaction=c['satisfaction'], special_card=c.get('special_card'))
 
@@ -468,6 +503,11 @@ def advance_wave(state, catalog, wave):
 def after_settle(state, report):
     from .engine import record
     state['totals']['contract_revenue'] += report.get('department_revenue', 0)
+    unlocked = [kind for kind, goal in booking_goals(state).items() if goal['earned_tonight']]
+    if unlocked:
+        report['booking_unlocks'] = unlocked
+        for kind in unlocked:
+            record(state, 'booking_unlocked', booking=kind)
     if report['profit'] > 0: state['reputation'] += 1
     if report['served'] >= 6: state['loyalty'] = min(100, state['loyalty'] + 1)
     goals = [('first_service', state['totals']['services'] >= 30),
@@ -486,6 +526,7 @@ def after_settle(state, report):
 def derived(state):
     ensure(state)
     return {'unlocks': unlocks(state), 'opening_progress': opening_progress(state), 'reservations': reservations(state),
+            'booking_goals': booking_goals(state),
             'reservation_nights': {c['id']: ops.reservation_nights(c) for c in state['contracts'] if c['status'] == 'active'},
             'delivery_chances': {c['id']: ops.delivery_chance(c) for c in state['contracts'] if c['status']=='active' and c['department']=='studio'},
             'staffing_conflicts': club_staffing_conflicts(state) if state['phase']=='prepare' else [],

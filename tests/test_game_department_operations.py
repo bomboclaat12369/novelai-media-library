@@ -1,5 +1,6 @@
 """Exercise both departments on the same night, including a mid-booking restore."""
 from pathlib import Path
+from copy import deepcopy
 import json
 import random
 import tempfile
@@ -31,6 +32,84 @@ class DepartmentOperations(unittest.TestCase):
             renewed=store.restore(doc)
             self.state=renewed.read()['state']
             self.assertEqual(self.state, GameStore(renewed.path,self.cat).read()['state'])
+
+    def test_premium_bookings_earn_their_unlocks_and_settle_elected_terms(self):
+        for owner in self.state['people']:
+            self.act('plan', owner=owner, role='rest')
+        guest = None
+        receipts = []
+        for _ in range(15):
+            goals = management.booking_goals(self.state)
+            if all(g['current'] >= g['target'] for g in goals.values()):
+                break
+            if goals['commission']['current'] < 6:
+                with self.assertRaisesRegex(engine.RuleError, '6 successful Studio shoots'):
+                    self.act('schedule', department='studio', kind='commission', owner='demo-0')
+                self.act('schedule', department='studio', kind='portrait', owner='demo-0')
+            if goals['vip']['current'] < 3:
+                with self.assertRaisesRegex(engine.RuleError, '3 completed return visits'):
+                    self.act('schedule', department='resort', kind='vip', owner='demo-2')
+                if not any(c['status']=='active' and c['department']=='resort' for c in self.state['contracts']):
+                    quote = management.contract_quote(self.state, 'resort', 'retreat', 'demo-2', {'guest':guest})
+                    self.act('schedule', department='resort', kind='retreat', owner='demo-2', guest=guest,
+                             service_plan=quote['guest_offer']['preference'])
+                    guest = self.state['contracts'][-1]['guest']['id']
+                    self.assertEqual(management.booking_goals(self.state)['vip']['current'], goals['vip']['current'])
+            self.act('start')
+            self.act('finish')
+            receipts.extend(self.state['reports'][-1].get('booking_unlocks', []))
+        self.assertCountEqual(receipts, ['commission', 'vip'])
+        self.assertEqual(management.booking_goals(self.state)['vip']['current'], 3)
+        self.restore()
+        career = self.state
+        for accept, delivered, final_satisfaction in ((True, True, 90), (True, False, 89), (False, True, 90)):
+            with self.subTest(accept=accept, delivered=delivered, satisfaction=final_satisfaction):
+                self.state = deepcopy(career)
+                next_id = self.state['contract_counter'] + 1
+                low, high = (0, .5) if delivered else (.99, 1)
+                self.state['seed'] = next(seed for seed in range(10000)
+                    if low < random.Random(catalog.stable((seed, 'project', next_id))).random() < high)
+                self.act('schedule', department='studio', kind='commission', owner='demo-1')
+                self.act('schedule', department='resort', kind='vip', owner='demo-3')
+                for shift in range(4):
+                    self.act('start')
+                    while self.state['night']:
+                        night=self.state['night']
+                        if shift==2 and night['wave']==5:
+                            # Final standard service adds one point. Exercise both sides of the checkout target.
+                            self.state['contracts'][-1]['satisfaction'] = final_satisfaction-1
+                        self.act('advance', seconds=30, stop_at_decision=True)
+                        night=self.state['night']
+                        if not night or not night['paused']:
+                            continue
+                        event=next(d for d in night['decisions'] if d['choice'] is None and d['at']<=night['elapsed']<d['until'])
+                        special = event['kind'] in ('studio_license','resort_farewell')
+                        choice='accept' if special and accept else 'decline'
+                        self.act('decision', decision=event['id'], choice=choice)
+                        cost = 60 if choice=='accept' and event['kind']=='resort_farewell' else 0
+                        self.assertEqual(self.state['night']['decision_costs'],night['decision_costs']+cost)
+                        if special and accept:
+                            self.restore()
+                            with self.assertRaises(engine.RuleError):
+                                self.act('decision', decision=event['id'], choice='accept')
+                            self.act('pause', paused=False)
+                    self.assertFalse(self.state['reports'][-1].get('booking_unlocks'))
+                shoot, stay = self.state['contracts'][-2:]
+                self.assertEqual((shoot['success'],stay['satisfaction']), (delivered,final_satisfaction))
+                self.assertEqual(sum(d['kind']=='studio_license' for d in shoot['decisions']), 1)
+                self.assertEqual(sum(d['kind']=='resort_farewell' for d in stay['decisions']), 1)
+                self.assertEqual(shoot['work_log'][2]['stage'], 'Shoot the lead image')
+                self.assertEqual(stay['work_log'][2]['stage'], 'Host a private lunch')
+                base=round(shoot['spec']['pay']*min(1.25,shoot['quality']/24)*(1 if delivered else .55))
+                self.assertEqual(shoot['revenue'], base+(80 if accept else 0))
+                vouchers = sum(row['amount'] for row in self.state['reports'][-1]['voucher_rewards'] if row.get('contract')==shoot['id'])
+                self.assertEqual(vouchers, (1 if accept else 2) if delivered else 0)
+                farewell = 160 if accept and final_satisfaction>=90 else 0
+                self.assertEqual(stay.get('farewell_bonus_paid',0), farewell)
+                self.assertEqual(stay.get('service_cost',0), 60 if accept else 0)
+                self.assertEqual(stay['revenue'],sum(w['earned'] for w in stay['work_log']) + stay['checkout_bonus_paid'] + farewell)
+                self.assertEqual(sum(r['earnings']['demo-3'] for r in self.state['reports'][-4:]),stay['revenue'])
+                self.restore()
 
     def test_recovery_preserves_worked_nights_and_moves_only_the_remaining_shifts(self):
         self.act('schedule', department='studio', owner='demo-0', kind='feature_film', costar='demo-1')

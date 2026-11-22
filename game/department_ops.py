@@ -13,11 +13,14 @@ BRIEFS = {
     'campaign': ('photo', 'Deliver a coordinated advertising campaign.', 'tips'),
     'solo_film': ('film', 'Direct a solo adult film from blocking through the final cut.', 'efficiency'),
     'feature_film': ('film', 'Shoot a multi-scene adult feature. A co-star can share the lead.', 'service'),
+    'commission': ('photo', 'Shoot a four-night print campaign for a single client. On set, the client may offer cash for one of the delivery vouchers.', 'efficiency'),
 }
 STAGES = {
     'photo': ('Set the lighting', 'Block the poses', 'Shoot the first look', 'Change the setup', 'Shoot the selects', 'Review the contact sheet'),
     'film': ('Light the set', 'Block the scene', 'Roll the first take', 'Change the camera setup', 'Shoot the pickups', 'Review the footage'),
     'resort': ('Welcome the guest', 'Prepare the suite', 'Host the afternoon service', 'Check in with the guest', 'Host the evening service', 'Close the guest folio'),
+    'commission': ('Review the client brief', 'Light the campaign set', 'Shoot the lead image', 'Photograph a second layout', 'Choose the print selects', 'Review the client proofs'),
+    'vip': ('Welcome the VIP guest', 'Walk through the suite', 'Host a private lunch', 'Review guest preferences', 'Host the evening reception', 'Review the guest folio'),
 }
 SERVICE_PLANS = {
     'standard': 'Standard service', 'privacy': 'Quiet suite', 'dining': 'Private dining', 'leisure': 'Hosted activities',
@@ -39,10 +42,14 @@ EVENTS = {
                              'Cut a second version · 7 energy', energy=7, extra_fee=55),
     'studio_cover': event_rule('Take the cover commission?', 'The magazine adds $90 for a cover-ready photo set. Its stricter brief lowers delivery odds by 12 percentage points. Rework earns no cover bonus.',
                                'Shoot for the cover', success_fee=90, chance_cost=12),
+    'studio_license': event_rule('License the campaign photos?', 'The client offers $80 when the project settles, including on rework. A successful delivery will earn one Standard pack voucher instead of two.',
+                                 'License the photos', extra_fee=80, voucher_cost=1),
     'resort_request': event_rule('A guest has a request', 'Spend $18 on a personal request to raise guest satisfaction by 12 points.',
                                  'Arrange it · $18', cost=18, satisfaction_gain=12),
     'resort_private': event_rule('A guest wants a private booking', 'The guest offers $65 for a private booking with their host. It costs 8 energy. Any overlapping suite service earns less and costs 2 satisfaction.',
                                  'Take the booking · +$65 at completion', revenue=65, energy=8),
+    'resort_farewell': event_rule('Arrange a VIP farewell?', 'Put $60 toward a farewell reception. The guest pays an extra $160 at checkout if satisfaction reaches 90/100.',
+                                  'Arrange the farewell · $60', cost=60, success_fee=160, satisfaction_target=90),
 }
 
 
@@ -117,19 +124,33 @@ def stage_name(contract, day, wave):
         return {'photo': 'Deliver the selects', 'film': 'Deliver the final cut', 'resort': 'Check the guest out'}[medium]
     if medium == 'resort' and day > contract['start'] and wave == 1:
         return 'Review the guest itinerary'
-    return STAGES[medium][wave-1]
+    return STAGES.get(contract['kind'], STAGES[medium])[wave-1]
 
 
 def delivery_chance(contract):
     return min(.99, max(0, contract['spec']['success_chance'] + contract.get('chance_bonus', 0) - contract.get('chance_penalty', 0)))
 
 
+def event_kinds(contract):
+    if contract['department'] == 'resort':
+        standard = ('resort_request', 'resort_private')
+        return standard + ('resort_farewell',) if contract['kind'] == 'vip' else standard
+    if contract['spec']['medium'] == 'film':
+        return ('studio_cut', 'studio_press', 'studio_pickup')
+    standard = ('studio_pickup', 'studio_press', 'studio_cover')
+    return standard + ('studio_license',) if contract['kind'] == 'commission' else standard
+
+
+def valid_recorded_event(contract, kind):
+    # Older releases used different rotations for the original department decisions.
+    if kind in ('studio_license', 'resort_farewell'):
+        return kind in event_kinds(contract)
+    return kind in EVENTS and kind.startswith(contract['department'] + '_')
+
+
 def offer_for(state, contract):
     day = state['day']
-    if contract['department'] == 'studio':
-        choices = ('studio_cut', 'studio_press', 'studio_pickup') if contract['spec']['medium'] == 'film' else ('studio_pickup', 'studio_press', 'studio_cover')
-    else:
-        choices = ('resort_request', 'resort_private')
+    choices = event_kinds(contract)
     offset = stable((state['seed'], contract['id'], 'department-offer'))
     kind = choices[(offset + contract['nights']) % len(choices)]
     spec = EVENTS[kind]
@@ -151,7 +172,7 @@ def resolve_offer(state, decision, choice, automatic):
     n = state['night']
     c = next((row for row in state['contracts'] if row['id'] == decision['contract']), None)
     kind = decision['kind']
-    if not c or c['status'] != 'active' or state['day'] not in reservation_nights(c) or decision['worker'] != c['owner']:
+    if not c or c['status'] != 'active' or state['day'] not in reservation_nights(c) or decision['worker'] != c['owner'] or not valid_recorded_event(c, kind):
         raise RuleError('This contract is no longer in progress.')
     rule = EVENTS[kind]
     worker = state['people'][c['owner']]
@@ -181,12 +202,21 @@ def resolve_offer(state, decision, choice, automatic):
             c['cover_fee'] = rule['success_fee']
             c['chance_penalty'] = rule['chance_cost'] / 100
             result = 'Cover commissioned · $90 on successful delivery'
+        elif kind == 'studio_license':
+            c['license_fee'] = rule['extra_fee']
+            c['delivery_vouchers'] = c['spec']['packs'] - rule['voucher_cost']
+            result = 'Photos licensed · $80 at settlement and one voucher on successful delivery'
         elif kind == 'resort_request':
             before = c['satisfaction']
             c['satisfaction'] = min(100, before + rule['satisfaction_gain'])
             c['service_cost'] = c.get('service_cost', 0) + cost
             result = f"Guest request fulfilled · {before} → {c['satisfaction']} satisfaction"
-        else:
+        elif kind == 'resort_farewell':
+            c['service_cost'] = c.get('service_cost', 0) + cost
+            c['farewell_fee'] = rule['success_fee']
+            c['farewell_target'] = rule['satisfaction_target']
+            result = 'Farewell reserved · $60 spent, $160 at checkout with 90 satisfaction'
+        elif kind == 'resort_private':
             start_private(state, c, decision)
             result = 'Private booking started · $65 payable on completion'
     decision.update(choice=choice, automatic=automatic, result=result)
@@ -320,8 +350,24 @@ def validate_contract(c, state):
     if not isinstance(decisions,list) or len(decisions) > spec['days'] or len({d['id'] for d in decisions}) != len(decisions):
         raise ValueError('Invalid department decisions.')
     for decision in decisions:
-        if decision['kind'] not in EVENTS or not decision['kind'].startswith(c['department']+'_') or decision['choice'] not in ('accept','decline') or not isinstance(decision['result'], str):
+        if not valid_recorded_event(c, decision['kind']) or decision['choice'] not in ('accept','decline') or not isinstance(decision['result'], str):
             raise ValueError('Invalid department decision.')
+    for kind, fields in (('studio_license', ('license_fee', 'delivery_vouchers')), ('resort_farewell', ('farewell_fee', 'farewell_target'))):
+        offers = [d for d in decisions if d['kind'] == kind]
+        accepted = bool(offers and offers[0]['choice'] == 'accept')
+        if len(offers) > 1 or any((key in c) != accepted for key in fields):
+            raise ValueError('Invalid premium booking terms.')
+        if accepted and any(type(c[key]) is not int or c[key] < 0 for key in fields):
+            raise ValueError('Invalid premium booking amounts.')
+    if 'delivery_vouchers' in c and not 0 <= c['delivery_vouchers'] < spec['packs']:
+        raise ValueError('Invalid licensed delivery voucher count.')
+    if 'farewell_target' in c and not 0 < c['farewell_target'] <= 100:
+        raise ValueError('Invalid farewell satisfaction target.')
+    settled_farewell = c['status'] == 'completed' and 'farewell_fee' in c
+    if ('farewell_bonus_paid' in c) != settled_farewell:
+        raise ValueError('Invalid farewell checkout receipt.')
+    if settled_farewell and (type(c['farewell_bonus_paid']) is not int or c['farewell_bonus_paid'] != (c['farewell_fee'] if c['satisfaction'] >= c['farewell_target'] else 0)):
+        raise ValueError('Invalid farewell bonus.')
     for row in [*work, *decisions]:
         elapsed = row.get('elapsed', 0)
         if row['day'] not in nights or type(elapsed) not in (int, float) or not 0 <= elapsed <= 180:

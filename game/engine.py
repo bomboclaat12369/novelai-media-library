@@ -8,7 +8,7 @@ from . import management as m
 from . import evolution, flavor, wardrobe
 from . import meetings, stage_labels, bookings
 
-VERSION = '1.6.2-local'
+VERSION = '1.7.0-local'
 NIGHT_SPEEDS = (1, 2, 4, 8)
 PACK_RARITY_WEIGHTS = (55, 27, 12, 5, 1)
 PACKS = {'standard': {'name':'Standard','price':100,'count':5},

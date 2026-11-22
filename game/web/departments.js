@@ -36,9 +36,15 @@ function departmentHeader(dept,level,staffed){
   <div class="lounge-summary"><span>Cash <strong>${money(save.cash)}</strong></span><span>${n?(n.paused?'Night paused':'Night in progress'):'Preparation'}</span>
   ${level?`<span><strong>${level}</strong> ${inventory}</span><span><strong>${money(level*boot.departments[dept].upkeep)}</strong> nightly upkeep</span><span>${total} ${studio?'delivered':'checked out'}</span>`:''}</div>`;
 }
+function bookingGoalText(goal){
+ return goal.current>=goal.target?'Unlocked · '+goal.current+' '+goal.unit:goal.current+' / '+goal.target+' '+goal.unit;
+}
 function departmentOpening(dept,table){
  const studio=dept==='studio',ready=canOpenDepartment(dept),details=boot.departments[dept],cost=derived.department_costs[dept];
- const examples=Object.values(table).map(p=>`<li><strong>${esc(p.name)}</strong><span>${p.days} ${p.days===1?'night':'nights'} · ${studio?money(p.pay)+' base fee':money(p.rate)+' per night'}</span></li>`).join('');
+ const examples=Object.entries(table).map(([key,p])=>{
+  const goal=derived.booking_goals?.[key];
+  return `<li><strong>${esc(p.name)}</strong><span>${p.days} ${p.days===1?'night':'nights'} · ${studio?money(p.pay)+' base fee':money(p.rate)+' per night'}${goal?' · '+esc(bookingGoalText(goal)):''}</span></li>`;
+ }).join('');
  return `<div class="department-front">${departmentPreview(dept,0)}
   <section class="panel department-gate"><h2>${ready?'Ready to open':'Opening requirements'}</h2>${openingGoals(dept,true)}
   <p>${money(cost)} to open · ${money(details.upkeep)} upkeep per night</p>
@@ -64,12 +70,17 @@ function departmentChoicesUI(dept,kind,owner,quote){
   ${choiceSelect('service_plan','Service plan',Object.entries(boot.department_play.plans),picked.service_plan||'standard')}
   <p class="department-brief"><strong>${esc(guest.name)}</strong> · ${guest.visit===1?'First stay':'Visit '+guest.visit+' · $10 extra per night'}
   <small>Enjoys ${esc(boot.department_play.preferences[guest.preference].toLowerCase())}. Matching service earns extra satisfaction.
-  ${{standard:'Standard service uses the base rate and energy.',privacy:'Quiet service saves 3 energy and pays $6 less per night.',dining:'Private dining adds $12 per night to the deposit.',leisure:'Activities add $10 nightly pay and cost 4 extra energy per night.'}[quote.service_plan]}</small></p>`;
+  ${{standard:'Standard service uses the base rate and energy.',privacy:'Quiet service saves 3 energy and pays $6 less per night.',dining:'Private dining adds $12 per night to the deposit.',leisure:'Activities add $10 nightly pay and cost 4 extra energy per night.'}[quote.service_plan]}${kind==='vip'?' During the stay you can arrange a paid farewell for a highly satisfied guest.':''}</small></p>`;
 }
 function departmentDesk(dept,table,owner,kind,start,quote,horizon){
  const studio=dept==='studio';
- return `<section class="panel department-desk"><h2 id="department-desk" tabindex="-1">${studio?'Schedule a project':'Book a stay'}</h2><div class="desk-fields">
-  <label>${studio?'Production brief':'Package'}<select id="quote-kind-${dept}" data-quote-kind="${dept}">${Object.entries(table).map(([key,p])=>`<option value="${key}" ${key===kind?'selected':''}>${esc(p.name)} · ${p.days} ${p.days===1?'night':'nights'}</option>`).join('')}</select></label>
+ const milestone=Object.entries(derived.booking_goals||{}).find(([,goal])=>goal.department===dept);
+ const progress=milestone?`<p class="department-milestone"><strong>${esc(table[milestone[0]].name)}</strong> · ${esc(bookingGoalText(milestone[1]))}</p>`:'';
+ return `<section class="panel department-desk"><h2 id="department-desk" tabindex="-1">${studio?'Schedule a project':'Book a stay'}</h2>${progress}<div class="desk-fields">
+  <label>${studio?'Production brief':'Package'}<select id="quote-kind-${dept}" data-quote-kind="${dept}">${Object.entries(table).map(([key,p])=>{
+   const goal=derived.booking_goals?.[key];
+   return `<option value="${key}" ${key===kind?'selected':''}>${esc(p.name)} · ${p.days} ${p.days===1?'night':'nights'}${goal&&goal.current<goal.target?' · Locked':''}</option>`;
+  }).join('')}</select></label>
   <label>${studio?'Lead cast':'Assigned host'}<select id="quote-owner-${dept}" data-quote-owner="${dept}">${Object.keys(save.people).map(key=>`<option value="${esc(key)}" ${key===owner?'selected':''}>${esc(person(key).name)} · ${Math.round(save.people[key].energy)} energy</option>`).join('')}</select></label>
   <label>Starting night<select id="quote-start-${dept}" data-quote-start="${dept}">${Array.from({length:horizon+1},(_,i)=>save.day+i).map(day=>`<option value="${day}" ${day===start?'selected':''}>Night ${day}</option>`).join('')}</select></label>
   ${departmentChoicesUI(dept,kind,owner,quote)}</div>${contractTerms(dept,quote,start)}
@@ -99,12 +110,15 @@ function departmentReservations(dept){
  return `<section class="panel department-reservations"><h2>Active reservations</h2>${active.map(c=>`<article class="reservation"><h3>${esc(c.spec.name)} · ${roster(c)}</h3>
   <p>${c.guest?esc(c.guest.name)+' · ':''}${reservationDatesLabel(c)} · ${c.nights}/${c.spec.days} completed</p>
   ${!studio?`<p>Satisfaction ${c.satisfaction}/100 · target ${c.spec.expectation} · ${money(c.revenue)} earned</p>`:''}
+  ${c.license_fee?`<p>Photo license · ${money(c.license_fee)} at settlement · ${c.delivery_vouchers} Standard voucher on successful delivery</p>`:''}
+  ${c.farewell_fee?`<p>Farewell reserved · ${money(c.farewell_fee)} extra at ${c.farewell_target}/100 satisfaction at checkout</p>`:''}
   ${contractHistory(c)}<button class="ghost small" data-action="cancel_contract" data-contract="${c.id}" ${dis(save.phase!=='prepare')}>Cancel · no deposit refund</button></article>`).join('')||'<p class="note">No active reservations.</p>'}
   <h2>${studio?'Recent deliveries':'Recent checkouts'}</h2>${completed.map(c=>`<article class="completed"><strong>${esc(c.spec.name)} · ${roster(c)}</strong><p>${money(c.revenue)}${c.success===false?' · rework fee':''}${c.guest?' · '+esc(c.guest.name)+(c.return_invited?' · willing to return':' · checked out'):''}${c.special_card?' · '+studioCardReward(c.special_card):''}</p>${contractHistory(c)}</article>`).join('')||'<p class="note">Completed work appears here.</p>'}</section>`;
 }
 function contractStageNames(c){
  const studio=c.department==='studio';
- const names=boot.department_play.stages[studio?(c.spec.medium||'photo'):'resort'].slice();
+ const stages=boot.department_play.stages;
+ const names=(stages[c.kind]||stages[studio?(c.spec.medium||'photo'):'resort']).slice();
  if(!studio&&save.day>reservationNights(c)[0])names[0]='Review the guest itinerary';
  if(save.day===c.end)names[5]=studio?(c.spec.medium==='film'?'Deliver the final cut':'Deliver the selects'):'Check the guest out';
  return names;

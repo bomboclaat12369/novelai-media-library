@@ -23,7 +23,9 @@ DEPARTMENT_TOKENS={
     'studio_pickup':'worker contract_title energy_cost','studio_press':'worker contract_title energy_cost reputation_gain promotion_nights',
     'studio_cut':'worker contract_title energy_cost extra_fee','studio_cover':'worker contract_title success_fee chance_cost',
     'resort_request':'worker guest cash_cost satisfaction_gain',
-    'resort_private':'worker guest payout energy_cost'}
+    'resort_private':'worker guest payout energy_cost',
+    'studio_license':'worker contract_title extra_fee voucher_cost',
+    'resort_farewell':'worker guest cash_cost success_fee satisfaction_target'}
 
 
 def text_tokens(text, allowed):
@@ -144,6 +146,7 @@ class Shelf:
                 'extra_seconds':round(decision.get('extra_time',0)),'reputation_gain':rule.get('reputation_gain',2),
                 'promotion_nights':rule.get('promotion_nights',3),'extra_fee':rule.get('extra_fee'),
                 'success_fee':rule.get('success_fee'),'chance_cost':rule.get('chance_cost'),
+                'voucher_cost':rule.get('voucher_cost'),'satisfaction_target':rule.get('satisfaction_target'),
                 'guest':decision.get('guest_name'),'contract_title':decision.get('contract_title'),'satisfaction_gain':rule.get('satisfaction_gain'),
                 'worker':people.get(decision.get('worker'),{}).get('name'),'partner':people.get(decision.get('partner'),{}).get('name')}
         rows=[r for r,_ in self.rows.get('event.'+kind,[]) if all(values.get(k) is not None for k in r['tokens'])]

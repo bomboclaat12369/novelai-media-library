@@ -190,7 +190,7 @@ class Handler(BaseHTTPRequestHandler):
                     spec=management.contract_quote(state,department,kind,owner,selected)
                 except RuleError as exc:
                     return self.send(400,{'error':str(exc)})
-                options=management.reservation_options(state,department,owner,spec)
+                options=management.reservation_options(state,department,owner,spec,kind)
                 return self.send(200,{'revision':current['revision'],'token':self.server.token,'options':options,'quote':spec})
         if path=='/api/backups': return self.send(200,{'backups':self.server.store.backups(),'save_name':self.server.store.path.name})
         if path=='/api/renderer': return self.send(200,renderer_assets())

@@ -71,17 +71,27 @@ companion was not replaced or updated.
   use extra copies for mastery, optionally recruit and expand. A first pull
   waives that person's hiring fee; it never starts payroll automatically.
 - **Studio.** Open from night 4 after 18 Club bookings for $650 plus $14 upkeep
-  per position. Choose among three photo briefs and two adult films. A feature
+  per position. Start with three photo briefs and two adult films. A feature
   can reserve a lead and a co-star on the same set. Each night has six steps.
   On-set choices include pickups, a higher-risk photo cover commission, Club
   publicity and a paid alternate film cut. Longer successful projects award
-  Standard vouchers and sometimes an extra Studio card.
+  Standard vouchers and sometimes an extra Studio card. Six successful shoots
+  unlock a four-night high-budget photo commission. Its $350 deposit secures
+  a $1,450 base fee and two vouchers on successful delivery. The client can
+  offer an $80 license fee at settlement in exchange for one of those vouchers.
 - **Resort.** Open after two Studio deliveries for $1,250 plus $24 upkeep per
   suite. Pick a host, package and service plan for a named guest. Matching
   service to the guest’s preferences improves satisfaction. Handle guest
   requests or offer a paid private booking during the stay. It takes the
   host away from overlapping suite service. Satisfied guests can return and
-  pay a $10 nightly premium.
+  pay a $10 nightly premium. Complete three stays with returning guests to
+  unlock a three-night VIP stay for new or returning guests. It costs $240
+  to reserve at a $300 base nightly rate. An optional $60 farewell reception
+  earns an extra $160 at checkout if the guest reaches 90/100 satisfaction.
+
+Both booking desks show progress and let you preview the terms before you
+qualify. Completed work from earlier versions counts. The qualifying night's
+report links directly to the newly available booking.
 
 During preparation, the Club shows what you still need to open the next
 department. Before you pay an opening fee or reservation deposit, you can see
