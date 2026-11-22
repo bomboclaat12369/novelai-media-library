@@ -2,7 +2,7 @@
 
 Choose two founders, grow the Club, collect cards, direct shoots and host
 Resort guests. All three venues share a roster, a budget and a three-minute
-night. The current local build is **1.5.0**.
+night.
 
 ## Play on this Windows computer
 
@@ -53,9 +53,12 @@ companion was not replaced or updated.
   saved speed, up to 8×. Each private room runs its own bookings with different
   durations. Select a room to see the ordered stages, the current action and
   earned photos or videos. Offers from every room still reach you.
-- **Answer offers.** Two venue events and up to four client offers arrive at
-  varied times. An offer pauses the clock. Choosing an option resumes your
-  selected speed. Finish night uses the free defaults for unanswered offers.
+- **Answer offers.** The number of events varies each night. Club and team
+  opportunities roll independently, and each active Studio shoot and Resort
+  stay brings its own decision. Private-room clients can make up to four
+  additional requests across the venue. An offer pauses the clock. Choosing
+  an option resumes your selected speed. Finish night uses the free defaults
+  for unanswered offers.
   A client can buy an activity, a specific finish, extra time or a repeat round.
   A finish follows the last actual activity and the client’s paid permissions.
 - **Group bookings.** A client can pay $95 to hire a second available worker.

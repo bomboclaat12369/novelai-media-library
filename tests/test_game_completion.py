@@ -14,7 +14,7 @@ from game.store import GameStore
 class Completion(unittest.TestCase):
     def test_group_offers_charge_once_and_keep_each_guests_history(self):
         cat=catalog.demo_catalog()
-        for kind,seed in (('second_client',6),('second_worker',17)):
+        for kind,seed in (('second_client',6),('second_worker',8)):
             with self.subTest(kind=kind):
                 state=engine.new_game(cat,['demo-0','demo-1'],seed)
                 state=engine.command(state,cat,'start')

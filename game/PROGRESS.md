@@ -1,5 +1,16 @@
 # After Hours — game development and releases
 
+## Version 1.6.1 — variable nightly events
+
+Club and team opportunities roll independently with nightly demand. Every
+active Studio shoot and Resort stay brings its own decision. Private-room
+clients can make up to four additional requests during the same night. Event
+times vary, and answering resumes the clock at the selected speed. Opening
+a saved night keeps the events and timings already scheduled for that shift.
+
+Night Reports now show the action chosen for promotions, refreshments, team
+meals and regulars’ perks, including choices recorded in older reports.
+
 ## Version 1.6.0 — staff schedules, Night Reports and earned clips
 
 The team roster shows tonight’s actual assignment, including film leads,

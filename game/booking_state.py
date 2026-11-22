@@ -95,8 +95,11 @@ def validate(state):
             n['next_request_at'], high=duration + bookings.REQUEST_COOLDOWN * bookings.clock_scale(n)):
         raise ValueError('Invalid request limits.')
     decisions = {d['id']: d for d in n['decisions']}
-    if len(decisions) != len(n['decisions']) or len(decisions) > bookings.MAX_CLIENT_REQUESTS + 2:
+    if len(decisions) != len(n['decisions']):
         raise ValueError('Invalid request IDs.')
+    if n['client_request_count'] != sum(bool(d.get('meeting_id')) for d in decisions.values()):
+        raise ValueError('Invalid client request count.')
+    general_sources = set()
     for d in decisions.values():
         spec = DECISIONS.get(d['kind'])
         if not spec or not number(d['at']) or not number(d['until'], d['at']) or d['at'] == d['until']:
@@ -118,6 +121,11 @@ def validate(state):
                 raise ValueError('Invalid department request.')
         elif not d.get('meeting_id') and d['kind'] not in ('promotion', 'lounge_round', 'hospitality', 'regular_perk', 'team_meal'):
             raise ValueError('This request needs an actual booking.')
+        if not d.get('meeting_id'):
+            source = ('contract', d['contract']) if d['kind'] in department_ops.EVENTS else ('venue', d['kind'])
+            if source in general_sources:
+                raise ValueError('Duplicate business opportunity.')
+            general_sources.add(source)
     if not isinstance(n['booking_history'], list) or len(n['booking_history']) > 100:
         raise ValueError('Invalid booking history.')
     history_ids = [m['id'] for m in n['booking_history']]

@@ -93,7 +93,30 @@ async function run(){
  await page.waitForFunction(()=>save.phase==='night');
  await page.getByLabel('Night speed').selectOption('8');
  await page.evaluate(()=>{interval=setInterval(pollGame,400);});
- await page.waitForFunction(()=>save.night.wave>=1);
+ const handled=new Set(), venueCounts=new Map();
+ async function answer(event){
+  if(event.department){
+   await nav(event.kind==='studio_cut'?'team':event.kind==='resort_request'?'reports':event.department==='studio'?'resort':'studio');
+   assert.ok(await page.locator('.venue-event-overlay .decision').isVisible());
+   handled.add(event.kind);
+  }
+  const day=await page.evaluate(()=>save.day);
+  if(!event.meeting_id)venueCounts.set(day,(venueCounts.get(day)||0)+1);
+  await page.locator('[data-action=decision][data-choice="'+(event.department?'accept':'decline')+'"]').first().click();
+  await page.waitForFunction(id=>save.night.decisions.find(d=>d.id===id)?.choice!=null,event.id);
+  assert.deepEqual(await page.evaluate(()=>[save.night.paused,save.night.speed]),[false,8]);
+  if(event.kind==='resort_private'){
+   await nav('resort');await page.locator('.suite-booking [aria-current=step]').waitFor();
+   assert.equal(await page.locator('.department-tracker [aria-current=step]').count(),1);
+   assert.match(await page.locator('.department-tracker').innerText(),/On hold/);
+   await page.locator('.department-tracker').screenshot({path:path.join(output,'resort-private-booking.png')});
+  }
+ }
+ while(await page.evaluate(()=>save.night.wave<1)){
+  await page.waitForFunction(()=>save.night.wave>=1||!!pendingDecision());
+  const event=await page.evaluate(()=>pendingDecision());
+  if(event)await answer(event);
+ }
  for(const dept of ['studio','resort']){
   await nav(dept);
   assert.ok(await page.locator('.contract-stages [aria-current=step]').isVisible());
@@ -103,25 +126,11 @@ async function run(){
   await page.locator('.department-tracker').screenshot({path:path.join(output,dept+'-tracker.png')});
   await size(390,844);await noOverflow();await size(1440,960);
  }
- const handled=new Set();
  for(let nights=0;nights<2;nights++){
   while(await page.evaluate(()=>!!save.night)){
    await page.waitForFunction(()=>!save.night||!!pendingDecision(),null,{timeout:35000});
    const event=await page.evaluate(()=>pendingDecision());
-   if(!event)continue;
-   if(event.department){
-    await nav(event.kind==='studio_cut'?'team':event.kind==='resort_request'?'reports':event.department==='studio'?'resort':'studio');
-    assert.ok(await page.locator('.venue-event-overlay .decision').isVisible());
-    handled.add(event.kind);
-   }
-   await page.locator('[data-action=decision][data-choice="'+(event.department?'accept':'decline')+'"]').first().click();
-   await page.waitForFunction(id=>!save.night||save.night.decisions.find(d=>d.id===id)?.choice!=null,event.id);
-   if(event.kind==='resort_private'){
-    await nav('resort');await page.locator('.suite-booking [aria-current=step]').waitFor();
-    assert.equal(await page.locator('.department-tracker [aria-current=step]').count(),1);
-    assert.match(await page.locator('.department-tracker').innerText(),/On hold/);
-    await page.locator('.department-tracker').screenshot({path:path.join(output,'resort-private-booking.png')});
-   }
+   if(event)await answer(event);
   }
   if(nights===0){
    await nav('resort');
@@ -130,6 +139,7 @@ async function run(){
   }
  }
  assert.ok(handled.has('resort_private')&&handled.has('resort_request'));
+ assert.ok(Math.max(...venueCounts.values())>2,'Three or more business decisions answered in the same night');
  await nav('resort');
  const regular=page.locator('[data-contract-choice=guest] option');
  assert.equal(await regular.count(),2);

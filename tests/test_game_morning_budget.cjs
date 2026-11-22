@@ -215,6 +215,25 @@ async function check() {
     const detail=page.locator('.report-receipts');
     assert.equal(await detail.locator('.contract-receipts > li').count(),2);
     assert.equal(await detail.locator('.receipt-plan').count(),0);
+    const choices=page.locator('.report-decisions');
+    await choices.locator(':scope > summary').click();
+    assert.ok((await choices.innerText()).includes('Automatic choice'));
+    const choiceRows=[
+        ['promotion','promote','Book the feature'], ['hospitality','refresh','Host a break'],
+        ['team_meal','refresh','Order food'], ['regular_perk','perk','Offer perk'],
+        ['studio_cut','accept','Cut a second version'], ['resort_request','decline','Keep the original plan']
+    ];
+    const descriptions=await page.evaluate(rows=>rows.map(([kind,choice])=>{
+        const html=reportDecision({kind,choice,copy:{title:'Saved title'},automatic:choice==='decline',
+            result:kind==='studio_cut'?'Recorded delivery bonus':undefined});
+        return new DOMParser().parseFromString(html,'text/html').body.textContent;
+    }),choiceRows);
+    assert.deepEqual(descriptions,choiceRows.map(([kind,choice,label])=>
+        'Saved title · '+(choice==='decline'?'Automatic choice':'Your choice')+' · '+label+
+        (kind==='studio_cut'?' · Recorded delivery bonus':'')));
+    assert.equal(await page.evaluate(()=>new DOMParser().parseFromString(
+        reportDecision({kind:'promotion',choice:'promote',copy:{title:'Older report'}}),'text/html'
+    ).body.textContent),'Older report · Choice · Book the feature');
     assert.equal((await get('state')).revision,current.revision);
     // Someone covers the lounge while its usual host delivers a Studio project.
     await night();

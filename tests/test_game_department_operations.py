@@ -5,7 +5,7 @@ import random
 import tempfile
 import unittest
 
-from game import catalog, engine, management, migrations, writing
+from game import booking_state, bookings, catalog, engine, management, migrations, writing
 from game.store import GameStore
 
 
@@ -31,6 +31,51 @@ class DepartmentOperations(unittest.TestCase):
             renewed=store.restore(doc)
             self.state=renewed.read()['state']
             self.assertEqual(self.state, GameStore(renewed.path,self.cat).read()['state'])
+
+    def test_fully_staffed_night_restores_all_offers_and_resumes_at_saved_speed(self):
+        self.state.update(cash=100000, day=9, seed=91)
+        roster = list(self.cat['people'])[:14]
+        for owner in roster:
+            if owner not in self.state['people']:
+                self.act('hire', owner=owner)
+        for department, kind, crew in [('studio', 'portrait', roster[2:8]), ('resort', 'retreat', roster[8:14])]:
+            for _ in range(len(crew) - self.state['departments'][department]):
+                self.act('department', kind=department)
+            for owner in crew:
+                self.act('schedule', department=department, owner=owner, kind=kind)
+        self.act('start')
+        self.act('speed', speed=8)
+        night = self.state['night']
+        offers = night['decisions']
+        self.assertEqual(len(offers), 17)
+        self.assertEqual({d['contract'] for d in offers if 'contract' in d}, {c['id'] for c in self.state['contracts']})
+        gap = bookings.REQUEST_COOLDOWN * bookings.clock_scale(night)
+        self.assertTrue(all(b['at'] - a['at'] >= gap for a, b in zip(offers, offers[1:])))
+        self.assertTrue(all(d['at'] <= .64 * night['duration'] for d in offers if d['kind'] == 'resort_private'))
+        answered = set()
+        while self.state['night']:
+            self.act('advance', seconds=180, stop_at_decision=True)
+            night = self.state['night']
+            if not night:
+                break
+            self.assertTrue(night['paused'])
+            pending = [d for d in night['decisions'] if d['choice'] is None and d['at'] <= night['elapsed'] < d['until']]
+            self.assertEqual(len(pending), 1)
+            event = pending[0]
+            self.assertNotIn(event['id'], answered)
+            if len(answered) == 7:
+                self.restore()
+                self.assertEqual(night, self.state['night'])
+            self.act('decision', decision=event['id'], choice='decline')
+            self.assertFalse(self.state['night']['paused'])
+            self.assertEqual(self.state['night']['speed'], 8)
+            answered.add(event['id'])
+        report = self.state['reports'][-1]
+        self.assertEqual({d['id'] for d in report['decisions']}, answered)
+        self.assertTrue(all(d['choice'] == 'decline' and not d['automatic'] for d in report['decisions']))
+        self.assertEqual(report['decision_costs'], 0)
+        booking_state.validate_reports(self.state)
+        self.restore()
 
     def test_shared_production_and_guest_lifecycle(self):
         self.act('schedule',department='studio',owner='demo-0',kind='feature_film',costar='demo-1')

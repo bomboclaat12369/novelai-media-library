@@ -1,28 +1,59 @@
-"""Focused coverage for event rotation, paid extras and team choices."""
+"""Current Club opportunities and recovery of the original desk-event rotation."""
 import copy
 import json
 import unittest
 
-from game import engine as g, flavor, management as m, migrations
+from game import bookings, engine as g, flavor, management as m, migrations
 from game.catalog import demo_catalog
 
 
-class EventVariety(unittest.TestCase):
+class ClubOpportunities(unittest.TestCase):
+    def test_event_count_and_timing_vary_with_only_staffed_opportunities(self):
+        cat = demo_catalog()
+        base = g.new_game(cat, ['demo-0', 'demo-1'], 1)
+        schedules = set()
+        counts = set()
+        for seed in range(32):
+            state = copy.deepcopy(base)
+            state['seed'] = seed
+            g.start_night(state)
+            offers = state['night']['decisions']
+            self.assertEqual(offers, bookings.prepare_events(state))
+            counts.add(len(offers))
+            schedules.add(tuple(d['at'] for d in offers))
+            self.assertEqual(len(offers), len({d['kind'] for d in offers}))
+            state['night']['assignments'] = dict.fromkeys(state['people'], 'rest')
+            self.assertTrue(all(d['kind'] == 'promotion' for d in bookings.prepare_events(state)))
+        self.assertGreater(max(counts), 2)
+        self.assertLess(min(counts), 2)
+        self.assertGreater(len(schedules), len(counts))
+
+
+class LegacyDeskEvents(unittest.TestCase):
     def setUp(self):
         self.cat=demo_catalog()
         self.base=g.new_game(self.cat,['demo-0','demo-1'],123)
 
+    def old_night(self, base=None):
+        state = copy.deepcopy(base or self.base)
+        state.update(schema=1, phase='night')
+        state['night'] = {'elapsed': 0, 'wave': 0, 'paused': False, 'speed': 1,
+                          'demand': 'Steady', 'demand_factor': .94, 'revenue': 0,
+                          'served': 0, 'missed': 0, 'log': [], 'earnings': dict.fromkeys(state['people'], 0),
+                          'energy_spent': dict.fromkeys(state['people'], 0)}
+        return migrations.migrate(state)
+
     def opportunity(self,kind):
-        state=g.command(self.base,self.cat,'start')
+        state=self.old_night()
         state['night']['decisions'][0].update(kind=kind,copy=flavor.event(kind,state))
         state=g.command(state,self.cat,'advance',{'seconds':100,'stop_at_decision':True})
         return state,state['night']['decisions'][0]['id']
 
     def test_rotation_covers_every_scenario_with_varied_saved_copy(self):
-        seen={kind:set() for kind in m.DECISIONS}
+        seen={kind:set() for kind in (*m.OPPORTUNITIES,*m.TEAM_CHOICES)}
         for day in range(1,25):
             state=copy.deepcopy(self.base);state['day']=day
-            state=g.command(state,self.cat,'start')
+            state=self.old_night(state)
             decisions=state['night']['decisions']
             self.assertEqual(len(decisions),2)
             self.assertEqual([d['at'] for d in decisions],[100,200])
@@ -35,7 +66,7 @@ class EventVariety(unittest.TestCase):
         self.assertTrue(all(len(titles)>=4 for titles in seen.values()))
         no_hosts=copy.deepcopy(self.base)
         for w in no_hosts['people'].values():w['role']='rest'
-        no_hosts=g.command(no_hosts,self.cat,'start')
+        no_hosts=self.old_night(no_hosts)
         self.assertEqual(no_hosts['night']['decisions'][0]['kind'],'promotion')
 
     def test_paid_extras_charge_the_matching_host_and_resume_once(self):
@@ -90,10 +121,10 @@ class EventVariety(unittest.TestCase):
                 self.assertEqual(state,before)
 
     def test_finish_uses_free_defaults_for_every_new_event(self):
-        baseline=g.command(g.command(self.base,self.cat,'start'),self.cat,'finish')
-        for kind in set(m.DECISIONS)-{'booking','hospitality','promotion'}:
+        baseline=g.command(self.old_night(),self.cat,'finish')
+        for kind in set(m.OPPORTUNITIES + m.TEAM_CHOICES)-{'booking','hospitality','promotion'}:
             with self.subTest(kind=kind):
-                state=g.command(self.base,self.cat,'start')
+                state=self.old_night()
                 state['night']['decisions'][0].update(kind=kind,copy=flavor.event(kind,state))
                 result=g.command(state,self.cat,'finish')
                 self.assertEqual(result['cash'],baseline['cash'])

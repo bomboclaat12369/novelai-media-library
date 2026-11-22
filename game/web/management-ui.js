@@ -106,6 +106,16 @@ function nightlyRevenue(report){
  return `<dl class="venue-revenue" aria-label="Revenue by venue">${Object.entries(split).map(([key,value])=>
   `<div><dt>${names[key]}</dt><dd>${money(value)}</dd></div>`).join('')}</dl>`;
 }
+function reportDecision(decision){
+ const rule=boot.decisions[decision.kind];
+ const title=decision.copy?.title||rule?.title||decision.kind;
+ const option=rule?.options.find(entry=>entry.id===decision.choice);
+ // The saved ID identifies the action. Current prices may differ from its historical terms.
+ const action=option?.label.split(' · ',1)[0]||decision.choice;
+ const outcome=decision.result?' · '+esc(decision.result):'';
+ const source=decision.automatic===true?'Automatic choice':decision.automatic===false?'Your choice':'Choice';
+ return `<li><strong>${esc(title)}</strong> · ${source} · ${esc(action)}${outcome}</li>`;
+}
 function nightReports(){
  const recent=save.reports.slice().reverse(),r=recent.find(row=>row.day===bookingReportDay)||recent[0];
  const header=`<header class="lounge-heading"><h1>Night reports</h1><a href="/game/api/export?download=1">Export save &amp; history ↗</a></header>`;
@@ -118,7 +128,7 @@ function nightReports(){
   [['Training',r.training_cost],['Business decisions',r.decision_costs]].filter(([,v])=>Number.isFinite(v));
  const costLines=costs.map(([name,value])=>`<div><dt>${name}</dt><dd>${money(value)}</dd></div>`).join('');
  const contracts=contractsEndingOn(r.day),vouchers=voucherReceipts(r);
- const decisions=(r.decisions||[]).filter(d=>d.choice).map(d=>`<li><strong>${esc(d.copy?.title||boot.decisions[d.kind]?.title||d.kind)}</strong> · ${d.choice==='accept'?'Accepted':'Passed'}${d.automatic?' automatically':''}${d.result?' · '+esc(d.result):''}</li>`).join('');
+ const decisions=(r.decisions||[]).filter(d=>d.choice).map(reportDecision).join('');
  const records=recent.map(row=>`<tr><th scope="row">${row.day}</th><td>${esc(row.demand)}</td><td>${money(row.revenue)}</td><td>${money(row.expenses)}</td><td>${money(row.profit)}</td><td>${row.served} completed · ${row.missed} missed</td></tr>`).join('');
  return header+stats+`<section class="panel night-balance"><div class="report-heading"><h2>Night ${r.day} · ${money(r.profit)} after costs</h2>${picker}</div>
   <div class="report-columns"><div><h3>Revenue received · ${money(r.revenue)}</h3>${nightlyRevenue(r)}<p class="note">Studio fees arrive on delivery. Resort lodging pays each night.</p></div>

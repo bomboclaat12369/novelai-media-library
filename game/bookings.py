@@ -31,39 +31,48 @@ def next_wave_at(night):
 
 
 def prepare_events(state):
-    """Venue-wide choices also have saved, randomly selected trigger times."""
+    """Roll eligible business opportunities and place them on the same night clock."""
     from . import management as m, flavor
-    n = state['night']; rng = rng_for(state, 'venue-events')
+    n = state['night']
+    roles = set(n['assignments'].values())
+    kinds = ['promotion']
+    if roles & {'room', 'lounge'}:
+        kinds.append('regular_perk')
+    if 'lounge' in roles:
+        kinds.append('lounge_round')
+    if roles - {'rest', 'train'}:
+        kinds.extend(('hospitality', 'team_meal'))
+
+    # Each distinct Club or team opportunity gets its own roll. A shoot or
+    # stay supplies its own daily decision without displacing the Club's roll.
+    chance = .45 * n['demand_factor']
+    offers = [{'id': f"{state['day']}-venue-{kind}", 'kind': kind,
+               'copy': flavor.event(kind, state, state['day'] - 1)}
+              for kind in kinds if rng_for(state, 'venue-opportunity', kind).random() < chance]
+    offers.extend(department_ops.offer_for(state, contract)
+                  for contract in m.reservations(state) if contract.get('operations'))
+    if not offers:
+        return []
+
+    rng = rng_for(state, 'venue-event-times')
+    private = [offer for offer in offers if offer['kind'] == 'resort_private']
+    other = [offer for offer in offers if offer['kind'] != 'resort_private']
+    first, last = 20, REFERENCE_NIGHT_SECONDS - 24
+    deadline = int(REFERENCE_NIGHT_SECONDS * .64)
+    # Reserve the gaps first so random placement cannot squeeze out a later
+    # shoot or stay. Suite bookings need enough time left to finish before close.
+    slack = last - first - (len(offers) - 1) * REQUEST_COOLDOWN
+    early_slack = min(slack, deadline - first - max(0, len(private) - 1) * REQUEST_COOLDOWN)
+    offsets = sorted([rng.randint(0, early_slack) for _ in private] +
+                     [rng.randint(0, slack) for _ in other])
+    times = [first + i * REQUEST_COOLDOWN + offset for i, offset in enumerate(offsets)]
+    private_times = rng.sample([t for t in times if t <= deadline], len(private))
+    other_times = [t for t in times if t not in private_times]
+    rng.shuffle(other_times)
     scale = clock_scale(n)
-    times = sorted(rng.sample(range(28, REFERENCE_NIGHT_SECONDS - 24), 2))
-    if times[1] - times[0] < REQUEST_COOLDOWN:
-        times[1] = times[0] + REQUEST_COOLDOWN
-    times = [at * scale for at in times]
-    business = ['promotion']
-    if any(m.assignment(state, p) == 'lounge' for p in state['people']):
-        business.append('lounge_round')
-    kinds = [rng.choice(business), rng.choice(m.TEAM_CHOICES)]
-    rng.shuffle(kinds)
-    events = [{'id': f"{state['day']}-venue-{i}", 'kind': kind, 'at': at,
-             'until': min(n['duration'], at + 20 * scale), 'choice': None,
-             'copy': flavor.event(kind, state, state['day'] - 1)}
-            for i, (kind, at) in enumerate(zip(kinds, times))]
-    active = [c for c in m.reservations(state) if c.get('operations')]
-    # Use the existing two venue decision slots. Favor contracts that have had
-    # fewer opportunities so parallel projects and suites each get a turn.
-    rows = []
-    for dept in ('studio', 'resort'):
-        pool = [c for c in active if c['department'] == dept]
-        if pool:
-            rng.shuffle(pool)
-            rows.append(department_ops.offer_for(state, min(pool, key=lambda c: len(c.get('decisions', [])))))
-    rows.sort(key=lambda row: row['kind'] != 'resort_private')
-    for i, row in enumerate(rows):
-        events[i].update(row)
-        if row['kind'] == 'resort_private':
-            events[i]['at'] = min(events[i]['at'], n['duration'] * .64)
-            events[i]['until'] = events[i]['at'] + 20 * scale
-    return events
+    for offer, t in zip(private + other, private_times + other_times):
+        offer.update(at=t * scale, until=(t + 20) * scale, choice=None)
+    return sorted(offers, key=lambda offer: offer['at'])
 
 
 def initialize(state, catalog, labels):

@@ -302,21 +302,21 @@ def command(state, catalog, action, body):
 def prepare_night(state):
     ensure(state)
     n = state['night']
-    # Cycle eligible scenarios without consuming any simulation random draws.
-    # The first night retains the familiar booking and refreshment choices.
-    opportunities = tuple(kind for kind in OPPORTUNITIES if 'roles' not in DECISIONS[kind] or
-        any(assignment(state, p) in DECISIONS[kind]['roles'] and w['energy'] >= DECISIONS[kind]['energy'] for p, w in state['people'].items()))
-    n['decisions'] = []
-    for i, (pool, at) in enumerate(((opportunities, 100), (TEAM_CHOICES, 200))):
-        occurrence, index = divmod(state['day'] - 1, len(pool))
-        kind = pool[index]
-        n['decisions'].append({'id': f"{state['day']}-{i}", 'kind': kind, 'at': at, 'until': at + 50,
-                              'choice': None, 'copy': flavor.event(kind, state, occurrence)})
+    n['assignments'] = {p: assignment(state, p) for p in state['people']}
     if n.get('stage_tracking') == 2:
         from .bookings import prepare_events
         n['decisions'] = prepare_events(state)
+    else:
+        # Restoring an early prototype's active shift uses its original clock.
+        opportunities = tuple(kind for kind in OPPORTUNITIES if 'roles' not in DECISIONS[kind] or
+            any(n['assignments'][p] in DECISIONS[kind]['roles'] and w['energy'] >= DECISIONS[kind]['energy'] for p, w in state['people'].items()))
+        n['decisions'] = []
+        for i, (pool, at) in enumerate(((opportunities, 100), (TEAM_CHOICES, 200))):
+            occurrence, index = divmod(state['day'] - 1, len(pool))
+            kind = pool[index]
+            n['decisions'].append({'id': f"{state['day']}-{i}", 'kind': kind, 'at': at, 'until': at + 50,
+                                  'choice': None, 'copy': flavor.event(kind, state, occurrence)})
     n['department_revenue'] = 0; n['decision_costs'] = 0; n['activities'] = {}
-    n['assignments'] = {p: assignment(state, p) for p in state['people']}
     for c in reservations(state):
         c['card'] = state['people'][c['owner']]['card']
         if c['spec'].get('costar'):
