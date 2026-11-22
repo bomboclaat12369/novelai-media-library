@@ -97,7 +97,7 @@ function departmentReservations(dept){
  const active=contracts.filter(c=>c.status==='active').sort((a,b)=>a.start-b.start),completed=contracts.filter(c=>c.status==='completed').slice(-8).reverse();
  const roster=c=>[c.owner,c.spec.costar].filter(Boolean).map(id=>esc(person(id).name)).join(' + ');
  return `<section class="panel department-reservations"><h2>Active reservations</h2>${active.map(c=>`<article class="reservation"><h3>${esc(c.spec.name)} · ${roster(c)}</h3>
-  <p>${c.guest?esc(c.guest.name)+' · ':''}Nights ${c.start}–${c.end} · ${c.nights}/${c.spec.days} completed</p>
+  <p>${c.guest?esc(c.guest.name)+' · ':''}${reservationDatesLabel(c)} · ${c.nights}/${c.spec.days} completed</p>
   ${!studio?`<p>Satisfaction ${c.satisfaction}/100 · target ${c.spec.expectation} · ${money(c.revenue)} earned</p>`:''}
   ${contractHistory(c)}<button class="ghost small" data-action="cancel_contract" data-contract="${c.id}" ${dis(save.phase!=='prepare')}>Cancel · no deposit refund</button></article>`).join('')||'<p class="note">No active reservations.</p>'}
   <h2>${studio?'Recent deliveries':'Recent checkouts'}</h2>${completed.map(c=>`<article class="completed"><strong>${esc(c.spec.name)} · ${roster(c)}</strong><p>${money(c.revenue)}${c.success===false?' · rework fee':''}${c.guest?' · '+esc(c.guest.name)+(c.return_invited?' · willing to return':' · checked out'):''}${c.special_card?' · '+studioCardReward(c.special_card):''}</p>${contractHistory(c)}</article>`).join('')||'<p class="note">Completed work appears here.</p>'}</section>`;
@@ -105,15 +105,16 @@ function departmentReservations(dept){
 function contractStageNames(c){
  const studio=c.department==='studio';
  const names=boot.department_play.stages[studio?(c.spec.medium||'photo'):'resort'].slice();
- if(!studio&&save.day>c.start)names[0]='Review the guest itinerary';
+ if(!studio&&save.day>reservationNights(c)[0])names[0]='Review the guest itinerary';
  if(save.day===c.end)names[5]=studio?(c.spec.medium==='film'?'Deliver the final cut':'Deliver the selects'):'Check the guest out';
  return names;
 }
 function departmentTracker(slot){
  const c=slot.contract,studio=slot.role==='studio';
  if(!c)return `<aside class="booking-tracker"><h2>${studio?'Production board':'Guest itinerary'}</h2><p>No reservation for this position tonight.</p></aside>`;
+ const shiftNumber=reservationNights(c).indexOf(save.day)+1;
  if(!c.operations){
-  const schedule='Night '+(save.day-c.start+1)+' of '+c.spec.days+' · '+(studio?'Delivery':'Checkout')+' on night '+c.end;
+  const schedule='Night '+shiftNumber+' of '+c.spec.days+' · '+(studio?'Delivery':'Checkout')+' on night '+c.end;
   return `<aside class="booking-tracker department-tracker"><h2>${esc(c.spec.name)}</h2><p>${esc(person(c.owner).name)} · ${schedule}</p>
    <p>${save.night?'Shift progress · '+save.night.wave+' of 6 parts completed.':'Reserved for tonight.'} ${studio?'': 'Satisfaction '+c.satisfaction+'/100.'}</p></aside>`;
  }
@@ -129,7 +130,7 @@ function departmentTracker(slot){
  const result=rows.length?`<div class="suite-booking"><h3>Private booking · ${m.completed?money(m.value)+' earned':'in progress'}</h3>
   <ol class="contract-stages">${rows.map((s,i)=>`<li ${!m.completed&&i===rows.length-1?'aria-current="step"':''}><small>${!m.completed&&i===rows.length-1?'Current':'Complete'}</small><strong>${esc(s.label.text.replace('{worker}',person(c.owner).name))}</strong></li>`).join('')}</ol></div>`:'';
  return `<aside class="booking-tracker department-tracker" data-booking-key="dept-${c.id}"><div class="venue-section-head"><h2>${studio?'Production board':'Guest itinerary'} <span>· ${esc(c.spec.name)}</span></h2><span class="live-indicator">${save.night?(save.night.paused?'Paused':'Live'):'Preparation'}</span></div>
-  <p>${c.guest?esc(c.guest.name)+' · ':''}Night ${save.day-c.start+1} of ${c.spec.days} · ${studio?'Delivery':'Checkout'} on night ${c.end}${studio&&derived.delivery_chances?.[c.id]!=null?' · '+Math.round(100*derived.delivery_chances[c.id])+'% delivery chance with sufficient work':''}${c.guest?' · Satisfaction '+c.satisfaction+'/100':''}${c.spec.costar?' · Co-star '+esc(person(c.spec.costar).name):''}</p>
+  <p>${c.guest?esc(c.guest.name)+' · ':''}Night ${shiftNumber} of ${c.spec.days} · ${studio?'Delivery':'Checkout'} on night ${c.end}${studio&&derived.delivery_chances?.[c.id]!=null?' · '+Math.round(100*derived.delivery_chances[c.id])+'% delivery chance with sufficient work':''}${c.guest?' · Satisfaction '+c.satisfaction+'/100':''}${c.spec.costar?' · Co-star '+esc(person(c.spec.costar).name):''}</p>
   <ol class="contract-stages" data-scroll-key="contract-${c.id}-${save.day}">${statuses}</ol>${result}</aside>`;
 }
 function departmentUI(dept){

@@ -51,6 +51,15 @@ def cast(contract):
     return (contract['owner'], partner) if partner else (contract['owner'],)
 
 
+def reservation_nights(contract):
+    """Completed shifts keep their recorded dates when recovery moves the remaining work."""
+    calendar = range(contract['start'], contract['end'] + 1)
+    if not contract.get('operations'):
+        return list(calendar)
+    completed = [row['day'] for row in contract.get('work_log', ()) if row['wave'] == 6]
+    return completed + list(calendar[contract['nights']:])
+
+
 def returning_guests(state):
     latest = {}
     for contract in state['contracts']:
@@ -142,7 +151,7 @@ def resolve_offer(state, decision, choice, automatic):
     n = state['night']
     c = next((row for row in state['contracts'] if row['id'] == decision['contract']), None)
     kind = decision['kind']
-    if not c or c['status'] != 'active' or not c['start'] <= state['day'] <= c['end'] or decision['worker'] != c['owner']:
+    if not c or c['status'] != 'active' or state['day'] not in reservation_nights(c) or decision['worker'] != c['owner']:
         raise RuleError('This contract is no longer in progress.')
     rule = EVENTS[kind]
     worker = state['people'][c['owner']]
@@ -303,6 +312,10 @@ def validate_contract(c, state):
     beats = [(row['day'],row['wave']) for row in work]
     if beats != sorted(set(beats)):
         raise ValueError('Invalid shift history order.')
+    nights = reservation_nights(c)
+    if (c['nights'] > spec['days'] or len(nights) != spec['days'] or nights != sorted(set(nights)) or nights[0] < 1 or nights[-1] != c['end']
+            or any(day > c['start'] + i for i, day in enumerate(nights))):
+        raise ValueError('Invalid reservation nights.')
     decisions = c.get('decisions', [])
     if not isinstance(decisions,list) or len(decisions) > spec['days'] or len({d['id'] for d in decisions}) != len(decisions):
         raise ValueError('Invalid department decisions.')
@@ -311,7 +324,7 @@ def validate_contract(c, state):
             raise ValueError('Invalid department decision.')
     for row in [*work, *decisions]:
         elapsed = row.get('elapsed', 0)
-        if type(elapsed) not in (int, float) or not 0 <= elapsed <= 180:
+        if row['day'] not in nights or type(elapsed) not in (int, float) or not 0 <= elapsed <= 180:
             raise ValueError('Invalid department history time.')
     if c['department'] == 'resort':
         validate_private(c, state)

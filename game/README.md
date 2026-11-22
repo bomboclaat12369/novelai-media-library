@@ -117,8 +117,9 @@ reception and recovery improvements. Studio and Resort each support six
 positions. The roster has no twenty-person cap; larger teams can rotate
 through work, rest and training. Keep a payroll reserve when buying capacity
 or paying deposits. If the next night is unaffordable, a recovery break
-restores an operating reserve and energy, shifts reservations by two dates,
-and retains your collection and facilities. There is no mandatory reset.
+restores an operating reserve and energy and moves the remaining reservation
+nights two days later. Work already done keeps its original dates and
+payments. You keep your collection and facilities.
 
 ## Cards and source preservation
 

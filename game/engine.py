@@ -8,7 +8,7 @@ from . import management as m
 from . import evolution, flavor, wardrobe
 from . import meetings, stage_labels, bookings
 
-VERSION = '1.6.1-local'
+VERSION = '1.6.2-local'
 NIGHT_SPEEDS = (1, 2, 4, 8)
 PACK_RARITY_WEIGHTS = (55, 27, 12, 5, 1)
 PACKS = {'standard': {'name':'Standard','price':100,'count':5},
@@ -435,7 +435,8 @@ def command(original,catalog,action,body=None,labels=None):
         # A deliberately visible, recoverable setback; no deletion or mandatory reset.
         state['cash']=recurring_cost(state)+100
         for worker in state['people'].values(): worker['energy']=100
-        # A recovery break must not strand reservations on dates that were skipped.
+        # Shift the booking window for the work still owed. Completed shifts
+        # keep their original dates in the contract's work history.
         for contract in state['contracts']:
             if contract['status']=='active':
                 contract['start']+=2;contract['end']+=2

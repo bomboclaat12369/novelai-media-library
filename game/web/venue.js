@@ -26,7 +26,7 @@ function venueSlots(view=screen){
  for(const [role,label,count] of [['room','Private room',save.facilities.rooms],['lounge','Lounge',save.facilities.lounge],['studio','Studio',save.departments.studio],['resort','Guest suite',save.departments.resort]]){
   if(view!=='club'&&role!==view)continue;
   if(role==='studio'||role==='resort'){
-   const jobs=save.contracts.filter(c=>c.department===role&&c.start<=save.day&&save.day<=c.end&&(c.status==='active'||(save.night&&c.status==='completed'&&c.end===save.day)));
+   const jobs=save.contracts.filter(c=>c.department===role&&(c.status==='active'||(save.night&&c.status==='completed'&&c.end===save.day))&&reservationNights(c).includes(save.day));
    for(let i=0;i<count;i++)slots.push({id:role+'-'+i,label:label+' '+(i+1),owner:jobs[i]?.owner,contract:jobs[i],role,index:i});
    continue;
   }
@@ -239,7 +239,7 @@ function illustratedClub(){
   ${staffingConflicts()}${illustratedVenue()}${nextDepartmentOpening()}
   <details class="venue-planning panel" data-venue-section="planning" ${venueSections.has('planning')?'open':''}><summary>Tonight’s plan <span>Assignments, cards & prices</span></summary><div class="venue-plan-body"><div class="sectionhead"><p>Each girl keeps her career and energy across cards.</p><button class="ghost small" data-screen="team">Team & recruitment →</button></div><div class="staff-grid">${Object.keys(save.people).map(staffHTML).join('')}</div><label class="policy-label" for="pricing">Price policy</label><select id="pricing" ${n?'disabled':''}>${[['accessible','Accessible · more bookings'],['standard','Standard · balanced'],['premium','Premium · higher price, fewer bookings']].map(([value,label])=>`<option value="${value}" ${save.pricing===value?'selected':''}>${label}</option>`).join('')}</select>${savedPlans()}</div></details>
   ${venueActivity(n,last)}
-  ${save.cash<derived.recurring&&!n?'<section class="panel"><h3>Time to regroup</h3><p>Take a two-day recovery break to restore energy and receive an operating reserve.</p><button data-action="recovery">Take recovery break</button></section>':''}`;
+  ${save.cash<derived.recurring&&!n?`<section class="panel"><h3>Time to regroup</h3><p>Take a two-day recovery break to restore energy and receive an operating reserve.${save.contracts.some(c=>c.status==='active')?' Remaining reservation dates move two nights later.':''}</p><button data-action="recovery">Take recovery break</button></section>`:''}`;
 }
 function enlargeBookingMedia(){
  const {url,chosen,clip}=venueContext();

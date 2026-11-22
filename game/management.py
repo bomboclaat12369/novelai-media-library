@@ -107,7 +107,7 @@ def ensure(state):
 
 def reservations(state, owner=None, day=None):
     day = state['day'] if day is None else day
-    return [c for c in state['contracts'] if c['status'] == 'active' and c['start'] <= day <= c['end']
+    return [c for c in state['contracts'] if c['status'] == 'active' and day in ops.reservation_nights(c)
             and (owner is None or owner in ops.cast(c))]
 
 
@@ -184,7 +184,9 @@ def reservation_options(state, department, owner, spec):
         same_department = contract['department'] == department
         if not same_worker and not same_department:
             continue
-        for night in range(max(first, contract['start']), min(final_night, contract['end']) + 1):
+        for night in ops.reservation_nights(contract):
+            if not first <= night <= final_night:
+                continue
             if same_worker:
                 assigned[night] = contract['id']
             if same_department:
@@ -484,6 +486,7 @@ def after_settle(state, report):
 def derived(state):
     ensure(state)
     return {'unlocks': unlocks(state), 'opening_progress': opening_progress(state), 'reservations': reservations(state),
+            'reservation_nights': {c['id']: ops.reservation_nights(c) for c in state['contracts'] if c['status'] == 'active'},
             'delivery_chances': {c['id']: ops.delivery_chance(c) for c in state['contracts'] if c['status']=='active' and c['department']=='studio'},
             'staffing_conflicts': club_staffing_conflicts(state) if state['phase']=='prepare' else [],
             'assignments': {p: assignment(state, p) for p in state['people']},

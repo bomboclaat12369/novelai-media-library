@@ -32,6 +32,44 @@ class DepartmentOperations(unittest.TestCase):
             self.state=renewed.read()['state']
             self.assertEqual(self.state, GameStore(renewed.path,self.cat).read()['state'])
 
+    def test_recovery_preserves_worked_nights_and_moves_only_the_remaining_shifts(self):
+        self.act('schedule', department='studio', owner='demo-0', kind='feature_film', costar='demo-1')
+        self.act('schedule', department='resort', owner='demo-2', kind='weekend')
+        self.act('schedule', department='studio', owner='demo-0', kind='portrait', start=10)
+        for expected in ([7,10,11], [7,10,13]):
+            self.act('start')
+            while self.state['night']:
+                self.act('advance', seconds=180, stop_at_decision=True)
+                night = self.state['night']
+                if not night:
+                    break
+                event = next(d for d in night['decisions'] if d['choice'] is None and d['at'] <= night['elapsed'] < d['until'])
+                self.act('decision', decision=event['id'], choice='accept' if event['kind']=='resort_private' else 'decline')
+            self.state['cash'] = 0
+            receipts = json.dumps(self.state['reports'], sort_keys=True)
+            self.act('recovery')
+            film, stay, future = self.state['contracts']
+            dates = management.derived(self.state)['reservation_nights']
+            self.assertEqual((dates[film['id']], dates[stay['id']], dates[future['id']]), (expected, expected, [expected[-1]+1]))
+            self.assertFalse(management.reservations(self.state, day=self.state['day']-1))
+            self.assertEqual(management.reservations(self.state,'demo-1',day=7), [film])
+            self.restore()
+            self.assertEqual(json.dumps(self.state['reports'], sort_keys=True), receipts)
+        self.act('start')
+        self.act('finish')
+        film, stay, future = self.state['contracts']
+        for job in (film,stay):
+            self.assertEqual(job['status'], 'completed')
+            self.assertEqual([row['day'] for row in job['work_log'] if row['wave']==6], [7,10,13])
+            self.assertEqual((job['nights'],len(job['work_log'])), (3,18))
+        self.assertEqual([m['value'] for m in stay['private_bookings'] if m['completed']], [65])
+        self.assertEqual(film['revenue']+stay['revenue'], sum(r['department_revenue'] for r in self.state['reports']))
+        self.assertEqual((future['status'], future['start'], future['nights']), ('active',14,0))
+        self.restore()
+        self.state['reports'][0]['day'] = 9
+        with self.assertRaisesRegex(ValueError, 'Invalid department request'):
+            booking_state.validate_reports(self.state)
+
     def test_fully_staffed_night_restores_all_offers_and_resumes_at_saved_speed(self):
         self.state.update(cash=100000, day=9, seed=91)
         roster = list(self.cat['people'])[:14]

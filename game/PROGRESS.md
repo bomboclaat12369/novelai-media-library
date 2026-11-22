@@ -1,5 +1,14 @@
 # After Hours — game development and releases
 
+## Version 1.6.2 — recovery during a shoot or guest stay
+
+Taking a financial recovery break partway through a Studio shoot or Resort
+stay could prevent the game from reopening the career or restoring its
+export. An affected career can now reopen and continue its remaining work.
+The Studio, Resort and team roster show the nights actually worked alongside
+the new reservation dates. Earlier receipts and payments stay on the nights
+they were earned.
+
 ## Version 1.6.1 — variable nightly events
 
 Club and team opportunities roll independently with nightly demand. Every

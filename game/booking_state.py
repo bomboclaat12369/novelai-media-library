@@ -117,7 +117,7 @@ def validate(state):
             contract = next((c for c in state['contracts'] if c['id'] == d.get('contract')), None)
             if (type(d.get('contract')) is not int or d.get('department') != department or n['assignments'].get(d.get('worker')) != department
                     or not contract or not contract.get('operations') or contract['department'] != department or contract['owner'] != d.get('worker')
-                    or not contract['start'] <= state['day'] <= contract['end']):
+                    or state['day'] not in department_ops.reservation_nights(contract)):
                 raise ValueError('Invalid department request.')
         elif not d.get('meeting_id') and d['kind'] not in ('promotion', 'lounge_round', 'hospitality', 'regular_perk', 'team_meal'):
             raise ValueError('This request needs an actual booking.')

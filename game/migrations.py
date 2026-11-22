@@ -163,7 +163,7 @@ def validate(state, catalog):
             elif not finite(spec['rate']) or not finite(spec['expectation'],0,100): raise ValueError()
             if 'checkout_bonus_paid' in c and not integer(c['checkout_bonus_paid']): raise ValueError()
             management.ops.validate_contract(c, state)
-            if c.get('operations') and state['phase']=='night' and c['status']=='active' and c['start']<=state['day']<=c['end']:
+            if c.get('operations') and state['phase']=='night' and c['status']=='active' and state['day'] in management.ops.reservation_nights(c):
                 for member, key in zip(management.ops.cast(c), ('card', 'costar_card')):
                     equipped = c.get(key)
                     if equipped not in state['owned'] or catalog['cards'][equipped]['owner'] != member:

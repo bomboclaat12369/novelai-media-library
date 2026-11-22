@@ -10,13 +10,21 @@ root.addEventListener('toggle',event=>{
  if(id){if(event.target.open)openBookingHistory.add(id);else openBookingHistory.delete(id);}
 },true);
 const esc=escapeHTML,dis=v=>v?'disabled':'';
+function reservationNights(contract){
+ return derived.reservation_nights?.[contract.id]??Array.from({length:contract.spec.days},(_,i)=>contract.start+i);
+}
+function reservationDatesLabel(contract){
+ const nights=reservationNights(contract),first=nights[0],last=nights.at(-1);
+ if(nights.length===1)return 'Night '+first;
+ return 'Nights '+(last-first+1===nights.length?first+'–'+last:nights.join(', '));
+}
 function staffAssignment(owner){
  const worker=save.people[owner];
  const booked=derived.reservations.find(c=>c.owner===owner||c.spec.costar===owner);
  if(booked){
   const department=boot.departments[booked.department].name;
   const duty=booked.department==='resort'?'Host':booked.owner===owner?'Lead':'Co-star';
-  const dates=booked.start===booked.end?'Night '+booked.start:'Nights '+booked.start+'–'+booked.end;
+  const dates=reservationDatesLabel(booked);
   return `<div class="staff-reservation"><small>Tonight’s assignment · ${esc(department)}</small>
    <strong>${esc(booked.spec.name)}</strong><span>${duty} · ${dates}</span>
    <small>When unreserved · ${esc(assignmentNames[worker.role])}</small></div>`;
@@ -363,10 +371,12 @@ function calendarUI(owner,start,duration,costar){
  const preview=!!owner&&save.phase==='prepare',first=preview?Math.max(save.day,start-1):save.day;
  const days=Array.from({length:7},(_,i)=>first+i),last=days[days.length-1],booked=new Map();
  for(const contract of save.contracts){
-  if(contract.status!=='active'||contract.end<first||contract.start>last)continue;
+  if(contract.status!=='active')continue;
+  const visible=reservationNights(contract).filter(night=>night>=first&&night<=last);
+  if(!visible.length)continue;
   for(const member of [contract.owner,contract.spec.costar].filter(Boolean)){
    if(!booked.has(member))booked.set(member,new Map());
-   for(let night=Math.max(first,contract.start);night<=Math.min(last,contract.end);night++)booked.get(member).set(night,contract);
+   for(const night of visible)booked.get(member).set(night,contract);
   }
  }
  const inRange=day=>preview&&day>=start&&day<start+duration;
