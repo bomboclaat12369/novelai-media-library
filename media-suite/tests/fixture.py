@@ -109,9 +109,8 @@ Handler = SuiteTestHandler
     shutil.copy(source / "release-standalone.json", project)
     game_config = json.loads((source / "release-standalone.json").read_text())
     for relative in game_config["parts"]:
-        if any(relative.endswith("." + name + ".txt") for name in ("ranks","collection","editions","base-layout")):
-            (project / relative).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy(source / relative, project / relative)
+        (project / relative).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(source / relative, project / relative)
     sys.path.insert(0, str(project))
     from game.catalog import read_library
     from game.store import GameStore
