@@ -25,6 +25,7 @@ likelyStyle.textContent = `
  .likely-photos .match-photo:has(input:checked){border-color:var(--accent)}
  .likely-photos .likely-enlarge{display:block;width:100%;padding:0;border:0;background:#0c1015}
  .likely-post-browser .match-photo.assigned{border:2px solid #78bbd7}
+ .likely-post-browser .match-photo.located{outline:3px solid var(--accent);outline-offset:-3px}
  .likely-membership{display:block;margin:-2px -2px 3px;padding:3px 6px;border-radius:3px 3px 0 0;background:#294759;color:#eef9ff;font-size:.92em;font-weight:700;line-height:1.2;overflow-wrap:anywhere}
  .likely-photos .match-photo img{width:100%;height:auto;aspect-ratio:var(--ratio);max-height:min(70dvh,calc(var(--photo-size) * 1.8));object-fit:contain}
  .likely-photos label{display:flex;gap:6px;align-items:center;padding:4px 3px;cursor:pointer}
@@ -248,7 +249,7 @@ async function openLikelyGroups(){
    const figure=photoChoice(photo,page.photos);
    if(page.source_posts?.some(post=>post.id===photo.source_key)){
     const label=photo.source_label||'Source post';
-    const link=button(label,()=>openPost(photo.source_key),'small likely-source');
+    const link=button(label,()=>openPost(photo.source_key,photo.id),'small likely-source');
     link.title='View post '+label;link.setAttribute('aria-label',link.title);figure.append(link);
    }else if(photo.source_label)figure.append(el('small',photo.source_label));
    proposed.append(figure);
@@ -262,7 +263,7 @@ async function openLikelyGroups(){
   function photoChoice(photo,list){
    const figure=photoFigure(photo,list), check=el('input');
    check.type='checkbox';check.value=photo.id;check.checked=state.selected.has(photo.id);check.disabled=!!photo.unavailable_reason;
-   const caption=el('label'), text=el('span',(photo.source_position?'#'+photo.source_position+' · ':'')+(photo.display_name||photo.name));
+   const caption=el('label'), text=el('span',(photo.suggested?'Suggested · ':'')+(photo.source_position?'#'+photo.source_position+' · ':'')+(photo.display_name||photo.name));
    text.title=photo.display_name||photo.name;caption.append(check,text);
    check.setAttribute('aria-label','Include '+photo.name);
    check.onchange=()=>{
@@ -282,13 +283,13 @@ async function openLikelyGroups(){
   let request=0, displayed='', currentPage=null, selectableIds=null;
   postPicker.setAttribute('aria-label','Matching post');
   for(const post of posts)postPicker.add(new Option(post.label,post.id));
-  if(!posts.some(p=>p.id===state.post))state.post=posts[0]?.id;
+  if(!posts.some(p=>p.id===state.post))state.post=page.photos.find(p=>posts.some(post=>post.id===p.source_key))?.source_key||posts[0]?.id;
   postPicker.value=state.post||'';
   const back=button('Previous photos',()=>showPost(currentPage.offset-currentPage.limit),'small');
   const more=button('Next photos',()=>showPost(currentPage.offset+currentPage.limit),'small');
   const similar=button('Group similar images',()=>{
    state.postOrder=state.postOrder==='similar'?'original':'similar';
-   showPost(0);
+   showPost(undefined,state.anchor);
   },'small');
   similar.title='Toggle between visual grouping and original post order.';
   const bulkSelect=button('Select entire post',()=>{
@@ -320,7 +321,7 @@ async function openLikelyGroups(){
   postStatus.setAttribute('role','status');controls.append(postPicker,similar,bulkSelect,merge,columnsLabel,back,more,postStatus);
   browser.append(el('summary','Browse matching posts'),controls,extraGrid);
   if(posts.length)comparison.append(browser);
-  async function showPost(at){
+  async function showPost(at,focusId){
    const source=postPicker.value, serial=++request;
    if(source!==displayed)selectableIds=null;
    state.post=source;state.postOffset=at;displayed=source;
@@ -330,27 +331,40 @@ async function openLikelyGroups(){
    extraGrid.replaceChildren();postStatus.textContent='Loading photos…';
    try{
     const result=await api('likely-groups',{job,session,key:groupKey,source_post:source,
-     post_offset:at,post_order:state.postOrder||'original',include_selectable:selectableIds===null});
+     post_context:true,focus_id:focusId,post_offset:at,post_order:state.postOrder||'original',include_selectable:selectableIds===null});
     if(serial!==request||!browser.isConnected||closed)return;
     if(result.selectable_ids)selectableIds=result.selectable_ids;
-    currentPage=result;state.postOffset=result.offset;
-    postStatus.textContent=result.total?(result.offset+1)+'–'+(result.offset+result.photos.length)+' of '+result.total+' other photos':'No other photos in this post.';
+    currentPage=result;state.postOffset=at===undefined?undefined:result.offset;
+    postStatus.textContent=result.total?(result.offset+1)+'–'+(result.offset+result.photos.length)+' of '+result.total+' photos':'No photos in this post.';
+    if(at===undefined&&focusId&&result.focus_id!==focusId)postStatus.textContent+=' · Requested photo unavailable';
+    else if(at===undefined&&result.total&&!result.focus_id)postStatus.textContent+=' · No visible match in this post';
+    if(at===undefined)state.anchor=result.focus_id;
     back.disabled=!result.offset;more.disabled=result.offset+result.limit>=result.total;
-    for(const photo of result.photos)extraGrid.append(photoChoice(photo,result.photos));
+    for(const photo of result.photos){
+     const figure=photoChoice(photo,result.photos);extraGrid.append(figure);
+     if(photo.id!==result.focus_id)continue;
+     figure.classList.add('located');figure.tabIndex=-1;
+     postStatus.textContent+=' · Located #'+photo.source_position;
+     requestAnimationFrame(()=>{
+      if(serial!==request||!browser.open||!figure.isConnected||closed)return;
+      figure.scrollIntoView({block:'center',inline:'nearest'});figure.focus({preventScroll:true});
+     });
+    }
     updateSelection();
-   }catch(error){if(serial===request&&browser.isConnected){postStatus.textContent=error.message;displayed='';extraGrid.append(button('Retry',()=>showPost(at)))}}
+   }catch(error){if(serial===request&&browser.isConnected){postStatus.textContent=error.message;displayed='';extraGrid.append(button('Retry',()=>showPost(at,focusId)))}}
   }
-  function openPost(source){
-   const changed=state.post!==source;
+  function openPost(source,focusId){
+   state.postOrder='original';
    postPicker.value=source;browser.open=true;
-   if(changed||!displayed)showPost(changed?0:state.postOffset||0);
+   showPost(undefined,focusId);
    browser.querySelector('summary').scrollIntoView({block:'nearest'});postPicker.focus({preventScroll:true});
   }
   browser.ontoggle=()=>{
    state.browsing=browser.open;
-   if(browser.open&&!displayed)showPost(state.postOffset||0);
+   if(browser.open&&!displayed)showPost(state.postOffset,state.anchor);
+   if(!browser.open){request++;displayed='';state.postOffset=undefined;state.postOrder='original'}
   };
-  postPicker.onchange=()=>showPost(0);
+  postPicker.onchange=()=>{state.postOrder='original';showPost()};
   if(state.browsing)browser.open=true;
   const dismiss=button('Dismiss group',()=>task(()=>decide('dismiss_likely')));
   const approve=button('Approve group',()=>task(()=>decide('approve_likely')),'primary');

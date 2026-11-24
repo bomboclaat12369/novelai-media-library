@@ -120,22 +120,40 @@ def source_page(organizer, review, body, state):
         raise ValueError('Choose original post order or visual grouping.')
     original, post_ids, visible_photos = post_photos(organizer, source)
     positions = {ident: pos for pos, ident in enumerate(original, 1)}
-    extras = set(visible_photos) - set(row['members'])
+    context = body.get('post_context') is True
+    suggested = set(row['members'])
+    included = set(visible_photos)
+    if not context:
+        included.difference_update(suggested)
     ordered = original if order == 'original' else organizer.ordered(post_ids, 'similar', source)
-    others = [i for i in ordered if i in extras]
+    page_ids = [i for i in ordered if i in included]
+    focus = None
+    if context and 'post_offset' not in body:
+        requested = body.get('focus_id')
+        if requested in suggested and requested in included:
+            focus = requested
+        else:
+            candidates = [i for i in row['members'] if row['posts'].get(i) == source]
+            focus = next((i for i in [*candidates, *row['members'], *row['references']] if i in included), None)
+            if focus is None:
+                witnesses = {link['survivor_sha'] for link in row['source_links']
+                             if source in link.get('sources', ()) and link.get('survivor_sha')}
+                focus = next((i for i in page_ids if organizer.catalog[i]['sha'] in witnesses), None)
     limit = 24
-    offset = min(max(0, int(body.get('post_offset', 0)) // limit) * limit, (max(0, len(others) - 1) // limit) * limit)
+    at = page_ids.index(focus) if focus is not None else int(body.get('post_offset', 0))
+    offset = max(0, min(at, len(page_ids) - 1)) // limit * limit
     photos = []
-    for ident in others[offset:offset + limit]:
+    for ident in page_ids[offset:offset + limit]:
         names = list(assigned.get(ident, []))
         names.extend(library_names.get(sid, 'a Library Set') for sid in sorted(live_memberships(organizer,ident)))
         if not names and organizer.catalog[ident]['sha'] in placement.get('held_set_hashes', ()):
             names.append('a Set under review')
         names = list(dict.fromkeys(names))
         reason = '' if ident in available else ('In ' + ', '.join(names) if names else 'Unavailable for this group')
-        photos.append(dict(organizer.image(ident), source_position=positions[ident], set_names=names, unavailable_reason=reason,
+        photos.append(dict(organizer.image(ident), source_position=positions[ident], suggested=ident in suggested,
+                           set_names=names, unavailable_reason=reason,
                            display_name=organizer.original_name(ident, source)))
-    result = {'photos': photos, 'offset': offset, 'total': len(others), 'limit': limit}
+    result = {'photos': photos, 'offset': offset, 'total': len(page_ids), 'limit': limit, 'focus_id': focus}
     if body.get('include_selectable'):
         result['selectable_ids'] = [i for i in visible_photos if i in available]
     return result

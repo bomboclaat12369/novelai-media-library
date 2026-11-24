@@ -61,8 +61,25 @@ const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/play
     await picker.selectOption('');
     await page.waitForFunction(()=>!busy);
     const proposed=await dialog.locator('.match-photo input:checked').count();
-    await dialog.getByRole('button',{name:/^View post /}).first().click();
     const postBrowser=dialog.locator('.likely-post-browser');
+    const links=dialog.locator('.likely-suggestions .likely-source');
+    const suggested=await links.evaluateAll(items=>items.map(link=>link.closest('figure').querySelector('input').value));
+    const waitForLocated=id=>page.waitForFunction(expected=>{
+      const card=document.querySelector('.likely-post-browser .located');
+      if(!card||card.querySelector('input').value!==expected||document.activeElement!==card)return false;
+      const bounds=card.getBoundingClientRect(), panel=card.closest('details').getBoundingClientRect();
+      return bounds.bottom>panel.top && bounds.top<Math.min(innerHeight,panel.bottom);
+    },id);
+    await postBrowser.locator('summary').click();
+    await waitForLocated(suggested[0]);
+    for(let i=suggested.length-1;i>=0;i--){
+      await links.nth(i).click();
+      await waitForLocated(suggested[i]);
+      const located=postBrowser.locator('.located input');
+      await located.uncheck();
+      assert.equal(await dialog.locator('.likely-suggestions input[value="'+suggested[i]+'"]').isChecked(),false);
+      await located.check();
+    }
     const extra=postBrowser.getByRole('checkbox',{name:'Include Extra portrait.jpg'});
     await extra.waitFor();assert.equal(await extra.isChecked(),false);
     await postBrowser.getByRole('button',{name:'Enlarge Extra portrait.jpg'}).click();

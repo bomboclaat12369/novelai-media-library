@@ -171,6 +171,41 @@ class ReviewTests(unittest.TestCase):
             if predicate(page):return page
         self.fail('Expected a reviewable group')
 
+    def test_open_matching_post_locates_suggestions_in_a_large_original_sequence(self):
+        group = self.find(lambda g: not g['destination'] and len(g['photos']) > len({p['source_key'] for p in g['photos']}))
+        posts = [p['source_key'] for p in group['photos']]
+        post = next(key for key in posts if posts.count(key) >= 2)
+        first, second = [p['id'] for p in group['photos'] if p['source_key'] == post][:2]
+        catalog = self.bulk.current['source_catalog']
+        for ident in self.org.posts[post]['ids']:
+            for origin in catalog[ident]['origins']:
+                if origin['key'] == post:
+                    origin['original_path'] = {first:'m-first.jpg', second:'y-second.jpg'}.get(ident, 'zz-'+ident+'.jpg')
+        template = catalog[first]
+        for n in range(3240):
+            ident = f'frame-{n:04d}'
+            origin = dict(template['sources'][post], original_path=('a' if n < 1358 else 't')+ident+'.jpg')
+            catalog[ident] = dict(template,id=ident,sha=ident,sources={post:origin},origins=[origin],existing_sets=[])
+        self.bulk.persist()
+        self.org.bind()
+        group = self.find(lambda g: {first,second} <= {p['id'] for p in g['photos']})
+        self.assertEqual(next(p['source_position'] for p in group['photos'] if p['id']==first),1359)
+        args = dict(session=group['session'],key=group['key'],source_post=post,post_context=True)
+        before = self.org.state()
+        page = self.get(**args)
+        self.assertEqual((page['focus_id'],page['offset']), (first,1344))
+        by_position = {p['source_position']:p for p in page['photos']}
+        self.assertEqual(by_position[1359]['id'],first)
+        self.assertTrue(by_position[1359]['suggested'])
+        self.assertEqual([by_position[n]['id'] for n in (1358,1360)], ['frame-1357','frame-1358'])
+        explicit = self.get(**args,focus_id=second)
+        self.assertEqual(explicit['focus_id'],second)
+        self.assertGreater(explicit['offset'],3200)
+        previous = self.get(**args,post_offset=explicit['offset']-24)
+        self.assertIsNone(previous['focus_id'])
+        self.assertEqual(previous['offset'],explicit['offset']-24)
+        self.assertEqual(self.org.state(),before)
+
     def test_whole_post_selection_and_visual_order_span_pages(self):
         gallery = add_review_gallery(self.engine, self.bulk)
         self.org.bind()
