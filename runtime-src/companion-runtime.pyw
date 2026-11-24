@@ -2843,6 +2843,7 @@ class LibraryStore:
         membership = {key: value for key, value in character.items() if key != 'collection'} if character else None
         return hashlib.sha256(json.dumps({'character':membership,
             'sets':[g for g in self.data.get('sets',[]) if g.get('character_id')==owner],
+            'held_names':[(g['id'],g['name']) for g in self.data.get('review_sets',[]) if g.get('character_id')==owner],
             'media':[(m['id'],m['sha256'],m.get('in_review'),m.get('in_purgatory')) for m in self.data['media']
                      if m['character_id']==owner and not m.get('source',{}).get('organizer_pending')]},sort_keys=True).encode()).hexdigest()
 
@@ -2874,6 +2875,39 @@ class LibraryStore:
             group['removed_members']=[i for i in removed if i not in deferred]
             groups.append(group)
         return groups
+
+    def _plan_organizer_names(self, owner, groups, namespace, linked):
+        # Work only on preview copies. Reserve explicitly requested names first so
+        # numbering an earlier draft cannot take a later draft's chosen suffix.
+        occupied = self._set_names(owner)
+        reserved = occupied | {g['name'].casefold() for g in groups}
+        destinations = {}
+        for group in groups:
+            key = ('library', group['destination_id']) if group['destination_id'] else ('draft', group['id'])
+            destinations.setdefault(key, []).append(group)
+        for (kind, ident), drafts in sorted(destinations.items()):
+            # Existing transfers apply edits to the same explicit target in order.
+            last = drafts[-1]
+            requested = last['name']
+            target = self.set_item(ident) if kind == 'library' else None
+            current = target['name'] if target else ''
+            previous = (target or {}).get('organizer_name_resolution', {})
+            if target and current.casefold() == requested.casefold():
+                name = requested
+            elif (target and linked.get(last['id']) == ident and previous.get('namespace') == namespace
+                  and previous.get('draft') == last['id'] and previous.get('requested') == requested
+                  and previous.get('assigned') == current):
+                # Apply committed, but Workbench may still have the original draft name.
+                name = current
+            elif requested.casefold() in occupied:
+                name = self._numbered_set_name(requested, reserved)
+            else:
+                name = requested
+            occupied.add(name.casefold())
+            reserved.add(name.casefold())
+            for group in drafts:
+                group['requested_name'] = group['name']
+                group['name'] = name
 
     def organizer_preview(self,body):
         draft=body.get('draft',{});owner=str(body.get('character_id',''))
@@ -2943,17 +2977,19 @@ class LibraryStore:
                 sid=group.get('library_id') or linked.get(group['id'])
                 target=self.set_item(sid) if sid else None
                 if sid and (not target or target.get('character_id')!=owner):issues.append('Destination set unavailable: '+group['name']);continue
-                name=title_case_label(group['name'])
-                if not name or len(name)>250:issues.append('Invalid set name.');continue
-                collision=next((g for g in self.data.get('sets',[]) if g.get('character_id')==owner and g['id']!=sid and g['name'].casefold()==name.casefold()),None)
-                if collision:issues.append('Name already exists; choose that library set as the draft destination: '+name)
+                name=target['name'] if target and group['name']==target['name'] else title_case_label(group['name'])
+                if not name or (len(name)>250 and not (target and target['name']==name)):issues.append('Invalid set name.');continue
+                group.update(destination_id=sid, name=name)
+                plan.append(group)
+            self._plan_organizer_names(owner, plan, namespace, linked)
+            for group in plan:
+                sid, name = group['destination_id'], group['name']
                 for ident in group['members']:
                     if ident in claims and claims[ident]!=group['id']:issues.append('Image appears in two saved drafts: '+ident)
                     claims[ident]=group['id']
                     mid=mapping.get(ident)
                     others=[g['name'] for g in self.data.get('sets',[]) if mid and g['id']!=sid and mid in g.get('media_ids',[])]
                     if others:conflicts.append({'id':ident,'name':Path(catalog[ident]['path']).name,'from':others,'to':name})
-                group['destination_id']=sid;plan.append(group)
             resolved_targets=list(mapping.values())+[v['target'] for i,v in resolutions.items() if i not in mapping]
             if len(set(resolved_targets))!=len(resolved_targets):issues.append('Multiple selected images resolve to the same library image. Keep only one of them in this import.')
             token=uuid.uuid4().hex
@@ -3063,7 +3099,10 @@ class LibraryStore:
                     old=target.get('media_ids',[])
                     members=list(dict.fromkeys([mid for mid in old if mid not in removed]+members))
                     self._detach_set_members(owner,members,except_set_id=sid)
-                    target.update(name=title_case_label(group['name']),media_ids=members,colors=self._set_details(colors=group.get('colors',[])).get('colors',[]),
+                    if group['name'] != group['requested_name']:
+                        target['organizer_name_resolution'] = dict(namespace=session['namespace'], draft=group['id'],
+                            requested=group['requested_name'], assigned=group['name'])
+                    target.update(name=group['name'],media_ids=members,colors=self._set_details(colors=group.get('colors',[])).get('colors',[]),
                         in_purgatory=bool(group.get('in_purgatory',False) if not group.get('destination_id') or group.get('purgatory_edited') else target.get('in_purgatory',False)),favorite=bool(group.get('favorite')),categories=[category_map.get(c,c) for c in group.get('categories',[])],updated_at=now_iso())
                     self._validate_set_categories(owner,target['categories'])
                     for mid in members:
@@ -5222,16 +5261,21 @@ class LibraryStore:
             self.save()
             return copy.deepcopy(regular)
 
-    def _unique_set_name(self, character_id: str, name: str, except_set_id: str | None = None) -> str:
-        names = {str(s.get("name", "")).strip().casefold()
+    def _set_names(self, character_id, except_set_id=None):
+        return {str(s.get("name", "")).strip().casefold()
                  for s in (*self.data.get("sets", []), *self.data.get("review_sets", []))
                  if s.get("character_id") == character_id and s.get("kind", "set") == "set"
                  and s.get("id") != except_set_id}
-        if name.casefold() not in names:
-            return name
+
+    @staticmethod
+    def _numbered_set_name(name, names):
         pattern = re.compile(re.escape(name.casefold()) + r" ([0-9]+)$")
         suffix = max((int(m.group(1)) for n in names if (m := pattern.fullmatch(n))), default=0) + 1
         return f"{name} {suffix}"
+
+    def _unique_set_name(self, character_id: str, name: str, except_set_id: str | None = None) -> str:
+        names = self._set_names(character_id, except_set_id)
+        return self._numbered_set_name(name, names) if name.casefold() in names else name
 
     @TrackingJournal.action("manual")
     def create_set(self, character_id: str, name: str, media_ids: list[Any], cover_media_id: Any = None, kind: str = "set", preserve_placement: bool = False, cover_source: Any = None, categories: Any = None, aliases: Any = None, colors: Any = None, notes: Any = None, *, under_review=False, review_id=None) -> dict[str, Any]:

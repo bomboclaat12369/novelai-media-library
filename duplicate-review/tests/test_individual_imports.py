@@ -93,6 +93,63 @@ class IndividualHTTPTests(unittest.TestCase):
         self.assertTrue(self.server.organizer.individual_imports(include_applied=True)[0]['applied_at']);self.assertTrue(result['checkpoint'])
         self.assertTrue(all(Path(self.server.organizer.catalog[i]['path']).is_file() for i in self.ids[2:5]))
 
+    def test_saved_drafts_with_name_collisions_import_separately_and_retry(self):
+        org = self.server.organizer
+        job = self.request('state')['job']
+        owner = self.owner['id']
+        existing = self.store.create_set(owner, 'Night Shoot', [])
+        self.store.create_set(owner, 'Night Shoot 2', [])
+        linked = self.store.create_set(owner, 'Original Name', [])
+        self.store.create_set(owner, 'Night Shoot 4', [], under_review=True)
+        drafts = [
+            ('a', 'Night Shoot', None), ('b', 'night shoot', None),
+            ('c', 'Night Shoot 5', None), ('d', 'Night Shoot', linked['id']),
+            ('e', 'Pink Dress', None), ('f', 'pink dress', None),
+            ('g', 'Night Shoot', existing['id'])]
+        # Rows saved by older Workbench versions are already in the organizer database.
+        with org.db() as db:
+            for index, (ident, name, target) in enumerate(drafts):
+                group = dict(id=ident, name=name, library_id=target, members=[self.ids[index+2]])
+                db.execute('INSERT INTO sets VALUES (?,?,?)', (org.scope, ident, json.dumps(group)))
+            held = dict(id='held', name='Held shoot', under_review=True, members=[self.ids[10]])
+            db.execute('INSERT INTO sets VALUES (?,?,?)', (org.scope, 'held', json.dumps(held)))
+        expected = dict(a='Night Shoot 6', b='Night Shoot 7', c='Night Shoot 5', d='Night Shoot 8',
+                        e='Pink Dress', f='Pink Dress 1', g='Night Shoot')
+
+        def preview():
+            plan = self.request('transfer-preview', {'job': job})
+            self.assertEqual(plan['issues'], [])
+            self.assertEqual({g['id']: g['name'] for g in plan['sets']}, expected)
+            self.assertEqual(plan['under_review_count'], 1)
+            return plan
+
+        first = preview()
+        self.assertEqual({g['id'] for g in first['sets'] if g['action']=='update'}, {'d', 'g'})
+        # Reopen after an interrupted copy. Keep an old export to simulate a lost Apply reply.
+        self.request('transfer-import', dict(job=job, token=first['token'], id=first['imports'][0]['id']))
+        original = org.export(include_tracking=False)
+        original['scope'] = org.scope
+        plan = preview()
+        for row in plan['imports']:
+            self.request('transfer-import', dict(job=job, token=plan['token'], id=row['id']))
+        result = self.request('transfer-apply', dict(job=job, token=plan['token']))
+        mapping = result['mapping']
+        self.assertEqual(len(set(mapping.values())), len(drafts))
+        self.assertEqual((mapping['g'], mapping['d']), (existing['id'], linked['id']))
+        self.assertEqual(org.sets()['held']['members'], held['members'])
+        self.assertNotIn('held', mapping)
+        for index, (ident, _, _) in enumerate(drafts):
+            saved = self.store.set_item(mapping[ident])
+            self.assertEqual(org.sets()[ident]['name'], expected[ident])
+            self.assertEqual(saved['name'], expected[ident])
+            self.assertEqual([self.store.media_item(mid)['sha256'] for mid in saved['media_ids']], [self.ids[index+2]])
+        self.assertEqual(preview()['imports'], [])
+        reopened = type(self.store)(self.store.root)
+        retry = reopened.organizer_preview(dict(character_id=owner, draft=original))
+        self.assertEqual(retry['issues'], [])
+        self.assertEqual({g['id']: g['name'] for g in retry['sets']}, expected)
+        self.assertEqual(reopened.organizer_apply({'token': retry['token']})['mapping'], mapping)
+
     def test_set_review_stays_local_through_import_and_promotes_same_draft(self):
         org=self.server.organizer;job=self.request('state')['job']
         def decide(action,**fields):

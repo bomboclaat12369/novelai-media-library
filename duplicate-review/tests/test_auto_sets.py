@@ -163,7 +163,7 @@ class OrganizerAutoSetTests(unittest.TestCase):
         ident=self.ids[7]
         def companion(route,body=None):
             if route=='/api/library':return {'characters':[{'id':'owner'}]}
-            if route=='/api/organizer/preview':return {'token':'preview','conflicts':[{'id':ident}]}
+            if route=='/api/organizer/preview':return {'token':'preview','sets':[],'conflicts':[{'id':ident}]}
             raise AssertionError(route)
         with patch.object(self.engine.library,'request',side_effect=companion):
             preview=self.org.transfer('preview',{'job':'fixture-job','character_id':'owner'})

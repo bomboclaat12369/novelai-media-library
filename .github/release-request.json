@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "id": "workbench-matching-post-location-2026-11-23-r2",
-  "components": ["workbench"],
+  "id": "workbench-import-set-names-2026-11-23",
+  "components": ["runtime", "workbench"],
   "publish": true,
-  "workbench_notes": "Browse matching posts opens at the suggested photo in original post order. Click the post link under any suggestion to jump to that exact photo, highlighted among its neighbors, even deep in a large post."
+  "workbench_notes": "Import to library numbers distinct Sets that share a name. The preview shows the final names for saved drafts, and Apply keeps those names, memberships and existing Library links. Sets under review stay in Workbench."
 }

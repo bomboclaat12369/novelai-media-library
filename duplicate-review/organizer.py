@@ -1305,6 +1305,7 @@ class Organizer:
                 if protected:result['protected_auto_conflicts']=len(protected)
                 if starting_revision!=self.state()['revision']:raise ValueError('Drafts changed. Preview again to resume safely.')
                 self.transfer_plan={'token':result['token'],'revision':starting_revision,'scope':self.scope,'individuals':draft['individuals'],'protected_auto_conflicts':protected}
+                self.transfer_plan['set_names'] = {g['id']: g['name'] for g in result['sets']}
                 return result
             plan=getattr(self,'transfer_plan',{})
             if plan.get('token')!=body.get('token') or plan.get('scope')!=self.scope or plan.get('revision')!=self.state()['revision']:
@@ -1324,9 +1325,11 @@ class Organizer:
                     saved={**row,'applied_at':time.time(),'library_id':outcome['id'],'outcome':outcome}
                     db.execute('UPDATE individual_imports SET data=? WHERE scope=? AND sha=?',(json.dumps(saved),self.scope,row['key']))
                 for ident,sid in result['mapping'].items():
+                    if ident not in plan['set_names']:continue
                     row=db.execute('SELECT data FROM sets WHERE scope=? AND id=?',(self.scope,ident)).fetchone()
                     if not row:continue
                     group=json.loads(row[0]);group['library_id']=sid;group['applied_at']=time.time();group['purgatory_edited']=False;group['applied_partial']=bool(result.get('skipped'))
+                    group['name'] = plan['set_names'][ident]
                     if 'auto_pending' in group:
                         # Only unapplied conflicts remain removable in the local draft.
                         group['auto_pending']=[i for i in group['auto_pending'] if i in plan.get('protected_auto_conflicts',[])]
