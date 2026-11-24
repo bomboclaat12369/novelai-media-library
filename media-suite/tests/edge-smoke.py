@@ -144,9 +144,8 @@ def verify(page, address, root):
     picker.get_by_role("button", name="Updates…").click()
     updates = page.get_by_role("dialog", name="Suite updates")
     expect(updates.locator("dt")).to_have_text(["Media Suite", "Media Library and Battles", "Workbench", "After Hours"])
-    updates.get_by_text("Ready for next session · 2.0.1").wait_for()
-    updates.get_by_role("button", name="Check for updates").click()
-    updates.get_by_text("Ready for next session · 2.0.1").wait_for()
+    updates.get_by_text("Update ready · 2.0.1").wait_for()
+    expect(updates.get_by_role("button", name="Update Media Suite")).to_be_enabled()
     updates.get_by_role("button", name="Close", exact=True).click()
     direct = page.context.new_page()
     try:
@@ -249,20 +248,51 @@ if __name__ == "__main__":
                         another = browser.new_page()
                         another.goto(address)
                         until(another, "presence.readyState === EventSource.OPEN")
-                        page.goto("about:blank")
-                        assert host_command("handoff") == "busy", "A tab in a second profile would have been restarted."
-                        another.close()
-                        deadline = time.monotonic() + 30
-                        while (result := host_command("apply")) != "applied":
-                            assert time.monotonic() < deadline, f"A verified release did not resume after the last tab closed: {result}"
-                            time.sleep(.2)
+                        # An open chooser in the other profile must survive a refused update.
+                        another.locator("#mode-toggle").click()
+                        another.locator("#locations").click()
+                        another.locator("#settings[open]").wait_for()
+                        bench = page.frame(name="suite-Workbench")
+                        until(bench, "typeof sessionReady !== 'undefined' && sessionReady")
+                        before = bench.locator("#title").inner_text()
+                        page.locator("#mode-toggle").click()
+                        page.locator("#updates").click()
+                        page.get_by_role("button", name="Update Media Suite").click()
+                        page.locator("#update-message").filter(has_text="Finish editing Suite locations").wait_for()
+                        assert "Post 2" in before and page.frame(name="suite-Workbench") == bench
+                        assert host_command("apply") == "waiting"
+                        another.locator("#cancel").click()
+                        # Keep an actual Workbench photo review open through a second refusal.
+                        page.locator("#close-updates").click()
+                        bench.locator("#grid .card img").first.click()
+                        bench.locator("#viewer[open]").wait_for()
+                        page.locator("#mode-toggle").click()
+                        page.locator("#updates").click()
+                        page.get_by_role("button", name="Update Media Suite").click()
+                        page.locator("#update-message").filter(has_text="open Workbench review").wait_for()
+                        assert bench.locator("#viewer").evaluate("e => e.open")
+                        page.locator("#close-updates").click()
+                        bench.locator("#viewerClose").click()
+                        page.locator("#mode-toggle").click()
+                        page.locator("#updates").click()
+                        page.get_by_role("button", name="Update Media Suite").click()
+                        page.locator("#update-list").get_by_text("Installed · 2.0.1").wait_for()
+                        until(page, "tabPreparation === null && pages.get('Workbench').loaded")
+                        updated = page.frame(name="suite-Workbench")
+                        until(updated, "typeof sessionReady !== 'undefined' && sessionReady")
+                        assert before == updated.locator("#title").inner_text() and updated != bench
+                        assert host_command("apply") == "applied"
                         pointer = json.loads((fixture / "Workbench data/state/updates/active.json").read_text())
                         assert pointer["version"] == "2.0.1"
+                        assert page.url == another.url == address and len(page.context.pages) == len(another.context.pages) == 1
+                        page.goto("about:blank")
+                        assert host_command("handoff") == "busy"
+                        another.close()
                         deadline = time.monotonic() + 15
                         while host_command("handoff") != "idle":
                             assert time.monotonic() < deadline, "Closed tabs prevented the update from applying."
                             time.sleep(.2)
-                        print("Verified an open tab defers upgrades and closing it releases the host.")
+                        print("Verified manual suite updates across two open Edge profiles, review protection, the updated companion and Workbench, and return to the same post.")
                     except Exception:
                         print("Edge fixture errors:", errors[-12:], flush=True)
                         raise

@@ -7,6 +7,7 @@
   <link rel="icon" href="/favicon.ico">
   <link rel="stylesheet" href="/suite.css">
   <script src="/suite.js" defer></script>
+  <script src="/updates.js" defer></script>
 </head>
 <body>
   <button type="button" id="mode-toggle" aria-haspopup="dialog" aria-controls="mode-picker" aria-expanded="false" disabled>Mode</button>
@@ -23,9 +24,10 @@
   <main></main>
   <dialog id="update-dialog" aria-labelledby="update-title">
     <h1 id="update-title">Suite updates</h1>
-    <p>Updates are checked automatically. Close the suite tabs to apply a waiting update when the app is idle.</p>
+    <p>Update all connected programs here. Your current mode reopens in this tab if it needs to refresh.</p>
+    <p id="update-message" role="status"></p>
     <dl id="update-list" aria-live="polite"></dl>
-    <footer><button type="button" id="check-updates">Check for updates</button><button type="button" id="close-updates">Close</button></footer>
+    <footer><button type="button" id="check-updates">Update Media Suite</button><button type="button" id="close-updates">Close</button></footer>
   </dialog>
   <dialog id="settings" aria-labelledby="settings-title">
     <form>

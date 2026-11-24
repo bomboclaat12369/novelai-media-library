@@ -16,7 +16,7 @@ using System.Windows.Forms;
 
 namespace NovelAI.MediaSuite;
 
-internal sealed class BrowserHost : IDisposable
+internal sealed partial class BrowserHost : IDisposable
 {
     private readonly Preferences settings;
     private readonly string folder;
@@ -32,13 +32,13 @@ internal sealed class BrowserHost : IDisposable
     private bool handingOff;
     private TaskCompletionSource maintenance;
     internal ApplicationUpdates Updates { get; set; }
-    internal bool InUse { get { lock (requestLock) return activeRequests != 0 || maintenance != null; } }
+    internal bool InUse { get { lock (requestLock) return activeRequests != 0 || maintenance != null || update.Active; } }
     internal async Task<bool> WhileIdle(Func<Task> action)
     {
         TaskCompletionSource finished;
         lock (requestLock)
         {
-            if (activeRequests != 0 || handingOff || maintenance != null) return false;
+            if (activeRequests != 0 || handingOff || maintenance != null || update.Active) return false;
             maintenance = finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }
         try { await action(); return true; }
@@ -48,7 +48,7 @@ internal sealed class BrowserHost : IDisposable
     {
         lock (requestLock)
         {
-            if (activeRequests != 0 || maintenance != null) return false;
+            if (activeRequests != 0 || maintenance != null || update.Active) return false;
             handingOff = true;
             return true;
         }
@@ -59,20 +59,20 @@ internal sealed class BrowserHost : IDisposable
     internal BrowserHost(Preferences settings, string folder, Services services)
     { this.settings = settings; this.folder = folder; this.services = services; }
 
-    internal async Task StartAsync()
+    internal async Task StartAsync(bool keepAddresses = false)
     {
         Directory.CreateDirectory(folder);
         string file = Path.Combine(folder, "chrome-ports.json");
         int[] ports = File.Exists(file) ? JsonSerializer.Deserialize<int[]>(File.ReadAllText(file)) : null;
         if (ports?.Length != 4 || ports.Any(p => p is < 1024 or > 65535) || ports.Distinct().Count() != 4)
             ports = new[] {8764, 8861, 8862, 8863};
-        Address = await Listen(ports[0], Shell);
+        Address = await Listen(ports[0], Shell, keepAddresses);
         foreach (var section in new[] {Section.Library, Section.Workbench, Section.AfterHours})
         {
             var proxy = new ApplicationProxy(section, Address);
             applications[section] = proxy;
             int index = section == Section.Library ? 1 : (int)section;
-            proxy.Address = await Listen(ports[index], proxy.Handle);
+            proxy.Address = await Listen(ports[index], proxy.Handle, keepAddresses);
             ports[index] = proxy.Address.Port;
         }
         applications[Section.Battles] = applications[Section.Library];
@@ -82,9 +82,9 @@ internal sealed class BrowserHost : IDisposable
         ready = true;
     }
 
-    private async Task<Uri> Listen(int preferred, RequestDelegate handle)
+    private async Task<Uri> Listen(int preferred, RequestDelegate handle, bool keepAddress)
     {
-        foreach (int port in new[] {preferred, 0})
+        foreach (int port in keepAddress ? new[] {preferred} : new[] {preferred, 0})
         {
             var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions { ApplicationName = typeof(BrowserHost).Assembly.GetName().Name });
             builder.Logging.ClearProviders();
@@ -113,7 +113,7 @@ internal sealed class BrowserHost : IDisposable
                 finally { lock (requestLock) activeRequests--; }
             });
             try { await app.StartAsync(); }
-            catch (IOException) when (port != 0) { await app.DisposeAsync(); continue; }
+            catch (IOException) when (port != 0 && !keepAddress) { await app.DisposeAsync(); continue; }
             servers.Add(app);
             return new Uri(app.Urls.Single());
         }
@@ -147,28 +147,13 @@ internal sealed class BrowserHost : IDisposable
             {
                 case "/": await Asset(context, "index.html", "text/html; charset=utf-8"); return;
                 case "/suite.js": await Asset(context, "suite.js", "text/javascript; charset=utf-8"); return;
+                case "/updates.js": await Asset(context, "updates.js", "text/javascript; charset=utf-8"); return;
                 case "/suite.css": await Asset(context, "suite.css", "text/css; charset=utf-8"); return;
                 case "/favicon.ico": await Asset(context, "favicon.ico", "image/x-icon"); return;
                 case "/api/presence":
                     if (req.Headers["Sec-Fetch-Site"] != "same-origin" || req.Headers.Accept != "text/event-stream")
                     { res.StatusCode = 403; return; }
-                    res.ContentType = "text/event-stream";
-                    await res.WriteAsync(": connected\n\n", context.RequestAborted);
-                    await res.Body.FlushAsync(context.RequestAborted);
-                    using (var lifetime = CancellationTokenSource.CreateLinkedTokenSource(closing.Token, context.RequestAborted))
-                    {
-                        try
-                        {
-                            while (true)
-                            {
-                                await Task.Delay(TimeSpan.FromSeconds(5), lifetime.Token);
-                                await res.WriteAsync(": keepalive\n\n", lifetime.Token);
-                                await res.Body.FlushAsync(lifetime.Token);
-                            }
-                        }
-                        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
-                        catch (IOException) { /* The browser closed its connection. */ }
-                    }
+                    await TabPresence(context);
                     return;
                 case "/api/session":
                     if (req.Headers["X-Suite-Request"] != "session") { res.StatusCode = 403; return; }
@@ -188,11 +173,18 @@ internal sealed class BrowserHost : IDisposable
         try
         {
             string[] parts = path.Trim('/').Split('/');
-            if (path is "/api/updates" or "/api/updates/check")
+            if (path is "/api/updates" or "/api/updates/check" or "/api/updates/install" or "/api/updates/respond")
             {
                 if (Updates == null) { res.StatusCode = 503; return; }
-                if (path.EndsWith("/check", StringComparison.Ordinal)) _ = Updates.Check();
-                await res.WriteAsJsonAsync(Updates.Snapshot()); return;
+                if (path.EndsWith("/check", StringComparison.Ordinal) && !Updating) _ = Updates.Check();
+                if (path.EndsWith("/install", StringComparison.Ordinal) || path.EndsWith("/respond", StringComparison.Ordinal))
+                {
+                    var input = await req.ReadFromJsonAsync<TabReply>() ?? throw new ArgumentException("Missing tab.");
+                    if (!Guid.TryParseExact(input.tab, "D", out _)) throw new ArgumentException("Invalid tab.");
+                    if (path.EndsWith("/install", StringComparison.Ordinal)) StartUpdate(input.tab);
+                    else AnswerUpdate(input);
+                }
+                await res.WriteAsJsonAsync(Updates.Snapshot(UpdateStatus())); return;
             }
             if (parts.Length == 3 && parts[0] == "api" && Enum.TryParse(parts[2], out Section section) && section.ToString() == parts[2] && Enum.IsDefined(section))
             {

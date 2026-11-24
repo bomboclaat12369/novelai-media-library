@@ -129,7 +129,7 @@ internal sealed class GameUpdates
                 if (exit != 0) throw new IOException("Game package could not be staged.");
                 Save(Path.Combine(state, "staged.json"), JsonSerializer.SerializeToUtf8Bytes(r));
             }
-            return "Ready for next session · " + r.version;
+            return "Update ready · " + r.version;
         }
         finally { gate.Release(); }
     }

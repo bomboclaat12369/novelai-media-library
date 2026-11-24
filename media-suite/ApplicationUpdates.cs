@@ -45,9 +45,26 @@ internal sealed class ApplicationUpdates
         this.checkSuite=checkSuite; this.whileIdle=whileIdle; this.stopping=stopping;
     }
 
-    internal object Snapshot()
+    internal sealed record Plan(bool launcher, bool companion, bool workbench, bool game, string libraryVersion);
+
+    internal Plan Prepared(bool launcher)
     {
-        lock (sync) return new {checking = !checking.IsCompleted, apps = new Dictionary<string,string>(messages)};
+        bool gameReady = game.Pending(settings.GameFolder);
+        lock (sync) return new(launcher, companion != null, pending != null, gameReady, libraryInterface);
+    }
+
+    internal Plan Applied(Plan plan)
+    {
+        lock (sync) return plan with {
+            companion = plan.companion && companion == null && messages[Library].EndsWith("ready to open", StringComparison.Ordinal),
+            workbench = plan.workbench && messages[Bench].StartsWith("Installed · ", StringComparison.Ordinal),
+            game = plan.game && messages[Game].StartsWith("Installed · ", StringComparison.Ordinal)
+        };
+    }
+
+    internal object Snapshot(object update = null)
+    {
+        lock (sync) return new {checking = !checking.IsCompleted, apps = new Dictionary<string,string>(messages), update};
     }
 
     internal Task Check(string alreadyCheckedSuite = null)
@@ -86,12 +103,12 @@ internal sealed class ApplicationUpdates
         var address = await services.Library(ct);
         var ui = CheckInterface(address,ct);
         var program = settings.CompanionFolder;
-        if (services.CompanionUpdates == null || !Installations.Companion(program))
-            return "Ready to open · " + await ui;
-        var runtime = services.CompanionUpdates.Stage(program,services.ActiveLibrary,address,ct);
+        var runtime = services.CompanionUpdates != null && Installations.Companion(program)
+            ? services.CompanionUpdates.Stage(program,services.ActiveLibrary,address,ct) : null;
         string interfaceVersion;
-        try { interfaceVersion = await ui; }
-        catch (Exception e) { Trace.TraceWarning("Library interface check deferred: {0}",e.Message); interfaceVersion = "check deferred"; }
+        try { interfaceVersion = await ui; lock (sync) libraryInterface = interfaceVersion; }
+        catch (Exception e) { Trace.TraceWarning("Library interface check deferred: {0}",e.Message); lock (sync) libraryInterface = null; interfaceVersion = "check deferred"; }
+        if (runtime == null) return "Interface " + interfaceVersion;
         CompanionUpdates.Release release;
         try { release = await runtime; }
         catch (Exception e)
@@ -105,7 +122,7 @@ internal sealed class ApplicationUpdates
     }
 
     private static string LibraryStatus(string ui,string runtime,bool pending) =>
-        "Interface " + ui + " · companion " + runtime + (pending ? " ready for next session" : " ready to open");
+        "Interface " + ui + " · companion " + runtime + (pending ? " update ready" : " ready to open");
 
     private async Task<string> CheckInterface(Uri address,CancellationToken ct)
     {
@@ -165,7 +182,7 @@ internal sealed class ApplicationUpdates
         if (state == null) return "Will check when Workbench is idle";
         if (state.available && !state.ready) throw new IOException("Workbench update is still pending.");
         lock (sync) pending = state.available ? app with { Version = state.version } : null;
-        return state.available ? "Ready for next session · " + state.version : "Up to date · " + state.current;
+        return state.available ? "Update ready · " + state.version : "Up to date · " + state.current;
     }
 
     private async Task<WorkbenchRelease> Session(Uri address,string folder,CancellationToken ct)
@@ -242,9 +259,13 @@ internal sealed class ApplicationUpdates
         }
     }
 
-    internal async Task ApplyWhenIdle()
+    internal Task ApplyWhenIdle() => Apply(false);
+    internal Task ApplyFromTab() => Apply(true);
+
+    private async Task Apply(bool fromTab)
     {
-        if (!await applying.WaitAsync(0,stopping)) return;
+        if (fromTab) await applying.WaitAsync(stopping);
+        else if (!await applying.WaitAsync(0,stopping)) return;
         try
         {
             WorkbenchRelease app;
@@ -253,7 +274,7 @@ internal sealed class ApplicationUpdates
             {
                 app = pending;
                 library = companion;
-                if (workbenchBusy && checking.IsCompleted)
+                if (!fromTab && workbenchBusy && checking.IsCompleted)
                 {
                     workbenchBusy = false;
                     checking = Report(Bench,CheckWorkbench);
@@ -262,7 +283,8 @@ internal sealed class ApplicationUpdates
             string folder = settings.GameFolder;
             bool gameReady = game.Pending(folder);
             if (app == null && library == null && !gameReady) return;
-            await whileIdle(async () => {
+            async Task Activate()
+            {
                 if (library != null) await Report(Library,ct => ApplyLibrary(library,ct));
                 var benchTask = app == null ? Task.CompletedTask : Report(Bench, ct => ApplyWorkbench(app,ct));
                 var gameTask = !gameReady ? Task.CompletedTask : Report(Game, async ct => {
@@ -271,7 +293,9 @@ internal sealed class ApplicationUpdates
                     return await game.Apply(folder,bounded.Token);
                 });
                 await Task.WhenAll(benchTask,gameTask);
-            });
+            }
+            if (fromTab) await Activate();
+            else await whileIdle(Activate);
         }
         finally { applying.Release(); }
     }

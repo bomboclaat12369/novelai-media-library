@@ -64,7 +64,7 @@ try
             bool latest=Array.Exists(companionSessions,path=>
                 JsonSerializer.Deserialize<JsonElement>(File.ReadAllBytes(path)).GetProperty("version").GetString()=="9.9.1");
             Console.WriteLine(status == "Installed · 2.0.1" && latest && File.Exists(Path.Combine(state,"updates","active.json")) ? "applied"
-                : status == "Ready for next session · 2.0.1" ? "waiting" : status);
+                : status == "Update ready · 2.0.1" ? "waiting" : status);
         }
     }
     if (started.Count != 3 && !(started.Count==4 && started[3].StartInfo.Arguments.Contains("2.0.1")))

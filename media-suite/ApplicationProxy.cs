@@ -84,6 +84,11 @@ internal sealed class ApplicationProxy : IDisposable
         if (req.Method is "POST" or "DELETE" && req.Headers.Origin != self) { res.StatusCode = 403; return; }
         if (req.Path == "/_media-suite/battles.js" && section == Section.Library && req.Method == "GET")
         { await BrowserHost.Asset(context, "battles.js", "text/javascript; charset=utf-8"); return; }
+        if (req.Path == "/_media-suite/update-frame.js" && req.Method == "GET")
+        {
+            res.Headers.CacheControl = "no-store";
+            await BrowserHost.Asset(context, "update-frame.js", "text/javascript; charset=utf-8"); return;
+        }
         if (req.Path == "/_media-suite/apply-runtime") { res.StatusCode = 404; return; }
         string raw = context.Features.Get<IHttpRequestFeature>()?.RawTarget;
         if (string.IsNullOrEmpty(raw) || !raw.StartsWith('/') || raw.StartsWith("//") || raw.Contains('\\'))
@@ -118,16 +123,24 @@ internal sealed class ApplicationProxy : IDisposable
                     .Replace("\"8765\"", "\"" + Address.Port + "\"").Replace("'8765'", "'" + Address.Port + "'");
                 const string head = "</head>";
                 int end = html.IndexOf(head, StringComparison.OrdinalIgnoreCase);
-                if (end >= 0) html = html.Insert(end, "<script src=\"/_media-suite/battles.js\" data-parent=\"" + parent + "\" defer></script>");
+                if (end >= 0) html = html.Insert(end, "<script src=\"/_media-suite/battles.js\" data-parent=\"" + parent + "\" defer></script>" + UpdateBridge());
                 await res.WriteAsync(html, Encoding.UTF8, context.RequestAborted);
                 return;
             }
-            if (section == Section.Workbench && req.Method == "GET" && reply.IsSuccessStatusCode &&
+            if ((section == Section.Workbench && req.Path.Value is "/" or "/organizer" or "/bulk" ||
+                 section == Section.AfterHours && req.Path.Value is "/game" or "/game/") && req.Method == "GET" && reply.IsSuccessStatusCode &&
                 reply.Content.Headers.ContentType?.MediaType == "text/html")
             {
                 string html = await reply.Content.ReadAsStringAsync(context.RequestAborted);
                 int end = html.IndexOf("</head>", StringComparison.OrdinalIgnoreCase);
-                if (end >= 0) html = html.Insert(end,"<style>#programUpdate{display:none!important}</style>");
+                string insert = UpdateBridge();
+                if (section == Section.Workbench)
+                {
+                    var nonce = Regex.Match(policy, @"(?:^|;)\s*script-src\s+'nonce-([A-Za-z0-9_-]{16,128})'");
+                    insert = "<style>#programUpdate{display:none!important}</style>" +
+                        (nonce.Success ? UpdateBridge(nonce.Groups[1].Value) : "");
+                }
+                if (end >= 0) html = html.Insert(end, insert);
                 await res.WriteAsync(html,Encoding.UTF8,context.RequestAborted);
                 return;
             }
@@ -142,6 +155,10 @@ internal sealed class ApplicationProxy : IDisposable
             await res.WriteAsync("The local program disconnected. Reopen its section to reconnect.");
         }
     }
+
+    private string UpdateBridge(string nonce = null) =>
+        "<script src=\"/_media-suite/update-frame.js\" data-parent=\"" + parent + "\" data-mode=\"" + section + "\"" +
+        (nonce == null ? "" : " nonce=\"" + nonce + "\"") + " defer></script>";
 
     public void Dispose() => client.Dispose();
 }

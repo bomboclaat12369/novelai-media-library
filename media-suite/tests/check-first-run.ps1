@@ -80,6 +80,13 @@ try {
     }
     if ($session.version -ne $v) { throw 'The verified replacement did not serve its own version.' }
     Write-Host 'Verified the original launcher starts the staged release without another installer.'
+    Start-Process -FilePath $exe -ArgumentList '--stop' -Wait
+    if (!$first.WaitForExit(12000)) { throw 'The fixture host did not exit.' }
+    & python (Join-Path $PSScriptRoot 'launcher-update.py') $OlderLauncher $profile $v
+    if ($LASTEXITCODE) { throw 'Updating the packaged launcher from an open Edge tab failed.' }
+    if (@(Get-SuiteTabs $window).Count -ne 1 -or @(Get-SuiteTabs $otherWindow).Count -ne 1) {
+        throw 'The replacement launcher opened an extra tab in an existing Edge profile.'
+    }
 } catch {
     foreach ($proc in (Get-Process msedge,MediaSuite -ErrorAction SilentlyContinue | Where-Object MainWindowHandle -ne 0)) {
         Write-Host "Fixture window: $($proc.ProcessName) $($proc.MainWindowTitle)"

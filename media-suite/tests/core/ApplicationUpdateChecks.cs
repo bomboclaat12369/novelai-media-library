@@ -90,17 +90,23 @@ internal sealed class ApplicationUpdateChecks : HttpMessageHandler
         await apps.Check();
         if (!calls.SequenceEqual(new[]{"Stage"}) || game.LaunchCommand(settings.GameFolder,root)!=null)
             throw new Exception("Staging changed the active game.");
-        inUse=false;
-        await apps.ApplyWhenIdle();
+        var plan=apps.Prepared(true);
+        if (!plan.launcher || !plan.workbench || !plan.game || plan.libraryVersion!="3.1.0")
+            throw new Exception("The in-tab check omitted a connected program.");
+        await apps.ApplyFromTab();
         if (mock.installed || !game.Pending(settings.GameFolder) || !Report().Contains("Workbench is idle"))
             throw new Exception("Busy releases were not deferred.");
         mock.busy=false; gameBusy=false;
-        await apps.ApplyWhenIdle();
+        await apps.ApplyFromTab();
         var launch=new GameUpdates(root,http).LaunchCommand(settings.GameFolder,root);
         if (!mock.installed || mock.installs!=1 || launch==null || !launch.ArgumentList.Contains("Launch")
             || !launch.ArgumentList.Contains(root) || game.Pending(settings.GameFolder))
             throw new Exception("Verified selections did not survive the session.");
         await apps.Check();
+        inUse=false;
+        await apps.ApplyWhenIdle();
+        if (apps.Prepared(false).workbench || apps.Prepared(false).game || mock.applied!=2)
+            throw new Exception("The updater retried an already applied release.");
         if (mock.installs!=1 || calls.Count(c=>c=="Stage")!=1 || !Report().Contains("Up to date"))
             throw new Exception("An unchanged release was downloaded again.");
         Console.WriteLine("Unified update checks passed for independent releases, open tabs, busy jobs, corrupt downloads and offline game launch.");

@@ -6,7 +6,7 @@ const modeToggle = byId('mode-toggle');
 const picker = byId('mode-picker');
 // Keep the current host while this tab, including a background tab, is using it.
 let presence;
-window.addEventListener('pageshow', () => { presence = new EventSource('/api/presence'); });
+window.addEventListener('pageshow', () => connectPresence());
 window.addEventListener('pagehide', () => { presence?.close(); });
 let token, selected, remember = Promise.resolve();
 
@@ -70,9 +70,14 @@ async function connect(page) {
     frame.setAttribute('allowfullscreen', '');
     frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-downloads allow-modals allow-popups allow-popups-to-escape-sandbox');
     frame.hidden = true;
-    frame.addEventListener('load', () => {
+    frame.addEventListener('load', async () => {
       if (page.frame !== frame) return;
       page.loaded = true; page.feedback.hidden = true; frame.hidden = false;
+      if (page.restoreOwner) {
+        const owner = page.restoreOwner;
+        delete page.restoreOwner;
+        await frameMessage(page, {type:'suite-restore-owner', owner}).catch(() => {});
+      }
       if (page.button.id === 'Battles') openBattles();
     });
     frame.src = url;
@@ -130,31 +135,6 @@ picker.onkeydown = event => {
 };
 
 const fields = Array.from(dialog.querySelectorAll('input'));
-const updateDialog = byId('update-dialog'), checkUpdates = byId('check-updates');
-let updateTimer;
-async function showUpdates(check = false) {
-  clearTimeout(updateTimer);
-  if (check) checkUpdates.disabled = true;
-  const list = byId('update-list');
-  try {
-    const state = await request(check ? 'updates/check' : 'updates');
-    if (!updateDialog.open) return;
-    list.replaceChildren(...Object.entries(state.apps).flatMap(([name, status]) => {
-      const label = document.createElement('dt'), value = document.createElement('dd');
-      label.textContent = name; value.textContent = status;
-      return [label, value];
-    }));
-    checkUpdates.disabled = false;
-    if (state.checking) updateTimer = setTimeout(showUpdates, 1000);
-  } catch (error) {
-    list.textContent = error.message;
-    checkUpdates.disabled = false;
-  }
-}
-byId('updates').onclick = () => { picker.close(); updateDialog.showModal(); showUpdates(); };
-checkUpdates.onclick = () => showUpdates(true);
-byId('close-updates').onclick = () => updateDialog.close();
-updateDialog.onclose = () => { clearTimeout(updateTimer); modeToggle.focus(); };
 
 byId('locations').onclick = async () => {
   picker.close();
@@ -190,13 +170,16 @@ document.addEventListener('visibilitychange', () => {
 });
 setInterval(async () => {
   const page = pages.get('Workbench');
-  if (selected !== 'Workbench' || !page.loaded || checking || document.hidden) return;
+  if (tabPreparation || selected !== 'Workbench' || !page.loaded || checking || document.hidden) return;
   checking = true;
   try { if ((await request('workbench-changed')).changed) await connect(page); }
   catch { /* Recheck after the service or browser resumes. */ }
   finally { checking = false; }
 }, 2500);
-session().then(data => select(pages.has(data.lastSection) ? data.lastSection : 'Library')).catch(error => {
+document.addEventListener('DOMContentLoaded', () => session().then(data => {
+  const previous = restoreUpdatedTab(data);
+  select(previous || (pages.has(data.lastSection) ? data.lastSection : 'Library'));
+}).catch(error => {
   const first = pages.get('Library'); first.panel.hidden = false; first.message.textContent = error.message;
   first.retry.hidden = false; first.retry.onclick = () => location.reload();
-}).finally(() => { modeToggle.disabled = false; });
+}).finally(() => { modeToggle.disabled = Boolean(tabPreparation); }));
