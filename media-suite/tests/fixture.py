@@ -83,7 +83,7 @@ def prepare(root, source, isolated_ports=False):
     project = root / "Game project"
     game = project / "game"
     game.mkdir(parents=True)
-    for pattern in ("*.py", "Launch.ps1"):
+    for pattern in ("*.py", "Launch.ps1", "release-version.txt"):
         for path in (source / "game").glob(pattern):
             shutil.copy(path, game)
     # Exercise a cold service that is busy for the first script request. Only
@@ -101,8 +101,9 @@ class SuiteTestHandler(Handler):
 Handler = SuiteTestHandler
 ''')
     shutil.copytree(source / "game/web", game / "web")
-    if (source / "game/stage-data").is_dir():
-        shutil.copytree(source / "game/stage-data", game / "stage-data")
+    for folder in ("stage-data", "wardrobe-data"):
+        if (source / "game" / folder).is_dir():
+            shutil.copytree(source / "game" / folder, game / folder)
     shutil.copytree(source / "runtime-src", project / "runtime-src")
     shutil.copytree(source / "assets", project / "assets")
     shutil.copy(source / "release-standalone.json", project)

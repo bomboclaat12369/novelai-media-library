@@ -71,6 +71,7 @@ async function prepareTab(state) {
   if (picker.open) picker.close();
   let reason;
   try {
+    if (!token) await session();
     if (dialog.open) throw Error('Finish editing Suite locations, then press Update Media Suite again.');
     await remember;
     const replies = await Promise.allSettled(Array.from(pages, async ([id, page]) => {
