@@ -38,7 +38,11 @@ internal sealed class CompanionUpdates
     {
         var info=Command("stage",program,library);
         info.RedirectStandardOutput=true;
+        // The Windows Python launcher can block initializing an inherited input
+        // pipe if the host is reading it. This helper only returns a version.
+        info.RedirectStandardInput=true;
         using var child=Process.Start(info);
+        child.StandardInput.Close();
         var output=child.StandardOutput.ReadToEndAsync(ct);
         try { await child.WaitForExitAsync(ct); }
         catch (OperationCanceledException)

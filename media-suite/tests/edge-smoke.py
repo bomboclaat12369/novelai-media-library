@@ -294,6 +294,8 @@ if __name__ == "__main__":
                             time.sleep(.2)
                         print("Verified manual suite updates across two open Edge profiles, review protection, the updated companion and Workbench, and return to the same post.")
                     except Exception:
+                        if page.url == address:
+                            print("Update dialog:", page.locator("#update-dialog").text_content(timeout=3000)[:750], flush=True)
                         print("Edge fixture errors:", errors[-12:], flush=True)
                         raise
                 finally:
