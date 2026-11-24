@@ -7,19 +7,27 @@ const findButton = (root, text) => [...root.querySelectorAll('button')].find(but
 
 async function run() {
   const initial = await library();
-  const writes = [], originals = [];
+  const writes = [], originalByUrl = new Map();
   const f = await fixture({configure(w) {
+    const originalByBlob = new WeakMap();
+    const createUrl = w.URL.createObjectURL;
+    w.URL.createObjectURL = blob => {
+      const url = createUrl(blob);
+      if (originalByBlob.has(blob)) originalByUrl.set(url, originalByBlob.get(blob));
+      return url;
+    };
     const normal = w.GM_xmlhttpRequest;
     w.GM_xmlhttpRequest = options => {
       const path = new URL(options.url).pathname;
       if (path !== '/api/library' && !path.endsWith('/evolution') && !path.endsWith('/original')) return normal(options);
       const method = options.method || 'GET';
       if (path.endsWith('/evolution')) writes.push(JSON.parse(options.data));
-      if (path.endsWith('/original')) originals.push(path.split('/')[3]);
       fetch(base + path, {method, headers:options.headers, body:method === 'POST' ? options.data : undefined}).then(async response => {
         if (!w.document) return;
         if (options.responseType === 'blob') {
-          options.onload({status:response.status, response:new w.Blob([await response.arrayBuffer()])});
+          const blob = new w.Blob([await response.arrayBuffer()]);
+          if (path.endsWith('/original')) originalByBlob.set(blob, path.split('/')[3]);
+          options.onload({status:response.status, response:blob});
         } else options.onload({status:response.status, responseText:await response.text()});
       }).catch(error => options.onerror?.(error));
       return {abort() {}};
@@ -85,13 +93,13 @@ async function run() {
       const faces = [...preview.querySelectorAll('.naiEncoreCard')];
       assert.equal(faces.length, count);
       for (const [index, face] of faces.entries()) {
+        assert.equal(originalByUrl.get(face.querySelector('.naiFramedSource').src), expected[index]);
         assert.equal(face.querySelector('[data-current]').getAttribute('data-form-number'), String(index + 1));
         assert.match(face.title, new RegExp('Form ' + (index + 1) + ' of ' + count + '$'));
         const stage = index + 1 === count ? 'finale' : 'regular';
         assert(face.querySelector('.naiEncoreFrame').src.endsWith('/encore-' + stage + '.webp'));
         assert(!face.querySelector('.naiCardRail,.naiEditionRank,.naiBaseRank'));
       }
-      assert.deepEqual(originals.slice(-count).sort(), [...expected].sort());
       assert.equal(writes.length, beforePreview);
       findButton(preview, 'Close').click();
       findButton(editor, 'Mark ready').click();
