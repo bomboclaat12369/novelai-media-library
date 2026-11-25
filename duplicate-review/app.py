@@ -59,12 +59,22 @@ def make_server(engine, port=0, token=None):
     organizer_html = organizer_html.replace('__UPDATER__',update_js)
     organizer_html = organizer_html.replace('__ORGANIZER_WORKFLOW__',(Path(__file__).parent/'missing-files.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-workflow.js').read_text(encoding='utf-8')+'\n'+(Path(__file__).parent/'organizer-search.js').read_text(encoding='utf-8'))
     review_scripts = ('organizer-session.js', 'organizer-match-review.js', 'organizer-likely.js', 'organizer-splits.js','organizer-set-decisions.js')
-    organizer_html = organizer_html.replace('__ORGANIZER_SESSION__','\n'.join((Path(__file__).parent/name).read_text(encoding='utf-8') for name in review_scripts))
+    review_js = '\n'.join((Path(__file__).parent/name).read_text(encoding='utf-8') for name in review_scripts)
+    # A gallery request from either entry point belongs to the collection shown in its tab.
+    gallery_params = 'new URLSearchParams({kind,id,offset:page,'
+    organizer_html = organizer_html.replace(gallery_params, gallery_params + "job:data.job??'',", 1)
+    before_session, normal_startup = organizer_html.split('__ORGANIZER_SESSION__')
+    shared_organizer = before_session + review_js
+    _, after_script = normal_startup.split('</script>', 1)
+    linked_startup = (Path(__file__).parent / 'organizer-source-post.js').read_text(encoding='utf-8')
+    organizer_html = shared_organizer + normal_startup
+    linked_organizer_html = shared_organizer + '\n' + linked_startup + '\n</script>' + after_script
 
     autofill_js=(Path(__file__).parent/'no-autofill.js').read_text(encoding='utf-8')
     def no_autofill(page):
         return page.replace('<html ', '<html data-local-duplicate-review="1" ',1).replace('</body>', '<script nonce="__TOKEN__">'+autofill_js+'</script></body>')
     html=no_autofill(html);bulk_html=no_autofill(bulk_html);organizer_html=no_autofill(organizer_html)
+    linked_organizer_html = no_autofill(linked_organizer_html)
 
     image_slots = threading.Semaphore(2)
 
@@ -81,7 +91,8 @@ def make_server(engine, port=0, token=None):
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
-            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'nonce-"+token+"'; style-src 'unsafe-inline'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+            scripts = "'nonce-"+token+"'" if kind.startswith('text/html') else "'none'"
+            self.send_header('Content-Security-Policy', "default-src 'self'; script-src "+scripts+"; style-src 'unsafe-inline'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
             try:
                 self.end_headers()
                 self.wfile.write(data)
@@ -99,11 +110,15 @@ def make_server(engine, port=0, token=None):
             if not self.allowed():
                 return self.send(403, {'error': 'Local access only'})
             url = urlparse(self.path)
-            params = parse_qs(url.query)
+            params = parse_qs(url.query, keep_blank_values=url.path == '/organizer')
             if url.path == '/bulk':
                 return self.send(200, bulk_html.replace('__TOKEN__', token).encode(), 'text/html; charset=utf-8')
             if url.path == '/organizer':
-                return self.send(200, organizer_html.replace('__TOKEN__', token).encode(), 'text/html; charset=utf-8')
+                linked = any(key in params for key in ('sourceCollection', 'sourcePost', 'sourcePhoto'))
+                page = linked_organizer_html if linked else organizer_html
+                return self.send(200, page.replace('__TOKEN__', token).encode(), 'text/html; charset=utf-8')
+            if url.path == '/api/workbench/post-navigation':
+                return self.send(200, {'post_navigation': 1})
             if url.path == '/':
                 return self.send(200, html.replace('__TOKEN__', token).replace('__VERSION__', VERSION).encode(), 'text/html; charset=utf-8')
             if self.headers.get('X-Review-Token') != token and params.get('token', [''])[0] != token:
@@ -149,7 +164,7 @@ def make_server(engine, port=0, token=None):
                 if url.path == '/api/organizer/state':
                     return self.send(200, organizer.summary())
                 if url.path == '/api/organizer/page':
-                    return self.send(200, organizer.page(params.get('kind',['post'])[0],params['id'][0],int(params.get('offset',[0])[0]),params.get('order',['similar'])[0],params.get('peek',['0'])[0]!='1',params.get('focus',[''])[0]))
+                    return self.send(200, organizer.page(params.get('kind',['post'])[0],params['id'][0],int(params.get('offset',[0])[0]),params.get('order',['similar'])[0],params.get('peek',['0'])[0]!='1',params.get('focus',[''])[0],params.get('job',[None])[0]))
                 if url.path == '/api/organizer/progress':
                     with organizer.lock:progress=dict(organizer.job)
                     return self.send(200, progress)
@@ -247,6 +262,8 @@ def make_server(engine, port=0, token=None):
                     if path.endswith('transfer-preview'):organizer.transfer_checkpoint=None
                 elif path == '/api/organizer/switch':
                     result=organizer.switch_collection(body)
+                elif path == '/api/organizer/source-post':
+                    result=organizer.open_source_post(body)
                 elif path == '/api/organizer/collections':
                     result=organizer.refresh_collections(body)
                 elif path == '/api/organizer/folders':

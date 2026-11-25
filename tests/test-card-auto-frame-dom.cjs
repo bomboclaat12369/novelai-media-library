@@ -10,7 +10,7 @@ async function setup(){
  const auto=(checked,token)=>({mode:'auto',checked,token,algorithm:'centered-edge-fit-v2',side_crop_percent:3.125,vertical_crop_percent:0,frame:copy(frame)});
  let collection={revision:'r1',frames:{'image:unchecked':copy(frame),'image:checked':copy(frame),'image:manual':{x:5,y:0,zoom:1.2,fit:'contain'}},frame_meta:{'image:unchecked':auto(false,'first'),'image:checked':auto(true,'second')}};
  const calls=[];let reject=false;
- const f=await fixture({media:copy(media),configure:w=>{
+ const f=await fixture({media:copy(media),sourceModules:['ui-src/card-debug.js','ui-src/battles.js'],configure:w=>{
   Object.defineProperties(w.HTMLElement.prototype,{clientWidth:{get(){return this.classList.contains('naiTradingCard')?420:1000},configurable:true},clientHeight:{get(){return 700},configurable:true}});
   w.HTMLCanvasElement.prototype.getContext=()=>null;
   const normal=w.GM_xmlhttpRequest;w.GM_xmlhttpRequest=o=>{
@@ -25,7 +25,7 @@ async function setup(){
      if(b.revision!==collection.revision){status=400;value={error:'Stale frame revision'};}
      else {collection.frames[b.key]=copy(b.frame);collection.frame_meta[b.key]={mode:'manual'};collection.revision+='x';}
     }
-    value??={collection:copy(collection),name:'Fixture'};
+    value??={collection:copy(collection),name:'Fixture',boards:[{kind:'images',entries:copy(entries)}]};
    }else if(route.startsWith('/api/battles/'))value={entries:copy(entries),revision:'battle',kind:'images',votes:8,recorded_votes:8,ranked_count:4,scope_count:4,unfinished_count:0,session:null,trophies:[],achievements:[]};
    else return normal(o);
    queueMicrotask(()=>o.onload({status,responseText:JSON.stringify(value)}));return {abort(){}};
@@ -75,6 +75,25 @@ test('a stale review rejection is visible and never marks the card checked',asyn
   button(panel,'Mark checked').click();await waitFor(()=>panel.querySelector('.naiDebugMessage').textContent.includes('Refresh the card'),f.errors);
   assert.equal(f.root.naiCards.framingStatus('character','unchecked'),'auto-unchecked');
   await waitFor(()=>!button(panel,'Mark checked').disabled,f.errors);assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close()}
+});
+
+test('leaderboard opens the crop sheet outside Debug and the full-size editor returns to the queue',async()=>{
+ const f=await setup();try{
+  f.root.getElementById('naiBattlesBtn').click();
+  const leaderboard=await waitFor(()=>{const b=f.root.getElementById('naiBattleLeaderboard');return b&&!b.disabled&&b;},f.errors);
+  leaderboard.click();
+  const open=await waitFor(()=>[...f.root.querySelectorAll('.naiEditionGalleryLink button')].find(b=>b.textContent==='Review card crops'),f.errors);
+  open.click();
+  const sheet=f.root.querySelector('[aria-label="Review card crops"]');
+  await waitFor(()=>sheet.querySelector('.naiCropActions button')?.disabled===false,f.errors);
+  sheet.querySelector('.naiCropActions button').click();
+  const editor=await waitFor(()=>f.root.querySelector('.naiCardEditor'),f.errors);
+  await waitFor(()=>editor.querySelector('.naiCardZoomValue')&&!button(editor,'Close').disabled,f.errors);
+  button(editor,'Close').click();
+  await waitFor(()=>sheet.textContent.includes('No automatic crops are waiting'),f.errors);
+  button(sheet,'Close').click();
+  assert.ok(f.root.querySelector('.naiEditionGalleryLink'));assert.deepEqual(f.errors,[]);
  }finally{f.dom.window.close()}
 });
 

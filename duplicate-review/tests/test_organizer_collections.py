@@ -18,6 +18,9 @@ class CollectionTests(unittest.TestCase):
             for n in range(14):
                 bulk.current=copy.deepcopy(mikayla);bulk.current['id']='alice-'+str(n)
                 bulk.current['config']['roots']=[r'C:\SMG\Alice'];bulk.persist()
+            # Rapid saves can share one clock reading. The last persisted inventory still owns the entry.
+            with bulk.db() as db:
+                db.execute("UPDATE jobs SET updated=1234567890 WHERE id LIKE 'alice-%'")
             org.bound=None;org.bind()
             org.mutate('save',{'job':'alice-13','revision':0,'name':'Alice Shoot','ids':[ids[4]]})
             org.mutate('draft',{'job':'alice-13','ids':[ids[5]],'new_name':'Unfinished Alice'})

@@ -6,7 +6,7 @@ const assembled=config.parts.map(p=>fs.readFileSync(path.join(repo,p),'utf8')).j
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function waitFor(fn,errors=[],ms=2000){const start=Date.now();while(!fn()){if(errors.length)throw errors[0];if(Date.now()-start>ms)throw Error('UI did not become ready');await delay(10)}return fn()}
 
-async function fixture({media = [], configure = null} = {}) {
+async function fixture({media = [], configure = null, sourceModules = []} = {}) {
   const errors = [], writes = [], revoked = [], history = [], queue = [], uploads=new Map();
   let queueState={}, updateVersion=config.version;
   const vc = new VirtualConsole();
@@ -128,7 +128,11 @@ async function fixture({media = [], configure = null} = {}) {
   w.document.documentElement.dataset.naiMediaPayloadVersion = config.version;
   w.document.documentElement.dataset.naiStandalone = '1';
   if (configure) configure(w);
-  w.eval(assembled);
+  const script = sourceModules.length ? config.parts.map(part => {
+    const source = config.module_sources[part];
+    return fs.readFileSync(path.join(repo, sourceModules.includes(source) ? source : part), 'utf8');
+  }).join('') : assembled;
+  w.eval(script);
   await delay(250);
   const root = w.document.getElementById('nai-media-host').shadowRoot;
   assert.equal(root.getElementById('status').textContent, 'Local library connected');

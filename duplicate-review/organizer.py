@@ -11,6 +11,7 @@ import organizer_auto_sets
 import organizer_likely_sets
 import organizer_post_merge
 import organizer_splits
+import source_navigation
 from match_history import MatchHistory
 from bulk.sources import natural, original_name, original_order_key, original_sequence
 from engine import load_image, sha256, stat_key, linked
@@ -78,7 +79,7 @@ class Organizer:
             self.match_preparation=None
         self.likely_reviews.clear()
         self.bound=key;self.catalog=dict(cat);self.posts={};self.order_cache={}
-        alias='section:'+current['section_id'] if current.get('section_id') else hashlib.sha256(json.dumps(current.get('config',{}).get('roots',[]),sort_keys=True).encode()).hexdigest()
+        alias=tracking.collection_alias(current)
         with self.db() as db:
             collection=tracking.journal().identity(db,'collection',alias,current.get('collection_id') if current.get('collection_roots')==current.get('config',{}).get('roots',[]) else None)
             # Keep existing scope keys and explicitly bind their stable identity.
@@ -113,8 +114,7 @@ class Organizer:
                 self.quick[ident]=v/(np.linalg.norm(v)+1e-8)
 
     def hashes(self,ident):
-        item=self.catalog[ident]
-        return {v for v in [item.get('sha')]+[c.get('sha') for c in item.get('copies',[])] if v}
+        return source_navigation.photo_hashes(self.catalog[ident])
 
     def load_dispositions(self):
         with self.db() as db:
@@ -213,11 +213,21 @@ class Organizer:
             ident=str(body.get('id',''))
             if ident not in {c['id'] for c in self.bulk.collections()}:
                 raise ValueError('Choose an available saved collection.')
-            if ident.startswith('girl:'):self.bulk.sections.activate(ident)
-            else:self.bulk.activate(ident)
-            self.bound=None
-            self.job={'running':False,'phase':'Saved inventory ready','done':0,'total':0,'eta_seconds':None}
+            self.activate_collection(ident)
             return self.summary()
+
+    def activate_collection(self,ident,validate=None):
+        if ident.startswith('girl:'):self.bulk.sections.activate(ident,validate)
+        else:self.bulk.activate(ident,validate)
+        self.bound=None
+        self.job={'running':False,'phase':'Saved inventory ready','done':0,'total':0,'eta_seconds':None}
+
+    def open_source_post(self,body):
+        with self.engine.lock,self.lock,self.bulk.lock:
+            if body.get('job')!=(self.bulk.current or {}).get('id'):
+                raise ValueError('The collection changed in another window. Reopen the post.')
+            self.bind()
+            return source_navigation.locate(self,body)
 
     def merge_scopes(self,sources):
         """Copy once; retain original rows and journal all adopted evidence."""
@@ -445,9 +455,11 @@ class Organizer:
             if ident and ident not in result:result.append(ident)
         return result
 
-    def page(self,kind,ident,offset=0,order='similar',remember=True,focus_id=None):
+    def page(self,kind,ident,offset=0,order='similar',remember=True,focus_id=None,expected_job=None):
         with self.lock,self.bulk.lock:
             self.bind()
+            if expected_job is not None and expected_job!=self.bound[0]:
+                raise ValueError('The collection changed in another window. Reopen the post.')
             if kind=='post':
                 group=self.posts.get(ident)
                 ids=self.post_ids(ident) if group else []

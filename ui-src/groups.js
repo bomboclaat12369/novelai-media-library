@@ -43,6 +43,7 @@
     if(!panel){panel=document.createElement('div');panel.id='naiMemberships';root.getElementById('qualityInfo').after(panel);}
     panel.replaceChildren();panel.hidden=!m;
     if(!m)return;
+    root.naiPostHistoryButton?.(panel,m);
     for(const s of memberships(m.id,lib)){
       const b=document.createElement('button');b.innerHTML=root.naiIconSvg('link');b.append(document.createTextNode(` ${kind(s)}: ${s.name}`));b.dataset.groupId=s.id;
       b.title=`Open ${kind(s).toLowerCase()} “${s.name}”`;b.onclick=()=>root.naiOpenGroup(s.id);panel.appendChild(b);

@@ -33,6 +33,18 @@ composition and artwork overlapping the image still require visual judgment.
 
 ## Review and overrides
 
+Open **Review card crops** from the Library toolbar or the Battles image
+leaderboard. Each page shows up to twelve unchecked automatic crops for the
+selected character in their actual card frames. Each side of a Duo has its own
+crop. Leave the good previews checked and use **Approve selected** once.
+Unchecking a photo keeps it available for later. **Adjust** opens the existing
+original-resolution positioning editor. Opening it marks the crop checked once
+the original loads.
+
+Approval saves all selected review decisions together and checks the displayed
+revision and each photo’s framing token. A missing preview stays unchecked.
+Refresh the sheet if another window changes the collection during review.
+
 In the leaderboard, enable **Debug mode**, then use **Crop filter**:
 
 - **Auto-positioned · Unchecked**: automatic crops awaiting optional review.

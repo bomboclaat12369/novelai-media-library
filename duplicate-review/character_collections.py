@@ -92,7 +92,7 @@ class Sections:
         result.extend(c for c in legacy if c['id'] not in claimed)
         return sorted(result,key=lambda r:r['name'].casefold())
 
-    def activate(self,ident):
+    def activate(self,ident,validate=None):
         row=next((r for r in self.rows() if r['id']==ident),None)
         if not row:raise ValueError('Choose an available girl.')
         with self.bulk.db() as db:
@@ -124,6 +124,7 @@ class Sections:
             if job.get('model_root'):result['model_root']=job['model_root']
             result['inventory_complete']|=bool(job.get('inventory_complete') or job.get('complete'))
         result['collection_id']=row['collection_id'];result['collection_roots']=result['config']['roots'][:]
+        if validate is not None:validate(result)
         with self.bulk.db() as db:self.save(db,row)
         self.bulk.current=result;self.bulk.persist()
         return result

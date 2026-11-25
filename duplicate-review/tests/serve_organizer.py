@@ -5,7 +5,7 @@ from test_organizer import fixture,add_instagram
 from app import make_server
 with tempfile.TemporaryDirectory() as temp:
     engine,bulk,org,ids=fixture(temp)
-    if any(flag in sys.argv for flag in ('--auto-sets','--likely-sets','--split-sets')):
+    if any(flag in sys.argv for flag in ('--auto-sets','--likely-sets','--split-sets','--source-post')):
         def offline(*args,**kwargs):raise ValueError('Offline test library.')
         engine.library.request=offline
     add_instagram(bulk,ids)
@@ -44,6 +44,16 @@ with tempfile.TemporaryDirectory() as temp:
         org.bound=None;org.bind()
         org.mutate('save',{'job':'alice-job','revision':0,'name':'Alice Shoot','ids':[ids[3]]})
         bulk.activate('fixture-job')
+    info={}
+    if '--source-post' in sys.argv:
+        from test_source_navigation import browser_inventory
+        info=browser_inventory(bulk,org,ids)
     server=make_server(engine)
-    print(json.dumps({'url':f'http://127.0.0.1:{server.server_port}/organizer','ids':ids}),flush=True)
-    server.serve_forever()
+    print(json.dumps({'url':f'http://127.0.0.1:{server.server_port}/organizer','ids':ids,**info}),flush=True)
+    if '--source-post' in sys.argv:
+        import threading
+        worker=threading.Thread(target=server.serve_forever)
+        worker.start()
+        try:sys.stdin.readline()
+        finally:server.shutdown();worker.join();server.server_close()
+    else:server.serve_forever()

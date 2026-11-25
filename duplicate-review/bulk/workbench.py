@@ -141,12 +141,14 @@ class Workbench:
             rows=db.execute('SELECT id,updated FROM jobs ORDER BY updated DESC LIMIT 12').fetchall()
         return [{'id':r[0],'at':r[1]} for r in rows]
 
-    def activate(self,ident):
+    def activate(self,ident,validate=None):
         with self.lock:
             if self.current and self.current['running']:raise ValueError('Stop the current scan first.')
             with self.db() as db:row=db.execute('SELECT data FROM jobs WHERE id=?',(ident,)).fetchone()
             if not row:raise ValueError('Evaluation not found.')
-            self.current=json.loads(row[0]);self.current['running']=False
+            job=json.loads(row[0])
+            if validate is not None:validate(job)
+            self.current=job;self.current['running']=False
             with self.db() as db:db.execute("INSERT OR REPLACE INTO preferences VALUES ('active_job',?)",(ident,))
             self._collections_cache=None
             return self.status()
@@ -156,7 +158,7 @@ class Workbench:
         with self.lock:
             if self._collections_cache is None:
                 with self.db() as db:
-                    rows=db.execute("SELECT id,updated,json_extract(data,'$.config') FROM jobs WHERE json_type(data,'$.source_catalog')='object' AND json_extract(data,'$.source_catalog')!='{}' ORDER BY updated DESC").fetchall()
+                    rows=db.execute("SELECT id,updated,json_extract(data,'$.config') FROM jobs WHERE json_type(data,'$.source_catalog')='object' AND json_extract(data,'$.source_catalog')!='{}' ORDER BY updated DESC,rowid DESC").fetchall()
                 groups={};active=(self.current or {}).get('id')
                 for ident,stamp,raw in rows:
                     config=json.loads(raw or '{}');roots=config.get('roots',[])

@@ -2186,6 +2186,381 @@ class TrackingJournal:
                     'bytes': self.path.stat().st_size}
 
 
+def original_post_order(name, post):
+    # Match Workbench bulk.sources.original_order_key, including Instagram slides 2 and 10.
+    parts = tuple((1, int(p)) if p.isdecimal() and len(p) <= 255 else (0, p.casefold())
+                  for p in re.split(r'(\d+)', name))
+    slide = re.search(r'(?:^|_)(\d{1,255})\.[^.]+$', name) if post.startswith('instagram:') else None
+    return (0, int(slide[1]), parts) if slide else (1, 0, parts)
+
+
+class OriginalPostHistory:
+    """Rebuildable read index over the Library and transferred Workbench journal."""
+    PAGE = 24
+    fields = ('sha', 'path', 'sources', 'origins', 'copies', 'media_type', 'quarantine_only')
+    cursor = 'original-post-index-v1'
+
+    def __init__(self, store):
+        from collections import OrderedDict
+        self.store = store
+        self.lock = threading.Lock()
+        self.preview_salt = uuid.uuid4()
+        self.preview_sources = OrderedDict()
+        self.preview_slots = threading.BoundedSemaphore(2)
+
+    @staticmethod
+    def basename(path):
+        return re.split(r'[/\\]', path)[-1] if isinstance(path, str) else ''
+
+    @staticmethod
+    def hashes(record):
+        copies = record.get('copies')
+        values = [record.get('sha')]
+        if isinstance(copies, list):
+            values.extend(c.get('sha') for c in copies if isinstance(c, dict))
+        return {v for v in values if isinstance(v, str) and re.fullmatch('[a-f0-9]{64}', v)}
+
+    @classmethod
+    def memberships(cls, record, name=''):
+        sources = record.get('sources')
+        origins = record.get('origins')
+        observed = [record]
+        if isinstance(origins, list):
+            observed.extend(o for o in origins if isinstance(o, dict))
+        if isinstance(sources, dict):
+            observed.extend({**s, 'key': k} for k, s in sources.items() if isinstance(s, dict))
+        posts = {}
+        for origin in observed:
+            key, kind = origin.get('key'), origin.get('kind')
+            if kind not in ('instagram', 'forum') or not isinstance(key, str) or not key:
+                continue
+            filename = cls.basename(origin.get('original_path') or origin.get('path')) or name or cls.basename(record.get('path'))
+            info = {k: origin[k] for k in ('kind', 'label', 'post_id', 'post_date') if isinstance(origin.get(k), str) and origin[k]}
+            info.setdefault('label', info.get('post_id') or key)
+            if key not in posts or (filename and original_post_order(filename, key) < original_post_order(posts[key][1], key)):
+                posts[key] = (info, filename)
+        return posts
+
+    @staticmethod
+    def change(previous, payload, fields):
+        change = payload.get('change') or {}
+        if 'after' in change:
+            value = change['after']
+            return {k: value[k] for k in fields if k in value} if isinstance(value, dict) else {}
+        result = dict(previous)
+        for key, delta in (change.get('changes') or {}).items():
+            if key in fields and isinstance(delta, dict):
+                if delta.get('removed'):
+                    result.pop(key, None)
+                elif 'after' in delta:
+                    result[key] = delta['after']
+        return result
+
+    def index_event(self, db, event):
+        kind, origin, entity, raw = event
+        payload = json.loads(raw)
+        if kind == 'inventory.batch':
+            prior = db.execute('SELECT collection,owner,roots FROM post_batches WHERE store=? AND job=?', (origin, entity)).fetchone()
+            before = {'collection_id': prior[0], 'config': {'character_id': prior[1], 'roots': json.loads(prior[2])}} if prior else {}
+            value = self.change(before, payload, ('collection_id', 'config'))
+            config = value.get('config') if isinstance(value.get('config'), dict) else {}
+            roots = config.get('roots') if isinstance(config.get('roots'), list) else []
+            db.execute('INSERT OR REPLACE INTO post_batches VALUES (?,?,?,?,?)',
+                       (origin, entity, value.get('collection_id') or '', config.get('character_id') or '',
+                        TrackingJournal.encode([r for r in roots if isinstance(r, str)])))
+            return
+        if kind == 'source.catalog':
+            collection, sep, key = entity.partition(':')
+            if not sep or not key:
+                return
+            previous = db.execute('SELECT id,data FROM post_records WHERE store=? AND entry=? AND collection=?',
+                                  (origin, key, collection)).fetchone()
+            record = self.change(json.loads(previous[1]) if previous else {}, payload, self.fields)
+            if previous:
+                db.execute('DELETE FROM post_hashes WHERE record=?', (previous[0],))
+                db.execute('DELETE FROM post_members WHERE record=?', (previous[0],))
+            digest = record.get('sha') or ''
+            rid = self.record(db, origin, key, collection, digest, record)
+            hashes = self.hashes(record)
+            posts = self.memberships(record)
+        else:
+            if kind == 'library.media':
+                # Libraries created before source.appearance have an initial observed snapshot.
+                snapshot = (payload.get('change') or {}).get('after') or {}
+                payload = snapshot if isinstance(snapshot, dict) else {}
+            digest = payload.get('sha256')
+            if not isinstance(digest, str) or not re.fullmatch('[a-f0-9]{64}', digest):
+                return
+            source = payload.get('source') or {}
+            catalog = payload.get('catalog_record') or {}
+            name = payload.get('original_name') or ''
+            posts = {}
+            hashes = {digest}
+            for record in (source, catalog):
+                if isinstance(record, dict):
+                    posts.update(self.memberships(record, name))
+                    hashes.update(self.hashes(record))
+            if not posts and len(hashes) == 1:
+                return
+            # A different file can later replace this stable Library ID. Keep the two byte identities separate.
+            rid = self.record(db, digest, entity, '', digest, {})
+        db.executemany('INSERT OR IGNORE INTO post_hashes VALUES (?,?)', ((rid, h) for h in hashes))
+        for key, (info, name) in posts.items():
+            db.execute('INSERT OR IGNORE INTO post_members VALUES (?,?,?,?)',
+                       (rid, key, TrackingJournal.encode(info), name))
+
+    @staticmethod
+    def record(db, store, entry, collection, digest, data):
+        encoded = TrackingJournal.encode(data)
+        db.execute('''INSERT INTO post_records(store,entry,collection,digest,data) VALUES (?,?,?,?,?)
+                      ON CONFLICT(store,entry,collection) DO UPDATE SET digest=excluded.digest,data=excluded.data''',
+                   (store, entry, collection, digest, encoded))
+        return db.execute('SELECT id FROM post_records WHERE store=? AND entry=? AND collection=?', (store, entry, collection)).fetchone()[0]
+
+    def refresh(self, db):
+        db.executescript('''
+            CREATE TABLE IF NOT EXISTS post_records(id INTEGER PRIMARY KEY,store TEXT,entry TEXT,collection TEXT,digest TEXT,data TEXT,UNIQUE(store,entry,collection));
+            CREATE TABLE IF NOT EXISTS post_hashes(record INTEGER,sha TEXT,PRIMARY KEY(record,sha));
+            CREATE INDEX IF NOT EXISTS post_hash_lookup ON post_hashes(sha,record);
+            CREATE TABLE IF NOT EXISTS post_members(record INTEGER,post TEXT,info TEXT,name TEXT,PRIMARY KEY(record,post));
+            CREATE INDEX IF NOT EXISTS post_member_lookup ON post_members(post,record);
+            CREATE TABLE IF NOT EXISTS post_batches(store TEXT,job TEXT,collection TEXT,owner TEXT,roots TEXT,PRIMARY KEY(store,job));
+        ''')
+        row = db.execute('SELECT value FROM tracking_meta WHERE key=?', (self.cursor,)).fetchone()
+        after = int(row[0]) if row else 0
+        through = db.execute('SELECT COALESCE(max(seq),0) FROM tracking_events').fetchone()[0]
+        while after < through:
+            # A batch commits its cursor with its rows. Large histories yield the writer lock between batches.
+            with db:
+                rows = db.execute("""SELECT seq,kind,store,entity,payload FROM tracking_events
+                    WHERE seq>? AND seq<=? AND (kind IN ('source.appearance','source.catalog','inventory.batch')
+                      OR (kind='library.media' AND json_extract(payload,'$.provenance')='legacy_observation'))
+                    ORDER BY seq LIMIT 512""", (after, through)).fetchall()
+                for seq, *event in rows:
+                    self.index_event(db, event)
+                after = rows[-1][0] if len(rows) == 512 else through
+                db.execute('INSERT OR REPLACE INTO tracking_meta VALUES (?,?)', (self.cursor, str(after)))
+
+    def saved_sources(self, db, item):
+        seen = {}
+        def add(source, fallback):
+            if not isinstance(source, dict):
+                return
+            url = source.get('url')
+            if not isinstance(url, str) or not re.match(r'^https?://[^\s/?#]+', url, re.I):
+                url = ''
+            path = source.get('original_path') or source.get('path') or ''
+            path = path if isinstance(path, str) else ''
+            name = self.basename(path) or fallback or ''
+            if name or path or url:
+                seen[(name, path, url)] = {'name': name, 'path': path, 'url': url}
+            for child in (source.get('origins') if isinstance(source.get('origins'), list) else []):
+                if isinstance(child, dict) and (child.get('original_path') or child.get('path')):
+                    add({k: child.get(k) for k in ('path','original_path','url')}, name)
+        add(item.get('source') or {}, item.get('original_name'))
+        for (raw,) in db.execute("SELECT payload FROM tracking_events WHERE kind='source.appearance' AND entity=? ORDER BY seq", (item['id'],)):
+            observed = json.loads(raw)
+            if observed.get('sha256') == item['sha256']:
+                add(observed.get('source'), observed.get('original_name'))
+                if isinstance(observed.get('catalog_record'), dict):
+                    add(observed['catalog_record'], observed.get('original_name'))
+        return list(seen.values())
+
+    def view(self, mid, requested=None, offset=None):
+        import sqlite3
+        with self.store.lock:
+            item = self.store.media_item(mid)
+            if not item:
+                raise KeyError('This photo is no longer in the Library.')
+            item = dict(item)
+            owner = item['character_id']
+            library = {m['id']: (m['sha256'], m.get('media_type', 'image')) for m in self.store.data['media'] if m['character_id'] == owner}
+        by_hash = {digest: ident for ident, (digest, _) in library.items()}
+        with self.lock, closing(sqlite3.connect(self.store.tracking.path, timeout=30)) as db:
+            self.refresh(db)
+            owners = {}
+            for store, collection, character in db.execute("SELECT DISTINCT store,collection,owner FROM post_batches WHERE owner<>''"):
+                owners.setdefault((store, collection), set()).add(character)
+            # Seed Workbench lookup with the current file and any copy the user explicitly kept at import.
+            direct = db.execute("SELECT id FROM post_records WHERE store=? AND entry=? AND collection=''", (item['sha256'], mid)).fetchone()
+            seeds = {item['sha256']}
+            if direct:
+                seeds.update(row[0] for row in db.execute('SELECT sha FROM post_hashes WHERE record=?', direct))
+            anchors = {}
+            for digest in seeds:
+                for key, info, store, collection, entry, sha in db.execute('''SELECT m.post,m.info,r.store,r.collection,r.entry,r.digest
+                    FROM post_hashes h JOIN post_records r ON r.id=h.record JOIN post_members m ON m.record=r.id
+                    WHERE h.sha=?''', (digest,)):
+                    scope = (store, collection)
+                    if collection and scope in owners and owner not in owners[scope]:
+                        continue
+                    if not collection and (entry != mid or sha != item['sha256']):
+                        continue
+                    anchor = anchors.setdefault(key, {'info': dict(json.loads(info), key=key), 'scopes': set()})
+                    if collection:
+                        anchor['scopes'].add(scope)
+            # Legacy media snapshots are also usable if the first full backup had no journal.
+            source = item.get('source') if isinstance(item.get('source'), dict) else {}
+            for key, (info, _) in self.memberships(source, item.get('original_name') or '').items():
+                anchors.setdefault(key, {'info': dict(info, key=key), 'scopes': set()})
+            posts = sorted((a['info'] for a in anchors.values()), key=lambda p: (p['label'].casefold(), p['key']))
+            result = {'posts': posts, 'sources': self.saved_sources(db, item), 'page': None}
+            if requested is not None and requested not in anchors:
+                raise ValueError('This post is not connected to the selected photo.')
+            if not posts:
+                return result
+            post = requested or posts[0]['key']
+            scopes = anchors[post]['scopes']
+            rows = db.execute('''SELECT r.entry,r.digest,r.store,r.collection,m.name,group_concat(h.sha),r.id
+                FROM post_members m JOIN post_records r ON r.id=m.record JOIN post_hashes h ON h.record=r.id
+                WHERE m.post=? GROUP BY r.id''', (post,)).fetchall()
+            photos = {}
+            # Library records first, so a deliberately retained copy resolves to its Library identity.
+            aliases = dict(by_hash)
+            for entry, digest, _, collection, _, hashes, _ in rows:
+                if not collection and entry in library and library[entry][0] == digest:
+                    for h in hashes.split(','):
+                        aliases.setdefault(h, entry)
+            # From the selected keeper, identify its explicitly retained source copy as this photo.
+            aliases.update(dict.fromkeys(seeds, mid))
+            previews = {}
+            for entry, digest, store, collection, name, hashes, rid in rows:
+                if collection:
+                    if (store, collection) not in scopes:
+                        continue
+                    connected = [aliases[h] for h in hashes.split(',') if h in aliases]
+                    media = mid if mid in connected else aliases.get(digest) or next(iter(sorted(connected)), None)
+                else:
+                    if entry not in library or library[entry][0] != digest:
+                        continue
+                    media = entry
+                key = media or digest
+                row = photos.setdefault(key, {'name': name, 'media_id': media, 'current': media == mid})
+                if name and (not row['name'] or original_post_order(name, post) < original_post_order(row['name'], post)):
+                    row['name'] = name
+                if media:
+                    row['media_type'] = library[media][1]
+                if collection and 'workbench' not in row:
+                    row['workbench'] = {'collection': collection, 'photo': digest}
+                if collection and not media:
+                    previews.setdefault(key, []).append((rid, store, collection))
+            if mid not in photos:
+                photos[mid] = {'name': item['original_name'], 'media_id': mid, 'current': True, 'media_type': item.get('media_type', 'image')}
+            ordered = sorted(photos.items(), key=lambda kv: (original_post_order(kv[1]['name'], post), kv[0]))
+            focus = next(i for i, (k, _) in enumerate(ordered) if k == mid)
+            start = focus if offset is None else max(0, min(int(offset), len(ordered) - 1))
+            start = start // self.PAGE * self.PAGE
+            page = ordered[start:start + self.PAGE]
+            roots_by_scope = {}
+            for key, photo in page:
+                for rid, store, collection in previews.get(key, []):
+                    scope = (store, collection)
+                    if scope not in roots_by_scope:
+                        roots_by_scope[scope] = sorted({p for (paths,) in db.execute(
+                            "SELECT roots FROM post_batches WHERE store=? AND collection=? AND (owner='' OR owner=?)",
+                            (store, collection, owner)) for p in json.loads(paths)})
+                    if roots_by_scope[scope]:
+                        record = json.loads(db.execute('SELECT data FROM post_records WHERE id=?', (rid,)).fetchone()[0])
+                        preview = self.offer_preview(record, roots_by_scope[scope])
+                        if preview:
+                            photo['preview'] = preview
+                            break
+            result['page'] = {'post': post, 'offset': start, 'total': len(ordered), 'limit': self.PAGE, 'focus': focus,
+                              'workbench': photos[mid].get('workbench'), 'items': [r for _, r in page]}
+            return result
+
+    @staticmethod
+    def local_path(raw):
+        if not isinstance(raw, str) or not raw or '\x00' in raw:
+            return None
+        if os.name == 'nt' and (not re.match(r'^[a-zA-Z]:[/\\]', raw) or ':' in raw[2:]):
+            return None
+        path = Path(raw)
+        if not path.is_absolute() or '..' in path.parts or raw.startswith(('//', '\\\\')):
+            return None
+        if os.name == 'nt' and any(PureWindowsPath(p).is_reserved() for p in path.parts[1:]):
+            return None
+        return path
+
+    def offer_preview(self, record, roots):
+        # Only paths from the recorded Workbench inventory can reach the photo reader.
+        # The browser receives a short-lived handle, never an arbitrary-path file service.
+        digest = record.get('sha')
+        if record.get('media_type') == 'video' or not isinstance(digest, str) or not re.fullmatch('[a-f0-9]{64}', digest):
+            return None
+        folders = [p for root in roots if (p := self.local_path(root))]
+        locations = [record.get('path')]
+        for c in (record.get('copies') if isinstance(record.get('copies'), list) else []):
+            if isinstance(c, dict) and c.get('sha') == digest:
+                locations.append(c.get('path'))
+        paths = [p for raw in locations if (p := self.local_path(raw)) and any(f in p.parents for f in folders)]
+        if not paths:
+            return None
+        paths = tuple(dict.fromkeys(paths))
+        token = uuid.uuid5(self.preview_salt, TrackingJournal.encode([digest, *map(str, paths)])).hex
+        self.preview_sources[token] = (time.monotonic(), digest, paths)
+        self.preview_sources.move_to_end(token)
+        while len(self.preview_sources) > 1024:
+            self.preview_sources.popitem(last=False)
+        return token
+
+    def preview(self, token, large):
+        import io, stat, warnings
+        with self.lock:
+            source = self.preview_sources.get(token)
+        if not source or time.monotonic() - source[0] > 3600 or Image is None:
+            return None
+        limit = 96 * 1024 * 1024
+        with self.preview_slots:
+            for path in source[2]:
+                try:
+                    # Refuse junctions, links and special files before opening an inventory path.
+                    if any(p.is_symlink() or getattr(p.lstat(), 'st_file_attributes', 0) & 0x400 for p in [*reversed(path.parents), path]):
+                        continue
+                    entry = path.stat()
+                    if not stat.S_ISREG(entry.st_mode) or not 0 < entry.st_size <= limit:
+                        continue
+                    with path.open('rb') as stream:
+                        raw = stream.read(entry.st_size + 1)
+                    if len(raw) != entry.st_size or hashlib.sha256(raw).hexdigest() != source[1]:
+                        continue
+                    with warnings.catch_warnings():
+                        warnings.simplefilter('error', Image.DecompressionBombWarning)
+                        with Image.open(io.BytesIO(raw)) as photo:
+                            size = (1280, 1280) if large else (320, 320)
+                            photo.draft('RGB', size)
+                            photo.thumbnail(size)
+                            image = ImageOps.exif_transpose(photo).convert('RGB')
+                            output = io.BytesIO()
+                            image.save(output, format='JPEG', quality=86)
+                            return output.getvalue()
+                except (OSError, ValueError, OverflowError, Image.DecompressionBombError, Image.DecompressionBombWarning):
+                    continue
+        return None
+
+
+def running_post_organizer():
+    """Use the same loopback address file as the Windows suite. No redirects, proxy, or browser token."""
+    import http.client
+    local = os.environ.get('LOCALAPPDATA')
+    if not local:
+        return None
+    try:
+        with (Path(local) / 'LocalDuplicateReview' / 'running-url.txt').open(encoding='utf-8-sig') as url_file:
+            addr = url_file.read(160).strip()
+        match = re.fullmatch(r'http://127\.0\.0\.1:([1-9][0-9]{0,4})/organizer', addr)
+        if not match or int(match[1]) > 65535:
+            return None
+        with closing(http.client.HTTPConnection('127.0.0.1', int(match[1]), timeout=0.8)) as client:
+            client.request('GET', '/api/workbench/post-navigation')
+            reply = client.getresponse()
+            if reply.status == 200 and json.loads(reply.read(256)).get('post_navigation') == 1:
+                return addr
+    except (OSError, ValueError, http.client.HTTPException, AttributeError):
+        pass
+    return None
+
+
 class LibraryStore:
     def __init__(self, root: Path):
         self.root = root
@@ -2215,6 +2590,7 @@ class LibraryStore:
         self.timings={}
         self.recent_errors=[]
         self._tracking_start()
+        self.original_posts = OriginalPostHistory(self)
         matching_deps=self.root/'.outfit-search'/('python-'+str(sys.version_info.major)+'.'+str(sys.version_info.minor))
         if matching_deps.is_dir() and str(matching_deps) not in sys.path:sys.path.insert(0,str(matching_deps))
         if self._refresh_set_metadata():
@@ -4024,7 +4400,7 @@ class LibraryStore:
             for ident,mid in list(data['captains'].items()):
                 if ident not in groups or mid not in groups[ident].get('media_ids',[]) or mid not in media:
                     data['captains'].pop(ident,None)
-            if action not in ('state', 'save', 'frame', 'frame-review', 'frame-default', 'review', 'captain', 'title', 'title-correction', 'edition'):
+            if action not in ('state', 'save', 'frame', 'frame-review', 'frame-review-batch', 'frame-default', 'review', 'captain', 'title', 'title-correction', 'edition'):
                 raise ValueError('Unknown collection action.')
             if action != 'state' and body.get('revision', '') != data['revision']:
                 raise ValueError('Collection changed in another window. Reopen it before saving.')
@@ -4139,6 +4515,24 @@ class LibraryStore:
                 data['frames'][key]['fit']=fit
                 if reference is not None:data['frames'][key]['reference']=dict(reference)
                 data['frame_meta'][key]={'mode':'manual','at':now_iso()}
+            elif action == 'frame-review-batch':
+                reviews = body.get('reviews')
+                if not isinstance(reviews, list) or not 1 <= len(reviews) <= 12:
+                    raise ValueError('Choose between one and twelve displayed crops.')
+                seen = set()
+                checked_at = now_iso()
+                for review in reviews:
+                    mid = review.get('media_id') if isinstance(review, dict) else None
+                    if not isinstance(mid, str) or mid in seen:
+                        raise ValueError('Each crop must appear once.')
+                    seen.add(mid)
+                    item = media.get(mid)
+                    record = data['frame_meta'].get('image:' + mid, {})
+                    if (not item or not self._in_main(item) or item.get('flagged_for_removal') or
+                            record.get('mode') != 'auto' or record.get('checked') or
+                            not record.get('token') or record['token'] != review.get('token')):
+                        raise ValueError('A crop changed. Refresh the sheet and review it again.')
+                    record.update(checked=True, checked_at=checked_at)
             elif action in ('frame-review','frame-default'):
                 mid=body.get('media_id');key='image:'+str(mid)
                 record=data['frame_meta'].get(key,{})
@@ -6412,6 +6806,35 @@ class MediaHandler(BaseHTTPRequestHandler):
             if path == "/api/media/metadata-index":
                 self._send_json(200, self.store.metadata_index_status())
                 return
+            match = re.fullmatch(r'/api/post-previews/([0-9a-f]{32})', path)
+            if match:
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                image = self.store.original_posts.preview(match[1], query.get('size') == ['large'])
+                if image is None:
+                    self._send_json(404, {'error': 'The recorded source photo is unavailable.'})
+                    return
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/jpeg')
+                self.send_header('Content-Length', str(len(image)))
+                self.send_header('Cache-Control', 'private, max-age=300')
+                self.send_header('X-Content-Type-Options', 'nosniff')
+                self.end_headers()
+                self.wfile.write(image)
+                return
+            match = re.fullmatch(r"/api/media/([0-9a-f]+)/post-history", path)
+            if match:
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                try:
+                    view = self.store.original_posts.view(match[1], query.get('post', [None])[0], query.get('offset', [None])[0])
+                except KeyError:
+                    self._send_json(404, {'error': 'This photo is no longer in the Library.'})
+                    return
+                except ValueError as error:
+                    self._send_json(400, {'error': str(error)})
+                    return
+                view['organizer'] = running_post_organizer() if view['page'] and view['page']['workbench'] else None
+                self._send_json(200, view)
+                return
             match = re.fullmatch(r"/api/media/([0-9a-f]+)/quality", path)
             if match:
                 self._send_json(200, self.store.media_quality(match.group(1)))
@@ -6497,7 +6920,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                 body = self._read_json()
                 self._send_json(200, self.server.ui_updates.activate(str(body.get("version", ""))))
                 return
-            if path in {"/api/collection/state", "/api/collection/save", "/api/collection/frame", "/api/collection/frame-review", "/api/collection/frame-default", "/api/collection/review", "/api/collection/captain", "/api/collection/title", "/api/collection/title-correction", "/api/collection/edition"}:
+            if path in {"/api/collection/state", "/api/collection/save", "/api/collection/frame", "/api/collection/frame-review", "/api/collection/frame-review-batch", "/api/collection/frame-default", "/api/collection/review", "/api/collection/captain", "/api/collection/title", "/api/collection/title-correction", "/api/collection/edition"}:
                 self._send_json(200, self.store.collection_request(path.rsplit("/", 1)[1], self._read_json()))
                 return
             if path in {"/api/profile/state", "/api/profile/save"}:

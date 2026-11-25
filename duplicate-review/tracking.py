@@ -46,6 +46,13 @@ ORGANIZER = {
     'category_catalog': (['scope'], ['scope','data'], 'organizer.categories'),
 }
 
+def collection_alias(job):
+    if job.get('section_id'):
+        return 'section:'+job['section_id']
+    roots=job.get('config',{}).get('roots',[])
+    return hashlib.sha256(json.dumps(roots,sort_keys=True).encode()).hexdigest()
+
+
 def inventory(db, job, legacy=False, previous=None):
     """Only saved source facts and proposal evidence, never embeddings/bytes.
 
@@ -63,7 +70,7 @@ def inventory(db, job, legacy=False, previous=None):
     def folder(path):
         if ('folder',path) not in cache:
             log.identity(db,'folder',path);cache[('folder',path)]=True
-    alias='section:'+job['section_id'] if job.get('section_id') else hashlib.sha256(json.dumps(roots,sort_keys=True).encode()).hexdigest()
+    alias=collection_alias(job)
     collection=log.identity(db,'collection',alias,job.get('collection_id') if job.get('collection_roots')==roots else None)
     job['collection_id']=collection;job['collection_roots']=list(roots)
     observe('inventory.batch',job['id'],{'collection_id':collection,'config':config,

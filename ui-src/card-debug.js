@@ -20,6 +20,115 @@
  cards.hasCustomCrop=(owner,mid)=>custom(frameFor(owner,mid));
  cards.framingStatus=(owner,mid)=>metaFor(owner,mid)?.mode==='auto'?(metaFor(owner,mid).checked?'auto-checked':'auto-unchecked'):custom(frameFor(owner,mid))?'custom':'default';
  cards.matchesCropFilter=(owner,mid,filter)=>filter==='all'||(filter==='auto'?cards.framingStatus(owner,mid).startsWith('auto-'):cards.framingStatus(owner,mid)===filter);
+ style.textContent += `
+ .naiCropToolbar{position:sticky;top:0;z-index:3;background:#111923;padding:8px 0;display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;margin:0 0 1rem}
+ .naiCropGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,235px),1fr));gap:16px}
+ .naiCropTile{min-width:0}.naiCropTile .naiPortraitCard{width:100%;height:auto;max-width:none}
+ .naiCropTile .naiCropPreview{aspect-ratio:7/10}.naiCropTile .naiCropActions{display:flex;align-items:center;gap:6px;margin-top:5px}
+ .naiCropActions label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ `;
+ cards.reviewCrops=function(owner,onClose){
+  const excluded=new Set(),urls=new Set(),pageSize=12;
+  let generation=0,page=0,snapshot,rows=[],queue=[],visible=[],saving=false,pending=0,stale=false,changed=false;
+  const release=()=>{generation++;for(const url of urls)URL.revokeObjectURL(url);urls.clear();};
+  const m=cards.modal('Review card crops',()=>{release();if(changed)onClose?.();});
+  if(!owner){m.body.textContent='Choose a character to review card crops.';return;}
+  const button=(name,click)=>{const b=el('button','',name);b.type='button';b.onclick=click;return b;};
+  const toolbar=el('div','naiCropToolbar'),status=el('span'),grid=el('div','naiCropGrid');
+  status.setAttribute('role','status');
+  const previous=button('Previous',()=>{page--;draw();}),next=button('Next',()=>{page++;draw();});
+  const refresh=button('Refresh',reload),approve=button('Approve selected',save);
+  toolbar.append(approve,previous,next,refresh,status);
+  m.body.append(el('p','','Uncheck crops to leave them for later. Adjust opens the full-size original and marks that crop reviewed when it loads.'),toolbar,grid);
+  function sync(){
+   const count=visible.filter(v=>v.ready&&v.check.checked).length;
+   approve.textContent='Approve selected ('+count+')';
+   approve.disabled=saving||stale||pending>0||!count;
+   previous.disabled=saving||stale||page===0;next.disabled=saving||stale||(page+1)*pageSize>=queue.length;
+   refresh.disabled=saving;
+   for(const v of visible){v.check.disabled=saving||stale||!v.ready;v.adjust.disabled=saving||!v.ready;}
+  }
+  function use(data){
+   snapshot=data;stale=false;rows=data.boards.find(b=>b.kind==='images').entries;
+   const libraryMedia=new Map((root.naiGetLibrary?.()?.media||[]).map(m=>[m.id,m]));
+   const seen=new Set();queue=[];
+   for(const entry of rows){
+    if(entry.flagged_for_removal)continue;
+    for(const [side,mid] of entry.images.entries()){
+     const meta=data.collection.frame_meta?.['image:'+mid];
+     const photo=libraryMedia.get(mid);
+     if(seen.has(mid)||meta?.mode!=='auto'||meta.checked||photo?.in_all===false||
+        photo?.in_review||photo?.in_purgatory||photo?.flagged_for_removal)continue;
+     seen.add(mid);
+     queue.push({mid,token:meta.token,name:photo?.original_name||entry.name,entry:entry.duo_side?{...entry,duo_side:side?'back':'front'}:entry});
+    }
+   }
+   page=Math.min(page,Math.max(0,Math.ceil(queue.length/pageSize)-1));draw();
+  }
+  async function reload(){
+   release();const current=generation;stale=true;visible=[];grid.replaceChildren();
+   status.textContent='Loading card crops…';m.error.textContent='';sync();
+   try{const data=await cards.load(owner);if(current===generation)use(data);}
+   catch(e){if(current===generation){status.textContent='';m.error.textContent=e.message||String(e);}}
+  }
+  function draw(){
+   release();const current=generation;grid.replaceChildren();m.error.textContent='';
+   const start=page*pageSize,slice=queue.slice(start,start+pageSize);
+   status.textContent=slice.length?(start+1)+'–'+(start+slice.length)+' of '+queue.length+' unchecked crops':'No automatic crops are waiting for review.';
+   visible=slice.map(item=>{
+    const tile=el('article','naiCropTile'),preview=el('div','naiCropPreview','Loading original…'),actions=el('div','naiCropActions');
+    const filename=item.entry.duo_side?item.name+' · '+item.entry.duo_side:item.name;
+    const label=el('label'),check=el('input');check.type='checkbox';label.title=filename;
+    check.onchange=()=>{if(check.checked)excluded.delete(item.token);else excluded.add(item.token);sync();};
+    label.append(check,document.createTextNode(filename));
+    const adjust=button('Adjust',()=>cards.adjust(owner,item.mid,'image:'+item.mid,()=>{changed=true;reload();},{entry:item.entry,rows}));
+    adjust.setAttribute('aria-label','Adjust crop for '+filename);
+    actions.append(label,adjust);tile.append(preview,actions);grid.append(tile);
+    return {...item,preview,check,adjust,ready:false,filename};
+   });
+   pending=visible.length;sync();
+   const work=visible.values();
+   async function worker(){
+    for(const v of work){
+     if(current!==generation)return;
+     let url;
+     try{
+      const original=await root.naiOutfitOriginal(v.mid);
+      if(current!==generation)return;
+      url=URL.createObjectURL(original);urls.add(url);
+      const im=el('img');im.alt=v.filename;im.src=url;await im.decode();
+      if(current!==generation)return;
+      v.preview.replaceChildren(cards.lightCard(v.entry,rows,owner,im,true,v.mid));
+      cards.applyFrame(im,snapshot.collection.frames['image:'+v.mid]);
+      v.ready=true;v.check.checked=!excluded.has(v.token);
+     }catch(e){
+      if(current!==generation)return;
+      if(url&&urls.delete(url))URL.revokeObjectURL(url);
+      v.preview.textContent='Preview unavailable. Refresh to retry.';v.preview.title=e.message||String(e);
+     }finally{if(current===generation){pending--;sync();}}
+    }
+   }
+   for(let n=0;n<Math.min(3,pending);n++)worker();
+  }
+  async function save(){
+   if(approve.disabled)return;
+   const reviews=visible.filter(v=>v.ready&&v.check.checked).map(v=>({media_id:v.mid,token:v.token}));
+   saving=true;sync();
+   await m.run(async()=>{
+    try{
+     const saved=await root.naiOutfitRequest('/api/collection/frame-review-batch',{character_id:owner,revision:snapshot.collection.revision,reviews});
+     cards.cache.set(owner,saved);changed=true;use(saved);
+    }catch(e){stale=true;throw Error((e.message||String(e))+' Refresh this sheet before approving again.');}
+   });
+   saving=false;sync();
+  }
+  reload();
+ };
+ const libraryToolbar=root.getElementById('addMediaBtn')?.parentNode;
+ if(libraryToolbar){
+  const open=el('button','','Review card crops');open.type='button';
+  open.onclick=()=>cards.reviewCrops(root.getElementById('characterSelect')?.value);libraryToolbar.append(open);
+ }
  let saveQueue=Promise.resolve();
  cards.debugPanel=function(entry,owner,kind,onSaved,rows){
   const panel=el('section','naiCardDebugPanel'),mid=entry.preview_id||entry.captain_id||entry.images[0],names=new Map(cards.editionNames),owned=new Set(entry.edition_settings?.traits||[]),automatic=new Set(entry.automatic_editions||[]),frame=frameFor(owner,mid);

@@ -1,4 +1,5 @@
 """Conservative image framing, review identity, manual priority and persistence."""
+from contextlib import closing
 import copy
 import io
 import json
@@ -141,6 +142,43 @@ class AutomaticFramingTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.edit('frame-default',state,item,token=token)
         self.assertEqual(self.call()['collection']['frames'][key]['zoom'],1)
 
+    def test_batch_approval_is_atomic_and_preserves_originals_and_manual_frames(self):
+        first, second, manual = [self.photo() for _ in range(3)]
+        state = self.call()
+        state = self.edit('frame', state, manual, key='image:'+manual['id'],
+                          frame={'x':2,'y':-3,'zoom':1.12,'fit':'contain'})
+        collection = state['collection']
+        def review(item):
+            return {'media_id':item['id'], 'token':collection['frame_meta']['image:'+item['id']].get('token')}
+        def submit(items):
+            return self.call('frame-review-batch', revision=collection['revision'], reviews=items)
+        original = (self.store.root / first['stored_rel']).read_bytes()
+        for bad in [[], [review(first)] * 13, [review(first), review(first)], [review(first), review(manual)],
+                    [review(first), dict(review(second), token='old')], [review(first), None]]:
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                submit(bad)
+            self.assertEqual(self.call()['collection'], collection)
+        second['flagged_for_removal'] = True
+        with self.assertRaises(ValueError):
+            submit([review(first), review(second)])
+        self.assertFalse(self.character['collection']['frame_meta']['image:'+first['id']]['checked'])
+        second['flagged_for_removal'] = False
+        saved = submit([review(first), review(second)])['collection']
+        self.assertEqual(saved['frames'], collection['frames'])
+        for item in (first, second):
+            meta = saved['frame_meta']['image:'+item['id']]
+            self.assertTrue(meta['checked'])
+            self.assertTrue(meta['checked_at'])
+            self.assertEqual(meta['token'], review(item)['token'])
+        self.assertEqual(saved['frame_meta']['image:'+manual['id']], collection['frame_meta']['image:'+manual['id']])
+        self.assertEqual(original, (self.store.root / first['stored_rel']).read_bytes())
+        with self.assertRaises(ValueError):
+            submit([review(first)])
+        with self.assertRaises(ValueError):
+            self.call('frame-review-batch', revision=saved['revision'], reviews=[review(second)])
+        reopened = R['LibraryStore'](self.store.root)
+        self.assertEqual(reopened.character(self.character['id'])['collection'], saved)
+
     def test_new_source_invalidates_review_and_rejects_a_stale_check(self):
         item=self.photo();state=self.call();key='image:'+item['id'];token=state['collection']['frame_meta'][key]['token']
         state=self.edit('frame-review',state,item,token=token,checked=True)
@@ -161,18 +199,18 @@ class AutomaticFramingTests(unittest.TestCase):
         self.store.checkpoint_restore({'id':checkpoint['id'],'token':preview['token']})
         restored=self.call();self.assertFalse(restored['collection']['frame_meta'][key]['checked'])
         self.assertEqual(restored['collection']['frame_meta'][key]['token'],token)
-        with sqlite3.connect(self.store.tracking.path) as db:events=R['TrackingJournal'].rows(db)
+        with closing(sqlite3.connect(self.store.tracking.path)) as db:events=R['TrackingJournal'].rows(db)
         evidence=json.dumps(events)
         self.assertIn('centered-edge-fit-v2',evidence);self.assertIn('checked_at',evidence)
 
     def test_failed_automatic_save_has_no_partial_state_or_history(self):
         item=self.photo();before=self.store.db_path.read_bytes()
-        with sqlite3.connect(self.store.tracking.path) as db:events=R['TrackingJournal'].rows(db)
+        with closing(sqlite3.connect(self.store.tracking.path)) as db:events=R['TrackingJournal'].rows(db)
         with patch.object(self.store,'_write_atomic',side_effect=OSError('disk full')):
             with self.assertRaises(OSError):self.call()
         self.assertEqual(self.store.db_path.read_bytes(),before)
         self.assertNotIn('collection',self.store.character(self.character['id']))
-        with sqlite3.connect(self.store.tracking.path) as db:self.assertEqual(events,R['TrackingJournal'].rows(db))
+        with closing(sqlite3.connect(self.store.tracking.path)) as db:self.assertEqual(events,R['TrackingJournal'].rows(db))
         self.assertIn('image:'+item['id'],self.call()['collection']['frames'])
 
     def test_review_endpoint_rejects_other_characters(self):
