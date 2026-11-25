@@ -378,6 +378,92 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(self.org.sets(),baseline)
         self.assertEqual(self.org.state()['selection'],[self.ids[2]])
 
+    def test_split_three_pairs_survives_reopening_and_each_save_can_be_undone(self):
+        before = self.org.sets()
+        page = self.find(lambda p: not p['destination'] and len(p['photos']) == 6)
+        photos = [p['id'] for p in page['photos']]
+        pairs = [[photos[0], photos[1]], [photos[2], photos[5]], [photos[3], photos[4]]]
+        remaining = set(photos)
+        for n, pair in enumerate(pairs):
+            result = self.act('approve_likely', session=page['session'], key=page['key'], ids=pair,
+                              name=f'Pair {n+1}', keep_remaining=True, separate=True)
+            remaining.difference_update(pair)
+            self.assertEqual(set(self.org.sets()[result['state']['undo']['id']]['members']), set(pair))
+            self.org = Organizer(self.engine, self.bulk)
+            self.org.bind()
+            if remaining:
+                from organizer_auto_sets import matching_inputs
+                with self.org.db() as db:
+                    _, automatic_exclusions, _ = matching_inputs(self.org, self.org.state(), db)
+                self.assertTrue(remaining <= automatic_exclusions)
+                page = self.get()
+                self.assertTrue(page['remaining_group'])
+                self.assertEqual(page['key'], result['likely_result']['remaining_key'])
+                self.assertEqual({p['id'] for p in page['photos']}, remaining)
+                self.assertEqual(page['destination'], '')
+        self.assertFalse(self.org.state().get('likely_remainders'))
+        with self.org.db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM rejected WHERE context='split-set-pair'").fetchone()[0], 3)
+        for _ in pairs:self.act('undo')
+        self.assertEqual(self.org.sets(), before)
+        self.assertFalse(self.org.state().get('likely_remainders'))
+        with self.org.db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM rejected WHERE context='split-set-pair'").fetchone()[0], 0)
+
+    def test_discard_suggestion_and_matching_post_preserves_draft_membership_and_originals(self):
+        extra = add_post_extra(self.bulk, 'Discard from post')
+        self.org.bind()
+        self.act('save', ids=[extra], name='Other shoot')
+        before = self.org.sets()
+        page = self.find(lambda p: bool(p['destination']))
+        ids = [p['id'] for p in page['photos']]
+        signed = dict(session=page['session'], key=page['key'])
+        post = page['photos'][0]['source_key']
+        photo = next(p for p in self.get(**signed, source_post=post)['photos'] if p['id']==extra)
+        self.assertIn('Other Shoot', photo['destination_sets'].values())
+        paths = [self.org.original_path(i) for i in (ids[0],extra)]
+        with self.assertRaises(ValueError):self.act('discard_likely', **signed, ids=[self.ids[-1]])
+        result = self.act('discard_likely', **signed, ids=[ids[0], extra], retain_ids=ids[1:])
+        self.assertEqual(set(result['likely_result']['retained_ids']), set(ids[1:]))
+        self.assertEqual(self.org.discarded.intersection([*ids, extra]), {ids[0],extra})
+        self.assertTrue(all(path.is_file() for path in paths))
+        self.assertEqual(self.org.sets(include_discarded=True), before)
+        left = self.get(session=page['session'], offset=result['likely_result']['offset'])
+        self.assertEqual({p['id'] for p in left['photos']}, set(ids[1:]))
+        with self.org.db() as db:
+            evidence = json.loads(db.execute("SELECT payload FROM tracking_events WHERE kind='decision.discarded_likely_group'").fetchone()[0])
+            self.assertIn(post, evidence['manual_post_discards'][extra])
+        self.act('undo')
+        self.assertEqual(self.org.sets(), before)
+        self.assertFalse(self.org.discarded.intersection([*ids,extra]))
+
+    def test_matching_photo_can_choose_live_library_set_created_since_inventory(self):
+        extra = add_post_extra(self.bulk, 'Existing Red Bunny member')
+        self.bulk.current['config']['character_id'] = 'owner'
+        self.org.bind()
+        self.org.refresh_library_placement()
+        placement = dict(self.org.library_placement, set_ids_by_sha={extra: {'new-bunny'}}, set_names={'new-bunny':'Red Bunny'})
+        library = {'sets':[{'id':'new-bunny','character_id':'owner','name':'Red Bunny','colors':['Red'],'favorite':True}]}
+        with patch.object(self.org,'refresh_library_placement'), patch.object(self.org,'library_placement',placement),\
+             patch.object(self.engine.library,'request',return_value=library):
+            page = self.find(lambda p:not p['destination'])
+            signed = dict(session=page['session'], key=page['key'])
+            rows = self.get(**signed, source_post=page['photos'][0]['source_key'])['photos']
+            anchor = next(p for p in rows if p['id']==extra)
+            target = 'library:new-bunny'
+            self.assertEqual(anchor['destination_sets'],{target:'Red Bunny'})
+            picker = self.get(session=page['session'],offset=page['offset'],destination=target)
+            self.assertEqual([p['id'] for p in picker['references']],[extra])
+            ids = [p['id'] for p in page['photos']]
+            with self.assertRaises(ValueError):
+                self.act('approve_likely',**signed,ids=ids,target=target,destination_anchor=ids[0])
+            self.act('approve_likely',**signed,ids=ids,target=target,destination_anchor=extra)
+            group = self.org.sets()[target]
+            self.assertEqual(group['library_id'],'new-bunny')
+            self.assertEqual(set(group['members']),{extra,*ids})
+            self.assertTrue(group['favorite'])
+            self.assertIn('Red',group['colors'])
+
     def test_post_browsing_and_details_are_one_undoable_approval(self):
         extra = add_post_extra(self.bulk)
         unrelated = add_post_extra(self.bulk, 'Unrelated', {'lonely': {'kind':'forum','label':'Different post'}})

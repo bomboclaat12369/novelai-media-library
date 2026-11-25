@@ -12,6 +12,11 @@ likelyStyle.textContent = `
  .likely-header,.likely-footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 12px;flex:none}
  .likely-header{border-bottom:1px solid var(--line)}.likely-header h2{margin-right:auto!important}
  .likely-footer{border-top:1px solid var(--line)}.likely-footer .primary{margin-left:auto}
+ #likelyGroupsDialog .likely-footer{padding-inline-end:max(5.5rem,calc(env(safe-area-inset-right) + 5rem))}
+ .likely-tools{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:4px 0}
+ .likely-footer .likely-error{color:#ffb7aa;font-weight:600}
+ .likely-membership button{padding:2px 5px;margin-inline-start:5px;color:inherit;border-color:#8abbd0}
+ .likely-discarding .match-photo:has(input:checked){border-color:#ee987f}
  .likely-status{margin:0;color:var(--muted);font-size:.92em}
  .likely-destination{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:5px}
  .likely-destination select,.likely-destination input{max-width:100%;min-width:150px}
@@ -98,14 +103,14 @@ function confirmMatchingPostMerge(plan){
 
 async function openLikelyGroups(){
  const job = data.job, choices = new Map();
- let session='', index=0, page=null, dirty=false, closed=false, breadth='closest';
+ let session='', index=0, page=null, dirty=false, closed=false, breadth='closest', saving=false;
  matchDialog.close();
  const header=el('div',undefined,'likely-header'), body=el('div',undefined,'match-body');
  const footer=el('div',undefined,'likely-footer'), status=el('p','Finding cross-post groups…','likely-status');
  status.setAttribute('role','status');
  const prev=button('Previous group',()=>task(()=>load(index-1)));
  const next=button('Next group',()=>task(()=>load(index+1)));
- const close=button('Close',()=>likelyDialog.close());
+ const close=button('Close',()=>{if(!saving)likelyDialog.close()});
  const tier=el('select');tier.setAttribute('aria-label','Suggestion range');
  tier.add(new Option('Closest matches','closest'));tier.add(new Option('More from post order','broader'));
  tier.add(new Option('Finish partial Sets','partial'));
@@ -116,12 +121,15 @@ async function openLikelyGroups(){
  likelyDialog.replaceChildren(header,body,footer);
  footer.append(status);
  likelyDialog.showModal();
+ const protectSave=event=>{if(saving){event.preventDefault();event.returnValue=''}};
+ window.addEventListener('beforeunload',protectSave);
+ likelyDialog.oncancel=event=>{if(saving)event.preventDefault()};
  async function refreshPost(){
   if(data.job!==job||!view)return;
   try{const saved=captureSession();await open(currentKind,currentId,view.offset||0,false);await related();await restoreScroll(saved)}
   catch(error){toast(error.message)}
  }
- likelyDialog.onclose=async()=>{closed=true;if(dirty)await refreshPost()};
+ likelyDialog.onclose=async()=>{closed=true;window.removeEventListener('beforeunload',protectSave);if(dirty)await refreshPost()};
  await saveDraft();
 
  function preview(photo,list){
@@ -148,6 +156,7 @@ async function openLikelyGroups(){
    const result=await api('likely-groups',{job,session,breadth,offset:at,...(destination===undefined?{}:{destination})});
    if(closed||!likelyDialog.open)return;
    session=result.session;index=result.offset;page=result;
+   if(page.destination_set?.id&&!data.sets.some(g=>g.id===page.destination_set.id))data.sets.push(page.destination_set);
    const saved=choices.get(page.key);
    if(destination===undefined&&saved&&saved.target!==page.destination){await load(index,saved.target);return}
    render();
@@ -180,6 +189,7 @@ async function openLikelyGroups(){
  }
  function render(){
   body.replaceChildren();body.scrollTop=0;footer.replaceChildren(status);
+  status.classList.remove('likely-error');
   prev.disabled=!index;next.disabled=index+1>=page.total;
   const missing=data.match_stills-data.match_analyzed;
   if(missing>0){
@@ -195,6 +205,9 @@ async function openLikelyGroups(){
   }
   status.textContent='Group '+(index+1)+' of '+page.total+' · '+page.photos_left+' suggested photos left';
   const state=choices.get(page.key)||{selected:new Set(page.photos.map(p=>p.id)),target:page.destination,details:new Map()};
+  if(!state.selected)state.selected=new Set(state.splitting&&page.photos.length>2?[]:page.photos.map(p=>p.id));
+  const discarding=!!state.discards;
+  body.classList.toggle('likely-discarding',discarding);
   if(!state.named)state.name=page.new_name;
   choices.set(page.key,state);
   const destination=el('div',undefined,'likely-destination'), label=el('label','Destination Set');
@@ -206,7 +219,15 @@ async function openLikelyGroups(){
    picker.add(new Option(set.name+note+(set.under_review?' · under review':''),set.id));
   }
   picker.value=state.target;
-  picker.onchange=()=>task(async()=>{state.target=picker.value;await load(index,state.target)});
+  async function chooseTarget(target,anchor){
+   state.target=target;
+   state.destinationAnchor=anchor;
+   const scroll=browser.scrollTop;
+   if(currentPage)state.postOffset=currentPage.offset;
+   state.postScroll=scroll;
+   await load(index,target);
+  }
+  picker.onchange=()=>task(()=>chooseTarget(picker.value));
   destination.append(label,picker);
   let name;
   if(!state.target){
@@ -238,11 +259,25 @@ async function openLikelyGroups(){
   size.onchange=()=>localStorage.setItem('organizer-likely-photo-size',size.value);
   applySize();sizeLabel.append(size);destination.append(sizeLabel);
   body.append(destination);
-  body.append(el('p','Check the photos that belong to this shoot. Your selection is saved when you approve.','muted'));
+  const hint=discarding?'Check photos in either pane to send to Discard. You can restore them from Discarded.':
+   state.splitting||page.remaining_group?'Check one shoot at a time. After saving, the remaining photos stay here.':
+   'Check the photos that belong to this shoot. Your selection is saved when you approve.';
+  body.append(el('p',hint,'muted'));
   if(page.source_reason)body.append(el('p',page.source_reason));
   const comparison=el('div',undefined,'likely-comparison'), suggestions=el('section',undefined,'likely-suggestions');
   comparison.append(suggestions);body.append(comparison);
-  suggestions.append(el('h3','Suggested photos'));
+  const suggestionTools=el('div',undefined,'likely-tools');
+  suggestionTools.append(el('h3',page.remaining_group?'Remaining photos':'Suggested photos'));
+  if(!discarding){
+   const split=button('Split group',()=>task(async()=>{
+    state.selected.clear();state.splitting=true;await chooseTarget('');
+   }));
+   split.title='Start with an empty selection and save each shoot separately.';
+   if(page.photos.length>1&&!state.splitting)suggestionTools.append(split);
+   suggestionTools.append(button('Select suggested',()=>{for(const p of page.photos)state.selected.add(p.id);updateSelection()}),
+    button('Clear selection',()=>{state.selected.clear();updateSelection()}));
+  }
+  suggestions.append(suggestionTools);
   const proposed=el('div',undefined,'likely-photos');
   suggestions.append(proposed);
   for(const photo of page.photos){
@@ -254,26 +289,41 @@ async function openLikelyGroups(){
    }else if(photo.source_label)figure.append(el('small',photo.source_label));
    proposed.append(figure);
   }
-  if(page.references.length){
-   suggestions.append(el('h3','Already in the destination Set'));
+  if(state.target){
+   const refTools=el('div',undefined,'likely-tools');
+   refTools.append(el('h3','Already in the destination Set'));
+   if(!discarding)refTools.append(button('Use a separate Set',()=>task(async()=>{
+    state.separateFrom=state.target;
+    if(!state.named&&page.separate_name){state.name=page.separate_name;state.named=true}
+    await chooseTarget('');
+    const field=body.querySelector('[aria-label="New Set name"]');field?.focus();field?.select();
+   })));
+   suggestions.append(refTools);
    const refs=el('div',undefined,'match-examples likely-photos');
    for(const photo of page.references)refs.append(photoFigure(photo,page.references));
    suggestions.append(refs);
   }
   function photoChoice(photo,list){
    const figure=photoFigure(photo,list), check=el('input');
-   check.type='checkbox';check.value=photo.id;check.checked=state.selected.has(photo.id);check.disabled=!!photo.unavailable_reason;
+   const selected=discarding?state.discards:state.selected;
+   check.type='checkbox';check.value=photo.id;check.checked=selected.has(photo.id);check.disabled=!discarding&&!!photo.unavailable_reason;
    const caption=el('label'), text=el('span',(photo.suggested?'Suggested · ':'')+(photo.source_position?'#'+photo.source_position+' · ':'')+(photo.display_name||photo.name));
    text.title=photo.display_name||photo.name;caption.append(check,text);
-   check.setAttribute('aria-label','Include '+photo.name);
+   check.setAttribute('aria-label',(discarding?'Discard ':'Include ')+photo.name);
    check.onchange=()=>{
-    if(check.checked)state.selected.add(photo.id);else state.selected.delete(photo.id);
+    if(check.checked)selected.add(photo.id);else selected.delete(photo.id);
     updateSelection();
    };
    figure.append(caption);
    if(photo.set_names?.length){
     figure.classList.add('assigned');
-    figure.prepend(el('span','In '+photo.set_names.join(', '),'likely-membership'));
+    const band=el('div','In '+photo.set_names.join(', '),'likely-membership');
+    if(!discarding)for(const [id,label] of Object.entries(photo.destination_sets||{})){
+     if(id===state.target){band.append(document.createTextNode(' · Destination'));continue}
+     const use=button('Use '+label,()=>task(()=>chooseTarget(id,photo.id)));
+     use.setAttribute('aria-label','Use '+label+' as destination');band.append(use);
+    }
+    figure.prepend(band);
    }else if(photo.unavailable_reason)figure.append(el('small',photo.unavailable_reason,'unavailable'));
    return figure;
   }
@@ -299,7 +349,7 @@ async function openLikelyGroups(){
    }
    updateSelection();
   },'small');
-  bulkSelect.title='Select available photos across all pages. Use Merge into one Set to include assigned photos.';
+  bulkSelect.title='Select available photos across all pages. Choose a Set on an assigned photo to add only the checked photos to it.';
   const merge=button('Merge into one Set…',()=>task(mergePost),'small likely-post-merge-button');
   merge.title='Combine the whole open post and checked photos with their existing Sets.';
   const columnsLabel=el('label','Photos per row','likely-post-columns');
@@ -319,6 +369,7 @@ async function openLikelyGroups(){
   columns.onchange=()=>localStorage.setItem('organizer-likely-post-columns',columns.value);
   applyColumns();columnsLabel.append(columns,columnCount);
   postStatus.setAttribute('role','status');controls.append(postPicker,similar,bulkSelect,merge,columnsLabel,back,more,postStatus);
+  if(discarding){bulkSelect.hidden=true;merge.hidden=true}
   browser.append(el('summary','Browse matching posts'),controls,extraGrid);
   if(posts.length)comparison.append(browser);
   async function showPost(at,focusId){
@@ -350,6 +401,7 @@ async function openLikelyGroups(){
       figure.scrollIntoView({block:'center',inline:'nearest'});figure.focus({preventScroll:true});
      });
     }
+    if(state.postScroll!=null){browser.scrollTop=state.postScroll;delete state.postScroll}
     updateSelection();
    }catch(error){if(serial===request&&browser.isConnected){postStatus.textContent=error.message;displayed='';extraGrid.append(button('Retry',()=>showPost(at,focusId)))}}
   }
@@ -366,13 +418,27 @@ async function openLikelyGroups(){
   };
   postPicker.onchange=()=>{state.postOrder='original';showPost()};
   if(state.browsing)browser.open=true;
-  const dismiss=button('Dismiss group',()=>task(()=>decide('dismiss_likely')));
-  const approve=button('Approve group',()=>task(()=>decide('approve_likely')),'primary');
-  const hold=button('Approve and hold for review',()=>task(()=>decide('approve_likely',true)));
+  function runDecision(action,hold=false){
+   if(busy){if(!saving)status.textContent='Workbench is finishing the previous action. Try again in a moment.';return}
+   return task(()=>decide(action,hold));
+  }
+  const dismiss=button('Dismiss group',()=>runDecision('dismiss_likely'));
+  const approve=button('Approve group',()=>runDecision('approve_likely'),'primary');
+  const hold=button('Approve and hold for review',()=>runDecision('approve_likely',true));
   hold.title='Save the checked photos to this Set and keep the Set in Workbench until promoted.';
-  footer.append(dismiss,hold,approve);
+  function discardMode(on){
+   if(currentPage){state.postOffset=currentPage.offset;state.postScroll=browser.scrollTop}
+   const scroll=body.scrollTop, within=suggestions.scrollTop;
+   if(on)state.discards=new Set();else delete state.discards;
+   render();body.scrollTop=scroll;body.querySelector('.likely-suggestions').scrollTop=within;
+  }
+  const discard=button('Discard photos…',()=>discardMode(true));
+  const cancelDiscard=button('Cancel discard',()=>discardMode(false));
+  const sendDiscard=button('Send to Discard',()=>runDecision('discard_likely'),'primary');
+  if(discarding)footer.append(cancelDiscard,sendDiscard);
+  else footer.append(dismiss,discard,hold,approve);
   function updateSelection(){
-   for(const check of comparison.querySelectorAll('input[type=checkbox]'))check.checked=state.selected.has(check.value);
+   for(const check of comparison.querySelectorAll('input[type=checkbox]'))check.checked=(discarding?state.discards:state.selected).has(check.value);
    bulkSelect.disabled=!currentPage||!selectableIds?.length;
    merge.disabled=!currentPage;
    const allInPost=selectableIds?.length&&selectableIds.every(id=>state.selected.has(id));
@@ -381,6 +447,9 @@ async function openLikelyGroups(){
    const entireGroup=count===page.photos.length&&page.photos.every(photo=>state.selected.has(photo.id));
    approve.textContent=(entireGroup?'Approve group (':'Approve selected (')+count+')';
    hold.disabled=approve.disabled=count<(state.target?1:2);
+   if(state.splitting)approve.textContent='Save Set ('+count+')';
+   sendDiscard.textContent='Send to Discard ('+(state.discards?.size||0)+')';
+   sendDiscard.disabled=!state.discards?.size;
   }
   updateSelection();
   const explanation=el('details'),cal=page.training;
@@ -417,20 +486,46 @@ async function openLikelyGroups(){
    }
   }
   async function decide(action,holdForReview=false){
+   if(saving)return;
+   const ids=[...(discarding?state.discards:state.selected)];
+   const key=page.key, target=state.target;
+   const name=state.details.get(target)?.name||data.sets.find(g=>g.id===target)?.name||state.name;
+   saving=true;body.inert=header.inert=true;
+   const buttons=[...footer.querySelectorAll('button:not(:disabled)')];for(const b of buttons)b.disabled=true;
+   status.classList.remove('likely-error');
+   status.textContent=discarding?'Sending photos to Discard…':action==='dismiss_likely'?'Dismissing group…':'Saving '+ids.length+' photos to '+name+'…';
    try{
-    const result=await mutate(action,{session,key:page.key,ids:[...state.selected],target:state.target,
-     name:state.name,set_details:state.details.get(state.target),hold_for_review:holdForReview});
-   if(!result)return;
-    dirty=true;choices.delete(page.key);
+    const result=await mutate(action,{session,key,ids,target,name:state.name,set_details:state.details.get(target),
+     hold_for_review:holdForReview,keep_remaining:true,separate:!!(state.splitting||state.separateFrom),separate_from:state.separateFrom,
+     destination_anchor:state.destinationAnchor,
+     retain_ids:discarding?[...state.selected].filter(i=>!state.discards.has(i)):undefined});
+    if(!result)return;
+    dirty=true;choices.delete(key);
+    const left=result.likely_result?.remaining_key;
+    if(left){
+     if(discarding){
+      state.selected=new Set(result.likely_result.retained_ids);
+      if(ids.includes(state.destinationAnchor))delete state.destinationAnchor;
+      delete state.discards;
+      if(currentPage){state.postOffset=currentPage.offset;state.postScroll=browser.scrollTop}
+      choices.set(left,state);
+     }else{
+      choices.set(left,{selected:null,target:'',details:new Map(),splitting:state.splitting,
+       post:state.post,postOrder:state.postOrder,browsing:state.browsing,postOffset:currentPage?.offset});
+     }
+    }
     if(closed){await refreshPost();return}
-    await load(index);
+    await load(result.likely_result?.offset??index);
+    const message=discarding?'Sent '+ids.length+' to Discard':action==='dismiss_likely'?'Group dismissed':'Saved '+ids.length+' to '+name;
+    status.prepend(document.createTextNode(message+' · '));
    }catch(e){
     if(closed)return;
-    status.textContent=e.message;
+    status.classList.add('likely-error');
+    status.textContent='Could not '+(discarding?'discard photos':action==='dismiss_likely'?'dismiss group':'approve group')+'. '+e.message;
     if(!footer.querySelector('[data-reload]')){
      const reload=button('Refresh groups',()=>task(restart));reload.dataset.reload='1';footer.prepend(reload);
     }
-   }
+   }finally{saving=false;body.inert=header.inert=false;for(const b of buttons)b.disabled=false}
   }
  }
  await load();

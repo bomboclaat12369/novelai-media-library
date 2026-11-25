@@ -50,7 +50,7 @@ def exclusions(organizer, groups, state, db):
     return ignored
 
 
-def matching_inputs(organizer, state, db):
+def matching_inputs(organizer, state, db, *, reviewing_remainders=False):
     groups = organizer.sets(include_discarded=True)
     excluded = exclusions(organizer, groups, state, db)
     placement = organizer.library_placement or {}
@@ -59,6 +59,8 @@ def matching_inputs(organizer, state, db):
     for group in groups.values():
         for ident in group['members']:
             local.setdefault(ident, set()).add(group.get('library_id'))
+    if not reviewing_remainders:
+        excluded.update(i for row in state.get('likely_remainders', {}).values() for i in row['members'] if i not in local)
     for ident, item in organizer.catalog.items():
         digest = item.get('sha')
         if digest in (placement.get('held_hashes') or set()):

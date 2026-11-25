@@ -243,8 +243,94 @@ const {chromium} = require(process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES+'/play
     assert.deepEqual(new Set(await page.evaluate(()=>data.sets.find(s=>s.id==='library:existing').members)),finalMembers);
     await dialog.getByRole('button',{name:'Undo last review'}).click();
     await page.waitForFunction(n=>!busy&&data.sets.find(s=>s.id==='library:existing').members.length===n,survivor.members.length);
+    await page.setViewportSize({width:1400,height:900});
+    const idle=()=>page.waitForFunction(()=>!busy);
+    const primary=dialog.locator('.likely-footer .primary');
+    const membership=id=>page.evaluate(id=>data.sets.find(g=>g.id===id).members,id);
+    const checkedIds=locator=>locator.evaluateAll(checks=>checks.map(c=>c.value));
+    const undo=async()=>{await dialog.getByRole('button',{name:'Undo last review'}).click();await idle()};
+    while(!await picker.inputValue()){await dialog.getByRole('button',{name:'Next group'}).click();await idle()}
+    const originalTarget=await picker.inputValue(), originalMembers=await membership(originalTarget);
+    const firstShoot=await checkedIds(proposedChecks);
+    await dialog.getByRole('button',{name:'Use a separate Set'}).click();
+    await idle();
+    assert.equal(await picker.inputValue(),'');
+    assert.equal(await dialog.locator('.match-examples figure').count(),0);
+    await dialog.getByRole('textbox',{name:'New Set name'}).fill('Separate outfit');
+    const shell=await browser.newPage();
+    await shell.setContent('<button id="mode-toggle">Mode</button>');
+    await shell.addStyleTag({path:'media-suite/browser/suite.css'});
+    for(const width of [430,1400,2556]){
+      const viewport={width,height:900};
+      await page.setViewportSize(viewport);await shell.setViewportSize(viewport);
+      const action=await primary.boundingBox(),mode=await shell.locator('#mode-toggle').boundingBox();
+      assert(action.x+action.width<mode.x || action.y+action.height<=mode.y);
+    }
+    await shell.close();
+    const bounds=await primary.boundingBox();
+    await primary.click({position:{x:bounds.width-5,y:bounds.height/2}});await idle();
+    await status.filter({hasText:'Saved '+firstShoot.length+' to Separate outfit'}).waitFor();
+    await page.reload();await page.waitForFunction(()=>sessionReady&&!busy);
+    assert.deepEqual(await membership(originalTarget),originalMembers);
+    assert.deepEqual(new Set(await page.evaluate(()=>data.sets.find(s=>s.name==='Separate Outfit').members)),new Set(firstShoot));
+    await open();
+    await undo();
+
+    const six=await checkedIds(proposedChecks);
+    assert.equal(six.length,6);
+    const pieces=[[six[0],six[1]],[six[2],six[5]],[six[3],six[4]]];
+    await dialog.getByRole('button',{name:'Split group',exact:true}).click();await idle();
+    const unplaced=new Set(six);
+    for(const [n,pair] of pieces.entries()){
+      assert.deepEqual(new Set(await checkedIds(proposedChecks)),unplaced);
+      await dialog.getByRole('button',{name:'Clear selection',exact:true}).click();
+      for(const id of pair)await suggestions.locator('input[value="'+id+'"]').check();
+      await dialog.getByRole('textbox',{name:'New Set name'}).fill('Outfit '+(n+1));
+      await primary.click();await idle();
+      assert.deepEqual(new Set(await page.evaluate(n=>data.sets.find(g=>g.name==='Outfit '+n).members,n+1)),new Set(pair));
+      for(const id of pair)unplaced.delete(id);
+      if(n===0){
+        await dialog.getByRole('button',{name:'Close',exact:true}).click();
+        await page.reload();
+        await page.waitForFunction(()=>sessionReady&&!busy);
+        await open();
+      }
+    }
+    for(const pair of pieces)await undo();
+
+    const pickIds=await checkedIds(proposedChecks);
+    await postResponse(()=>links.first().click());
+    const chosenExtra=await extra.inputValue();
+    await extra.check();
+    await postResponse(()=>postBrowser.getByRole('button',{name:'Next photos'}).click());
+    const use=assigned.getByRole('button',{name:'Use Existing shoot as destination',exact:true});
+    await use.click();await idle();
+    assert.equal(await picker.inputValue(),'library:existing');
+    await assigned.locator('.likely-membership').filter({hasText:'Destination'}).waitFor();
+    await primary.click();await idle();
+    const afterClick=await membership('library:existing');
+    assert.deepEqual(new Set(afterClick),new Set([...survivor.members,...pickIds,chosenExtra]));
+    await undo();
+
+    await postResponse(()=>links.first().click());
+    const removeId=await proposedChecks.first().inputValue();
+    await dialog.getByRole('button',{name:'Discard photos…'}).click();
+    const send=dialog.getByRole('button',{name:/^Send to Discard/});
+    assert(await send.isDisabled());
+    await suggestions.locator('input[value="'+removeId+'"]').check();
+    const extraDiscard=postBrowser.getByRole('checkbox',{name:'Discard Extra portrait.jpg'});
+    const removeExtra=await extraDiscard.inputValue();
+    await extraDiscard.check();
+    await send.click();await idle();
+    assert(!await suggestions.locator('input[value="'+removeId+'"]').count());
+    assert(!await postBrowser.locator('input[value="'+removeExtra+'"]').count());
+    assert.deepEqual(new Set(await page.evaluate(()=>data.state.undo.hashes)),new Set([removeId,removeExtra]));
+    await undo();
+    assert.equal(await suggestions.locator('input[value="'+removeId+'"]').count(),1);
+    await postResponse(()=>links.first().click());
+    await extra.waitFor();
     await page.waitForLoadState('networkidle');
     assert.deepEqual(errors,[]);
-    console.log('Verified full-brightness comparisons, adjustable galleries, whole-post selection, visual grouping, approval, Undo and mobile layout.');
+    console.log('Verified separate shoots, three-way splitting across reload, destination badges, discard from both panes, approval, Undo and mobile layout.');
   }finally{if(browser)await browser.close();server.kill()}
 })().catch(err=>{console.error(err);process.exitCode=1});

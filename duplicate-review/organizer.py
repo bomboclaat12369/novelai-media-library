@@ -804,7 +804,10 @@ class Organizer:
             if int(body.get('revision',-1))!=state.get('revision',0):raise ValueError('Review changed in another window. Reload before saving.')
             match_result=None
             unavailable_targets=set()
-            likely_action=action in ('approve_likely','dismiss_likely')
+            likely_action=action in ('approve_likely','dismiss_likely','discard_likely')
+            keep_remaining=body.get('keep_remaining') is True or action=='discard_likely'
+            separate=body.get('separate') is True
+            separate_from=body.get('separate_from')
             split_action=action in ('combine_split','separate_split')
             if likely_action or split_action or action=='merge_likely_post' or (action=='undo' and (state.get('undo') or {}).get('split_review')):
                 self.check_collection_idle(body)
@@ -884,6 +887,8 @@ class Organizer:
                     ids=self.valid_ids(body.get('ids',[]))
                     if not ids:raise ValueError('Select at least one image.')
                     target=str(body.get('target',''));allsets=self.sets(include_discarded=True);previous=allsets.get(target)
+                    if likely_action and target and not previous:
+                        previous=choices['destination_set']
                     if target and not previous:raise ValueError('Set no longer available.')
                     name=title_case_label(body.get('name') or (previous or {}).get('name',''))
                     if not name or len(name)>250:raise ValueError('Give the set a name (up to 250 characters).')
@@ -941,6 +946,11 @@ class Organizer:
                     if likely_action:
                         state['undo'].update(selection=state.get('selection',[]),likely_review=offer['key'])
                         organizer_likely_sets.record(self,db,review,offer,'approved_likely',ids,ident)
+                        if separate or offer.get('placed_sets'):
+                            other=separate_from if separate_from in allsets else offer['target']
+                            organizer_likely_sets.mark_separate(self,db,state,[other,*offer.get('placed_sets',())],ident)
+                        if group.get('under_review') or group.get('in_purgatory'):
+                            unavailable_targets.add(ident)
                     elif action=='save_evaluation':
                         state['undo']['selection']=state.get('selection',[])
                     else:
@@ -1012,7 +1022,7 @@ class Organizer:
                     group['members']=[i for i in group['members'] if i not in ids];group['updated']=time.time()
                     db.execute('INSERT OR REPLACE INTO sets VALUES (?,?,?)',(self.scope,target,json.dumps(group)))
                     if not reviewing:state['selection']=[]
-                elif action in ('discard','restore_discard','unsort','restore_unsorted'):
+                elif action in ('discard','discard_likely','restore_discard','unsort','restore_unsorted'):
                     ids=body.get('ids',[])
                     if action=='unsort' and body.get('remaining'):
                         post=body.get('post')
@@ -1024,15 +1034,19 @@ class Organizer:
                     else:ids=self.valid_ids(ids)
                     if not ids:raise ValueError('No eligible images selected.')
                     hashes=set().union(*(self.hashes(i) for i in ids))
-                    if action in ('discard','restore_discard'):
+                    if action in ('discard','discard_likely','restore_discard'):
                         old=[list(row) for row in db.execute('SELECT hash,batch,data FROM discarded') if row[0] in hashes]
-                        if action=='discard':
+                        if action!='restore_discard':
                             batch=uuid.uuid4().hex;metadata=json.dumps({'created':time.time(),'ids':ids})
                             for digest in hashes:db.execute('INSERT OR REPLACE INTO discarded VALUES (?,?,?)',(digest,batch,metadata))
                         else:
                             # Restore hashes belonging to the chosen image and its known copies.
                             for digest in hashes:db.execute('DELETE FROM discarded WHERE hash=?',(digest,))
                         state['undo']={'action':'disposition','table':'discarded','hashes':sorted(hashes),'previous':old}
+                        if action=='discard_likely':
+                            state['undo']['likely_review']=offer['key']
+                            state['undo']['selection']=state.get('selection',[])
+                            organizer_likely_sets.record(self,db,review,offer,'discarded_likely',ids)
                     else:
                         assigned={i for g in self.sets().values() for i in g['members']}
                         if action=='unsort' and any(i in assigned for i in ids):raise ValueError('Move only images not assigned to any set.')
@@ -1044,7 +1058,7 @@ class Organizer:
                         else:
                             for digest in hashes:db.execute('DELETE FROM parked WHERE scope=? AND hash=?',(self.scope,digest))
                         state['undo']={'action':'disposition','table':'parked','post':post if action=='unsort' else None,'hashes':sorted(hashes),'previous':old}
-                    state['selection']=[]
+                    if action!='discard_likely':state['selection']=[]
                 elif action=='post_evidence':
                     ident=body.get('id');ignored=body.get('ignored')
                     if ident not in self.posts or not isinstance(ignored,bool):raise ValueError('Choose a post and a valid grouping setting.')
@@ -1096,6 +1110,7 @@ class Organizer:
                             if raw:db.execute('INSERT INTO individual_imports VALUES (?,?,?)',(self.scope,key,raw))
                         state['selection']=undo.get('selection',[])
                     elif undo['action']=='disposition':
+                        if undo.get('likely_review'):state['selection']=undo.get('selection',[])
                         table=undo['table']
                         if table=='discarded':
                             for digest in undo['hashes']:db.execute('DELETE FROM discarded WHERE hash=?',(digest,))
@@ -1122,6 +1137,13 @@ class Organizer:
                         for ident in undo['ids']:db.execute('DELETE FROM rejected WHERE scope=? AND context=? AND id=?',(self.scope,undo['context'],ident))
                 else:raise ValueError('Unknown organizer action.')
                 if action=='undo':
+                    if 'previous_likely_remainders' in undo:
+                        saved=state.setdefault('likely_remainders',{})
+                        for key,previous in undo['previous_likely_remainders'].items():
+                            if previous is None:saved.pop(key,None)
+                            else:saved[key]=previous
+                    db.executemany("DELETE FROM rejected WHERE scope=? AND context='split-set-pair' AND id=?",
+                                   ((self.scope,key) for key in undo.get('likely_separate_pairs',())))
                     if undo.get('set_review'):
                         previous=json.loads(undo['previous']) if undo.get('previous') else {}
                         tracking.journal().event(db,'decision.undo_set_review',self.scope,
@@ -1135,15 +1157,26 @@ class Organizer:
                     if history:state['undo']=history.pop()
                 elif action!='pin' and previous_undo and state.get('undo')!=previous_undo:
                     state['undo_stack']=(state.get('undo_stack',[])+[previous_undo])[-19:]
+                if likely_action or action=='merge_likely_post':
+                    consumed=set(choices.get('ids',())) if likely_action else set(reviewed_ids)
+                    retained=()
+                    if action=='discard_likely':
+                        consumed.update(i for i in self.catalog if hashes.intersection(self.hashes(i)))
+                        retained=[i for i in choices['retained'] if i not in consumed]
+                    placed=list(offer.get('placed_sets',()))
+                    if action=='approve_likely' and (separate or placed):placed.append(ident)
+                    rows,remaining_key=organizer_likely_sets.advance(self,review,offer,consumed,state,unavailable_targets,
+                        keep_remaining and action in ('approve_likely','discard_likely'),retained,placed,
+                        consumed if action=='discard_likely' else ())
                 state['revision']=state.get('revision',0)+1;self.put_state(db,state)
             if likely_action or action=='merge_likely_post':
                 review.revision=state['revision']
-                if likely_action:reviewed_ids=choices.get('ids',[])
-                touched = set(reviewed_ids) - set(offer['members'])
-                review.rows = [row for row in review.rows if row is not offer and row['target'] not in unavailable_targets
-                               and not touched.intersection(row['members'])]
+                review.rows=rows
             self.load_dispositions()
             summary=self.summary()
+            if likely_action:
+                summary['likely_result']={'remaining_key':remaining_key,'retained_ids':retained,
+                    'offset':next((n for n,r in enumerate(rows) if r['key']==remaining_key),None)}
             if match_result is not None:summary['auto_result']=match_result
             return summary
 
