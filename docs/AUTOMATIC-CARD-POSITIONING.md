@@ -1,6 +1,6 @@
 # Automatic card positioning
 
-In Media Library 2.9.41, open **Review card crops** in the Library toolbar or
+In Media Library, open **Review card crops** in the Library toolbar or
 the Battles image leaderboard. The companion prepares crops for the selected
 character’s Main photos in the background while the review is open. Library
 and Battles share the framing and decisions. Each side of a Duo has its own
@@ -18,12 +18,21 @@ Each page shows up to twelve photos in their card frames. Tick **Mark to edit**
 on the exceptions, then use **Approve others & edit**. With no exceptions, use
 **Approve all**. Batch approval covers the ready previews on that page.
 
-In the editor, drag the photo or scroll to zoom. Hold **Space** to look at the
-original. When two distinct framings are available, **1** and **2** save the
-corresponding preview and advance. **Enter** saves the current framing and
-advances. Opening the editor leaves the decision pending. Choose **Later** to
-defer the photo and use the **Later** filter to return to it. **Undo last**
-restores the previous state of the affected photos.
+In the editor, click a crop preview or press its numbered shortcut to try it
+on the current photo. Drag the photo, scroll to zoom, or use the same fit,
+horizontal position, vertical position and zoom controls as **Position card**.
+**Reset framing** returns the draft to a centered whole-photo fit.
+
+**Peek original** shows the whole original inside its card. Hold **Space** to
+peek temporarily. **Show photo beyond frame** shows the whole photo at its
+original brightness and current position and zoom. The solid line marks the
+photo opening. The dashed line marks the outside of the card. Drag the photo
+in that view to bring a cut-off detail back into the opening.
+
+**Save & next** applies the previewed framing. **Back to sheet** discards
+the current preview. Choose **Later** to defer the photo and use the **Later**
+filter to return to it. **Undo last** restores the previous state of the
+affected photos.
 You can also **Flag crop for review** on a Battles photo and continue voting.
 
 ## Local body analysis

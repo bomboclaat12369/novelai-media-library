@@ -96,7 +96,7 @@ test('leaderboard opens the crop sheet outside Debug and previewing an exception
   await waitFor(()=>sheet.querySelector('.naiCropActions button')?.disabled===false,f.errors);
   sheet.querySelector('.naiCropActions button').click();
   const editor=sheet.querySelector('.naiCropException');
-  await waitFor(()=>editor.querySelector('.naiCropOriginal'),f.errors);
+  await waitFor(()=>editor.querySelector('.naiCropEditView[data-mode=crop]'),f.errors);
   button(editor,'Back to sheet').click();
   await waitFor(()=>sheet.querySelector('.naiCropActions button')?.disabled===false,f.errors);
   assert.equal(f.collection.frame_meta['image:unchecked'].checked,false);

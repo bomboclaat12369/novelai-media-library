@@ -14,7 +14,7 @@ async function setup({open=true,pending=false,analysisUnavailable=false,offline=
  Object.assign(rows[0],{id:'duo',duo_side:'front',images:['p0','p1']});
  const collection={revision:'first',frames:{'image:p15':copy(wider)},frame_meta:{},crop_review:{}};
  const actions=[];
- let prior,reject,stale=false,releaseAnalysis=()=>{};
+ let prior,reject,overviewGate,stale=false,releaseAnalysis=()=>{};
  const analyzed=new Set();
  const analysisGate=pending||healthyAll?new Promise(resolve=>{releaseAnalysis=resolve;}):Promise.resolve();
  const state=()=>copy({collection,boards:[{kind:'images',entries:rows}]});
@@ -65,6 +65,7 @@ async function setup({open=true,pending=false,analysisUnavailable=false,offline=
   if(path.endsWith('crop-review-state')){
    stateCalls.push(copy(body));
    const ids=body.media_ids||[];
+   if(!ids.length&&overviewGate){const gate=overviewGate;overviewGate=null;await gate;}
    if(body.analyze!==false&&healthyAll&&ids.length)await analysisGate;
    if(body.analyze!==false&&pending&&ids.some(id=>['p11','p12','p13'].includes(id)))await analysisGate;
    if(body.analyze!==false)ids.forEach(id=>analyzed.add(id));
@@ -97,7 +98,12 @@ async function setup({open=true,pending=false,analysisUnavailable=false,offline=
  const openSheet=(scope=root)=>{button(scope,'Review card crops').click();return root.querySelector('[aria-label="Review card crops"]');};
  const sheet=open?openSheet():null;
  return {...f,sheet,root,cards,collection,faces,originals,thumbs,battleCalls,stateCalls,openSheet,releaseAnalysis,
-  get actions(){return actions;},stale(){stale=true;},fail(message){reject=message;}};
+  get actions(){return actions;},stale(){stale=true;},fail(message){reject=message;},
+  pauseOverview(){
+   let resume,fail;
+   overviewGate=new Promise((resolve,reject)=>{resume=resolve;fail=message=>reject(Error(message));});
+   return {resume,fail};
+  }};
 }
 
 test('sheet reviews twelve actual frames, protects unrendered and off-page crops, batches approvals, and edits its marked exceptions',async()=>{
@@ -114,17 +120,25 @@ test('sheet reviews twelve actual frames, protects unrendered and off-page crops
   const check=photo=>sheet.querySelector('[aria-label="Mark Photo '+photo+' for editing"]');
   check(2).click();check(4).click();
   button(sheet,'Approve others & edit 2').click();
-  await waitFor(()=>button(sheet,'[1] More body')?.disabled===false,errors);
+  await waitFor(()=>button(sheet,'[3] More body')?.disabled===false,errors);
   assert.deepEqual(f.actions[0].reviews.map(r=>r.media_id),['p0','p1','p5','p6','p7','p8','p9','p10','p11']);
   assert.equal(f.actions[0].revision,'first');
   assert.ok(f.actions[0].reviews.every(r=>r.choice==='suggested'));
   const editor=sheet.querySelector('.naiCropException');
   const key=(type,key)=>editor.dispatchEvent(new f.w.KeyboardEvent(type,{key,bubbles:true,cancelable:true}));
+  const preview=editor.querySelector('.naiCropEditView');
+  const card=preview.querySelector('.naiTradingCard');
   key('keydown',' ');
-  assert.equal(editor.querySelector('.naiCropOriginal').hidden,false);
+  assert.equal(preview.dataset.mode,'original');
+  assert.equal(preview.querySelector('.naiTradingCard'),card);
   key('keyup',' ');
-  assert.equal(editor.querySelector('.naiCropOriginal').hidden,true);
-  key('keydown','1');
+  assert.equal(preview.dataset.mode,'crop');
+  key('keydown','3');
+  assert.equal(button(editor,'[3] More body').getAttribute('aria-pressed'),'true');
+  assert.equal(editor.querySelector('h3').textContent,'Photo 2');
+  assert.equal(f.actions.length,1);
+  assert.equal(f.collection.frames['image:p2'],undefined);
+  key('keydown','Enter');
   await waitFor(()=>editor.querySelector('h3')?.textContent==='Photo 4',errors);
   assert.deepEqual(f.originals,['p2','p4']);
   assert.deepEqual(f.collection.frames['image:p2'],wider);
@@ -207,8 +221,9 @@ test('failed crop saves preserve the active edit and explicit retry, keyboard in
   button(editor,'Save & next').click();
   await waitFor(()=>f.collection.frames['image:p1']?.zoom>tight.zoom&&editor.hidden,errors);
   assert.equal(f.actions.at(-1).reviews[0].choice,'manual');
-  assert.equal(f.collection.frames['image:p1'].x,5);
-  assert.equal(f.collection.frames['image:p1'].y,7);
+  const frame=f.collection.frames['image:p1'];
+  assert.ok(Math.abs(frame.x-5/frame.reference.width)<.001);
+  assert.ok(Math.abs(frame.y-2-5/frame.reference.height)<.001);
   button(sheet,'Undo last').click();
   await waitFor(()=>sheet.querySelector('[aria-label="Edit crop for Photo 1 · back"]')?.disabled===false,errors);
   assert.equal(f.collection.frames['image:p1'],undefined);
@@ -235,6 +250,9 @@ test('an unavailable analysis offers an individual decision without entering bat
   await waitFor(()=>button(editor,'[2] Keep current crop')?.disabled===false,errors);
   assert.ok(f.actions[0].reviews.every(r=>r.media_id!=='p5'));
   editor.dispatchEvent(new w.KeyboardEvent('keydown',{key:'2',bubbles:true,cancelable:true}));
+  assert.equal(f.actions.length,1);
+  assert.equal(editor.hidden,false);
+  button(editor,'Save & next').click();
   await waitFor(()=>editor.hidden,errors);
   assert.equal(f.actions.at(-1).reviews[0].choice,'manual');
   assert.deepEqual(f.collection.frames['image:p5'],wider);
@@ -259,16 +277,17 @@ test('unanalysed crops on later pages can be fitted or kept while analysis is of
   assert.ok(status.textContent.includes('to check individually'));
   assert.ok(button(sheet,'Approve all').disabled);
   sheet.querySelector('[aria-label="Edit crop for Photo 12"]').click();
-  await waitFor(()=>button(editor,'Keep current crop & next')?.disabled===false,errors);
+  await waitFor(()=>button(editor,'Save & next')?.disabled===false,errors);
   assert.ok(button(editor,'[1] Fit whole photo'));
   editor.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
   await waitFor(()=>f.collection.frame_meta['image:p12']?.mode==='manual'&&editor.hidden,errors);
   assert.deepEqual(f.collection.frames['image:p12'],wider);
   const fitTile=await waitFor(()=>sheet.querySelector('[aria-label="Edit crop for Photo 13"]')?.disabled===false&&sheet.querySelector('[aria-label="Edit crop for Photo 13"]'),errors);
   fitTile.click();
-  await waitFor(()=>button(editor,'Use Fit & next')?.disabled===false,errors);
-  assert.equal(editor.querySelectorAll('.naiCropTreatments button').length,0);
-  button(editor,'Use Fit & next').click();
+  await waitFor(()=>button(editor,'Save & next')?.disabled===false,errors);
+  assert.equal(editor.querySelectorAll('.naiCropTreatments button').length,1);
+  assert.equal(button(editor,'[1] Fit whole photo').getAttribute('aria-pressed'),'true');
+  button(editor,'Save & next').click();
   await waitFor(()=>f.actions.at(-1)?.reviews[0].media_id==='p13'&&editor.hidden,errors);
   assert.equal(f.actions.at(-1).reviews[0].choice,'fit');
   assert.deepEqual(f.collection.frames['image:p13'],fit);
@@ -333,4 +352,117 @@ test('Battles flags the displayed Duo face without a new matchup, a vote, or a c
   assert.equal(f.actions.at(-1).reviews[0].token,'source-p1');
   assert.deepEqual(errors,[]);
  }finally{await delay(100);f.dom.window.close();}
+});
+
+test('treatments, original peek and beyond-frame view are local until explicit save',async()=>{
+ const f=await setup();
+ try{
+  const {sheet,w,errors}=f;
+  const edit=sheet.querySelector('.naiCropException'),samples=new Map(),apply=f.cards.applyFrame;
+  f.cards.applyFrame=(im,frame)=>{
+   if(im.closest('.naiCropTreatmentCard'))samples.set(im,copy(frame));
+   apply(im,frame);
+  };
+  await waitFor(()=>sheet.querySelector('[aria-label="Edit crop for Photo 1 \u00b7 back"]')?.disabled===false,errors);
+  sheet.querySelector('[aria-label="Edit crop for Photo 1 \u00b7 back"]').click();
+  await waitFor(()=>button(edit,'Save & next')?.disabled===false,errors);
+  const stage=edit.querySelector('.naiCropEditView'),card=stage.querySelector('.naiTradingCard');
+  const im=card.querySelector('.naiFramedSource'),source=im.src;
+  const fitType=edit.querySelector('[aria-label="Photo framing"]'),zoom=edit.querySelector('[aria-label=Zoom]');
+  assert.equal(card.dataset.duoSide,'back');
+  assert.match(edit.querySelector('.naiCardOriginalSize').textContent,/800.*1,200/);
+  assert.equal(zoom.value,String(tight.zoom));
+  for(const [name,frame] of [['[1] Fit whole photo',fit],['[2] Suggested crop',tight],['[3] More body',wider],['[4] Fill opening',fuller]]){
+   const sampleCard=button(edit,name).querySelector('.naiCropTreatmentCard');
+   const sample=sampleCard.querySelector('.naiFramedSource');
+   assert.equal(sampleCard.dataset.duoSide,'back');
+   assert.equal(sampleCard.getAttribute('aria-hidden'),'true');
+   assert.equal(sample.src,source);
+   assert.deepEqual(samples.get(sample),frame);
+  }
+  assert.equal(f.actions.length,0);
+  const key=(type,key)=>stage.dispatchEvent(new w.KeyboardEvent(type,{key,bubbles:true,cancelable:true}));
+  button(edit,'[1] Fit whole photo').click();
+  assert.equal(zoom.value,'1');
+  key('keydown','4');
+  assert.equal(fitType.value,'fill');
+  assert.equal(button(edit,'[4] Fill opening').getAttribute('aria-pressed'),'true');
+
+  button(edit,'Show photo beyond frame').click();
+  assert.equal(stage.dataset.mode,'overflow');
+  assert.equal(card.style.visibility,'hidden');
+  assert.equal(stage.querySelector('.naiCropOverflowPhoto').hidden,false);
+  assert.equal(stage.querySelector('.naiCropCardBoundary').hidden,false);
+  assert.equal(stage.querySelector('.naiCropAperture').hidden,false);
+  key('keydown',' ');
+  assert.equal(stage.dataset.mode,'original');
+  assert.equal(stage.querySelector('.naiCropAperture').hidden,true);
+  assert.equal(stage.querySelector('.naiTradingCard'),card);
+  assert.equal(card.style.visibility,'');
+  assert.equal(im.src,source);
+  assert.equal(zoom.disabled,true);
+  assert.equal(button(edit,'Save & next').disabled,true);
+  key('keyup',' ');
+  assert.equal(stage.dataset.mode,'overflow');
+  button(edit,'Peek original').click();
+  key('keyup',' ');
+  assert.equal(stage.dataset.mode,'original');
+  button(edit,'Peek original').click();
+  assert.equal(stage.dataset.mode,'overflow');
+  button(edit,'Show photo beyond frame').click();
+  assert.equal(stage.dataset.mode,'crop');
+  assert.equal(fitType.value,'fill');
+  assert.equal(f.actions.length,0);
+
+  button(edit,'Reset framing').click();
+  assert.equal(zoom.value,'1');
+  assert.equal(fitType.value,'contain');
+  assert.ok([...edit.querySelectorAll('.naiCropTreatments button')].every(b=>b.getAttribute('aria-pressed')==='false'));
+  const reset=button(edit,'Reset framing');
+  reset.focus();
+  reset.dispatchEvent(new w.KeyboardEvent('keydown',{key:'2',bubbles:true,cancelable:true}));
+  assert.equal(f.root.activeElement,stage);
+  assert.equal(zoom.value,String(tight.zoom));
+  assert.equal(f.actions.length,0);
+  key('keydown','Enter');
+  await waitFor(()=>edit.hidden,errors);
+  assert.deepEqual(f.actions[0].reviews,[{media_id:'p1',token:'token-p1-ready',choice:'suggested'}]);
+  assert.deepEqual(f.collection.frames['image:p1'],tight);
+  assert.deepEqual(errors,[]);
+ }finally{f.dom.window.close();}
+});
+
+test('refresh disarms the previous draft during a delayed read and leaves a recovery path on failure',async()=>{
+ const f=await setup();
+ try{
+  const {sheet,w,errors}=f,editor=sheet.querySelector('.naiCropException');
+  await waitFor(()=>sheet.querySelector('[aria-label="Edit crop for Photo 2"]')?.disabled===false,errors);
+  sheet.querySelector('[aria-label="Edit crop for Photo 2"]').click();
+  await waitFor(()=>button(editor,'Save & next')?.disabled===false,errors);
+  button(editor,'[1] Fit whole photo').click();
+  const oldSave=button(editor,'Save & next'),oldLater=button(editor,'Later');
+  const reject=f.pauseOverview();
+  button(sheet,'Refresh').click();
+  assert.equal(oldSave.isConnected,false);
+  assert.equal(button(editor,'Back to sheet').disabled,false);
+  await waitFor(()=>sheet.querySelector('[role=status]').textContent==='Loading crop review\u2026',errors);
+  oldSave.click();oldLater.click();
+  editor.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+  assert.equal(f.actions.length,0);
+  reject.fail('The Library did not respond.');
+  await waitFor(()=>sheet.querySelector('[role=alert]').textContent.includes('did not respond'),errors);
+  assert.equal(button(editor,'Save & next'),undefined);
+  assert.equal(button(editor,'Back to sheet').disabled,false);
+
+  const recover=f.pauseOverview();
+  button(sheet,'Refresh').click();
+  assert.equal(button(editor,'Save & next'),undefined);
+  recover.resume();
+  await waitFor(()=>button(editor,'Save & next')?.disabled===false,errors);
+  assert.equal(editor.querySelector('h3').textContent,'Photo 2');
+  assert.equal(button(editor,'[2] Suggested crop').getAttribute('aria-pressed'),'true');
+  assert.equal(f.collection.frames['image:p2'],undefined);
+  assert.equal(f.actions.length,0);
+  assert.deepEqual(errors,[]);
+ }finally{f.dom.window.close();}
 });

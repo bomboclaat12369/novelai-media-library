@@ -31,7 +31,7 @@
  .naiCropTile{min-width:0;padding:9px;border:1px solid #394b63;border-radius:10px;background:#172332}
  .naiCropTile[data-marked=true]{background:#242a32;border-color:#e0b86b}
  .naiCropPreview{display:grid;place-items:center;aspect-ratio:7/10;overflow:hidden;color:#c8d3e3;background:#24344a;border-radius:6px}
- .naiCropPreview>.naiPortraitCard,.naiCropEditView>.naiPortraitCard,.naiCropTreatments .naiPortraitCard{width:100%;height:auto;max-width:none;margin:0}
+ .naiCropPreview>.naiPortraitCard,.naiCropScene>.naiPortraitCard,.naiCropTreatments .naiCropTreatmentCard{width:100%;height:auto;max-width:none;margin:0}
  .naiCropDetails{display:grid;gap:2px;margin:8px 0;min-height:40px}
  .naiCropDetails strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .naiCropDetails small{color:#c1d1e6}
@@ -42,18 +42,31 @@
  .naiCropException{max-width:960px;margin:auto}
  .naiCropException>button{margin-bottom:12px}
  .naiCropEditLayout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start;gap:20px}
- .naiCropEditView{width:min(100%,50vh);aspect-ratio:7/10;margin:auto;background:#152438;border-radius:8px}
- .naiCropEditView .naiCardPhotoWindow{cursor:grab;touch-action:none}
- .naiCropEditView .naiCardPhotoWindow:active{cursor:grabbing}
- .naiCropOriginal{display:block;width:100%;height:100%;object-fit:contain}
- .naiCropEditTools{display:grid;gap:12px}
+ .naiCropEditView{position:relative;isolation:isolate;overflow:hidden;width:min(100%,50vh);aspect-ratio:7/10;margin:auto;background:#152438;border-radius:8px}
+ .naiCropScene{position:absolute;inset:0;transform-origin:top left}
+ .naiCropScene>.naiTradingCard>*:not(.naiCardPhotoWindow){pointer-events:none}
+ .naiCropEditView[data-mode=crop],.naiCropEditView[data-mode=overflow]{cursor:grab;touch-action:none;user-select:none}
+ .naiCropEditView[data-dragging=true],.naiCropEditView[data-dragging=true] .naiCardPhotoWindow{cursor:grabbing}
+ .naiCropEditView[data-mode=original] .naiCardPhotoWindow{cursor:default;touch-action:auto}
+ .naiCropEditView[data-mode=crop] .naiFramedSource{box-shadow:0 0 0 2px #ff263f!important}
+ .naiCropOverflowPhoto,.naiCropAperture,.naiCropCardBoundary{position:absolute;pointer-events:none}
+ .naiCropOverflowPhoto{display:block;max-width:none!important;max-height:none!important;object-fit:fill}
+ .naiCropAperture{outline:2px solid #f7db8e;box-shadow:0 0 0 3px #151b26}
+ .naiCropCardBoundary{outline:1px dashed #d9e4f3}
+ .naiCropEditTools{display:grid;gap:10px;min-width:0}
  .naiCropEditTools h3{overflow-wrap:anywhere}
- .naiCropTreatments{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-width:360px}
- .naiCropTreatments button{display:grid;gap:5px;text-align:center;padding:6px;font-size:12px}
- .naiCropZoom{display:flex;gap:8px;align-items:center;max-width:360px}
- .naiCropZoom input{flex:1;min-width:0;padding:0;accent-color:#e0b86b}
+ .naiCropTreatments{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+ .naiCropTreatments button{display:grid;grid-template-columns:clamp(30px,10vw,52px) minmax(0,1fr);align-items:center;gap:6px;min-width:0;padding:5px;text-align:left;overflow-wrap:anywhere}
+ .naiCropTreatmentCard{pointer-events:none}
+ .naiCropTreatments button,.naiCropEditActions button{min-height:40px}
+ .naiCropTreatments button[aria-pressed=true],.naiCropEditActions button[aria-pressed=true]{background:#3b526a;border-color:#7395b5;color:white}
+ .naiCropPositionTools{display:grid;gap:8px}
+ .naiCropPositionTools label{display:grid;grid-template-columns:1fr auto;gap:2px 8px}
+ .naiCropPositionTools select,.naiCropPositionTools input{grid-column:1/-1;width:100%;min-width:0}
+ .naiCropPositionTools input{padding:0;accent-color:#e0b86b}
+ .naiCropPositionTools button{justify-self:start}
  @media(max-width:940px){.naiCropGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
- @media(max-width:680px){.naiCropGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.naiCropEditLayout{grid-template-columns:1fr}.naiCropStatus{margin-left:0}.naiCropTreatments{max-width:260px}.naiCropEditView{width:min(100%,32vh)}}
+ @media(max-width:680px){.naiCropGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.naiCropEditLayout{grid-template-columns:1fr}.naiCropStatus{margin-left:0}.naiCropEditView{width:min(100%,32vh)}}
  @media(max-width:350px){.naiCropGrid{grid-template-columns:1fr}}
 `;
 
@@ -103,7 +116,7 @@
   let generation=0,page=0,anchor=resume.anchor,filter=['all','later'].includes(resume.filter)?resume.filter:'needs';
   let snapshot,rows=[],cardsById=new Map(),queue=[],visible=[],exceptionIds=Array.isArray(resume.exceptionIds)?resume.exceptionIds:[],exception=null;
   let saving=false,loading=false,stale=false,changed=false,undoToken=resume.undoToken;
-  const release=()=>{generation++;clearTimeout(scanTimer);exception=null;for(const url of urls)URL.revokeObjectURL(url);urls.clear();};
+  const release=()=>{generation++;clearTimeout(scanTimer);exception?.dispose();exception=null;for(const url of urls)URL.revokeObjectURL(url);urls.clear();};
   function remember(){
    try{sessionStorage.setItem(storageKey,JSON.stringify({anchor,filter,marked:[...marked].slice(-120),undoToken,exceptionIds}));}catch{}
   }
@@ -186,8 +199,8 @@
     v.check.disabled=saving||loading||stale||!v.ready;
     v.edit.disabled=v.check.disabled;
    }
-   for(const control of editor.querySelectorAll('button,input')){
-    control.disabled=saving||(stale&&control.dataset.save==='true')||control.dataset.unavailable==='true';
+   for(const control of editor.querySelectorAll('button,input,select')){
+    control.disabled=saving||(stale&&control.dataset.save==='true')||control.dataset.unavailable==='true'||(exception?.peeking()&&control.dataset.cropPosition==='true');
    }
   }
   function recordAnchor(){
@@ -213,6 +226,10 @@
    if(!keepException)exceptionIds=[];
    if(retry){scanError='';scanned.clear();missing.clear();}
    loading=true;visible=[];
+   const editing=exceptionIds.length>0;
+   editor.replaceChildren();
+   if(editing)editor.append(cropButton('Back to sheet',exitEditor));
+   editor.hidden=!editing;grid.hidden=editing;
    grid.replaceChildren();m.error.textContent='';stale=false;
    status.textContent='Loading crop review…';saveStatus();
    try{
@@ -402,7 +419,7 @@
    grid.hidden=true;editor.hidden=false;editor.tabIndex=0;editor.replaceChildren();
    status.textContent='Loading original…';m.error.textContent='';stale=false;
    loading=true;saveStatus();m.wrap.scrollTop=0;editor.focus({preventScroll:true});
-   const back=cropButton('Back to sheet',exitEditor),later=cropButton('Later',()=>advance());
+   const back=cropButton('Back to sheet',exitEditor),later=cropButton('Later',()=>{if(checkCurrent(current)&&!loading)advance();});
    editor.append(back);
    try{
     const data=await cropRequest('state',owner,{media_ids:[mid],retry,analyze:retry});
@@ -417,93 +434,178 @@
     await im.decode();
     if(!checkCurrent(current))return;
     const preview=cards.lightCard(item.entry,rows,owner,im,true,mid);
-    const peek=el('img','naiCropOriginal');peek.src=url;peek.alt='Original photo';peek.draggable=false;peek.hidden=true;
-    const view=el('div','naiCropEditView'),tools=el('div','naiCropEditTools'),layout=el('div','naiCropEditLayout');
-    view.append(preview,peek);layout.append(view,tools);editor.append(layout);
+    const opening=im.parentElement,view=el('div','naiCropEditView'),scene=el('div','naiCropScene');
+    const overflowPhoto=el('img','naiCropOverflowPhoto'),aperture=el('span','naiCropAperture'),boundary=el('span','naiCropCardBoundary');
+    overflowPhoto.alt='';overflowPhoto.src=url;overflowPhoto.draggable=false;
+    for(const node of [overflowPhoto,aperture,boundary]){node.hidden=true;node.setAttribute('aria-hidden','true');}
+    const tools=el('div','naiCropEditTools'),layout=el('div','naiCropEditLayout');
+    view.tabIndex=0;view.setAttribute('role','group');view.setAttribute('aria-label','Card crop preview');
+    view.dataset.mode='crop';scene.append(preview);view.append(overflowPhoto,scene,boundary,aperture);
+    layout.append(view,tools);editor.append(layout);
     status.textContent=exceptionIds.length+' to edit';
+
     const {options}=proposal;
-    let frame={...defaultFrame,...options.suggested.frame},edited=false,drag=null;
-    const update=()=>cards.applyFrame(im,frame);
-    update();
-    const title=el('h3','',item.filename);
-    tools.append(title,el('p','naiCollectionMuted',proposal.reason||''));
-    const actions=el('div','naiCropEditActions'),choices=el('div','naiCropTreatments');
-    const frameKey=option=>JSON.stringify([option?.frame?.fit,option?.frame?.x,option?.frame?.y,option?.frame?.zoom,option?.frame?.reference]);
+    const frame={...defaultFrame,...options.suggested.frame};
     const pending=['pending','unavailable'].includes(proposal.analysis_status);
+    const frameKey=option=>JSON.stringify([option?.frame?.fit,option?.frame?.x,option?.frame?.y,option?.frame?.zoom,option?.frame?.reference]);
     const sameAsFit=frameKey(options.suggested)===frameKey(options.fit);
     const fallback=pending?(sameAsFit?'fit':'manual'):'suggested';
-    const second=!pending&&options.fuller?'fuller':'suggested';
-    const first=['wider','fit'].find(choice=>options[choice]&&frameKey(options[choice])!==frameKey(options[second]));
-    const treatment=(key,choice)=>{
-     const option=options[choice];
-     const offlineKeep=pending&&choice==='suggested';
-     const label='['+key+'] '+(offlineKeep?'Keep current crop':option.label);
-     const b=cropButton(label,()=>commit(offlineKeep?fallback:choice,option.frame));
-     b.setAttribute('aria-label',label);b.dataset.save='true';
-     const sample=el('img');sample.alt='';sample.src=url;sample.draggable=false;
-     const card=cards.lightCard(item.entry,rows,owner,sample,true,mid);
-     card.setAttribute('aria-hidden','true');b.prepend(card);cards.applyFrame(sample,option.frame);choices.append(b);return b;
-    };
-    const one=first?treatment(1,first):null;
-    const two=one?treatment(2,second):null;
-    if(choices.childElementCount)tools.append(choices);
-    const savedLabel=pending?(sameAsFit?'Use Fit & next':'Keep current crop & next'):'Save & next';
-    const save=cropButton(savedLabel,()=>commit(edited?'manual':fallback));
-    save.dataset.save='true';save.dataset.primary='true';
-    function markEdited(){edited=true;save.textContent='Save & next';}
+    let selected=pending&&sameAsFit?'fit':'suggested',choice=fallback;
+    let showBeyond=false,peekHeld=false,peekLatched=false,scale=1,drag=null;
+    const peeking=()=>peekHeld||peekLatched;
+    const canEdit=()=>checkCurrent(current)&&!loading&&!saving&&!stale&&!peeking();
+
+    const choices=el('div','naiCropTreatments'),actions=el('div','naiCropEditActions'),position=el('div','naiCropPositionTools');
+    const help=el('p','naiCollectionMuted');
+    const save=cropButton('Save & next',()=>commit(choice));
+    save.dataset.save='true';save.dataset.primary='true';save.dataset.cropPosition='true';
+    const peekButton=cropButton('Peek original',()=>{peekLatched=!peekLatched;changeView();});
+    const overflowButton=cropButton('Show photo beyond frame',()=>{showBeyond=!showBeyond;changeView();});
+    overflowButton.dataset.cropPosition='true';
+    actions.append(save,later,peekButton,overflowButton);
     later.onclick=()=>commit('later');
-    const zoom=el('input');zoom.type='range';zoom.min='1';zoom.max='3';zoom.step='.001';zoom.value=frame.zoom;
-    zoom.setAttribute('aria-label','Zoom');zoom.oninput=()=>changeZoom(Number(zoom.value));
-    const zoomLabel=el('label','naiCropZoom','Zoom ');zoomLabel.append(zoom);
-    const peekButton=cropButton('Peek original',()=>showOriginal(peek.hidden));
-    peekButton.setAttribute('aria-pressed','false');
-    tools.append(el('p','naiCollectionMuted','Drag to position, scroll to zoom. Hold Space to see the original.'),zoomLabel,actions);
-    actions.append(save,later,peekButton);
-    const opening=im.parentElement;
-    function showOriginal(show){preview.hidden=show;peek.hidden=!show;peekButton.setAttribute('aria-pressed',String(show));}
-    function changeZoom(value){
-     if(saving||stale||!peek.hidden)return;
-     frame.zoom=Math.max(1,Math.min(3,value));
-     zoom.value=frame.zoom;zoom.setAttribute('aria-valuetext',Math.round(frame.zoom*100)+'%');markEdited();update();
+    tools.append(el('h3','',item.filename),el('p','naiCollectionMuted',proposal.reason||''),actions,help,choices,position);
+
+    const treatments=new Map();
+    const controls=cards.positionTools(preview,im,position,frame,{
+     canEdit,onEdit(){choice='manual';selected=null;syncTreatment();},onRender:layoutOverflow,
+     displayFrame:()=>peeking()?defaultFrame:frame,
+    });
+    for(const control of position.querySelectorAll('button,input,select')){
+     control.dataset.save='true';control.dataset.cropPosition='true';
     }
-    opening.addEventListener('wheel',event=>{
-     if(saving||stale||!peek.hidden||event.ctrlKey)return;
-     event.preventDefault();changeZoom(frame.zoom*Math.exp(-Math.max(-100,Math.min(100,event.deltaY))*.0025));
-    },{passive:false});
-    opening.addEventListener('pointerdown',event=>{
-     if(event.button!==0||saving||stale||!peek.hidden)return;
-     const rect=(frame.reference?preview:opening).getBoundingClientRect();
-     const {width,height}=frame.reference?{width:rect.width*frame.reference.width,height:rect.height*frame.reference.height}:rect;
-     if(!width||!height)return;
+    for(const [index,name] of ['fit','suggested','wider','fuller'].entries()){
+     if(!options[name]||(pending&&name==='suggested'&&sameAsFit))continue;
+     const key=String(index+1),option=options[name];
+     const label='['+key+'] '+(pending&&name==='suggested'?'Keep current crop':option.label);
+     const button=cropButton(label,event=>{
+      if(!canEdit())return;
+      endDrag();
+      choice=name==='suggested'?fallback:name;selected=name;
+      controls.setFrame(option.frame);syncTreatment();
+      if(event.detail)view.focus({preventScroll:true});
+     });
+     button.dataset.save='true';button.dataset.cropPosition='true';
+     button.setAttribute('aria-label',label);button.setAttribute('aria-keyshortcuts',key);
+     const sample=el('img');sample.src=url;sample.alt='';sample.draggable=false;
+     const sampleCard=cards.lightCard(item.entry,rows,owner,sample,true,mid);
+     sampleCard.classList.add('naiCropTreatmentCard');sampleCard.setAttribute('aria-hidden','true');
+     button.prepend(sampleCard);cards.applyFrame(sample,option.frame);
+     treatments.set(key,{name,button});choices.append(button);
+    }
+    function syncTreatment(){
+     for(const {name,button} of treatments.values())button.setAttribute('aria-pressed',String(name===selected));
+    }
+    function changeView(){
+     if(!checkCurrent(current))return;
+     endDrag();
+     const mode=peeking()?'original':showBeyond?'overflow':'crop';
+     view.dataset.mode=mode;
+     peekButton.setAttribute('aria-pressed',String(peeking()));
+     overflowButton.setAttribute('aria-pressed',String(showBeyond));
+     const outside=mode==='overflow';
+     preview.style.visibility=outside?'hidden':'';
+     for(const node of [overflowPhoto,aperture,boundary])node.hidden=!outside;
+     if(!outside){scene.style.transform='';scale=1;}
+     help.textContent=peeking()?'Original photo fitted in the card.':outside?
+      'Solid outline: photo opening. Dashed outline: card edge. Drag to position or scroll to zoom.':
+      'Drag the photo to position it. Scroll to zoom or hold Space to peek at the original.';
+     controls.render();saveStatus();
+    }
+    // Measure the actual rendered photo and aperture in scene coordinates, then
+    // scale the union with the card so even a large offset stays visible.
+    function layoutOverflow(){
+     if(view.dataset.mode!=='overflow')return;
+     const origin=scene.getBoundingClientRect();
+     const measure=node=>{
+      const rect=node.getBoundingClientRect();
+      return {x:(rect.left-origin.left)/scale,y:(rect.top-origin.top)/scale,w:rect.width/scale,h:rect.height/scale};
+     };
+     const photo=measure(im),card=measure(preview),windowRect=measure(opening);
+     const width=view.clientWidth,height=view.clientHeight,pad=10;
+     if(width<=2*pad||height<=2*pad||!card.w||!photo.w)return;
+     let x=drag?.sceneX,y=drag?.sceneY;
+     if(!drag){
+      const left=Math.min(card.x,photo.x),top=Math.min(card.y,photo.y);
+      const unionWidth=Math.max(card.x+card.w,photo.x+photo.w)-left;
+      const unionHeight=Math.max(card.y+card.h,photo.y+photo.h)-top;
+      scale=Math.min(1,(width-2*pad)/unionWidth,(height-2*pad)/unionHeight);
+      x=(width-unionWidth*scale)/2-left*scale;
+      y=(height-unionHeight*scale)/2-top*scale;
+     }
+     scene.style.transform='translate('+x+'px,'+y+'px) scale('+scale+')';
+     view.dataset.sceneX=String(x);view.dataset.sceneY=String(y);
+     for(const [node,rect] of [[overflowPhoto,photo],[aperture,windowRect],[boundary,card]]){
+      node.style.left=x+rect.x*scale+'px';node.style.top=y+rect.y*scale+'px';
+      node.style.width=rect.w*scale+'px';node.style.height=rect.h*scale+'px';
+     }
+    }
+    view.addEventListener('wheel',event=>{
+     if(!canEdit()||event.ctrlKey)return;
      event.preventDefault();
-     opening.setPointerCapture?.(event.pointerId);
-     editor.focus({preventScroll:true});
-     drag={id:event.pointerId,x:event.clientX,y:event.clientY,left:frame.x,top:frame.y,width,height};
+     const zoom=frame.zoom*Math.exp(-Math.max(-100,Math.min(100,event.deltaY))*.0025);
+     controls.edit({zoom:Math.max(1,Math.min(3,zoom))});
+    },{passive:false});
+    view.addEventListener('pointerdown',event=>{
+     if(drag||event.button!==0||event.isPrimary===false||!canEdit())return;
+     const ref=controls.reference(),rect=ref?preview.getBoundingClientRect():opening.getBoundingClientRect();
+     const width=ref?(preview.clientWidth*scale||rect.width)*ref.width:rect.width;
+     const height=ref?(preview.clientHeight*scale||rect.height)*ref.height:rect.height;
+     if(!width||!height)return;
+     event.preventDefault();view.focus({preventScroll:true});
+     drag={id:event.pointerId,x:event.clientX,y:event.clientY,left:frame.x,top:frame.y,width,height,
+      sceneX:Number(view.dataset.sceneX),sceneY:Number(view.dataset.sceneY)};
+     view.dataset.dragging='true';view.setPointerCapture?.(event.pointerId);
     });
-    opening.addEventListener('pointermove',event=>{
-     if(drag?.id!==event.pointerId||!drag||saving||stale)return;
+    view.addEventListener('pointermove',event=>{
+     if(!drag||drag.id!==event.pointerId||!canEdit())return;
      const limit=value=>Math.max(-1000,Math.min(1000,value));
-     const x=limit(drag.left+(event.clientX-drag.x)*100/drag.width),y=limit(drag.top+(event.clientY-drag.y)*100/drag.height);
-     if(x===frame.x&&y===frame.y)return;
-     frame.x=x;frame.y=y;markEdited();update();
+     controls.edit({
+      x:limit(drag.left+(event.clientX-drag.x)*100/drag.width),
+      y:limit(drag.top+(event.clientY-drag.y)*100/drag.height),
+     });
     });
-    for(const type of ['pointerup','pointercancel','lostpointercapture'])opening.addEventListener(type,()=>{drag=null;});
-    async function commit(choice,chosenFrame=frame){
-     if(saving||(stale&&choice!=='later'))return;
+    function endDrag(event){
+     if(!drag||(event&&event.pointerId!==drag.id))return;
+     const {id}=drag;drag=null;delete view.dataset.dragging;
+     if(view.hasPointerCapture?.(id))view.releasePointerCapture(id);
+     layoutOverflow();
+    }
+    for(const type of ['pointerup','pointercancel','lostpointercapture'])view.addEventListener(type,endDrag);
+    async function commit(choice){
+     if(!checkCurrent(current)||loading||saving||(stale&&choice!=='later')||(peeking()&&choice!=='later'))return;
      if(choice==='later'&&stale){advance();return;}
+     endDrag();
      const review={media_id:mid,token:proposal.token,choice};
-     if(choice==='manual')review.frame=chosenFrame;
+     if(choice==='manual'){
+      review.frame={...frame};
+      if(!review.frame.reference)delete review.frame.reference;
+     }
      if(await mutate('save',{reviews:[review]}))advance();
     }
     exception={
      onKey(event){
       if(event.ctrlKey||event.altKey||event.metaKey||event.shiftKey||/^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)||event.target.isContentEditable)return;
-      const commands={'1':one,'2':two,'Enter':event.target.tagName==='BUTTON'?null:save};
-      if(commands[event.key]){event.preventDefault();if(!event.repeat)commands[event.key].click();}
-      if(event.key===' '&&event.target.tagName!=='BUTTON'){event.preventDefault();showOriginal(true);}
+      const preset=treatments.get(event.key)?.button;
+      const command=event.key==='Enter'&&event.target.tagName!=='BUTTON'?save:preset;
+      if(command&&!command.disabled){
+       event.preventDefault();
+       if(!event.repeat){
+        command.click();
+        if(preset)view.focus({preventScroll:true});
+       }
+      }
+      if(event.key===' '&&event.target.tagName!=='BUTTON'){
+       event.preventDefault();
+       if(!event.repeat&&!saving){peekHeld=true;changeView();}
+      }
      },
-     endPeek(){showOriginal(false);},
+     releaseSpace(){if(peekHeld){peekHeld=false;changeView();}},
+     endPeek(){if(peeking()){peekHeld=peekLatched=false;changeView();}},
+     peeking,
+     dispose(){endDrag();controls.dispose();},
     };
+    syncTreatment();changeView();
     loading=false;saveStatus();
    }catch(e){
     if(checkCurrent(current)){
@@ -519,7 +621,7 @@
   }
   m.wrap.addEventListener('keydown',event=>exception?.onKey(event));
   m.wrap.addEventListener('keydown',event=>{if(saving&&event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();}},true);
-  m.wrap.addEventListener('keyup',event=>{if(event.key===' ')exception?.endPeek();});
+  m.wrap.addEventListener('keyup',event=>{if(event.key===' ')exception?.releaseSpace();});
   m.wrap.addEventListener('focusout',event=>{if(!event.relatedTarget||!editor.contains(event.relatedTarget))exception?.endPeek();});
   window.addEventListener('blur',clearPeek);
   reload(true);
