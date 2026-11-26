@@ -1,48 +1,52 @@
 {
   "schema": 1,
-  "version": "2.0.48",
-  "sha256": "fdbb9e642f8e96e61653c9bbcaf6d0e3f3426a31200faef2a3c46068c3792c57",
-  "notes": "Split mixed suggestions one shoot at a time, keep a separate Set, choose an existing Set from a matching photo, or send photos from either pane to Discard. Unfinished groups stay available on reopening. Approval shows the result and stays clear of the suite Mode button.",
+  "version": "2.0.49",
+  "sha256": "cf2009f9c13cae3322cfe4ed899898dd687d76e70bc5b65582bc022b094dcc88",
+  "notes": "Includes the companion for body-aware card framing and fast crop review in Media Library and Battles.",
   "parts": [
     {
       "sha256": "34ae9e8a61b1108a0bae7eae96a6a523f935a1fb3dd6cc1859ea5f4d6762f6c6",
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/62afa5bf16928cf6975f7f3de23cd512caf1ae1f/payload/duplicate-review-2.0.48.part01.txt"
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/b2d707071da023bf7a652a772e8520c492349f80/payload/duplicate-review-2.0.49.part01.txt"
     },
     {
       "sha256": "8e2e4fae42364093804f9dce71c519f1d1d80bb7f5c3494663863d9081489c3d",
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/62afa5bf16928cf6975f7f3de23cd512caf1ae1f/payload/duplicate-review-2.0.48.part02.txt"
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/b2d707071da023bf7a652a772e8520c492349f80/payload/duplicate-review-2.0.49.part02.txt"
     },
     {
       "sha256": "cd93d3bb461fcb21394e4e228e83bbd8a6d943d4626aa102b2745823f8ecee8f",
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/62afa5bf16928cf6975f7f3de23cd512caf1ae1f/payload/duplicate-review-2.0.48.part03.txt"
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/b2d707071da023bf7a652a772e8520c492349f80/payload/duplicate-review-2.0.49.part03.txt"
     },
     {
-      "sha256": "ce29bf200f4f9923658db9f53fff67049e46ae64582f84b78b2e7462d3e8eac8",
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/62afa5bf16928cf6975f7f3de23cd512caf1ae1f/payload/duplicate-review-2.0.48.part04.txt"
+      "sha256": "2bf7f1a6d36223e0860d2d22a5ab46ac5097f9d86c2958319ea29b4e9849db0f",
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/b2d707071da023bf7a652a772e8520c492349f80/payload/duplicate-review-2.0.49.part04.txt"
     },
     {
-      "sha256": "6fbebee6d551bdddc32b36531a5c0df2452aca38e0a435cc4450ad54bc9b9a0c",
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/62afa5bf16928cf6975f7f3de23cd512caf1ae1f/payload/duplicate-review-2.0.48.part05.txt"
+      "sha256": "8a537af8a05625df55a2b24f14afd225941c7e81e059b68c34ba6ceceead1b1d",
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/b2d707071da023bf7a652a772e8520c492349f80/payload/duplicate-review-2.0.49.part05.txt"
     },
     {
-      "sha256": "796306cf7d6b0f9a5cc116ad03652dfbfd5241227d0383be697dca1dd466d00f",
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/62afa5bf16928cf6975f7f3de23cd512caf1ae1f/payload/duplicate-review-2.0.48.part06.txt"
+      "sha256": "8e917a993ef60d03b2de24a6df05e9a57828207694adf9602333ef54301da052",
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/b2d707071da023bf7a652a772e8520c492349f80/payload/duplicate-review-2.0.49.part06.txt"
     },
     {
-      "sha256": "95fd3db863521a89e8fd602eaeeb87b06325475d7e1c874e8419ce29e173b539",
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/62afa5bf16928cf6975f7f3de23cd512caf1ae1f/payload/duplicate-review-2.0.48.part07.txt"
+      "sha256": "8a7166292b537108941db81c5b06755e9a77b0974036456faad1947dd1f4f734",
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/b2d707071da023bf7a652a772e8520c492349f80/payload/duplicate-review-2.0.49.part07.txt"
     },
     {
-      "sha256": "8c50a21fbda7f31ac785a85200d8225362da4bba674329328a45510bc19d89ff",
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/62afa5bf16928cf6975f7f3de23cd512caf1ae1f/payload/duplicate-review-2.0.48.part08.txt"
+      "sha256": "1d133a37556016a85d3444fb7a78bb426747c3a149daead550f3768410e596be",
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/b2d707071da023bf7a652a772e8520c492349f80/payload/duplicate-review-2.0.49.part08.txt"
     },
     {
-      "sha256": "fa9e6315ee01f13033aea47b4f90e2b9d5ef7500a98e2e4cc9e8162975a0863a",
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/62afa5bf16928cf6975f7f3de23cd512caf1ae1f/payload/duplicate-review-2.0.48.part09.txt"
+      "sha256": "93b74d82a3e8492e1a43ce237862f815d23a2950a0bd773c5e03eac127bffea4",
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/b2d707071da023bf7a652a772e8520c492349f80/payload/duplicate-review-2.0.49.part09.txt"
     },
     {
-      "sha256": "109292931a2ed7e06f98a77464472309754e11d66921250112831ab7fea7c70d",
-      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/62afa5bf16928cf6975f7f3de23cd512caf1ae1f/payload/duplicate-review-2.0.48.part10.txt"
+      "sha256": "043b00667b326fbaa1b964d95b0c7be3672b41c4c05d5247d2bfd96189e4abc9",
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/b2d707071da023bf7a652a772e8520c492349f80/payload/duplicate-review-2.0.49.part10.txt"
+    },
+    {
+      "sha256": "a8a84edc78705f7af4014c9b6664ee9e9af97323c70bc56624f3827da1a7be23",
+      "url": "https://raw.githubusercontent.com/bomboclaat12369/novelai-media-library/b2d707071da023bf7a652a772e8520c492349f80/payload/duplicate-review-2.0.49.part11.txt"
     }
   ]
 }
