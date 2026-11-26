@@ -32,6 +32,38 @@ class AutomaticFramingTests(unittest.TestCase):
     def edit(self, action, state, item, **body):
         return self.call(action,revision=state['collection']['revision'],media_id=item['id'],**body)
 
+    def test_position_card_validates_extended_pan_against_real_source_and_fit(self):
+        wide=self.photo(3072,384)
+        typical=self.photo()
+        reference=dict(R['CARD_FRAME_REFERENCE'])
+        frame={'x':1550,'y':0,'zoom':3,'fit':'fill','reference':reference}
+        key='image:'+wide['id']
+        original=(self.store.root/wide['stored_rel']).read_bytes()
+        state=self.edit('frame',self.call(),wide,key=key,frame=frame)
+        self.assertEqual(state['collection']['frames'][key],frame)
+        self.assertEqual(self.call()['collection']['frames'][key],frame)
+        self.assertEqual((self.store.root/wide['stored_rel']).read_bytes(),original)
+        for item,next_frame in [
+            (wide,{**frame,'x':1700}),
+            (wide,{**frame,'zoom':1}),
+            (wide,{**frame,'fit':'contain'}),
+            (wide,{**frame,'reference':None}),
+            (typical,{**frame,'x':1001}),
+            (typical,{**frame,'x':float('inf')}),
+            (typical,{**frame,'y':float('nan')}),
+            (typical,{**frame,'x':10**400}),
+        ]:
+            with self.subTest(frame=next_frame):
+                code,_=self.post('/api/collection/frame',{'character_id':self.character['id'],
+                    'media_id':item['id'],'key':'image:'+item['id'],
+                    'revision':state['collection']['revision'],'frame':next_frame})
+                self.assertEqual(code,400)
+        self.assertEqual(self.call()['collection']['frames'][key],frame)
+        legacy={'x':1000,'y':-1000,'zoom':1,'fit':'contain'}
+        with patch.object(self.store,'_card_image_header',side_effect=AssertionError('Unexpected source read')):
+            result=self.edit('frame',self.call(),typical,key='image:'+typical['id'],frame=legacy)
+        self.assertEqual(result['collection']['frames']['image:'+typical['id']],legacy)
+
     def test_only_small_side_crops_and_full_height_are_automatic(self):
         eligible=self.photo();others=[self.photo(w,h) for w,h in [(750,1000),(667,1000),(1000,1000),(840,1000),(1600,900)]]
         original=(self.store.root/eligible['stored_rel']).read_bytes();ratings=copy.deepcopy(self.store.battles._load())

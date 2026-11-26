@@ -55,6 +55,20 @@ class CropReviewTests(unittest.TestCase):
         return [{'media_id':item['id'], 'token':page['proposals'][item['id']]['token'], 'choice':choice}
                 for item, choice in choices]
 
+    def test_review_saves_extended_vertical_pan_using_oriented_source_dimensions(self):
+        # The Photo app sees this 12:1 stored JPEG as a 1:12 portrait.
+        item=self.photo(3456,288,orientation=6)
+        page=self.crop('state',media_ids=[item['id']],analyze=False)
+        frame={'x':0,'y':-1300,'zoom':3,'fit':'fill','reference':dict(R['CARD_FRAME_REFERENCE'])}
+        review=self.decisions(page,(item,'manual'))[0]
+        for rejected in [{**frame,'y':-1500},{**frame,'x':1300}]:
+            self.crop('save',expected=400,revision=page['revision'],reviews=[{**review,'frame':rejected}])
+        result=self.crop('save',revision=page['revision'],reviews=[{**review,'frame':frame}])
+        key='image:'+item['id']
+        self.assertEqual(result['collection']['frames'][key],frame)
+        self.assertEqual(self.call()['collection']['frames'][key],frame)
+        self.assertEqual(result['collection']['frame_meta'][key]['dimensions'],[288,3456])
+
     def test_queue_protects_missing_lower_leg_evidence_and_real_padding_tradeoffs(self):
         lower_legs = self.photo(505,932)
         reclining = self.photo(2048,1365)

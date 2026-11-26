@@ -6,9 +6,9 @@ const media=['unchecked','checked','manual','default'].map(id=>({id,character_id
 const entries=media.map((m,i)=>({id:m.id,name:m.original_name,images:[m.id],count:1,played:3,rating:1250-i*50,rd:200,opponent_count:3,position:i+1,provisional:false,tier:'Gold',rating_status:'Developing',titles:[],owned_editions:[],automatic_editions:[],edition_settings:{choice:'auto',traits:[]}}));
 const button=(root,text)=>{const b=[...root.querySelectorAll('button')].find(b=>b.textContent===text);assert.ok(b,'Missing '+text);return b};
 
-async function setup(){
+async function setup({manualFrame={x:5,y:0,zoom:1.2,fit:'contain'}}={}){
  const auto=(checked,token)=>({mode:'auto',checked,token,algorithm:'centered-edge-fit-v2',side_crop_percent:3.125,vertical_crop_percent:0,frame:copy(frame)});
- let collection={revision:'r1',frames:{'image:unchecked':copy(frame),'image:checked':copy(frame),'image:manual':{x:5,y:0,zoom:1.2,fit:'contain'}},frame_meta:{'image:unchecked':auto(false,'first'),'image:checked':auto(true,'second')}};
+ let collection={revision:'r1',frames:{'image:unchecked':copy(frame),'image:checked':copy(frame),'image:manual':manualFrame},frame_meta:{'image:unchecked':auto(false,'first'),'image:checked':auto(true,'second')}};
  const calls=[];let reject=false;
  const f=await fixture({media:copy(media),sourceModules:['ui-src/card-debug.js','ui-src/battles.js'],configure:w=>{
   Object.defineProperties(w.HTMLElement.prototype,{clientWidth:{get(){return this.classList.contains('naiTradingCard')?420:1000},configurable:true},clientHeight:{get(){return 700},configurable:true}});
@@ -167,6 +167,37 @@ test('failed original loads and stale reviews leave the frame unchecked',async()
  }finally{f.dom.window.close();}
 });
 
+test('Position card preserves a saved reference when snapping to zero, and Reset restores native fit',async()=>{
+ const reference={left:.1,top:.11,width:.8,height:.7};
+ const f=await setup({manualFrame:{x:37,y:0,zoom:1,fit:'contain',reference}});
+ try{
+  const cards=f.root.naiCards,entry=entries[2];
+  const open=async()=>{
+   await cards.adjust('character','manual','image:manual',()=>{},{entry,rows:entries});
+   const editor=f.root.querySelector('.naiCardEditor'),card=editor.querySelector('.naiTradingCard');
+   const box=card.querySelector('.naiCardPhotoWindow'),im=box.querySelector('img');
+   Object.defineProperties(card,{clientWidth:{value:420},clientHeight:{value:600}});
+   Object.defineProperties(box,{clientWidth:{value:336},clientHeight:{value:448},offsetLeft:{value:42},offsetTop:{value:78}});
+   Object.defineProperties(im,{naturalWidth:{value:336},naturalHeight:{value:420}});
+   return editor;
+  };
+  let editor=await open();
+  const writes=()=>f.calls.filter(c=>c.route.endsWith('/frame'));
+  editor.querySelector('[aria-label="Move photo all the way left"]').click();
+  assert.equal(writes().length,0);
+  assert.equal(editor.querySelector('[aria-label="Horizontal position"]').value,'0');
+  button(editor,'Save framing').click();
+  await waitFor(()=>!editor.isConnected,f.errors);
+  assert.deepEqual(writes().at(-1).body.frame,{x:0,y:0,zoom:1,fit:'contain',reference});
+  editor=await open();
+  button(editor,'Reset framing').click();
+  button(editor,'Save framing').click();
+  await waitFor(()=>!editor.isConnected,f.errors);
+  assert.deepEqual(writes().at(-1).body.frame,{x:0,y:0,zoom:1,fit:'contain',reference:null});
+  assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close();}
+});
+
 test('production photo layout fills height with exact side cropping and ignores legacy references',async()=>{
  const f=await setup();try{
   const cards=f.root.naiCards,card=f.w.document.createElement('div'),box=f.w.document.createElement('div'),im=f.w.document.createElement('img');
@@ -187,4 +218,54 @@ test('production photo layout fills height with exact side cropping and ignores 
   assert.ok(Math.abs(filled-336)<1e-8);assert.ok(overflow>0);assert.ok((overflow/2)/(overflow+448)<.02);
   assert.equal(parseFloat(tall.style.left),50);assert.ok(Math.abs(parseFloat(tall.style.top)-50)<1e-8);
  }finally{f.dom.window.close()}
+});
+
+test('a crop snapped on a fractional bordered opening remains aligned after resizing and reopening',async()=>{
+ const f=await setup();
+ try{
+  const {document}=f.w,cards=f.root.naiCards;
+  const card=document.createElement('div'),opening=document.createElement('div');
+  const im=document.createElement('img'),tools=document.createElement('div');
+  card.className='naiTradingCard';
+  opening.className='naiCardPhotoWindow';
+  card.append(opening);opening.append(im);f.root.append(card,tools);
+  Object.defineProperties(im,{naturalWidth:{value:768},naturalHeight:{value:1200}});
+  Object.defineProperty(opening,'offsetParent',{value:card});
+  Object.defineProperties(card,{
+   clientWidth:{get:()=>Math.round(parseFloat(card.style.width))},
+   clientHeight:{get:()=>Math.round(parseFloat(card.style.height))},
+  });
+  const box={left:.1,top:.13,width:.8,height:1120/1500};
+  let width,height,openingWidth,openingHeight;
+  Object.defineProperties(opening,{
+   clientWidth:{get:()=>Math.round(openingWidth)},
+   clientHeight:{get:()=>Math.round(openingHeight)},
+   offsetLeft:{get:()=>Math.round(width*box.left-1)},
+   offsetTop:{get:()=>Math.round(height*box.top-2)},
+  });
+  opening.style.cssText='position:absolute;box-sizing:border-box;border-style:solid;border-width:2px 2px 1px 1px';
+  function resize(next){
+   width=next;height=next*10/7;
+   openingWidth=width*box.width;openingHeight=height*box.height;
+   card.style.width=width+'px';card.style.height=height+'px';
+   opening.style.left=(width*box.left-1)+'px';opening.style.top=(height*box.top-2)+'px';
+   opening.style.width=(openingWidth+3)+'px';opening.style.height=(openingHeight+3)+'px';
+  }
+  const beforeEdge=(position,size,span,zoom)=>span*(parseFloat(im.style[position])-parseFloat(im.style[size])*zoom/2)/100;
+  const near=(actual,want)=>assert.ok(Math.abs(actual-want)<1e-8,`${actual} != ${want}`);
+  const draft={x:0,y:0,zoom:3,fit:'contain'};
+  resize(218.234375);
+  const controls=cards.positionTools(card,im,tools,draft);
+  for(const direction of ['right','down'])tools.querySelector('[aria-label="Move photo all the way '+direction+'"]').click();
+  for(const key of Object.keys(box))near(draft.reference[key],box[key]);
+  near(beforeEdge('left','width',openingWidth,3),0);
+  near(beforeEdge('top','height',openingHeight,3),0);
+  const saved=copy(controls.savedFrame());
+  controls.dispose();
+  resize(470);
+  cards.applyFrame(im,saved);
+  near(beforeEdge('left','width',openingWidth,3),0);
+  near(beforeEdge('top','height',openingHeight,3),0);
+  assert.deepEqual(f.errors,[]);
+ }finally{f.dom.window.close();}
 });

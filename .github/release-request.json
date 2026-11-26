@@ -1,6 +1,7 @@
 {
   "schema": 1,
-  "id": "preview-and-position-review-crops-2.9.42",
-  "components": ["standalone"],
-  "publish": true
+  "id": "translucent-card-and-crop-edge-buttons-2.9.43",
+  "components": ["standalone", "runtime", "workbench"],
+  "publish": true,
+  "workbench_notes": "Includes the companion update that saves edge-to-edge card positioning for very wide and very tall photos."
 }

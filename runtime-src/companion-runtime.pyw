@@ -45,6 +45,7 @@ AUTO_FRAME_ALGORITHM = 'centered-edge-fit-v2'
 CROP_REVIEW_ALGORITHM = 'body-aware-balanced-v2-safe'
 CROP_REVIEW_FIT_ALGORITHM = 'verified-card-fit-v1'
 CARD_FRAME_REFERENCE = {'left':.1, 'top':.13, 'width':.8, 'height':1120/1500}
+CARD_FRAME_LEGACY_PAN = 1000
 CARD_FIT_FRAME = {'x':0., 'y':0., 'zoom':1., 'fit':'contain'}
 
 # Finished studio designs only. Automatic mode uses battle provenance; every finished frame is also selectable.
@@ -5173,21 +5174,34 @@ class LibraryStore:
     def _crop_token(value):
         return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
+    @staticmethod
+    def _card_image_header(path, *, single_frame=False):
+        if Image is None:
+            return None
+        try:
+            with Image.open(path) as image:
+                if single_frame and getattr(image, 'n_frames', 1) != 1:
+                    return None
+                orientation = image.getexif().get(274, 1)
+                if orientation not in range(1, 9):
+                    return None
+                size = image.size[::-1] if orientation in (5, 6, 7, 8) else image.size
+                return size, orientation
+        except (OSError, ValueError, KeyError, TypeError, SyntaxError, Image.DecompressionBombError):
+            return None
+
     def _crop_image_snapshot(self, item):
         if not self._crop_review_eligible(item) or Image is None:
             return None
         path = self.root / item['stored_rel']
         try:
             stat = path.stat()
-            with Image.open(path) as image:
-                if getattr(image, 'n_frames', 1) != 1:
-                    return None
-                orientation = image.getexif().get(274, 1)
-                if orientation not in range(1, 9):
-                    return None
-                size = image.size[::-1] if orientation in (5, 6, 7, 8) else image.size
-        except (OSError, ValueError, KeyError, TypeError, SyntaxError, Image.DecompressionBombError):
+        except OSError:
             return None
+        header = self._card_image_header(path, single_frame=True)
+        if header is None:
+            return None
+        size, orientation = header
         source = self._crop_token((CROP_REVIEW_ALGORITHM, self._frame_source(item), item['stored_rel'], size,
                                    orientation, stat.st_size, stat.st_mtime_ns, stat.st_ino))
         return {'path':path, 'size':size, 'source':source}
@@ -5486,13 +5500,15 @@ class LibraryStore:
         local = os.environ.get('LOCALAPPDATA') or os.environ.get('XDG_CACHE_HOME')
         return (Path(local) if local else Path.home() / '.cache') / APP_NAME / 'card-crop-engine'
 
-    @staticmethod
-    def _validate_card_frame(frame):
+    def _validate_card_frame(self, frame, *, item=None, size=None, profile=False):
         if not isinstance(frame, dict):
             raise ValueError('Invalid card framing.')
-        for name, low, high in [('x',-1000,1000), ('y',-1000,1000), ('zoom',1,3)]:
+        # Require numbers within JavaScript's safe numeric range before doing
+        # geometry. Range comparisons also reject infinity and NaN.
+        safe = 2**53 - 1
+        for name, low, high in [('x',-safe,safe), ('y',-safe,safe), ('zoom',1,3)]:
             value = frame.get(name)
-            if type(value) not in (int,float) or not math.isfinite(value) or not low <= value <= high:
+            if type(value) not in (int,float) or not low <= value <= high:
                 raise ValueError('Invalid card position or zoom.')
         fit = frame.get('fit','contain')
         if fit not in ('fill','contain'):
@@ -5503,13 +5519,35 @@ class LibraryStore:
         if reference is not None:
             if not isinstance(reference,dict) or set(reference) != set(CARD_FRAME_REFERENCE):
                 raise ValueError('Invalid card framing reference.')
-            if any(type(v) not in (int,float) or not math.isfinite(v) for v in reference.values()):
+            if any(type(v) not in (int,float) or not 0 <= v <= 1 for v in reference.values()):
                 raise ValueError('Invalid card framing reference.')
             if not (0 <= reference['left'] < 1 and 0 <= reference['top'] < 1 and
                     0 < reference['width'] <= 1 and 0 < reference['height'] <= 1 and
                     reference['left']+reference['width'] <= 1.001 and reference['top']+reference['height'] <= 1.001):
                 raise ValueError('Invalid card framing reference.')
             cleaned['reference'] = dict(reference)
+        if any(abs(cleaned[axis]) > CARD_FRAME_LEGACY_PAN for axis in ('x','y')):
+            if size is None and item and item.get('media_type') == 'image' and item.get('stored_rel'):
+                header = self._card_image_header(self.root / item['stored_rel'])
+                if header:
+                    size = header[0]
+            if reference is None or size is None:
+                raise ValueError('Invalid card position or zoom.')
+            card_width = 2 / 3.25 if profile else 7 / 10
+            width, height = size
+            scale = (min if fit == 'contain' else max)(card_width * reference['width'] / width,
+                                                       reference['height'] / height)
+            # The exact opening differs on legacy frames. An extended pan must
+            # leave the zoomed source overlapping the card on that axis.
+            for axis, start, span, card, source in [
+                ('x','left','width',card_width,width), ('y','top','height',1,height),
+            ]:
+                origin = reference[start] + reference[span] / 2
+                position = cleaned[axis]
+                reach = source * scale * cleaned['zoom'] / 2 + card * (origin if position < 0 else 1 - origin)
+                movement = abs(position) / 100 * card * reference[span]
+                if abs(position) > CARD_FRAME_LEGACY_PAN and movement > reach * (1 + 1e-6):
+                    raise ValueError('Invalid card position or zoom.')
         return cleaned
 
     @staticmethod
@@ -5555,7 +5593,7 @@ class LibraryStore:
                 if choice != 'suggested' or proposal['category'] != 'saved':
                     if choice != 'manual' and choice not in proposal['options']:
                         raise ValueError('Choose one of the displayed crop options.')
-                    frame = (self._validate_card_frame(review.get('frame')) if choice == 'manual'
+                    frame = (self._validate_card_frame(review.get('frame'), size=snapshot['size']) if choice == 'manual'
                              else dict(proposal['options'][choice]['frame']))
                     record = data.get('frame_meta', {}).get(key, {})
                     if (choice == 'suggested' and self._automatic_card_frame_record(record) and
@@ -5742,7 +5780,8 @@ class LibraryStore:
                 key, mid = body.get('key', ''), body.get('media_id', '')
                 if mid not in media or key not in ('image:'+mid, 'profile:'+mid):
                     raise ValueError('Choose an image belonging to this person.')
-                data['frames'][key] = self._validate_card_frame(body.get('frame', {}))
+                data['frames'][key] = self._validate_card_frame(body.get('frame', {}), item=media[mid],
+                                                                profile=key.startswith('profile:'))
                 data['frame_meta'][key]={'mode':'manual','at':now_iso()}
             elif action == 'frame-review-batch':
                 reviews = body.get('reviews')

@@ -21,11 +21,17 @@ on the exceptions, then use **Approve others & edit**. With no exceptions, use
 In the editor, click a crop preview or press its numbered shortcut to try it
 on the current photo. Drag the photo, scroll to zoom, or use the same fit,
 horizontal position, vertical position and zoom controls as **Position card**.
+Use the directional buttons beside either position slider to move the photo
+as far left, right, up or down as it can go at the current zoom. When the photo
+covers the opening, the button stops where a gap would first appear. When the
+photo is too small to cover that axis, it puts the existing gap on the opposite
+side. Each button moves the photo along just one axis.
 **Reset framing** returns the draft to a centered whole-photo fit.
 
 **Peek original** shows the whole original inside its card. Hold **Space** to
-peek temporarily. **Show photo beyond frame** shows the whole photo at its
-original brightness and current position and zoom. The solid line marks the
+peek temporarily. **Show photo beyond frame** overlays the actual card artwork
+at reduced opacity on the whole positioned photo. The photo stays at its
+original brightness inside the opening and beyond the card. The solid line marks the
 photo opening. The dashed line marks the outside of the card. Drag the photo
 in that view to bring a cut-off detail back into the opening.
 

@@ -49,6 +49,9 @@
  .naiCropEditView[data-dragging=true],.naiCropEditView[data-dragging=true] .naiCardPhotoWindow{cursor:grabbing}
  .naiCropEditView[data-mode=original] .naiCardPhotoWindow{cursor:default;touch-action:auto}
  .naiCropEditView[data-mode=crop] .naiFramedSource{box-shadow:0 0 0 2px #ff263f!important}
+ .naiCropEditView[data-mode=overflow] .naiCropScene>.naiTradingCard{opacity:.44;background:transparent!important}
+ .naiCropEditView[data-mode=overflow] .naiCropScene>.naiTradingCard>.naiCardPhotoWindow{background:transparent!important;box-shadow:none}
+ .naiCropEditView[data-mode=overflow] .naiCropScene .naiFramedSource{opacity:0}
  .naiCropOverflowPhoto,.naiCropAperture,.naiCropCardBoundary{position:absolute;pointer-events:none}
  .naiCropOverflowPhoto{display:block;max-width:none!important;max-height:none!important;object-fit:fill}
  .naiCropAperture{outline:2px solid #f7db8e;box-shadow:0 0 0 3px #151b26}
@@ -65,6 +68,7 @@
  .naiCropPositionTools select,.naiCropPositionTools input{grid-column:1/-1;width:100%;min-width:0}
  .naiCropPositionTools input{padding:0;accent-color:#e0b86b}
  .naiCropPositionTools button{justify-self:start}
+ .naiCropPositionTools .naiCardPanControl{margin:0}
  @media(max-width:940px){.naiCropGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
  @media(max-width:680px){.naiCropGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.naiCropEditLayout{grid-template-columns:1fr}.naiCropStatus{margin-left:0}.naiCropEditView{width:min(100%,32vh)}}
  @media(max-width:350px){.naiCropGrid{grid-template-columns:1fr}}
@@ -504,7 +508,6 @@
      peekButton.setAttribute('aria-pressed',String(peeking()));
      overflowButton.setAttribute('aria-pressed',String(showBeyond));
      const outside=mode==='overflow';
-     preview.style.visibility=outside?'hidden':'';
      for(const node of [overflowPhoto,aperture,boundary])node.hidden=!outside;
      if(!outside){scene.style.transform='';scale=1;}
      help.textContent=peeking()?'Original photo fitted in the card.':outside?
@@ -559,10 +562,9 @@
     });
     view.addEventListener('pointermove',event=>{
      if(!drag||drag.id!==event.pointerId||!canEdit())return;
-     const limit=value=>Math.max(-1000,Math.min(1000,value));
      controls.edit({
-      x:limit(drag.left+(event.clientX-drag.x)*100/drag.width),
-      y:limit(drag.top+(event.clientY-drag.y)*100/drag.height),
+      x:drag.left+(event.clientX-drag.x)*100/drag.width,
+      y:drag.top+(event.clientY-drag.y)*100/drag.height,
      });
     });
     function endDrag(event){

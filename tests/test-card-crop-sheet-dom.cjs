@@ -390,8 +390,12 @@ test('treatments, original peek and beyond-frame view are local until explicit s
 
   button(edit,'Show photo beyond frame').click();
   assert.equal(stage.dataset.mode,'overflow');
-  assert.equal(card.style.visibility,'hidden');
-  assert.equal(stage.querySelector('.naiCropOverflowPhoto').hidden,false);
+  assert.equal(stage.querySelector('.naiTradingCard'),card);
+  assert.equal(card.style.visibility,'');
+  assert.ok(card.querySelector('.naiEditionFrame'));
+  const overflow=stage.querySelector('.naiCropOverflowPhoto');
+  assert.equal(overflow.hidden,false);
+  assert.equal(overflow.src,source);
   assert.equal(stage.querySelector('.naiCropCardBoundary').hidden,false);
   assert.equal(stage.querySelector('.naiCropAperture').hidden,false);
   key('keydown',' ');
@@ -399,6 +403,7 @@ test('treatments, original peek and beyond-frame view are local until explicit s
   assert.equal(stage.querySelector('.naiCropAperture').hidden,true);
   assert.equal(stage.querySelector('.naiTradingCard'),card);
   assert.equal(card.style.visibility,'');
+  assert.equal(overflow.hidden,true);
   assert.equal(im.src,source);
   assert.equal(zoom.disabled,true);
   assert.equal(button(edit,'Save & next').disabled,true);
@@ -428,6 +433,112 @@ test('treatments, original peek and beyond-frame view are local until explicit s
   await waitFor(()=>edit.hidden,errors);
   assert.deepEqual(f.actions[0].reviews,[{media_id:'p1',token:'token-p1-ready',choice:'suggested'}]);
   assert.deepEqual(f.collection.frames['image:p1'],tight);
+  assert.deepEqual(errors,[]);
+ }finally{f.dom.window.close();}
+});
+
+test('review edge buttons place unavoidable padding and recover overpan without applying a crop',async()=>{
+ const f=await setup();
+ try{
+  const {sheet,w,errors}=f;
+  const edit=sheet.querySelector('.naiCropException');
+  const link=await waitFor(()=>sheet.querySelector('[aria-label="Edit crop for Photo 2"]'),errors);
+  await waitFor(()=>!link.disabled,errors);link.click();
+  await waitFor(()=>button(edit,'Save & next')?.disabled===false,errors);
+  const stage=edit.querySelector('.naiCropEditView'),card=stage.querySelector('.naiTradingCard');
+  const opening=card.querySelector('.naiCardPhotoWindow'),im=opening.querySelector('.naiFramedSource');
+  Object.defineProperties(card,{clientWidth:{value:420},clientHeight:{value:600}});
+  Object.defineProperties(opening,{clientWidth:{value:336},clientHeight:{value:448},offsetLeft:{value:42},offsetTop:{value:78}});
+  const edge=direction=>button(edit,'Move photo all the way '+direction);
+  const position=(label,value)=>{
+   const slider=edit.querySelector('[aria-label="'+label+'"]');
+   slider.value=value;slider.dispatchEvent(new w.Event('input'));
+  };
+  const pixels=(attribute,span)=>parseFloat(im.style[attribute])/100*span;
+  const near=(actual,expected)=>assert.ok(Math.abs(actual-expected)<1e-8,`${actual} != ${expected}`);
+  button(edit,'[1] Fit whole photo').click();
+  const left=edge('left'),right=edge('right');
+  const horizontal=edit.querySelector('[aria-label="Horizontal position"]');
+  assert.equal(left.nextElementSibling,horizontal);
+  assert.equal(horizontal.nextElementSibling,right);
+  left.click();
+  near(pixels('left',336)-pixels('width',336)/2,0);
+  right.click();
+  near(pixels('left',336)+pixels('width',336)/2,336);
+  position('Vertical position',23);
+  edge('up').click();
+  near(pixels('top',448),224);
+  assert.equal(f.actions.length,0);
+
+  position('Zoom',1.16);position('Horizontal position',39);position('Vertical position',-32);
+  button(edit,'Show photo beyond frame').click();
+  const topBefore=im.style.top;
+  left.click();
+  near(pixels('left',336)+pixels('width',336)*1.16/2,336);
+  assert.equal(im.style.top,topBefore);
+  right.click();
+  near(pixels('left',336)-pixels('width',336)*1.16/2,0);
+  const leftBefore=im.style.left;
+  edge('up').click();
+  near(pixels('top',448)+pixels('height',448)*1.16/2,448);
+  edge('down').click();
+  near(pixels('top',448)-pixels('height',448)*1.16/2,0);
+  assert.equal(im.style.left,leftBefore);
+  button(edit,'Peek original').click();
+  assert.ok(['left','right','up','down'].every(direction=>edge(direction).disabled));
+  button(edit,'Peek original').click();
+  assert.equal(stage.dataset.mode,'overflow');
+  assert.equal(f.actions.length,0);
+  button(edit,'Save & next').click();
+  await waitFor(()=>edit.hidden,errors);
+  const result=f.actions[0].reviews[0];
+  assert.equal(result.choice,'manual');
+  near(result.frame.x,(448*800/1200*1.16-336)/2/336*100);
+  near(result.frame.y,8);
+  assert.equal(result.frame.fit,'contain');
+  assert.equal(result.frame.zoom,1.16);
+  assert.deepEqual(result.frame.reference,{left:.1,top:.13,width:.8,height:448/600});
+  assert.deepEqual(errors,[]);
+ }finally{f.dom.window.close();}
+});
+
+test('review sliders and dragging stay continuous beyond the old pan limit',async()=>{
+ const f=await setup();
+ try{
+  const {sheet,w,errors}=f;
+  const edit=sheet.querySelector('.naiCropException');
+  const label='[aria-label="Edit crop for Photo 2"]';
+  const link=await waitFor(()=>sheet.querySelector(label)?.disabled===false&&sheet.querySelector(label),errors);
+  link.click();
+  await waitFor(()=>button(edit,'Save & next')?.disabled===false,errors);
+  const stage=edit.querySelector('.naiCropEditView'),card=stage.querySelector('.naiTradingCard');
+  const opening=card.querySelector('.naiCardPhotoWindow'),im=opening.querySelector('img');
+  Object.defineProperties(card,{clientWidth:{value:420},clientHeight:{value:600}});
+  Object.defineProperties(opening,{clientWidth:{value:336},clientHeight:{value:448},offsetLeft:{value:42},offsetTop:{value:78}});
+  Object.defineProperties(im,{naturalWidth:{value:3072},naturalHeight:{value:384}});
+  button(edit,'[4] Fill opening').click();
+  const slider=label=>edit.querySelector('[aria-label="'+label+'"]');
+  const move=(label,position)=>{
+   const control=slider(label);
+   control.value=position;control.dispatchEvent(new w.Event('input'));
+  };
+  move('Zoom',3);
+  button(edit,'Move photo all the way right').click();
+  assert.equal(Number(slider('Horizontal position').value),1550);
+  move('Horizontal position',1549.9);
+  button(edit,'Show photo beyond frame').click();
+  for(const [type,x,y] of [['pointerdown',10,30],['pointermove',10,35],['pointerup',10,35]]){
+   opening.dispatchEvent(new w.MouseEvent(type,{clientX:x,clientY:y,button:0,bubbles:true}));
+  }
+  assert.equal(Number(slider('Horizontal position').value),1549.9);
+  for(const [type,x,y] of [['pointerdown',10,30],['pointermove',8,30],['pointerup',8,30]]){
+   opening.dispatchEvent(new w.MouseEvent(type,{clientX:x,clientY:y,button:0,bubbles:true}));
+  }
+  assert.ok(Math.abs(Number(slider('Horizontal position').value)-1549.9)<1);
+  assert.equal(f.actions.length,0);
+  button(edit,'Save & next').click();
+  await waitFor(()=>edit.hidden,errors);
+  assert.ok(Math.abs(f.actions[0].reviews[0].frame.x-(1549.9-200/336))<1e-8);
   assert.deepEqual(errors,[]);
  }finally{f.dom.window.close();}
 });
