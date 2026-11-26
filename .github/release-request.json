@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "id": "body-aware-card-crop-review-2.9.41",
+  "id": "body-aware-card-crop-review-2.9.41-r2",
   "components": ["standalone", "runtime", "workbench"],
   "publish": true,
   "workbench_notes": "Includes the companion for body-aware card framing and fast crop review in Media Library and Battles."

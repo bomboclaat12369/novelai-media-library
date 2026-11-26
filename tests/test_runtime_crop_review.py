@@ -211,6 +211,32 @@ class CropReviewTests(unittest.TestCase):
         self.assertEqual(result['collection']['frame_meta'], original['frame_meta'])
         self.assertEqual(result['collection']['frames'], original['frames'])
 
+    def test_failed_crop_save_and_undo_can_be_retried_without_partial_history(self):
+        item = self.photo(750,1333)
+        page = self.fill_page(item, analyses=[LIKELY])
+        owner = self.character['id']
+
+        def attempt(action, **body):
+            return self.store.crop_review_edit('crop-review-' + action, {'character_id':owner, **body})
+
+        def fail_then_retry(action, **body):
+            snapshot = self.store.db_path.read_bytes()
+            journal = self.store.tracking.export()
+            with patch.object(self.store, '_write_atomic', side_effect=OSError('disk full')):
+                with self.assertRaisesRegex(OSError, 'disk full'):
+                    attempt(action, **body)
+            self.assertEqual(self.store.db_path.read_bytes(), snapshot)
+            self.assertEqual(self.store.tracking.export(), journal)
+            return attempt(action, **body)
+
+        original = self.store.character(owner)['collection']
+        saved = fail_then_retry('save', revision=page['revision'], reviews=self.decisions(page, (item,'suggested')))
+        key = 'image:' + item['id']
+        self.assertTrue(saved['collection']['frame_meta'][key]['checked'])
+        restored = fail_then_retry('undo', revision=saved['collection']['revision'], undo_token=saved['undo_token'])
+        self.assertEqual(restored['collection']['frames'], original['frames'])
+        self.assertEqual(restored['collection']['frame_meta'], original['frame_meta'])
+
     def test_tracking_keeps_compact_photo_deltas_and_checkpoint_history(self):
         item = self.photo(750,1333)
         page = self.fill_page(item, analyses=[LIKELY])

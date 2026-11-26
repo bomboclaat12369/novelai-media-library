@@ -5808,7 +5808,10 @@ class LibraryStore:
                 data['revision'] = uuid.uuid4().hex
                 character['collection'] = data
                 try:
-                    self.save(media_ids=[])
+                    if action in ('crop-review-save', 'crop-review-undo'):
+                        self.save(media_ids=[])
+                    else:
+                        self.save()
                 except Exception:
                     if previous is None: character.pop('collection', None)
                     else: character['collection'] = previous
