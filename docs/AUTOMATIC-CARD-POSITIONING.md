@@ -1,11 +1,42 @@
 # Automatic card positioning
 
-Media Library 2.9.29 and companion 2.7.79 (also bundled with Workbench 2.0.31)
-automatically position eligible images when collection settings load. Opening or
-refreshing Battles loads these settings for both existing and newly imported
-images. Normal card browsing has no additional badges or controls.
+In Media Library 2.9.41, open **Review card crops** in the Library toolbar or
+the Battles image leaderboard. The companion prepares crops for the selected
+character’s Main photos in the background while the review is open. Library
+and Battles share the framing and decisions. Each side of a Duo has its own
+photo and crop.
 
-## Crop limits
+## Reviewing photos
+
+**Needs a look** shows photos you flagged and automatic crops with a meaningful
+composition choice. This includes a crop that trims beyond the visible hips
+when the model could not locate the lower legs, and a fuller crop that could
+lose part of a reclining pose. **All auto crops** also shows straightforward
+fits and previously checked crops. Likely-good crops take effect automatically.
+
+Each page shows up to twelve photos in their card frames. Tick **Mark to edit**
+on the exceptions, then use **Approve others & edit**. With no exceptions, use
+**Approve all**. Batch approval covers the ready previews on that page.
+
+In the editor, drag the photo or scroll to zoom. Hold **Space** to look at the
+original. When two distinct framings are available, **1** and **2** save the
+corresponding preview and advance. **Enter** saves the current framing and
+advances. Opening the editor leaves the decision pending. Choose **Later** to
+defer the photo and use the **Later** filter to return to it. **Undo last**
+restores the previous state of the affected photos.
+You can also **Flag crop for review** on a Battles photo and continue voting.
+
+## Local body analysis
+
+On first use the companion downloads the local CPU pose software and verifies
+the full pose model against its pinned SHA-256. It prepares reduced, oriented
+copies for the model on this computer. It estimates the visible body and its
+outline and compares the resulting crop with the full-photo fit. This allows
+some empty space when filling the opening would sacrifice too much of the pose.
+The queue keeps working as more photos finish. An unavailable analysis can be
+retried. Saved manual frames and explicit choices take priority.
+
+## Initial framing before body analysis
 
 The shared photo opening is 840 × 1120. The companion measures the total gap
 left by centered Fit at this reference size. A gap under one pixel needs no
@@ -19,7 +50,7 @@ bottom. A 730 × 1,000 photo uses 102.74% zoom and loses 1.33% per vertical
 edge. Previously automatic crops with imperceptible changes revert to Default
 on load. Qualifying old crops keep their review token and checked state.
 
-The runtime uses known dimensions to shortlist candidates, then verifies their
+The initial edge-fit rule uses known dimensions to shortlist candidates, then verifies their
 original file headers and EXIF orientation. It skips missing/unreadable files,
 unknown dimensions, animated images, videos, removal flags, Review/Purgatory,
 images outside Main, and images with saved library crops. It does not decode,
@@ -31,19 +62,11 @@ edition is shown. Base and special editions retain the existing renderer and
 artwork. Geometry guarantees edge alignment within the shared photo window;
 composition and artwork overlapping the image still require visual judgment.
 
-## Review and overrides
+## Leaderboard tools and saved choices
 
-Open **Review card crops** from the Library toolbar or the Battles image
-leaderboard. Each page shows up to twelve unchecked automatic crops for the
-selected character in their actual card frames. Each side of a Duo has its own
-crop. Leave the good previews checked and use **Approve selected** once.
-Unchecking a photo keeps it available for later. **Adjust** opens the existing
-original-resolution positioning editor. Opening it marks the crop checked once
-the original loads.
-
-Approval saves all selected review decisions together and checks the displayed
-revision and each photo’s framing token. A missing preview stays unchecked.
-Refresh the sheet if another window changes the collection during review.
+Approval saves a page’s selected review decisions together. A source or crop
+change invalidates the corresponding preview. Refresh if another window has
+edited the same photo.
 
 In the leaderboard, enable **Debug mode**, then use **Crop filter**:
 
@@ -52,27 +75,26 @@ In the leaderboard, enable **Debug mode**, then use **Crop filter**:
 - **All auto-positioned**, **Manual custom crops**, or **Default crops**.
 
 An automatic crop offers **Mark checked** (or **Mark unchecked**), **Position /
-crop**, and **Restore default**. Opening the image's positioning editor from any
-card control marks the displayed automatic crop checked once the original loads.
-Closing refreshes the underlying view. Saving without touching the framing keeps
+crop**, and **Restore default**. Closing the positioning editor refreshes the
+underlying view. Explicitly saving the automatic framing keeps
 its automatic status. The Zoom control displays the precise percentage.
-Restore immediately saves centered Fit at 1×;
-normal editor adjustments save through the existing Save framing control.
+Restore immediately saves centered Fit at 1×. Editor adjustments save through
+the existing Save framing control.
 Both paths preserve an explicit manual frame, including a deliberate default,
 so automation cannot reapply over it. Every previously saved frame, including
 legacy defaults, takes priority. Profile positioning is independent.
 
 `collection.frames` retains the existing renderer format. New `frame_meta`
 records the derivation version, source identity and dimensions, applied frame,
-horizontal and vertical crop amounts, timestamp, review token and checked state. The existing atomic
-library save and durable character tracking journal retain before/after
-evidence. Checkpoints include this metadata and its history.
+horizontal and vertical crop amounts, timestamp, review token and checked state.
+The atomic Library save records each changed photo’s previous and new framing
+in the tracking journal, with the source and whether the decision was manual
+or automatic. Checkpoints include this metadata and its history.
 
-Review and restore validate the collection revision and the exact automatic
-frame token shown to the user. They reject stale clicks and another character's
-media. A replacement source invalidates the previous automatic frame/review;
-eligible replacements get a fresh unchecked crop, otherwise the automatic
-frame is removed. Saved manual frames continue to take priority.
+Review and restore validate the source and framing shown to the user. They
+reject stale clicks and another character's media. A replacement source
+invalidates the previous automatic analysis. Saved manual frames continue to
+take priority.
 
 ## Validation
 
@@ -82,4 +104,6 @@ checkpoint/journal retention, owner isolation and atomic failure rollback.
 DOM tests exercise debug labels, review/restore, stale-error recovery, the actual
 leaderboard review filter and production photo placement with legacy references.
 The normal product suite also checks ranking, Workbench and the 364 approved
-special-edition card renders. No live Windows desktop verification is claimed.
+special-edition card renders. The crop review release was exercised in a
+disposable Windows Library in Edge, including batch approval, an original
+comparison, a custom crop, Undo, Later and flagging a card during a battle.

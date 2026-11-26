@@ -21,109 +21,510 @@
  cards.framingStatus=(owner,mid)=>metaFor(owner,mid)?.mode==='auto'?(metaFor(owner,mid).checked?'auto-checked':'auto-unchecked'):custom(frameFor(owner,mid))?'custom':'default';
  cards.matchesCropFilter=(owner,mid,filter)=>filter==='all'||(filter==='auto'?cards.framingStatus(owner,mid).startsWith('auto-'):cards.framingStatus(owner,mid)===filter);
  style.textContent += `
- .naiCropToolbar{position:sticky;top:0;z-index:3;background:#111923;padding:8px 0;display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;margin:0 0 1rem}
- .naiCropGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,235px),1fr));gap:16px}
- .naiCropTile{min-width:0}.naiCropTile .naiPortraitCard{width:100%;height:auto;max-width:none}
- .naiCropTile .naiCropPreview{aspect-ratio:7/10}.naiCropTile .naiCropActions{display:flex;align-items:center;gap:6px;margin-top:5px}
- .naiCropActions label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- `;
+ .naiCropSheet{width:min(1260px,100%)}
+ .naiCropSheet .naiCollectionHeader{margin-bottom:8px}
+ .naiCropToolbar{position:sticky;top:0;z-index:3;background:#101923;border-bottom:1px solid #33445a;border-radius:8px;padding:10px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:16px}
+ .naiCropFilters,.naiCropPages,.naiCropEditActions{display:flex;flex-wrap:wrap;gap:6px}
+ .naiCropToolbar .naiCropFilters button[aria-pressed=true]{background:#3b526a;border-color:#7395b5;color:white}
+ .naiCropStatus{margin-left:auto;font-size:13px;color:#d2dfef}
+ .naiCropGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+ .naiCropTile{min-width:0;padding:9px;border:1px solid #394b63;border-radius:10px;background:#172332}
+ .naiCropTile[data-marked=true]{background:#242a32;border-color:#e0b86b}
+ .naiCropPreview{display:grid;place-items:center;aspect-ratio:7/10;overflow:hidden;color:#c8d3e3;background:#24344a;border-radius:6px}
+ .naiCropPreview>.naiPortraitCard,.naiCropEditView>.naiPortraitCard,.naiCropTreatments .naiPortraitCard{width:100%;height:auto;max-width:none;margin:0}
+ .naiCropDetails{display:grid;gap:2px;margin:8px 0;min-height:40px}
+ .naiCropDetails strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .naiCropDetails small{color:#c1d1e6}
+ .naiCropActions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;justify-content:space-between}
+ .naiCropActions label{display:flex;gap:5px;align-items:center;cursor:pointer;font-size:12px}
+ .naiCropActions input{margin:0;width:16px;height:16px;accent-color:#e0b86b}
+ .naiCropActions button{padding:4px 9px;font-size:12px}
+ .naiCropException{max-width:960px;margin:auto}
+ .naiCropException>button{margin-bottom:12px}
+ .naiCropEditLayout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start;gap:20px}
+ .naiCropEditView{width:min(100%,50vh);aspect-ratio:7/10;margin:auto;background:#152438;border-radius:8px}
+ .naiCropEditView .naiCardPhotoWindow{cursor:grab;touch-action:none}
+ .naiCropEditView .naiCardPhotoWindow:active{cursor:grabbing}
+ .naiCropOriginal{display:block;width:100%;height:100%;object-fit:contain}
+ .naiCropEditTools{display:grid;gap:12px}
+ .naiCropEditTools h3{overflow-wrap:anywhere}
+ .naiCropTreatments{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-width:360px}
+ .naiCropTreatments button{display:grid;gap:5px;text-align:center;padding:6px;font-size:12px}
+ .naiCropZoom{display:flex;gap:8px;align-items:center;max-width:360px}
+ .naiCropZoom input{flex:1;min-width:0;padding:0;accent-color:#e0b86b}
+ @media(max-width:940px){.naiCropGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+ @media(max-width:680px){.naiCropGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.naiCropEditLayout{grid-template-columns:1fr}.naiCropStatus{margin-left:0}.naiCropTreatments{max-width:260px}.naiCropEditView{width:min(100%,32vh)}}
+ @media(max-width:350px){.naiCropGrid{grid-template-columns:1fr}}
+`;
+
+ const cropRequest=(action,owner,body={})=>{
+  const analysis=action==='state'&&body.media_ids?.length&&body.analyze!==false;
+  return root.naiOutfitRequest('/api/collection/crop-review-'+action,{character_id:owner,...body},analysis?{timeout:300000}:undefined);
+ };
+ const cropButton=(name,click)=>{const b=el('button','',name);b.type='button';b.onclick=click;return b;};
+ const defaultFrame={x:0,y:0,zoom:1,fit:'contain'};
+ const flagged=(owner,mid)=>!!cards.cache.get(owner)?.collection.crop_review?.[mid]?.flagged;
+ const flagRequests=new Map();
+ cards.cropReviewFlag=function(owner,getMedia,onError,canUse=()=>true){
+  const flag=cropButton('',async event=>{
+   event.stopPropagation();
+   const mid=getMedia(),key=owner+':'+mid;
+   if(flagRequests.has(key)||!canUse())return;
+   const work=(async()=>{
+    const current=await cropRequest('state',owner,{media_ids:[mid],analyze:false});
+    const proposal=current.proposals[mid];
+    if(!proposal?.token||proposal.category==='unavailable')throw Error('This photo is unavailable for crop review.');
+    const saved=await cropRequest('save',owner,{revision:current.revision,reviews:[{media_id:mid,token:proposal.source_token||proposal.token,choice:proposal.flagged?'unflag':'flag'}]});
+    cards.cache.set(owner,saved);
+   })();
+   flagRequests.set(key,work);flag.refresh();
+   try{await work;}catch(e){onError(e.message||String(e));}
+   finally{flagRequests.delete(key);for(const control of root.querySelectorAll('.naiFlagCrop'))control.refresh();}
+  });
+  flag.className='naiFlagCrop';
+  flag.refresh=()=>{
+   const mid=getMedia(),marked=flagged(owner,mid),busy=flagRequests.has(owner+':'+mid);
+   flag.textContent=marked?'Crop flagged':'Flag crop for review';
+   flag.title=marked?'Clear crop review flag':'Flag this crop for review later';
+   flag.setAttribute('aria-pressed',String(marked));
+   flag.disabled=busy||!canUse();
+  };
+  flag.refresh();
+  return flag;
+ };
+
  cards.reviewCrops=function(owner,onClose){
-  const excluded=new Set(),urls=new Set(),pageSize=12;
-  let generation=0,page=0,snapshot,rows=[],queue=[],visible=[],saving=false,pending=0,stale=false,changed=false;
-  const release=()=>{generation++;for(const url of urls)URL.revokeObjectURL(url);urls.clear();};
-  const m=cards.modal('Review card crops',()=>{release();if(changed)onClose?.();});
-  if(!owner){m.body.textContent='Choose a character to review card crops.';return;}
-  const button=(name,click)=>{const b=el('button','',name);b.type='button';b.onclick=click;return b;};
-  const toolbar=el('div','naiCropToolbar'),status=el('span'),grid=el('div','naiCropGrid');
-  status.setAttribute('role','status');
-  const previous=button('Previous',()=>{page--;draw();}),next=button('Next',()=>{page++;draw();});
-  const refresh=button('Refresh',reload),approve=button('Approve selected',save);
-  toolbar.append(approve,previous,next,refresh,status);
-  m.body.append(el('p','','Uncheck crops to leave them for later. Adjust opens the full-size original and marks that crop reviewed when it loads.'),toolbar,grid);
-  function sync(){
-   const count=visible.filter(v=>v.ready&&v.check.checked).length;
-   approve.textContent='Approve selected ('+count+')';
-   approve.disabled=saving||stale||pending>0||!count;
-   previous.disabled=saving||stale||page===0;next.disabled=saving||stale||(page+1)*pageSize>=queue.length;
-   refresh.disabled=saving;
-   for(const v of visible){v.check.disabled=saving||stale||!v.ready;v.adjust.disabled=saving||!v.ready;}
+  if(root.querySelector('.naiCropSheet'))return;
+  const pageSize=12,storageKey='nai-crop-review:'+owner,urls=new Set();
+  let resume={};
+  try{resume=JSON.parse(sessionStorage.getItem(storageKey)||'{}')||{};}catch{}
+  const marked=new Map(Array.isArray(resume.marked)?resume.marked:[]),scanned=new Set(),missing=new Set();
+  let scanWork=null,scanError='',scanTimer;
+  let generation=0,page=0,anchor=resume.anchor,filter=['all','later'].includes(resume.filter)?resume.filter:'needs';
+  let snapshot,rows=[],cardsById=new Map(),queue=[],visible=[],exceptionIds=Array.isArray(resume.exceptionIds)?resume.exceptionIds:[],exception=null;
+  let saving=false,loading=false,stale=false,changed=false,undoToken=resume.undoToken;
+  const release=()=>{generation++;clearTimeout(scanTimer);exception=null;for(const url of urls)URL.revokeObjectURL(url);urls.clear();};
+  function remember(){
+   try{sessionStorage.setItem(storageKey,JSON.stringify({anchor,filter,marked:[...marked].slice(-120),undoToken,exceptionIds}));}catch{}
   }
-  function use(data){
-   snapshot=data;stale=false;rows=data.boards.find(b=>b.kind==='images').entries;
-   const libraryMedia=new Map((root.naiGetLibrary?.()?.media||[]).map(m=>[m.id,m]));
-   const seen=new Set();queue=[];
+  const clearPeek=()=>exception?.endPeek();
+  const m=cards.modal('Review card crops',()=>{
+   exceptionIds=[];remember();release();window.removeEventListener('blur',clearPeek);
+   if(changed)onClose?.();
+  });
+  m.inner.classList.add('naiCropSheet');
+  if(!owner){m.body.textContent='Choose a character to review card crops.';return;}
+  const status=el('span','naiCropStatus'),toolbar=el('div','naiCropToolbar'),grid=el('div','naiCropGrid'),editor=el('section','naiCropException');
+  status.setAttribute('role','status');editor.hidden=true;
+  const filters=el('div','naiCropFilters');
+  const needs=cropButton('Needs a look',()=>setFilter('needs')),all=cropButton('All auto crops',()=>setFilter('all'));
+  const laterFilter=cropButton('Later',()=>setFilter('later'));
+  filters.append(needs,all,laterFilter);
+  const approve=cropButton('Approve all',approvePage),undo=cropButton('Undo last',undoLast),refresh=cropButton('Refresh',()=>reload(true,true));
+  const previous=cropButton('Previous',()=>goPage(page-1)),next=cropButton('Next',()=>goPage(page+1));
+  approve.dataset.primary='true';approve.title='Approve the ready crops shown on this page';
+  const pages=el('div','naiCropPages');pages.append(previous,next);
+  toolbar.append(filters,approve,undo,refresh,pages,status);
+  m.body.append(toolbar,grid,editor);
+
+  function setFilter(value){
+   if(filter===value)return;
+   filter=value;page=0;anchor=null;
+   if(snapshot?.queue){queue=queueIds(snapshot.queue);drawPage(true);}
+   else reload();
+  }
+  function goPage(value){page=value;anchor=null;drawPage(true);}
+  function readRows(data){
+   rows=data.boards?.find(b=>b.kind==='images')?.entries||[];
+   const media=new Map((root.naiGetLibrary?.()?.media||[]).map(m=>[m.id,m]));
+   cardsById=new Map();
    for(const entry of rows){
     if(entry.flagged_for_removal)continue;
-    for(const [side,mid] of entry.images.entries()){
-     const meta=data.collection.frame_meta?.['image:'+mid];
-     const photo=libraryMedia.get(mid);
-     if(seen.has(mid)||meta?.mode!=='auto'||meta.checked||photo?.in_all===false||
-        photo?.in_review||photo?.in_purgatory||photo?.flagged_for_removal)continue;
-     seen.add(mid);
-     queue.push({mid,token:meta.token,name:photo?.original_name||entry.name,entry:entry.duo_side?{...entry,duo_side:side?'back':'front'}:entry});
+    entry.images.forEach((mid,side)=>{
+     const photo=media.get(mid);
+     if(cardsById.has(mid)||photo?.in_all===false||photo?.in_review||photo?.in_purgatory||photo?.flagged_for_removal) return;
+     const face=entry.duo_side?(side?'back':'front'):null;
+     cardsById.set(mid,{mid,filename:(photo?.original_name||entry.name)+(face?' · '+face:''),entry:face?{...entry,duo_side:face}:entry});
+    });
+   }
+  }
+  function queueIds(buckets){
+   const order=filter==='later'?['later']:filter==='needs'?['flagged','needs_look','unavailable']:['flagged','needs_look','unavailable','likely','fit','later','checked','pending'];
+   return [...new Set(order.flatMap(name=>buckets[name]||[]))].filter(mid=>cardsById.has(mid));
+  }
+  const canApprove=v=>v.ready&&v.pending&&!v.check.checked&&!['pending','unavailable'].includes(v.proposal.analysis_status);
+  function pendingIds(){return (snapshot?.queue?.pending||[]).filter(mid=>cardsById.has(mid)&&!scanned.has(mid));}
+  function pageStatus(){
+   if(loading||!editor.hidden)return;
+   const first=page*pageSize,failed=visible.filter(v=>!v.ready).length;
+   const count=visible.length?((first+1)+'–'+(first+visible.length)+' of '+queue.length+(failed?' · '+failed+(failed===1?' preview':' previews')+' unavailable':'')):'';
+   const manual=visible.filter(v=>v.ready&&v.pending&&['unavailable','pending'].includes(v.proposal.analysis_status)).length;
+   const remains=filter==='later'?0:pendingIds().length;
+   const progress=remains?(scanError?remains+' waiting for analysis':'Analyzing '+remains+' more crops…'):'';
+   status.textContent=[count,manual?manual+' to check individually':'',filter!=='later'&&missing.size?missing.size+' '+(missing.size===1?'original':'originals')+' unavailable':'',filter==='later'?'':scanError,filter==='all'||!scanError?progress:''].filter(Boolean).join(' · ')||
+      (filter==='later'?'No crops saved for later.':filter==='needs'?'No crops need a closer look.':'No automatic crops are available.');
+  }
+  function saveStatus(){
+   const count=visible.filter(canApprove).length;
+   const markedCount=visible.filter(v=>v.ready&&v.check.checked).length;
+   approve.textContent=markedCount?(count?'Approve others & edit '+markedCount:'Edit '+markedCount):(count?'Approve all ('+count+')':'Approve all');
+   const editing=!editor.hidden;
+   approve.hidden=editing;needs.disabled=all.disabled=laterFilter.disabled=saving||editing;
+   approve.disabled=saving||loading||stale||(!count&&!markedCount);
+   m.head.querySelector('button').disabled=saving;
+   undo.disabled=saving||loading||stale||!undoToken;
+   refresh.disabled=saving;
+   pages.hidden=editing;
+   previous.disabled=saving||loading||page===0;
+   next.disabled=saving||loading||(page+1)*pageSize>=queue.length;
+   needs.setAttribute('aria-pressed',String(filter==='needs'));
+   all.setAttribute('aria-pressed',String(filter==='all'));
+   const laterCount=(snapshot?.queue?.later||[]).filter(mid=>cardsById.has(mid)).length;
+   laterFilter.textContent=laterCount?'Later ('+laterCount+')':'Later';
+   laterFilter.setAttribute('aria-pressed',String(filter==='later'));
+   for(const v of visible){
+    v.check.disabled=saving||loading||stale||!v.ready;
+    v.edit.disabled=v.check.disabled;
+   }
+   for(const control of editor.querySelectorAll('button,input')){
+    control.disabled=saving||(stale&&control.dataset.save==='true')||control.dataset.unavailable==='true';
+   }
+  }
+  function recordAnchor(){
+   if(queue.length){
+    if(anchor&&queue.includes(anchor))page=Math.floor(queue.indexOf(anchor)/pageSize);
+    page=Math.min(page,Math.ceil(queue.length/pageSize)-1);
+    anchor=queue[page*pageSize];
+   }else{page=0;anchor=null;}
+   remember();
+  }
+  function checkCurrent(current){return current===generation&&m.wrap.isConnected;}
+  function acceptState(result,current){
+   if(Object.keys(result.changed_frames||{}).length){
+    changed=true;
+    const cached=cards.cache.get(owner)?.collection;
+    if(cached)Object.assign(cached.frames,result.changed_frames);
+    if(!m.wrap.isConnected)onClose?.();
+   }
+   if(checkCurrent(current)&&!saving)snapshot=result;
+  }
+  async function reload(keepException=false,retry=false){
+   release();const current=generation;
+   if(!keepException)exceptionIds=[];
+   if(retry){scanError='';scanned.clear();missing.clear();}
+   loading=true;visible=[];
+   grid.replaceChildren();m.error.textContent='';stale=false;
+   status.textContent='Loading crop review…';saveStatus();
+   try{
+    const data=await cards.load(owner);
+    if(!checkCurrent(current))return;
+    readRows(data);
+    const result=await cropRequest('state',owner);
+    if(!checkCurrent(current))return;
+    acceptState(result,current);queue=queueIds(result.queue);
+    if(exceptionIds.length){await drawException(retry);return;}
+    await drawPage(false,retry);
+   }catch(e){
+    if(checkCurrent(current)){status.textContent='';m.error.textContent=e.message||String(e);loading=false;saveStatus();}
+   }
+  }
+  async function loadPreview(v,current){
+   const im=el('img');im.alt=v.filename;im.draggable=false;
+   const card=cards.lightCard(v.entry,rows,owner,im,true,v.mid);
+   v.preview.replaceChildren(card);
+   try{
+    await root.naiLoadThumbnail(v.mid,im);
+    if(!checkCurrent(current))return false;
+    if(!im.getAttribute('src'))throw Error('Thumbnail unavailable');
+    await im.decode();
+    if(!checkCurrent(current))return false;
+    cards.applyFrame(im,v.proposal.options.suggested.frame);
+    v.thumbnail=im;
+    return true;
+   }catch(e){
+    if(checkCurrent(current)){
+     v.preview.textContent='Preview unavailable';v.preview.title=e.message||String(e);
+    }
+    return false;
+   }
+  }
+  async function drawPage(scroll=false,retry=false){
+   release();const current=generation;
+   editor.hidden=true;editor.replaceChildren();grid.hidden=false;visible=[];grid.replaceChildren();
+   m.error.textContent='';stale=false;recordAnchor();
+   if(scroll){m.wrap.scrollTop=0;}
+   const start=page*pageSize,ids=queue.slice(start,start+pageSize);
+   if(!ids.length){
+    loading=false;pageStatus();saveStatus();scheduleScan();return;
+   }
+   loading=true;status.textContent=retry?'Analyzing '+ids.length+' card crops…':'Loading card previews…';saveStatus();
+   try{
+    const result=await cropRequest('state',owner,{media_ids:ids,retry,analyze:retry});
+    acceptState(result,current);
+    if(!checkCurrent(current))return;
+    status.textContent='Loading card previews…';
+    await appendTiles(ids,result,current);
+    if(!checkCurrent(current))return;
+    loading=false;pageStatus();saveStatus();scheduleScan();
+   }catch(e){
+    if(checkCurrent(current)){loading=false;status.textContent='';m.error.textContent=e.message||String(e);saveStatus();}
+   }
+  }
+  async function appendTiles(ids,result,current){
+    const tiles=ids.map(mid=>{
+     const item=cardsById.get(mid),proposal=result.proposals[mid];
+     const tile=el('article','naiCropTile'),preview=el('div','naiCropPreview');
+     const details=el('div','naiCropDetails'),name=el('strong','',item.filename),note=el('small','',proposal?.reason||'Crop unavailable');
+     name.title=item.filename;details.append(name,note);
+     const actions=el('div','naiCropActions'),label=el('label'),check=el('input'),edit=cropButton('Edit',()=>startExceptions([mid]));
+     check.type='checkbox';check.setAttribute('aria-label','Mark '+item.filename+' for editing');
+     edit.setAttribute('aria-label','Edit crop for '+item.filename);
+     label.append(check,document.createTextNode('Mark to edit'));actions.append(label,edit);
+     tile.append(preview,details,actions);grid.append(tile);
+     const v={...item,proposal,preview,note,check,edit,ready:false,pending:!proposal?.checked||!!proposal?.flagged};
+     check.checked=!!proposal?.token&&marked.get(mid)===proposal.token;
+     tile.dataset.marked=String(check.checked);
+     check.onchange=()=>{
+      if(check.checked)marked.set(mid,v.proposal.token);else marked.delete(mid);
+      tile.dataset.marked=String(check.checked);remember();saveStatus();
+     };
+     if(!proposal?.options?.suggested||!proposal.token){preview.textContent='Preview unavailable';}
+     return v;
+    });
+    visible.push(...tiles);saveStatus();
+    const work=tiles.values();
+    await Promise.all(Array.from({length:Math.min(4,ids.length)},async()=>{
+     for(const v of work){
+      if(!checkCurrent(current))return;
+      if(v.proposal?.options?.suggested&&v.proposal.token)v.ready=await loadPreview(v,current);
+      if(checkCurrent(current))saveStatus();
+     }
+    }));
+  }
+  function refreshTiles(proposals){
+   let marksChanged=false;
+   for(const tile of visible){
+    const proposal=proposals[tile.mid];
+    if(!proposal||proposal.token===tile.proposal?.token)continue;
+    tile.proposal=proposal;
+    tile.pending=!proposal.checked||!!proposal.flagged;
+    tile.note.textContent=proposal.reason||'Crop unavailable';
+    if(proposal.options?.suggested&&proposal.token){
+     if(tile.thumbnail)cards.applyFrame(tile.thumbnail,proposal.options.suggested.frame);
+     if(tile.check.checked){marked.set(tile.mid,proposal.token);marksChanged=true;}
+    }else{
+     tile.ready=false;tile.thumbnail=null;tile.preview.textContent='Preview unavailable';
     }
    }
-   page=Math.min(page,Math.max(0,Math.ceil(queue.length/pageSize)-1));draw();
+   if(marksChanged)remember();
   }
-  async function reload(){
-   release();const current=generation;stale=true;visible=[];grid.replaceChildren();
-   status.textContent='Loading card crops…';m.error.textContent='';sync();
-   try{const data=await cards.load(owner);if(current===generation)use(data);}
-   catch(e){if(current===generation){status.textContent='';m.error.textContent=e.message||String(e);}}
+  function scheduleScan(){
+   clearTimeout(scanTimer);
+   if(!m.wrap.isConnected||!editor.hidden||filter==='later'||saving||loading||stale||scanError||!pendingIds().length)return;
+   scanTimer=setTimeout(scanMore,100);
   }
-  function draw(){
-   release();const current=generation;grid.replaceChildren();m.error.textContent='';
-   const start=page*pageSize,slice=queue.slice(start,start+pageSize);
-   status.textContent=slice.length?(start+1)+'–'+(start+slice.length)+' of '+queue.length+' unchecked crops':'No automatic crops are waiting for review.';
-   visible=slice.map(item=>{
-    const tile=el('article','naiCropTile'),preview=el('div','naiCropPreview','Loading original…'),actions=el('div','naiCropActions');
-    const filename=item.entry.duo_side?item.name+' · '+item.entry.duo_side:item.name;
-    const label=el('label'),check=el('input');check.type='checkbox';label.title=filename;
-    check.onchange=()=>{if(check.checked)excluded.delete(item.token);else excluded.add(item.token);sync();};
-    label.append(check,document.createTextNode(filename));
-    const adjust=button('Adjust',()=>cards.adjust(owner,item.mid,'image:'+item.mid,()=>{changed=true;reload();},{entry:item.entry,rows}));
-    adjust.setAttribute('aria-label','Adjust crop for '+filename);
-    actions.append(label,adjust);tile.append(preview,actions);grid.append(tile);
-    return {...item,preview,check,adjust,ready:false,filename};
-   });
-   pending=visible.length;sync();
-   const work=visible.values();
-   async function worker(){
-    for(const v of work){
-     if(current!==generation)return;
-     let url;
-     try{
-      const original=await root.naiOutfitOriginal(v.mid);
-      if(current!==generation)return;
-      url=URL.createObjectURL(original);urls.add(url);
-      const im=el('img');im.alt=v.filename;im.src=url;await im.decode();
-      if(current!==generation)return;
-      v.preview.replaceChildren(cards.lightCard(v.entry,rows,owner,im,true,v.mid));
-      cards.applyFrame(im,snapshot.collection.frames['image:'+v.mid]);
-      v.ready=true;v.check.checked=!excluded.has(v.token);
-     }catch(e){
-      if(current!==generation)return;
-      if(url&&urls.delete(url))URL.revokeObjectURL(url);
-      v.preview.textContent='Preview unavailable. Refresh to retry.';v.preview.title=e.message||String(e);
-     }finally{if(current===generation){pending--;sync();}}
-    }
-   }
-   for(let n=0;n<Math.min(3,pending);n++)worker();
-  }
-  async function save(){
-   if(approve.disabled)return;
-   const reviews=visible.filter(v=>v.ready&&v.check.checked).map(v=>({media_id:v.mid,token:v.token}));
-   saving=true;sync();
-   await m.run(async()=>{
+  async function scanMore(){
+   if(!m.wrap.isConnected||!editor.hidden||filter==='later'||saving||loading||stale||scanWork)return;
+   const ids=pendingIds().slice(0,4),current=generation;
+   if(!ids.length)return;
+   let result;
+   scanWork=(async()=>{
     try{
-     const saved=await root.naiOutfitRequest('/api/collection/frame-review-batch',{character_id:owner,revision:snapshot.collection.revision,reviews});
-     cards.cache.set(owner,saved);changed=true;use(saved);
-    }catch(e){stale=true;throw Error((e.message||String(e))+' Refresh this sheet before approving again.');}
-   });
-   saving=false;sync();
+     result=await cropRequest('state',owner,{media_ids:ids});
+     acceptState(result,current);
+     if(checkCurrent(current))for(const mid of ids)scanned.add(mid);
+    }catch(e){
+     if(checkCurrent(current)){
+      scanError='Analysis paused. Refresh to retry.';
+      m.error.textContent=e.message||String(e);
+      stale=/refresh|stale/i.test(m.error.textContent)&&!/timed out|respond/i.test(m.error.textContent);
+     }
+    }
+   })();
+   await scanWork;scanWork=null;
+   if(!checkCurrent(current)||saving||loading){scheduleScan();return;}
+   if(result){
+    refreshTiles(result.proposals);
+    for(const mid of ids)if(!result.proposals[mid]?.token)missing.add(mid);
+    const analyzed=Object.values(result.proposals).filter(proposal=>proposal.token);
+    if(analyzed.length&&analyzed.every(proposal=>proposal.analysis_status==='unavailable')){
+     scanError='Automatic analysis unavailable. Refresh to retry.';
+    }
+    const existing=new Set(queue),additions=queueIds(result.queue).filter(mid=>!existing.has(mid));
+    queue=queue.concat(additions);
+    const first=page*pageSize;
+    const toShow=queue.slice(first+visible.length,first+pageSize);
+    if(toShow.some(mid=>!result.proposals[mid])){await drawPage();return;}
+    if(toShow.length){
+     if(!anchor)recordAnchor();
+     await appendTiles(toShow,result,current);
+    }
+   }
+   if(!checkCurrent(current))return;
+   pageStatus();saveStatus();scheduleScan();
   }
-  reload();
+  async function mutate(action,body){
+   if(saving)return false;
+   saving=true;clearTimeout(scanTimer);saveStatus();m.error.textContent='';
+   try{
+    const saved=await cropRequest(action,owner,{revision:snapshot.revision,...body});
+    cards.cache.set(owner,saved);
+    snapshot={...snapshot,revision:saved.collection.revision};
+    undoToken=action==='undo'?null:saved.undo_token||undoToken;
+    changed=true;remember();return true;
+   }catch(e){
+    const message=e.message||String(e);
+    stale=/refresh|stale/i.test(message);
+    m.error.textContent=message;return false;
+   }finally{saving=false;saveStatus();scheduleScan();}
+  }
+  async function approvePage(){
+   if(approve.disabled)return;
+   const edits=visible.filter(v=>v.ready&&v.check.checked).map(v=>v.mid);
+   const accepted=visible.filter(canApprove);
+   const reviews=accepted.map(v=>({media_id:v.mid,token:v.proposal.token,choice:'suggested'}));
+   if(reviews.length&&!await mutate('save',{reviews}))return;
+   if(edits.length)startExceptions(edits);
+   else reload();
+  }
+  async function undoLast(){
+   if(undo.disabled)return;
+   if(await mutate('undo',{undo_token:undoToken}))await reload(!editor.hidden);
+  }
+  function startExceptions(ids){exceptionIds=ids;remember();drawException();}
+  function exitEditor(){
+   exceptionIds=[];editor.hidden=true;grid.hidden=false;reload();refresh.focus();
+  }
+  async function drawException(retry=false){
+   if(!exceptionIds.length){exitEditor();return;}
+   release();const current=generation;
+   const mid=exceptionIds[0],item=cardsById.get(mid);
+   grid.hidden=true;editor.hidden=false;editor.tabIndex=0;editor.replaceChildren();
+   status.textContent='Loading original…';m.error.textContent='';stale=false;
+   loading=true;saveStatus();m.wrap.scrollTop=0;editor.focus({preventScroll:true});
+   const back=cropButton('Back to sheet',exitEditor),later=cropButton('Later',()=>advance());
+   editor.append(back);
+   try{
+    const data=await cropRequest('state',owner,{media_ids:[mid],retry,analyze:retry});
+    acceptState(data,current);
+    if(!checkCurrent(current))return;
+    const proposal=data.proposals[mid];
+    if(!item||!proposal?.token||!proposal.options?.suggested)throw Error('This crop is no longer available.');
+    const original=await root.naiOutfitOriginal(mid);
+    if(!checkCurrent(current))return;
+    const url=URL.createObjectURL(original);urls.add(url);
+    const im=el('img');im.alt=item.filename;im.src=url;im.draggable=false;
+    await im.decode();
+    if(!checkCurrent(current))return;
+    const preview=cards.lightCard(item.entry,rows,owner,im,true,mid);
+    const peek=el('img','naiCropOriginal');peek.src=url;peek.alt='Original photo';peek.draggable=false;peek.hidden=true;
+    const view=el('div','naiCropEditView'),tools=el('div','naiCropEditTools'),layout=el('div','naiCropEditLayout');
+    view.append(preview,peek);layout.append(view,tools);editor.append(layout);
+    status.textContent=exceptionIds.length+' to edit';
+    const {options}=proposal;
+    let frame={...defaultFrame,...options.suggested.frame},edited=false,drag=null;
+    const update=()=>cards.applyFrame(im,frame);
+    update();
+    const title=el('h3','',item.filename);
+    tools.append(title,el('p','naiCollectionMuted',proposal.reason||''));
+    const actions=el('div','naiCropEditActions'),choices=el('div','naiCropTreatments');
+    const frameKey=option=>JSON.stringify([option?.frame?.fit,option?.frame?.x,option?.frame?.y,option?.frame?.zoom,option?.frame?.reference]);
+    const pending=['pending','unavailable'].includes(proposal.analysis_status);
+    const sameAsFit=frameKey(options.suggested)===frameKey(options.fit);
+    const fallback=pending?(sameAsFit?'fit':'manual'):'suggested';
+    const second=!pending&&options.fuller?'fuller':'suggested';
+    const first=['wider','fit'].find(choice=>options[choice]&&frameKey(options[choice])!==frameKey(options[second]));
+    const treatment=(key,choice)=>{
+     const option=options[choice];
+     const offlineKeep=pending&&choice==='suggested';
+     const label='['+key+'] '+(offlineKeep?'Keep current crop':option.label);
+     const b=cropButton(label,()=>commit(offlineKeep?fallback:choice,option.frame));
+     b.setAttribute('aria-label',label);b.dataset.save='true';
+     const sample=el('img');sample.alt='';sample.src=url;sample.draggable=false;
+     const card=cards.lightCard(item.entry,rows,owner,sample,true,mid);
+     card.setAttribute('aria-hidden','true');b.prepend(card);cards.applyFrame(sample,option.frame);choices.append(b);return b;
+    };
+    const one=first?treatment(1,first):null;
+    const two=one?treatment(2,second):null;
+    if(choices.childElementCount)tools.append(choices);
+    const savedLabel=pending?(sameAsFit?'Use Fit & next':'Keep current crop & next'):'Save & next';
+    const save=cropButton(savedLabel,()=>commit(edited?'manual':fallback));
+    save.dataset.save='true';save.dataset.primary='true';
+    function markEdited(){edited=true;save.textContent='Save & next';}
+    later.onclick=()=>commit('later');
+    const zoom=el('input');zoom.type='range';zoom.min='1';zoom.max='3';zoom.step='.001';zoom.value=frame.zoom;
+    zoom.setAttribute('aria-label','Zoom');zoom.oninput=()=>changeZoom(Number(zoom.value));
+    const zoomLabel=el('label','naiCropZoom','Zoom ');zoomLabel.append(zoom);
+    const peekButton=cropButton('Peek original',()=>showOriginal(peek.hidden));
+    peekButton.setAttribute('aria-pressed','false');
+    tools.append(el('p','naiCollectionMuted','Drag to position, scroll to zoom. Hold Space to see the original.'),zoomLabel,actions);
+    actions.append(save,later,peekButton);
+    const opening=im.parentElement;
+    function showOriginal(show){preview.hidden=show;peek.hidden=!show;peekButton.setAttribute('aria-pressed',String(show));}
+    function changeZoom(value){
+     if(saving||stale||!peek.hidden)return;
+     frame.zoom=Math.max(1,Math.min(3,value));
+     zoom.value=frame.zoom;zoom.setAttribute('aria-valuetext',Math.round(frame.zoom*100)+'%');markEdited();update();
+    }
+    opening.addEventListener('wheel',event=>{
+     if(saving||stale||!peek.hidden||event.ctrlKey)return;
+     event.preventDefault();changeZoom(frame.zoom*Math.exp(-Math.max(-100,Math.min(100,event.deltaY))*.0025));
+    },{passive:false});
+    opening.addEventListener('pointerdown',event=>{
+     if(event.button!==0||saving||stale||!peek.hidden)return;
+     const rect=(frame.reference?preview:opening).getBoundingClientRect();
+     const {width,height}=frame.reference?{width:rect.width*frame.reference.width,height:rect.height*frame.reference.height}:rect;
+     if(!width||!height)return;
+     event.preventDefault();
+     opening.setPointerCapture?.(event.pointerId);
+     editor.focus({preventScroll:true});
+     drag={id:event.pointerId,x:event.clientX,y:event.clientY,left:frame.x,top:frame.y,width,height};
+    });
+    opening.addEventListener('pointermove',event=>{
+     if(drag?.id!==event.pointerId||!drag||saving||stale)return;
+     const limit=value=>Math.max(-1000,Math.min(1000,value));
+     const x=limit(drag.left+(event.clientX-drag.x)*100/drag.width),y=limit(drag.top+(event.clientY-drag.y)*100/drag.height);
+     if(x===frame.x&&y===frame.y)return;
+     frame.x=x;frame.y=y;markEdited();update();
+    });
+    for(const type of ['pointerup','pointercancel','lostpointercapture'])opening.addEventListener(type,()=>{drag=null;});
+    async function commit(choice,chosenFrame=frame){
+     if(saving||(stale&&choice!=='later'))return;
+     if(choice==='later'&&stale){advance();return;}
+     const review={media_id:mid,token:proposal.token,choice};
+     if(choice==='manual')review.frame=chosenFrame;
+     if(await mutate('save',{reviews:[review]}))advance();
+    }
+    exception={
+     onKey(event){
+      if(event.ctrlKey||event.altKey||event.metaKey||event.shiftKey||/^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)||event.target.isContentEditable)return;
+      const commands={'1':one,'2':two,'Enter':event.target.tagName==='BUTTON'?null:save};
+      if(commands[event.key]){event.preventDefault();if(!event.repeat)commands[event.key].click();}
+      if(event.key===' '&&event.target.tagName!=='BUTTON'){event.preventDefault();showOriginal(true);}
+     },
+     endPeek(){showOriginal(false);},
+    };
+    loading=false;saveStatus();
+   }catch(e){
+    if(checkCurrent(current)){
+     loading=false;status.textContent='';m.error.textContent=e.message||String(e);
+     later.textContent='Next crop';editor.append(later);saveStatus();
+    }
+   }
+  }
+  function advance(){
+   const mid=exceptionIds.shift();
+   marked.delete(mid);if(mid===anchor)anchor=null;remember();
+   if(exceptionIds.length)drawException();else exitEditor();
+  }
+  m.wrap.addEventListener('keydown',event=>exception?.onKey(event));
+  m.wrap.addEventListener('keydown',event=>{if(saving&&event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();}},true);
+  m.wrap.addEventListener('keyup',event=>{if(event.key===' ')exception?.endPeek();});
+  m.wrap.addEventListener('focusout',event=>{if(!event.relatedTarget||!editor.contains(event.relatedTarget))exception?.endPeek();});
+  window.addEventListener('blur',clearPeek);
+  reload(true);
  };
+
  const libraryToolbar=root.getElementById('addMediaBtn')?.parentNode;
  if(libraryToolbar){
   const open=el('button','','Review card crops');open.type='button';
@@ -138,9 +539,9 @@
   const crop=el('span','naiDebugCrop',automaticFrame?'Auto-positioned · '+(metadata.checked?'Checked':'Unchecked'):custom(frame)?'Custom crop':'Default crop');
   crop.dataset.custom=String(custom(frame));crop.dataset.positioning=positioning;
   if(automaticFrame){
-   const trim=metadata.vertical_crop_percent>0
+   const trim=metadata.review_reason||(metadata.vertical_crop_percent>0
     ?`Full width preserved · ${metadata.vertical_crop_percent.toFixed(2)}% hidden at top and bottom`
-    :`Full height preserved · ${Number(metadata.side_crop_percent).toFixed(2)}% hidden on each side`;
+    :`Full height preserved · ${Number(metadata.side_crop_percent||0).toFixed(2)}% hidden on each side`);
    crop.title=trim+' · '+(metadata.checked?'Checked':'Unchecked');
   }else{
    crop.title=custom(frame)?`X ${frame.x||0} · Y ${frame.y||0} · Zoom ${frame.zoom??1} · ${frame.fit||'contain'}${frame.reference?' · Saved reference':''}`:'Centered · 1× zoom · Fit whole photo';

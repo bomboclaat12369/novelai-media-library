@@ -25,6 +25,13 @@ async function setup(){
      if(b.revision!==collection.revision){status=400;value={error:'Stale frame revision'};}
      else {collection.frames[b.key]=copy(b.frame);collection.frame_meta[b.key]={mode:'manual'};collection.revision+='x';}
     }
+    if(route.endsWith('/crop-review-state')){
+     const proposal=id=>({token:collection.frame_meta['image:'+id]?.token,checked:false,
+      category:'needs_look',analysis_status:'ready',reason:'Small trim',
+      options:{suggested:{frame,label:'Suggested crop'},fit:{frame:{x:0,y:0,zoom:1,fit:'contain'},label:'Fit whole photo'}}});
+     value??={revision:collection.revision,proposals:Object.fromEntries((b.media_ids||[]).map(id=>[id,proposal(id)])),
+      queue:{needs_look:collection.frame_meta['image:unchecked'].checked?[]:['unchecked'],checked:['checked']}};
+    }
     value??={collection:copy(collection),name:'Fixture',boards:[{kind:'images',entries:copy(entries)}]};
    }else if(route.startsWith('/api/battles/'))value={entries:copy(entries),revision:'battle',kind:'images',votes:8,recorded_votes:8,ranked_count:4,scope_count:4,unfinished_count:0,session:null,trophies:[],achievements:[]};
    else return normal(o);
@@ -78,7 +85,7 @@ test('a stale review rejection is visible and never marks the card checked',asyn
  }finally{f.dom.window.close()}
 });
 
-test('leaderboard opens the crop sheet outside Debug and the full-size editor returns to the queue',async()=>{
+test('leaderboard opens the crop sheet outside Debug and previewing an exception leaves its crop pending',async()=>{
  const f=await setup();try{
   f.root.getElementById('naiBattlesBtn').click();
   const leaderboard=await waitFor(()=>{const b=f.root.getElementById('naiBattleLeaderboard');return b&&!b.disabled&&b;},f.errors);
@@ -88,16 +95,18 @@ test('leaderboard opens the crop sheet outside Debug and the full-size editor re
   const sheet=f.root.querySelector('[aria-label="Review card crops"]');
   await waitFor(()=>sheet.querySelector('.naiCropActions button')?.disabled===false,f.errors);
   sheet.querySelector('.naiCropActions button').click();
-  const editor=await waitFor(()=>f.root.querySelector('.naiCardEditor'),f.errors);
-  await waitFor(()=>editor.querySelector('.naiCardZoomValue')&&!button(editor,'Close').disabled,f.errors);
-  button(editor,'Close').click();
-  await waitFor(()=>sheet.textContent.includes('No automatic crops are waiting'),f.errors);
+  const editor=sheet.querySelector('.naiCropException');
+  await waitFor(()=>editor.querySelector('.naiCropOriginal'),f.errors);
+  button(editor,'Back to sheet').click();
+  await waitFor(()=>sheet.querySelector('.naiCropActions button')?.disabled===false,f.errors);
+  assert.equal(f.collection.frame_meta['image:unchecked'].checked,false);
+  assert.equal(f.calls.filter(c=>c.route.endsWith('/frame-review')).length,0);
   button(sheet,'Close').click();
   assert.ok(f.root.querySelector('.naiEditionGalleryLink'));assert.deepEqual(f.errors,[]);
  }finally{f.dom.window.close()}
 });
 
-test('opening a position marks the preview checked and refreshes the unchecked queue on close',async()=>{
+test('opening and closing a position leaves the unchecked queue alone',async()=>{
  const f=await setup();try{
   f.root.getElementById('naiBattlesBtn').click();await waitFor(()=>f.root.getElementById('naiBattleLeaderboard')&&!f.root.getElementById('naiBattleLeaderboard').disabled,f.errors);f.root.getElementById('naiBattleLeaderboard').click();
   await waitFor(()=>f.root.querySelector('[aria-label="Debug mode"]'),f.errors);
@@ -110,10 +119,10 @@ test('opening a position marks the preview checked and refreshes the unchecked q
   await waitFor(()=>editor.querySelector('.naiCardZoomValue')&&!button(editor,'Close').disabled,f.errors);
   assert.equal(editor.querySelector('.naiCollectionError').textContent,'');
   assert.equal(editor.querySelector('.naiCardZoomValue').textContent.trim(),'106.67%');
-  assert.equal(f.collection.frame_meta['image:unchecked'].checked,true);
-  assert.equal(f.calls.filter(c=>c.route.endsWith('/frame-review')).length,1);
+  assert.equal(f.collection.frame_meta['image:unchecked'].checked,false);
+  assert.equal(f.calls.filter(c=>c.route.endsWith('/frame-review')).length,0);
   button(editor,'Close').click();
-  await waitFor(()=>f.root.querySelectorAll('.naiCardDebugPanel').length===0,f.errors);
+  assert.equal(f.root.querySelectorAll('.naiCardDebugPanel').length,1);
   assert.equal(f.root.querySelector('[aria-label="Crop filter"]').value,'auto-unchecked');
   const toggle=f.root.querySelector('[aria-label="Debug mode"]');toggle.checked=false;toggle.dispatchEvent(new f.w.Event('change'));
   await waitFor(()=>f.root.querySelectorAll('.naiBattleRankCard').length===4,f.errors);
@@ -151,7 +160,9 @@ test('failed original loads and stale reviews leave the frame unchecked',async()
   assert.equal(f.calls.filter(c=>c.route.endsWith('/frame-review')).length,0);button(editor,'Close').click();
   f.root.naiOutfitOriginal=original;f.reject();
   await open();editor=f.root.querySelector('.naiCardEditor');
-  assert.match(editor.querySelector('.naiCollectionError').textContent,/Refresh the card/);
+  assert.equal(editor.querySelector('.naiCollectionError').textContent,'');
+  button(editor,'Save framing').click();
+  await waitFor(()=>editor.querySelector('.naiCollectionError').textContent.includes('Refresh the card'),f.errors);
   assert.equal(cards.framingStatus('character','unchecked'),'auto-unchecked');assert.deepEqual(f.errors,[]);
  }finally{f.dom.window.close();}
 });

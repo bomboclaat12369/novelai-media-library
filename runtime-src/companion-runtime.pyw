@@ -23,6 +23,7 @@ import urllib.request
 import uuid
 import webbrowser
 from contextlib import closing
+from collections import deque
 from datetime import datetime, timezone
 from email.parser import BytesParser
 from email.policy import default as email_policy
@@ -41,6 +42,10 @@ PORT = 8765
 APP_NAME = "NovelAI Media Library"
 API_VERSION = 9
 AUTO_FRAME_ALGORITHM = 'centered-edge-fit-v2'
+CROP_REVIEW_ALGORITHM = 'body-aware-balanced-v2-safe'
+CROP_REVIEW_FIT_ALGORITHM = 'verified-card-fit-v1'
+CARD_FRAME_REFERENCE = {'left':.1, 'top':.13, 'width':.8, 'height':1120/1500}
+CARD_FIT_FRAME = {'x':0., 'y':0., 'zoom':1., 'fit':'contain'}
 
 # Finished studio designs only. Automatic mode uses battle provenance; every finished frame is also selectable.
 MANUAL_CARD_EDITIONS = ('cosplay', 'pregnant-orchid', 'hall-of-fame', 'valentines',
@@ -2561,6 +2566,698 @@ def running_post_organizer():
     return None
 
 
+# Balanced v2 crop geometry. This consumes only normalized evidence from the local model.
+BODY_CROP_MEDIAPIPE_VERSION = '0.10.32'
+BODY_CROP_MODEL_SHA256 = '5134a3aad27a58b93da0088d431f366da362b44e3ccfbe3462b3827a839011b1'
+BODY_CROP_MODEL_URL = ('https://storage.googleapis.com/mediapipe-models/pose_landmarker/'
+                       'pose_landmarker_full/float16/1/pose_landmarker_full.task')
+_BODY_CROP_CONFIG = {'max_foreground_trim': .075, 'padding_weight': 1.75, 'headroom': .028}
+
+
+def _body_fit(size):
+    # The card aperture is 840 by 1120 in the reference artwork.
+    scale = min(840 / size[0], 1120 / size[1])
+    width, height = size[0] * scale / 840, size[1] * scale / 1120
+    result = _body_cover([.5 - width / 2, .5 - height / 2, width, height])
+    result['rect'] = [0, 0, 1, 1]
+    return result
+
+
+def _body_cover(rect):
+    x, y, w, h = rect
+    clip = lambda value: min(1, max(0, value))
+    visible = [clip(-x/w), clip(-y/h), clip((1-x)/w), clip((1-y)/h)]
+    photo_area = _body_area(visible)*w*h
+    return {'rect': visible, 'padding': max(0, min(1, 1 - photo_area)), 'render':rect}
+
+
+def _body_area(rect):
+    return max(0, rect[2]-rect[0])*max(0, rect[3]-rect[1])
+
+
+_BODY_GROUPS = {
+    'head':range(0,11), 'shoulders':range(11,13), 'arms and hands':range(13,23),
+    'hips':range(23,25), 'legs and feet':range(25,33),
+}
+_BODY_CORE = {11,12,23,24}
+_BODY_CONFIDENCE = .55
+_BODY_MAX_PADDING = .18
+
+
+def _body_trusted(landmarks):
+    return {
+        i:(point['x'],point['y']) for i,point in enumerate(landmarks)
+        if all(isinstance(point.get(k),(float,int)) and math.isfinite(point[k]) for k in ('x','y','visibility','presence'))
+        and 0 <= point['x'] <= 1 and 0 <= point['y'] <= 1
+        and min(point['visibility'],point['presence']) >= _BODY_CONFIDENCE
+    }
+
+
+def _body_plausible(points):
+    # Either anchored torso evidence or an upper-body crop with head and shoulder evidence.
+    return bool({11,12}&points.keys()) and (len(_BODY_CORE&points.keys()) >= 2 or
+                                           (len(set(_BODY_GROUPS['head'])&points.keys()) >= 3 and len(points)>=5))
+
+
+def _body_supported(points, mask):
+    if not mask or not all(math.isfinite(v) and 0 <= v <= 1 for v in mask['bounds']):
+        return False
+    # Check mask agreement around visible head and torso anchors.
+    anchor = (_BODY_CORE|set(_BODY_GROUPS['head']))&points.keys()
+    return len(anchor&set(mask['anchored'])) >= max(2, math.ceil(.50*len(anchor)))
+
+
+def _body_guarded_area(evidence):
+    left, top, right, bottom = evidence['mask']['bounds']
+    for x,y in evidence['points'].values():
+        left, top, right, bottom = min(left,x), min(top,y), max(right,x), max(bottom,y)
+    # Allow for hair, hands, and stride around the actual observed evidence. Guards stop at source edges.
+    margin_x = max(.015,.045*(right-left))
+    margin_y = max(.015,.045*(bottom-top))
+    return [max(0,left-margin_x),max(0,top-margin_y),min(1,right+margin_x),min(1,bottom+margin_y)]
+
+
+def _body_dimension_start(length, left, right):
+    if length >= 1:
+        return (1-length)/2
+    aim = .35*.5 + .65*(left+right)/2
+    return min(1-length,left,max(0,right-length,aim-length/2))
+
+
+def _body_retention(rect, credible):
+    def inside(x, y):
+        return rect[0]-1e-9 <= x <= rect[2]+1e-9 and rect[1]-1e-9 <= y <= rect[3]+1e-9
+    points = [point for pose in credible for point in pose['points'].values()]
+    retained = sum(inside(x,y) for x,y in points)
+    result = {'retainedLandmarks':retained, 'droppedLandmarks':len(points)-retained}
+    if len(credible) == 1 and _body_supported(credible[0]['points'],credible[0]['mask']):
+        mask = credible[0]['mask']
+        g = mask['gridSize']
+        visible = sum(count for i,count in mask['grid'] if inside((i%g+.5)/g,(i//g+.5)/g))
+        result['foregroundRetainedPercentApprox'] = round(100*visible/mask['foregroundPixels'],1)
+    return result
+
+
+def _body_wide_geometry(size, points, mask):
+    # The wider variant keeps the supported outline and all reliable joints.
+    guard = _body_guarded_area({'points': points, 'mask': mask})
+    ratio = .75 * size[1] / size[0]
+    height = max(min(1, 1 / ratio), guard[3] - guard[1], (guard[2] - guard[0]) / ratio)
+    width = height * ratio
+    left = _body_dimension_start(width, guard[0], guard[2])
+    top = _body_dimension_start(height, guard[1], guard[3])
+    geometry = _body_cover([-left / width, -top / height, 1 / width, 1 / height])
+    if geometry['padding'] > _BODY_MAX_PADDING or _body_area(geometry['rect']) >= .995:
+        return _body_fit(size)
+    return geometry
+
+
+_BODY_MAJOR_JOINTS = {13,14,25,26}
+_BODY_HEAD = set(_BODY_GROUPS['head'])
+_BODY_ENDPOINTS = {15,16,27,28}
+
+
+def _body_protection(size, points, mask):
+    """Protect reliable head/core points and mask-supported elbows and knees."""
+    major = _BODY_MAJOR_JOINTS & set(mask['anchored'])
+    hard = {i:p for i,p in points.items() if i in _BODY_HEAD | _BODY_CORE | major}
+    # Hair/face and core get space in actual source pixels, including for reclined subjects.
+    face = [p for i,p in hard.items() if i in _BODY_HEAD]
+    face_span = max((math.dist((x*size[0],y*size[1]),(u*size[0],v*size[1]))
+                     for x,y in face for u,v in face), default=0)
+    edge = [[],[]]
+    for i,point in hard.items():
+        margin = (.037 if i in _BODY_HEAD else .018) * min(size)
+        if i in _BODY_HEAD:
+            margin = max(margin,.22*face_span)
+        for axis in (0,1):
+            edge[axis].extend((point[axis]-margin/size[axis],point[axis]+margin/size[axis]))
+    guard = [max(0,min(edge[0])),max(0,min(edge[1])),min(1,max(edge[0])),min(1,max(edge[1]))]
+    soft = {i:p for i,p in points.items() if i not in hard}
+    return guard, hard, soft
+
+
+def _body_foreground_axis(mask, axis):
+    counts = [0]*mask['gridSize']
+    for cell,pixels in mask['grid']:
+        index = cell % len(counts) if axis == 0 else cell // len(counts)
+        counts[index] += pixels
+    denominator = mask['foregroundPixels']
+    return [count/denominator for count in counts]
+
+
+def _body_outside_mass(hist, start, length):
+    bins = len(hist)
+    stop = start+length
+    kept = sum(count*max(0,min(stop,(i+1)/bins)-max(start,i/bins))*bins
+               for i,count in enumerate(hist))
+    return max(0,min(1,1-kept))
+
+
+def _body_crop_geometries(size, guard, mask, soft, config):
+    ratio = .75 * size[1] / size[0]
+    axis = 0 if ratio <= 1 else 1
+    full_length = min(ratio,1/ratio)
+    bins = _body_foreground_axis(mask,axis)
+    target_center = .35*.5 + .65*(mask['bounds'][axis]+mask['bounds'][axis+2])/2
+    for step in range(21):
+        length = full_length+(1-full_length)*step/20
+        low = max(0,guard[axis+2]-length)
+        high = min(guard[axis],1-length)
+        if low > high+1e-9:
+            continue
+        aim = min(high,max(low,target_center-length/2))
+        starts = {low,high,aim,*(low+(high-low)*j/12 for j in range(1,12))}
+        for start in sorted(starts):
+            mass = _body_outside_mass(bins,start,length)
+            if mass > config['max_foreground_trim']+1e-9:
+                continue
+            trimmed = [i for i,p in soft.items() if not start-1e-9 <= p[axis] <= start+length+1e-9]
+            endpoint_cost = sum(.045 if i in _BODY_ENDPOINTS else .012 if i in _BODY_MAJOR_JOINTS else .006 for i in trimmed)
+            # Penalize whole endpoints more than individual fingers or toes, independent of area.
+            wide = length/full_length
+            other = (1-wide)/2
+            view = (start,other,length,wide) if axis == 0 else (other,start,wide,length)
+            padding = 1-1/wide
+            composition = abs(start+length/2-target_center)*.12
+            loss = config['padding_weight']*padding + 2*mass + endpoint_cost + composition
+            yield (loss,-length,start), view, mass, trimmed
+
+
+def _body_fuller_geometry(size, points, mask, config):
+    guard, _, soft = _body_protection(size, points, mask)
+    solution = min(_body_crop_geometries(size, guard, mask, soft, config), key=lambda row: row[0], default=None)
+    if solution is None:
+        return _body_fit(size)
+    _, (x, y, w, h), _, _ = solution
+    geometry = _body_cover([-x / w, -y / h, 1 / w, 1 / h])
+    return _body_fit(size) if _body_area(geometry['rect']) >= .995 else geometry
+
+
+_BODY_WEAK_MAX_TRIM = .10
+_BODY_EYES = set(range(1,7))
+_BODY_LINKED_TIPS = {15:13,16:14,27:25,28:26,29:27,30:28,31:27,32:28}
+
+
+def _body_midpoint(points, indexes, size):
+    axes = [p for i,p in points.items() if i in indexes]
+    return tuple(sum(row[a] for row in axes)*size[a]/len(axes) for a in (0,1)) if axes else None
+
+
+def _body_unit_between(origin, destination):
+    delta = [b-a for a,b in zip(origin,destination)]
+    length = math.hypot(*delta)
+    return tuple(x/length for x in delta) if length else None
+
+
+def _body_anchored_component(mask, points, origin, size):
+    """Follow observed neighboring mask bins from the nearest supported face region."""
+    n = mask['gridSize']
+    minimum = max(1,max(count for _,count in mask['grid'])*.10)
+    grid = {(i%n,i//n):count for i,count in mask['grid'] if count>=minimum}
+    if not grid or not (_BODY_HEAD&points.keys()&set(mask['anchored'])):
+        return []
+    def center(cell):
+        return tuple((cell[a]+.5)*size[a]/n for a in (0,1))
+    seed = min(grid,key=lambda cell:math.dist(center(cell),origin))
+    if math.dist(center(seed),origin) > .05*min(size):
+        return []
+    seen = {seed}
+    queue = deque([seed])
+    while queue:
+        x,y = queue.popleft()
+        for cell in ((x-1,y),(x+1,y),(x,y-1),(x,y+1)):
+            if cell in grid and cell not in seen:
+                seen.add(cell)
+                queue.append(cell)
+    return [(center(cell),grid[cell]) for cell in sorted(seen)]
+
+
+def _body_bounds_for(size, centers, margin):
+    return [max(0,(min(p[a] for p in centers)-margin)/size[a]) for a in (0,1)]+[
+        min(1,(max(p[a] for p in centers)+margin)/size[a]) for a in (0,1)]
+
+
+def _body_extend(guard, bounds):
+    return [min(guard[0],bounds[0]),min(guard[1],bounds[1]),max(guard[2],bounds[2]),max(guard[3],bounds[3])]
+
+
+def _body_observed_guard(size, points, mask, headroom, axis):
+    guard,hard,soft = _body_protection(size,points,mask)
+    evidence = {}
+    anchored = set(mask['anchored'])
+    tips = {i:p for i,p in soft.items() if i in _BODY_LINKED_TIPS and i in anchored and _BODY_LINKED_TIPS[i] in points.keys() & anchored}
+    if tips:
+        guard = _body_extend(guard,_body_bounds_for(size,[(x*size[0],y*size[1]) for x,y in tips.values()],.012*min(size)))
+        hard.update(tips)
+        soft = {i:p for i,p in soft.items() if i not in tips}
+        evidence['linkedEndpoints'] = sorted(tips)
+
+    head = _body_midpoint(points,_BODY_EYES,size) or _body_midpoint(points,_BODY_HEAD,size)
+    shoulders = _body_midpoint(points,{11,12},size)
+    if not head or not shoulders:
+        return guard,hard,soft,evidence
+    direction = _body_unit_between(shoulders,head)
+    mouth = _body_midpoint(points,{9,10},size)
+    face_direction = _body_unit_between(mouth,head) if mouth else None
+    if not direction:
+        return guard,hard,soft,evidence
+    if face_direction and sum(a*b for a,b in zip(direction,face_direction)) >= .45:
+        direction = _body_unit_between((0,0),tuple(.65*a+.35*b for a,b in zip(direction,face_direction)))
+
+    component = _body_anchored_component(mask,points,head,size)
+    face = [(p[0]*size[0],p[1]*size[1]) for i,p in points.items() if i in _BODY_HEAD]
+    span = max((math.dist(p,q) for p in face for q in face),default=0)
+    minimum = min(size)
+    reach = min(.24*minimum,max(.092*minimum,1.55*span))
+    width = max(.043*minimum,.74*span)
+    crown = []
+    for center,_ in component:
+        dx,dy = center[0]-head[0],center[1]-head[1]
+        forward = dx*direction[0]+dy*direction[1]
+        lateral = abs(dx*direction[1]-dy*direction[0])
+        if 0 <= forward <= reach and lateral <= width:
+            crown.append(center)
+    if crown:
+        bounds = _body_bounds_for(size,crown,headroom*minimum)
+        evidence['observedCrownGuard'] = bounds
+        guard = _body_extend(guard,bounds)
+
+    # A long, upright or reclined silhouette may extend past unreliable distal joints.
+    # Protect the observed far edge along the head-to-body axis only, never predicted limbs.
+    if component and abs(direction[axis]) >= .72:
+        orientation = -1 if direction[axis]>0 else 1
+        distals = [(center[axis]/size[axis],count) for center,count in component
+                   if orientation*(center[axis]-head[axis]) >= .45*size[axis]]
+        if distals:
+            edge_mass = sum(count for _,count in distals)
+            cutoff = max(1,edge_mass*.025)
+            running = 0
+            for position,count in sorted(distals,reverse=orientation>0):
+                running += count
+                if running < cutoff:
+                    continue
+                distal = position+orientation*(.010*minimum/size[axis] + .5/mask['gridSize'])
+                distal = max(0,min(1,distal))
+                edge = axis if orientation<0 else axis+2
+                direction_value = min(guard[edge],distal) if orientation<0 else max(guard[edge],distal)
+                guard[edge] = direction_value
+                evidence['observedDistalEdge'] = distal
+                break
+    return guard,hard,soft,evidence
+
+
+def _body_centered_geometry(axis, length, cover_length):
+    wide = length/cover_length
+    centered = ((1-length)/2,(1-wide)/2,length,wide)
+    x,y,w,h = centered if axis==0 else (centered[1],centered[0],centered[3],centered[2])
+    return _body_cover([-x/w,-y/h,1/w,1/h])
+
+
+def _body_balanced_geometry(size, detections, config):
+    """Return balanced framing and optional explicitly reviewable variants."""
+    pose = detections[0] if len(detections)==1 else {}
+    points = _body_trusted(pose.get('landmarks',[]))
+    mask = pose.get('mask')
+    credible = [{'points':points,'mask':mask}] if _body_plausible(points) else []
+    evidence = {'detectedPoses':len(detections), 'reliableLandmarks':len(points) if credible else 0,
+                'observedGroups':{name:sum(i in ids for i in points) if credible else 0 for name,ids in _BODY_GROUPS.items()}}
+    ratio = .75*size[1]/size[0]
+    axis = 0 if ratio <= 1 else 1
+    cover_length = min(ratio,1/ratio)
+    fit = _body_fit(size)
+
+    def result(status, reason, geometry, alternate=None, vary=False):
+        evidence['retention'] = {'body':_body_retention(geometry['rect'],credible)}
+        top = {'status':status,'reason':reason,'evidence':evidence,**geometry}
+        if vary:
+            variants = {}
+            if geometry['padding'] < fit['padding']-.005:
+                wider = _body_wide_geometry(size, points, mask) if credible and _body_supported(points, mask) else fit
+                if wider['padding'] <= geometry['padding']+.005:
+                    wider = fit
+                variants['wider'] = {**{k:wider[k] for k in ('render','rect','padding')},
+                                     'reason':'Preview more space around the subject.'}
+            if alternate and alternate['padding'] < geometry['padding']-.005:
+                variants['fuller'] = {**{k:alternate[k] for k in ('render','rect','padding')},
+                                      'reason':'Preview less padding. Check the silhouette edges before choosing it.'}
+            if variants:
+                top['variants'] = variants
+        return top
+
+    if len(detections) > 1:
+        return result('default','Multiple pose detections. Showing the full photo.',fit)
+    if not credible or not _body_supported(points,mask):
+        if 1-_BODY_WEAK_MAX_TRIM <= cover_length < .995:
+            return result('centered-trim','Pose evidence is limited. Showing a small centered trim.',
+                          _body_centered_geometry(axis,cover_length,cover_length),vary=True)
+        alt = _body_centered_geometry(axis,max(cover_length,1-_BODY_WEAK_MAX_TRIM),cover_length) if cover_length < 1-_BODY_WEAK_MAX_TRIM else None
+        return result('default','Pose evidence is limited. Showing the full photo.',fit,alt,vary=True)
+    if cover_length < .48:
+        return result('default','Showing the full photo to avoid a large trim at this aspect ratio.',fit)
+
+    guard,hard,soft,extras = _body_observed_guard(size,points,mask,config['headroom'],axis)
+    evidence.update(extras,guard=guard,protectedLandmarks=sorted(hard))
+    fuller = _body_fuller_geometry(size, points, mask, config)
+    solution = min(_body_crop_geometries(size,guard,mask,soft,config),key=lambda row:row[0],default=None)
+    if solution is None:
+        return result('default','Showing the full photo keeps important visible features in frame.',fit,fuller,vary=True)
+    _, (x,y,w,h), mass, trimmed = solution
+    geometry = _body_cover([-x/w,-y/h,1/w,1/h])
+    rect = geometry['rect']
+    if (rect[2]-rect[0])*(rect[3]-rect[1]) >= .995:
+        return result('default','Showing the full photo keeps important visible features in frame.',fit,fuller,vary=True)
+    evidence['estimatedForegroundTrimPercent'] = round(100*mass,2)
+    evidence['trimmedPeripheralLandmarks'] = trimmed
+    reason = 'Keeps a little room around important visible features.' if geometry['padding']>.001 else 'Fills the opening using the visible subject as a guide.'
+    return result('balanced-guided',reason,geometry,fuller,vary=True)
+
+
+def _body_protect_placement(geometry, axis, guard):
+    """Return the same window, shifted only as much as its guard requires."""
+    render = geometry['render']
+    length = 1/render[axis+2]
+    if length >= 1:
+        return geometry
+    low = max(0,guard[axis+2]-length)
+    high = min(1-length,guard[axis])
+    if low > high + 1e-9:
+        return None
+    start = -render[axis]*length
+    if low-1e-9 <= start <= high+1e-9:
+        return geometry
+    corrected = list(render)
+    corrected[axis] = -min(high,max(low,start))/length
+    return {**geometry,**_body_cover(corrected)}
+
+
+def body_crop_geometry(size, detections):
+    """Use the frozen v2 profile with reliable face/core protection when masks fail."""
+    proposal = _body_balanced_geometry(size, detections, _BODY_CROP_CONFIG)
+    if len(detections) != 1:
+        return proposal
+    pose = detections[0]
+    points = _body_trusted(pose.get('landmarks',[]))
+    if _body_plausible(points) and _body_supported(points,pose.get('mask')):
+        return proposal
+    if not points.keys() & (_BODY_HEAD | _BODY_CORE):
+        return proposal
+
+    guard, protected, _ = _body_protection(size,points,{'anchored':[]})
+    axis = 0 if .75*size[1] <= size[0] else 1
+    corrected = _body_protect_placement(proposal,axis,guard)
+    if corrected is None:
+        ratio = .75*size[1]/size[0]
+        fit = _body_centered_geometry(axis,1,min(ratio,1/ratio))
+        fit['rect'] = [0,0,1,1]
+        corrected = {**proposal,**fit,'status':'default',
+                     'reason':'Pose outline is uncertain. Showing the full photo to keep the reliable face and body points in view.'}
+    elif corrected is not proposal:
+        corrected.update(status='landmark-trim',
+                         reason='Pose outline is uncertain. The small trim is shifted to keep reliable face and body points in view.')
+
+    evidence = corrected['evidence']
+    evidence.update(guard=guard,protectedLandmarks=sorted(protected),reliableLandmarks=len(points),
+                    observedGroups={name:sum(i in ids for i in points) for name,ids in _BODY_GROUPS.items()},
+                    retention={'body':_body_retention(corrected['rect'],[{'points':points,'mask':None}])})
+    variants = {}
+    for name,option in corrected.get('variants',{}).items():
+        option = _body_protect_placement(option,axis,guard)
+        if option is None or abs(option['padding']-corrected['padding']) <= .005:
+            continue
+        if name == 'fuller':
+            option = {**option,'reason':'Preview a small trim that keeps the reliable landmarks in view. Check the rest of the subject before choosing it.'}
+        variants[name] = option
+    if variants:
+        corrected['variants'] = variants
+    else:
+        corrected.pop('variants',None)
+    return corrected
+
+_BODY_CROP_WORKER_ARG = '--body-crop-worker'
+_BODY_CROP_MODEL_BYTES = 9_398_198
+_BODY_CROP_PREVIEW_EDGE = 1000
+_BODY_CROP_READY_WAIT = 35
+_BODY_CROP_INFERENCE_WAIT = 30
+_BODY_CROP_RETRY_DELAY = 20
+_BODY_CROP_LOCK = threading.Lock()
+_BODY_CROP_WORKER = None
+_BODY_CROP_START_FAILURE = None
+
+
+def _body_crop_preview(path, size):
+    from io import BytesIO
+
+    with Image.open(path) as source:
+        upright = ImageOps.exif_transpose(source).convert('RGB')
+        if upright.size != tuple(size):
+            raise ValueError('The recorded photo dimensions do not match the file.')
+        preview_size = tuple(max(1, round(value * _BODY_CROP_PREVIEW_EDGE / max(size))) for value in size)
+        resized = upright.resize(preview_size, Image.Resampling.LANCZOS)
+    # Reproduce the pilot's neutral JPEG preprocessing in memory. Strip metadata.
+    clean = Image.frombytes('RGB', preview_size, resized.tobytes())
+    buffer = BytesIO()
+    clean.save(buffer, 'JPEG', quality=93, optimize=True, subsampling=0)
+    return buffer.getvalue()
+
+
+def _body_crop_model(cache):
+    directory = cache / 'models'
+    directory.mkdir(parents=True, exist_ok=True)
+    model = directory / (BODY_CROP_MODEL_SHA256 + '.task')
+
+    def verified(content):
+        return len(content) == _BODY_CROP_MODEL_BYTES and hashlib.sha256(content).hexdigest() == BODY_CROP_MODEL_SHA256
+
+    if model.is_file() and model.stat().st_size == _BODY_CROP_MODEL_BYTES and verified(model.read_bytes()):
+        return model
+    with urllib.request.urlopen(BODY_CROP_MODEL_URL, timeout=20) as response:
+        content = response.read(_BODY_CROP_MODEL_BYTES + 1)
+    if not verified(content):
+        raise ValueError('Unexpected pose model content.')
+    stage = directory / (model.name + '.' + uuid.uuid4().hex + '.tmp')
+    try:
+        stage.write_bytes(content)
+        os.replace(stage, model)
+    finally:
+        stage.unlink(missing_ok=True)
+    return model
+
+
+def _body_crop_dependencies(cache):
+    version = f'{sys.implementation.cache_tag}-{sys.platform}-{64 if sys.maxsize > 2**32 else 32}bit'
+    deps = cache / f'mediapipe-{BODY_CROP_MEDIAPIPE_VERSION}-{version}'
+    if deps.is_dir():
+        return deps
+    cache.mkdir(parents=True, exist_ok=True)
+    stage = cache / ('install-' + uuid.uuid4().hex)
+    try:
+        result = subprocess.run(
+            [sys.executable, '-I', '-m', 'pip', 'install', '--disable-pip-version-check', '--no-input',
+             '--only-binary=:all:', '--ignore-installed', '--target', str(stage),
+             'mediapipe==' + BODY_CROP_MEDIAPIPE_VERSION],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=180, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+        if result.returncode:
+            raise ValueError('Could not install the local pose packages.')
+        try:
+            stage.rename(deps)
+        except OSError:
+            if not deps.is_dir():
+                raise
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+    return deps
+
+
+class _BodyCropWorker:
+    def __init__(self, cache):
+        self.cache = cache
+        self.results = queue.Queue()
+        self.preview_dir = cache / 'previews'
+        self.preview_dir.mkdir(parents=True, exist_ok=True)
+        # Clear stale neutral copies left only if the companion itself was forcibly stopped.
+        cutoff = time.time() - 3600
+        for preview in self.preview_dir.glob('body-crop-*.jpg'):
+            try:
+                if re.fullmatch(r'body-crop-[0-9a-f]{32}\.jpg', preview.name) and preview.stat().st_mtime < cutoff:
+                    preview.unlink()
+            except OSError:
+                pass
+        dependencies = _body_crop_dependencies(cache)
+        model = _body_crop_model(cache)
+        self.process = subprocess.Popen(
+            [sys.executable, '-I', '-S', '-u', str(Path(__file__).resolve()),
+             _BODY_CROP_WORKER_ARG, str(dependencies), str(model)],
+            cwd=self.preview_dir, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+        self.reader = threading.Thread(target=self._read_results, daemon=True)
+        self.reader.start()
+        try:
+            if self.results.get(timeout=_BODY_CROP_READY_WAIT) != {'ready': True}:
+                raise ValueError('The local pose worker could not start.')
+        except Exception:
+            self.close()
+            raise
+
+    def _read_results(self):
+        try:
+            for message in self.process.stdout:
+                self.results.put(json.loads(message))
+        except (OSError, ValueError):
+            pass
+        finally:
+            self.results.put(None)
+
+    def request(self, preview):
+        self.process.stdin.write((preview.name + '\n').encode('ascii'))
+        self.process.stdin.flush()
+        result = self.results.get(timeout=_BODY_CROP_INFERENCE_WAIT)
+        if not isinstance(result, dict) or not isinstance(result.get('poses'), list):
+            raise ValueError('The local pose worker could not process the photo.')
+        return result['poses']
+
+    def close(self):
+        if self.process.poll() is None:
+            self.process.kill()
+        self.process.wait(timeout=5)
+        self.reader.join(timeout=1)
+        self.process.stdin.close()
+        self.process.stdout.close()
+
+
+def body_crop_proposal(path, size, cache_dir):
+    """Prepare and frame a photo locally. Failures are retryable and have no geometry."""
+    global _BODY_CROP_WORKER, _BODY_CROP_START_FAILURE
+    if Image is None or ImageOps is None:
+        return {'status': 'unavailable', 'reason': 'Photo decoding is unavailable in the companion.'}
+    try:
+        jpeg = _body_crop_preview(path, size)
+    except (OSError, ValueError, TypeError, SyntaxError, Image.DecompressionBombError):
+        return {'status': 'error', 'reason': 'The local engine could not read this photo.'}
+
+    cache = Path(cache_dir).resolve()
+    with _BODY_CROP_LOCK:
+        worker = _BODY_CROP_WORKER
+        if worker is not None and (worker.cache != cache or worker.process.poll() is not None):
+            _BODY_CROP_WORKER = None
+            worker.close()
+            worker = None
+        if worker is None:
+            unavailable = {'status': 'unavailable', 'reason': (
+                'The local pose model could not start. Check internet access and retry with a supported 64-bit Python installation.')}
+            if _BODY_CROP_START_FAILURE and _BODY_CROP_START_FAILURE[0] == cache:
+                if time.monotonic() - _BODY_CROP_START_FAILURE[1] < _BODY_CROP_RETRY_DELAY:
+                    return unavailable
+            try:
+                worker = _BODY_CROP_WORKER = _BodyCropWorker(cache)
+                _BODY_CROP_START_FAILURE = None
+            except (OSError, ValueError, queue.Empty, subprocess.SubprocessError):
+                _BODY_CROP_START_FAILURE = (cache, time.monotonic())
+                return unavailable
+        preview = worker.preview_dir / ('body-crop-' + uuid.uuid4().hex + '.jpg')
+        try:
+            preview.write_bytes(jpeg)
+            poses = worker.request(preview)
+        except (OSError, ValueError, queue.Empty):
+            _BODY_CROP_WORKER = None
+            worker.close()
+            return {'status': 'error', 'reason': 'The local pose model could not process this photo. Retry to try again.'}
+        finally:
+            preview.unlink(missing_ok=True)
+    return body_crop_geometry(size, poses)
+
+
+def _body_mask_evidence(mask, landmarks, left_pad, source_width, np):
+    if not mask.is_contiguous():
+        return None
+    threshold = .65
+    grid_size = 64
+    values = mask.numpy_view().reshape(mask.height, mask.width)[:, left_pad:left_pad + source_width]
+    height, width = values.shape
+    y, x = np.nonzero(values >= threshold)
+    if x.size < width * height * .006:
+        return None
+    nx, ny = (x + .5) / width, (y + .5) / height
+    bounds = [float(np.quantile(axis, quantile))
+              for quantile in (.0025, .9975) for axis in (nx, ny)]
+    indices = ((y * grid_size) // height) * grid_size + (x * grid_size) // width
+    grid = np.bincount(indices, minlength=grid_size * grid_size)
+    anchored = []
+    dx, dy = max(2, int(width * .018)), max(2, int(height * .018))
+    for index, point in enumerate(landmarks):
+        px_norm, py_norm = point['x'], point['y']
+        if px_norm is None or py_norm is None or not (0 <= px_norm <= 1 and 0 <= py_norm <= 1):
+            continue
+        px, py = min(width - 1, int(px_norm * width)), min(height - 1, int(py_norm * height))
+        if np.max(values[max(0, py - dy):py + dy + 1, max(0, px - dx):px + dx + 1]) >= threshold:
+            anchored.append(index)
+    return {'bounds': bounds, 'foregroundPixels': int(x.size), 'anchored': anchored,
+            'threshold': threshold, 'gridSize': grid_size,
+            'grid': [[int(i), int(grid[i])] for i in np.flatnonzero(grid)]}
+
+
+def _body_detect_photo(detector, image, mp, np):
+    width = image.width
+    # The Windows 0.10.32 native float-mask reader needs 16-pixel-aligned rows.
+    extra = -width % 16
+    left = extra // 2
+    if extra:
+        values = np.pad(image.numpy_view(), ((0, 0), (left, extra - left), (0, 0)), mode='edge')
+        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=values)
+    frame = detector.detect(image)
+    masks = frame.segmentation_masks or []
+
+    def number(value):
+        return float(value) if value is not None and math.isfinite(value) else None
+
+    poses = []
+    for index, pose in enumerate(frame.pose_landmarks):
+        points = [{'x': number((p.x * image.width - left) / width), 'y': number(p.y),
+                   'visibility': number(p.visibility), 'presence': number(p.presence)} for p in pose]
+        mask = _body_mask_evidence(masks[index], points, left, width, np) if index < len(masks) else None
+        poses.append({'landmarks': points, 'mask': mask})
+    return poses
+
+
+def _body_crop_worker_main(deps, model):
+    """Isolated native CPU model. Read only the companion’s neutral temporary JPEGs."""
+    sys.path.insert(0, deps)
+    os.environ['MPLCONFIGDIR'] = str(Path(deps).parent / 'matplotlib-cache')
+
+    def deny_network(event, args):
+        if event in ('socket.connect', 'socket.getaddrinfo', 'socket.bind', 'socket.sendto'):
+            raise PermissionError('The local pose worker does not use the network.')
+
+    sys.addaudithook(deny_network)
+    import mediapipe as mp
+    import numpy as np
+    from mediapipe.tasks import python
+    from mediapipe.tasks.python import vision
+
+    if mp.__version__ != BODY_CROP_MEDIAPIPE_VERSION:
+        raise ValueError('Unexpected local pose package version.')
+    model_data = Path(model).read_bytes()
+    if hashlib.sha256(model_data).hexdigest() != BODY_CROP_MODEL_SHA256:
+        raise ValueError('Unexpected local pose model content.')
+    options = vision.PoseLandmarkerOptions(
+        base_options=python.BaseOptions(model_asset_buffer=model_data, delegate=python.BaseOptions.Delegate.CPU),
+        running_mode=vision.RunningMode.IMAGE, num_poses=2, min_pose_detection_confidence=.50,
+        min_pose_presence_confidence=.50, output_segmentation_masks=True,
+    )
+    with vision.PoseLandmarker.create_from_options(options) as detector:
+        print('{"ready":true}', flush=True)
+        for name in sys.stdin:
+            name = name.strip()
+            if not re.fullmatch(r'body-crop-[0-9a-f]{32}\.jpg', name):
+                return
+            image = mp.Image.create_from_file(name)
+            poses = _body_detect_photo(detector, image, mp, np)
+            print(json.dumps({'poses': poses}, separators=(',', ':'), allow_nan=False), flush=True)
+
+
 class LibraryStore:
     def __init__(self, root: Path):
         self.root = root
@@ -2574,6 +3271,11 @@ class LibraryStore:
         self._thumbnail_queue = queue.Queue()
         self._thumbnail_worker = None
         self._preview_lock = threading.Lock()
+        self._crop_analysis_lock = threading.Lock()
+        self._crop_analysis = {}
+        self._crop_analysis_failures = {}
+        self._crop_analysis_index = None
+        self._crop_review_undo = {}
         self._metadata_index_worker = None
         self._metadata_index = {"running": False, "total": 0, "processed": 0, "updated": 0}
         self.root.mkdir(parents=True, exist_ok=True)
@@ -2636,9 +3338,66 @@ class LibraryStore:
             payload['catalog_record'] = copy.deepcopy(record)
         self._tracking_queue.append(self._tracking_event('source.appearance', item['id'], payload, deterministic=True))
 
+    @staticmethod
+    def _tracking_crop_projection(character):
+        """Project image framing separately from the rest of a character record."""
+        collection = (character or {}).get('collection')
+        if not isinstance(collection, dict):
+            return character, {}, None
+        other = dict(collection)
+        crops = {}
+        for field in ('frames', 'frame_meta', 'crop_review'):
+            records = collection.get(field)
+            if not isinstance(records, dict):
+                continue
+            untouched = {}
+            for key, value in records.items():
+                if field == 'crop_review' or key.startswith('image:'):
+                    mid = key if field == 'crop_review' else key[6:]
+                    crops.setdefault(mid, {})[field] = value
+                else:
+                    untouched[key] = value
+            if untouched:
+                other[field] = untouched
+            else:
+                other.pop(field, None)
+        return {**character, 'collection':other}, crops, collection.get('revision')
+
+    def _tracking_character_crops(self, ident, old, new, context, source):
+        if old and new and old.get('collection') == new.get('collection'):
+            return old, new, []
+        old, before, revision_before = self._tracking_crop_projection(old)
+        new, after, revision_after = self._tracking_crop_projection(new)
+        events = []
+        for mid in sorted(before.keys() | after.keys()):
+            change = TrackingJournal.delta(before.get(mid), after.get(mid))
+            if change:
+                events.append(self._tracking_event('library.card_crop', mid, {
+                    'schema':1, 'character_id':ident, 'change':change, 'source':source(mid),
+                    'revision':{'before':revision_before, 'after':revision_after}, **context,
+                }))
+        if events and isinstance((old or {}).get('collection'), dict) and isinstance((new or {}).get('collection'), dict):
+            # The per-photo entries already carry the revision. Avoid retransmitting
+            # unchanged properties such as titles and editions for a crop-only edit.
+            if ({k:v for k,v in old['collection'].items() if k != 'revision'} ==
+                    {k:v for k,v in new['collection'].items() if k != 'revision'}):
+                old['collection'] = new['collection']
+        return old, new, events
+
     def _tracking_changes(self, media_ids=None):
         events = list(self._tracking_queue)
         context={**TrackingJournal.context()};context.setdefault('operation_id',uuid.uuid4().hex)
+
+        def crop_source(mid):
+            old, new = before_media.get(mid), after_media.get(mid)
+            if media_ids is not None and mid not in before_media and mid in self._saved_positions:
+                position = self._saved_positions[mid]
+                old, new = self._saved_data['media'][position], self.data['media'][position]
+                if new['id'] != mid:
+                    new = None
+            return {'before':self._frame_source(old) if old else None,
+                    'after':self._frame_source(new) if new else None}
+
         for table in ('media', 'rapid_queue', 'sets', 'review_sets', 'characters'):
             if table == 'media' and media_ids is not None:
                 before = {i: self._saved_data['media'][self._saved_positions[i]] for i in media_ids}
@@ -2646,8 +3405,15 @@ class LibraryStore:
             else:
                 before = {i['id']: i for i in self._saved_data.get(table, [])}
                 after = {i['id']: i for i in self.data.get(table, [])}
+            if table == 'media':
+                before_media, after_media = before, after
             for ident in before.keys() | after.keys():
                 old, new = before.get(ident), after.get(ident)
+                if table == 'characters':
+                    if old == new:
+                        continue
+                    old, new, crop_events = self._tracking_character_crops(ident, old, new, context, crop_source)
+                    events.extend(crop_events)
                 change = TrackingJournal.delta(old, new)
                 if change:
                     events.append(self._tracking_event('library.' + table, ident,
@@ -4345,8 +5111,9 @@ class LibraryStore:
         frames=data['frames'];metadata=data.setdefault('frame_meta',{})
         for mid,item in media.items():
             key='image:'+mid;record=metadata.get(key,{})
-            if key in frames and record.get('mode')!='auto':continue
-            if record.get('mode')=='auto':
+            automatic = self._automatic_card_frame_record(record)
+            if key in frames and not automatic:continue
+            if automatic:
                 if frames.get(key)!=record.get('frame'):
                     # Preserve an external/older-client override without claiming
                     # to know who made it. The saved frame now blocks automation.
@@ -4354,7 +5121,10 @@ class LibraryStore:
                     if key in frames:continue
                 else:
                     if record.get('source') == self._frame_source(item):
-                        if record.get('algorithm') == AUTO_FRAME_ALGORITHM:
+                        algorithm = record.get('algorithm', '')
+                        if (algorithm in (AUTO_FRAME_ALGORITHM, CROP_REVIEW_ALGORITHM, CROP_REVIEW_FIT_ALGORITHM) or
+                                (record.get('checked') and str(algorithm).startswith('body-aware-')) or
+                                (record.get('choice') == 'suggested' and record.get('reason') == 'crop_review')):
                             continue
                         # v1 verified these dimensions against the original. If its exact
                         # frame still qualifies, retain its token and any existing review.
@@ -4372,6 +5142,476 @@ class LibraryStore:
                                'at':now_iso(),'checked':False,'source':self._frame_source(item),
                                **copy.deepcopy(candidate)}
 
+    @staticmethod
+    def _automatic_card_frame_record(meta):
+        return (meta.get('mode') == 'auto' or
+                (meta.get('mode') == 'reviewed' and meta.get('reason') == 'crop_review' and
+                 meta.get('choice') == 'suggested'))
+
+    @staticmethod
+    def _crop_review_items(body, key):
+        items = body.get(key)
+        if not isinstance(items, list) or not 1 <= len(items) <= 12:
+            raise ValueError('Choose between one and twelve displayed crops.')
+        return items
+
+    def _crop_review_eligible(self, item):
+        return (item and item.get('media_type') == 'image' and self._in_main(item)
+                and not item.get('flagged_for_removal')
+                and not item.get('crop_top') and not item.get('crop_bottom')
+                and item.get('sha256') and item.get('stored_rel'))
+
+    @staticmethod
+    def _crop_fit_padding(size):
+        width, height = size
+        if any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in size):
+            return None
+        ratio = .75 * height / width
+        return 1 - min(ratio, 1 / ratio)
+
+    @staticmethod
+    def _crop_token(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+    def _crop_image_snapshot(self, item):
+        if not self._crop_review_eligible(item) or Image is None:
+            return None
+        path = self.root / item['stored_rel']
+        try:
+            stat = path.stat()
+            with Image.open(path) as image:
+                if getattr(image, 'n_frames', 1) != 1:
+                    return None
+                orientation = image.getexif().get(274, 1)
+                if orientation not in range(1, 9):
+                    return None
+                size = image.size[::-1] if orientation in (5, 6, 7, 8) else image.size
+        except (OSError, ValueError, KeyError, TypeError, SyntaxError, Image.DecompressionBombError):
+            return None
+        source = self._crop_token((CROP_REVIEW_ALGORITHM, self._frame_source(item), item['stored_rel'], size,
+                                   orientation, stat.st_size, stat.st_mtime_ns, stat.st_ino))
+        return {'path':path, 'size':size, 'source':source}
+
+    def _crop_cache_key(self, item):
+        return CROP_REVIEW_ALGORITHM, *self._frame_source(item).values(), item.get('stored_rel')
+
+    def _crop_cache_db(self):
+        import sqlite3
+        db = sqlite3.connect(self.root / '.card-crop-analysis.sqlite3')
+        try:
+            db.execute("""CREATE TABLE IF NOT EXISTS analyses (
+                media_id TEXT PRIMARY KEY, cache_key TEXT NOT NULL, source TEXT NOT NULL,
+                category TEXT NOT NULL, result TEXT NOT NULL)""")
+        except Exception:
+            db.close()
+            raise
+        return db
+
+    def _crop_cached_analysis(self, mid, source):
+        if self._crop_analysis_failures.get(mid) == source:
+            return source, None
+        cache = self._crop_analysis.get(mid)
+        if cache and cache[0] == source:
+            return cache
+        if not self._crop_analysis_index or mid not in self._crop_analysis_index:
+            return None
+        import sqlite3
+        try:
+            with closing(self._crop_cache_db()) as db:
+                row = db.execute('SELECT result FROM analyses WHERE media_id=? AND source=?', (mid, source)).fetchone()
+            return (source, json.loads(row[0])) if row else None
+        except (sqlite3.Error, OSError, ValueError):
+            return None
+
+    def _remember_crop_analysis(self, mid, item, snapshot, result, category):
+        cache_key = self._crop_cache_key(item)
+        source = snapshot['source'] if snapshot else None
+        self._crop_analysis_index[mid] = cache_key, category
+        if not result:
+            self._crop_analysis_failures[mid] = source
+            return
+        self._crop_analysis_failures.pop(mid, None)
+        self._crop_analysis[mid] = source, result
+        if len(self._crop_analysis) > 512:
+            self._crop_analysis.pop(next(iter(self._crop_analysis)))
+        import sqlite3
+        try:
+            with closing(self._crop_cache_db()) as db, db:
+                db.execute('INSERT OR REPLACE INTO analyses VALUES (?, ?, ?, ?, ?)',
+                           (mid, json.dumps(cache_key), source, category, json.dumps(result, separators=(',', ':'))))
+        except (sqlite3.Error, OSError):
+            pass
+
+    def _read_crop_analysis_index(self):
+        if self._crop_analysis_index is not None:
+            return
+        import sqlite3
+        try:
+            with closing(self._crop_cache_db()) as db:
+                self._crop_analysis_index = {
+                    mid:(tuple(json.loads(cache_key)), category) for mid, cache_key, category in
+                    db.execute('SELECT media_id, cache_key, category FROM analyses')
+                }
+        except (sqlite3.Error, OSError, ValueError):
+            self._crop_analysis_index = {}
+
+    @staticmethod
+    def _crop_frame_from_render(size, render):
+        width, height = size
+        scale = min(840 / width, 1120 / height)
+        left, top, photo_width, photo_height = render
+        return {'x':100 * (left + photo_width / 2 - .5),
+                'y':100 * (top + photo_height / 2 - .5),
+                'zoom':max(1., photo_width * 840 / (width * scale)), 'fit':'contain',
+                'reference':dict(CARD_FRAME_REFERENCE)}
+
+    @staticmethod
+    def _crop_triage(size, proposal):
+        """Separate likely good crops from consequential decisions and trivial fits."""
+        fit_padding = LibraryStore._crop_fit_padding(size)
+        if fit_padding < .015:
+            return 'fit', 'The whole photo nearly fills the card opening.'
+        if not proposal:
+            return 'needs_look', 'The body outline is unavailable. Preview Fit or adjust the crop.'
+        evidence = proposal.get('evidence', {})
+        status = proposal['status']
+        left, top, right, bottom = proposal['rect']
+        if status != 'balanced-guided':
+            trim = max(left, top, 1 - right, 1 - bottom)
+            if status in ('centered-trim', 'landmark-trim') and trim <= .03:
+                return 'likely', 'A small trim closes the gap around the photo.'
+            if status == 'default' and fit_padding < .055:
+                return 'fit', 'Fit preserves the whole photo with very little padding.'
+            return 'needs_look', proposal['reason']
+        groups = evidence.get('observedGroups', {})
+        distal = evidence.get('observedDistalEdge')
+        vertical = size[0] / size[1] < .75
+        low, high = (top, bottom) if vertical else (left, right)
+        trailing_trim = (low if distal < .5 else 1 - high) if distal is not None else (1 - bottom if vertical else 0)
+        linked_feet = set(evidence.get('linkedEndpoints', ())) & {27,28,29,30,31,32}
+        uncertain_legs = not groups.get('legs and feet', 0) or (distal is not None and not linked_feet)
+        if groups.get('hips', 0) and uncertain_legs and trailing_trim >= .075:
+            return 'needs_look', 'This crop trims space beyond the hips. Check the visible legs and feet against Fit.'
+        fuller = proposal.get('variants', {}).get('fuller')
+        if fuller and proposal['padding'] - fuller['padding'] >= .08:
+            return 'needs_look', 'A fuller crop reduces the padding substantially. Compare the visible body at the edges.'
+        if (not groups.get('head', 0) or evidence.get('trimmedPeripheralLandmarks') or
+                evidence.get('estimatedForegroundTrimPercent', 0) >= 3.5):
+            return 'needs_look', 'Check the visible subject near the cropped edges.'
+        if fit_padding - proposal['padding'] < .035 and proposal['padding'] > .18:
+            return 'fit', 'Fit preserves the whole photo with nearly the same amount of padding.'
+        return 'likely', proposal['reason']
+
+    @staticmethod
+    def _crop_saved_state(collection, mid, item):
+        key = 'image:' + mid
+        frame = collection.get('frames', {}).get(key)
+        meta = collection.get('frame_meta', {}).get(key, {})
+        pending = collection.get('crop_review', {}).get(mid, {})
+        # Old automatic decisions are source-bound. Deliberate positioning always wins.
+        auto = LibraryStore._automatic_card_frame_record(meta) and meta.get('frame') == frame
+        checked = bool(frame is not None and meta.get('checked') and
+                       (not auto or meta.get('source') == LibraryStore._frame_source(item)))
+        saved = frame is not None and (not auto or checked)
+        deferred = bool(pending.get('deferred') and pending.get('deferred_source') == LibraryStore._frame_source(item))
+        return frame, meta, checked, saved, bool(pending.get('flagged')), deferred
+
+    def _crop_proposal(self, collection, mid, item, snapshot):
+        frame, meta, checked, saved, flagged, deferred = self._crop_saved_state(collection, mid, item)
+        result = {'category':'unavailable', 'reason':'This photo is unavailable for crop review.',
+                  'analysis_status':'unavailable', 'options':{}, 'checked':checked,
+                  'flagged':flagged, 'deferred':deferred}
+        if not snapshot:
+            return result
+        options = {'fit':{'label':'Fit whole photo', 'frame':dict(CARD_FIT_FRAME)}}
+        size, source = snapshot['size'], snapshot['source']
+        cached = self._crop_cached_analysis(mid, source)
+        analysis = cached[1] if cached else None
+        analysis_status = 'ready' if analysis else 'unavailable' if cached else 'pending'
+        if saved:
+            category, reason = 'saved', 'The existing crop is protected.'
+            options['suggested'] = {'label':'Current crop', 'frame':frame}
+            analysis_status = 'ready'
+        else:
+            category, reason = self._crop_triage(size, analysis)
+            if category == 'fit':
+                suggested = dict(CARD_FIT_FRAME)
+                analysis_status = 'ready'
+            elif analysis:
+                suggested = self._crop_frame_from_render(size, analysis['render'])
+                for name, label in [('wider', 'Wider'), ('fuller', 'Fuller')]:
+                    variant = analysis.get('variants', {}).get(name)
+                    if variant and variant['rect'] != analysis['rect'] and variant['rect'] != [0, 0, 1, 1]:
+                        options[name] = {'label':label, 'frame':self._crop_frame_from_render(size, variant['render'])}
+            else:
+                mild = meta.get('mode') == 'auto' and meta.get('source') == self._frame_source(item) and meta.get('frame') == frame
+                suggested = frame if mild else dict(CARD_FIT_FRAME)
+                if mild and analysis_status == 'unavailable':
+                    category, reason = 'needs_look', 'Check the existing small trim against Fit whole photo.'
+                if analysis_status == 'pending':
+                    category, reason = 'pending', 'This photo is waiting for crop analysis.'
+            options['suggested'] = {'label':'Suggested crop', 'frame':suggested}
+        token = self._crop_token((CROP_REVIEW_ALGORITHM, mid, source, frame, meta, flagged, deferred,
+                                  analysis_status, {key: option['frame'] for key, option in options.items()}))
+        result.update(category=category, reason=reason, analysis_status=analysis_status,
+                      token=token, source_token=self._crop_token((mid, source, frame, meta, flagged, deferred)),
+                      options=options)
+        return result
+
+    def _crop_review_queue(self, collection, media):
+        buckets = {key:[] for key in ('needs_look', 'likely', 'fit', 'later', 'flagged', 'checked', 'pending', 'unavailable')}
+        for mid, item in media.items():
+            if not self._crop_review_eligible(item):
+                continue
+            _, _, checked, saved, flagged, deferred = self._crop_saved_state(collection, mid, item)
+            if flagged:
+                buckets['flagged'].append(mid)
+            elif deferred:
+                buckets['later'].append(mid)
+            elif checked:
+                buckets['checked'].append(mid)
+            elif not saved:
+                cache = self._crop_analysis_index.get(mid)
+                category = cache[1] if cache and cache[0] == self._crop_cache_key(item) else 'pending'
+                buckets[category].append(mid)
+        return buckets
+
+    @TrackingJournal.action("automatic")
+    def crop_review_state(self, body):
+        owner = str(body.get('character_id', ''))
+        requested = self._crop_review_items(body, 'media_ids') if 'media_ids' in body else []
+        if any(not isinstance(mid, str) for mid in requested) or len(set(requested)) != len(requested):
+            raise ValueError('Each crop must appear once.')
+        with self.lock:
+            character = self.character(owner)
+            if not character:
+                raise ValueError('Choose a character first.')
+            self._read_crop_analysis_index()
+            collection = character.get('collection') or {}
+            sources = {}
+            for mid in requested:
+                item = self.media_item(mid)
+                if item and item.get('character_id') == owner:
+                    sources[mid] = (copy.deepcopy(item), self._crop_image_snapshot(item),
+                                    self._crop_saved_state(collection, mid, item)[3])
+                else:
+                    sources[mid] = ({}, None, False)
+        if requested and body.get('analyze') is not False:
+            # Serialize the local vision worker, without blocking routine Library work.
+            with self._crop_analysis_lock:
+                for mid, (item, snapshot, saved) in sources.items():
+                    if not snapshot:
+                        if self._crop_review_eligible(item):
+                            self._remember_crop_analysis(mid, item, snapshot, None, 'unavailable')
+                        continue
+                    if saved:
+                        continue
+                    cache = self._crop_cached_analysis(mid, snapshot['source'])
+                    if cache and (cache[1] or body.get('retry') is not True):
+                        continue
+                    if self._crop_fit_padding(snapshot['size']) < .015:
+                        # EXIF-aware source dimensions verify a fit without running a pose model.
+                        self._remember_crop_analysis(mid, item, snapshot, {'status':CROP_REVIEW_FIT_ALGORITHM}, 'fit')
+                        continue
+                    result = self._analyze_card_crop(snapshot)
+                    if result and result.get('status') in ('unavailable', 'error'):
+                        result = None
+                    category = self._crop_triage(snapshot['size'], result)[0]
+                    self._remember_crop_analysis(mid, item, snapshot, result, category)
+        with self.lock:
+            character = self.character(owner)
+            if not character:
+                raise ValueError('Crop review changed. Refresh the sheet before continuing.')
+            previous = character.get('collection')
+            collection = copy.deepcopy(previous or {}) if requested else previous or {}
+            proposals = {}
+            changed_frames = {}
+            for mid, (item, snapshot, _) in sources.items():
+                current = self.media_item(mid)
+                if current and current.get('character_id') == owner:
+                    current = self._crop_image_snapshot(current)
+                else:
+                    current = None
+                if current != snapshot:
+                    proposals[mid] = self._crop_proposal(collection, mid, item, None)
+                    proposals[mid]['reason'] = 'This photo changed during analysis. Refresh the sheet to try again.'
+                    continue
+                proposal = self._crop_proposal(collection, mid, item, snapshot)
+                if body.get('analyze') is not False and self._apply_likely_crop(collection, mid, item, snapshot, proposal):
+                    changed_frames['image:' + mid] = collection['frames']['image:' + mid]
+                    proposal = self._crop_proposal(collection, mid, item, snapshot)
+                proposals[mid] = proposal
+            if changed_frames:
+                collection['revision'] = uuid.uuid4().hex
+                character['collection'] = collection
+                try:
+                    self.save(media_ids=[])
+                except Exception:
+                    if previous is None:
+                        character.pop('collection', None)
+                    else:
+                        character['collection'] = previous
+                    raise
+            media = {item['id']:item for item in self.data['media'] if item.get('character_id') == owner}
+            return {'revision':collection.get('revision', ''), 'queue':self._crop_review_queue(collection, media),
+                    'proposals':proposals, 'changed_frames':changed_frames}
+
+    def _apply_likely_crop(self, collection, mid, item, snapshot, proposal):
+        if (not snapshot or proposal['category'] != 'likely' or
+                proposal['analysis_status'] != 'ready' or proposal['flagged'] or proposal['deferred']):
+            return False
+        key = 'image:' + mid
+        frames = collection.setdefault('frames', {})
+        metadata = collection.setdefault('frame_meta', {})
+        existing = metadata.get(key, {})
+        if existing.get('algorithm') == CROP_REVIEW_ALGORITHM and existing.get('source_fingerprint') == snapshot['source']:
+            return False
+        frame = copy.deepcopy(proposal['options']['suggested']['frame'])
+        analysis = self._crop_cached_analysis(mid, snapshot['source'])[1]
+        frames[key] = frame
+        metadata[key] = {'mode':'auto', 'algorithm':CROP_REVIEW_ALGORITHM, 'token':uuid.uuid4().hex,
+                         'at':now_iso(), 'checked':False, 'source':self._frame_source(item),
+                         'source_fingerprint':snapshot['source'], 'dimensions':list(snapshot['size']),
+                         'frame':copy.deepcopy(frame), 'analysis_status':analysis['status'],
+                         'triage':proposal['category'], 'review_reason':proposal['reason'],
+                         'evidence':copy.deepcopy(analysis.get('evidence', {}))}
+        return True
+
+    def _analyze_card_crop(self, snapshot):
+        return body_crop_proposal(snapshot['path'], snapshot['size'], self._crop_engine_cache())
+
+    @staticmethod
+    def _crop_engine_cache():
+        """Keep the worker's temporary previews outside the potentially synced library."""
+        local = os.environ.get('LOCALAPPDATA') or os.environ.get('XDG_CACHE_HOME')
+        return (Path(local) if local else Path.home() / '.cache') / APP_NAME / 'card-crop-engine'
+
+    @staticmethod
+    def _validate_card_frame(frame):
+        if not isinstance(frame, dict):
+            raise ValueError('Invalid card framing.')
+        for name, low, high in [('x',-1000,1000), ('y',-1000,1000), ('zoom',1,3)]:
+            value = frame.get(name)
+            if type(value) not in (int,float) or not math.isfinite(value) or not low <= value <= high:
+                raise ValueError('Invalid card position or zoom.')
+        fit = frame.get('fit','contain')
+        if fit not in ('fill','contain'):
+            raise ValueError('Choose fill opening or fit whole photo.')
+        cleaned = {name:frame[name] for name in ('x','y','zoom')}
+        cleaned['fit'] = fit
+        reference = frame.get('reference')
+        if reference is not None:
+            if not isinstance(reference,dict) or set(reference) != set(CARD_FRAME_REFERENCE):
+                raise ValueError('Invalid card framing reference.')
+            if any(type(v) not in (int,float) or not math.isfinite(v) for v in reference.values()):
+                raise ValueError('Invalid card framing reference.')
+            if not (0 <= reference['left'] < 1 and 0 <= reference['top'] < 1 and
+                    0 < reference['width'] <= 1 and 0 < reference['height'] <= 1 and
+                    reference['left']+reference['width'] <= 1.001 and reference['top']+reference['height'] <= 1.001):
+                raise ValueError('Invalid card framing reference.')
+            cleaned['reference'] = dict(reference)
+        return cleaned
+
+    @staticmethod
+    def _crop_decision_state(collection, mid):
+        key = 'image:' + mid
+        return {name:copy.deepcopy(collection.get(name, {}).get(mid if name == 'crop_review' else key))
+                for name in ('frames', 'frame_meta', 'crop_review')}
+
+    def _save_crop_decisions(self, data, media, body):
+        self._read_crop_analysis_index()
+        reviews = self._crop_review_items(body, 'reviews')
+        before = {}
+        checked_at = now_iso()
+        pending = data.setdefault('crop_review', {})
+        for review in reviews:
+            if not isinstance(review, dict):
+                raise ValueError('Choose a crop decision for each displayed photo.')
+            mid, choice = review.get('media_id'), review.get('choice')
+            if not isinstance(mid, str) or mid in before:
+                raise ValueError('Each crop must appear once.')
+            item = media.get(mid)
+            snapshot = self._crop_image_snapshot(item)
+            if not snapshot:
+                raise ValueError('A photo changed or is unavailable. Refresh the sheet before saving.')
+            proposal = self._crop_proposal(data, mid, item, snapshot)
+            reposition = choice in ('suggested', 'fit', 'fuller', 'wider', 'manual')
+            acceptable = proposal['token'] if reposition else proposal['source_token']
+            if review.get('token') not in (proposal['token'], acceptable):
+                raise ValueError('A crop changed. Refresh the sheet and review it again.')
+            before[mid] = {'state':self._crop_decision_state(data, mid), 'source':snapshot['source']}
+            marker = pending.get(mid, {})
+            if choice == 'flag':
+                marker['flagged'] = True
+            elif choice == 'unflag':
+                marker.pop('flagged', None)
+            elif choice == 'later':
+                marker.update(deferred=True, deferred_source=self._frame_source(item))
+                marker.pop('flagged', None)
+            elif reposition:
+                key = 'image:' + mid
+                if choice == 'suggested' and proposal['analysis_status'] != 'ready':
+                    raise ValueError('Crop analysis is unavailable. Refresh the sheet or choose Fit or Adjust.')
+                if choice != 'suggested' or proposal['category'] != 'saved':
+                    if choice != 'manual' and choice not in proposal['options']:
+                        raise ValueError('Choose one of the displayed crop options.')
+                    frame = (self._validate_card_frame(review.get('frame')) if choice == 'manual'
+                             else dict(proposal['options'][choice]['frame']))
+                    record = data.get('frame_meta', {}).get(key, {})
+                    if (choice == 'suggested' and self._automatic_card_frame_record(record) and
+                            record.get('frame') == data['frames'].get(key) == frame and
+                            record.get('source') == self._frame_source(item)):
+                        record.update(checked=True, checked_at=checked_at, choice=choice)
+                    else:
+                        cached = self._crop_cached_analysis(mid, snapshot['source'])
+                        analysis = cached[1] if cached else None
+                        if analysis and analysis['status'] == CROP_REVIEW_FIT_ALGORITHM:
+                            analysis = None
+                        algorithm = CROP_REVIEW_ALGORITHM if analysis else 'explicit-card-frame-v1'
+                        if proposal['category'] == 'fit' and not analysis:
+                            algorithm = CROP_REVIEW_FIT_ALGORITHM
+                        data['frames'][key] = frame
+                        data.setdefault('frame_meta', {})[key] = {
+                            'mode':{'manual':'manual', 'suggested':'auto'}.get(choice, 'reviewed'), 'reason':'crop_review',
+                            'choice':choice, 'at':checked_at, 'checked':True, 'checked_at':checked_at,
+                            'algorithm':algorithm,
+                            'dimensions':list(snapshot['size']),
+                            'token':proposal['token'], 'source':self._frame_source(item),
+                            'source_fingerprint':snapshot['source'], 'analysis_status':proposal['analysis_status'],
+                            'triage':proposal['category'], 'review_reason':proposal['reason'],
+                            'frame':copy.deepcopy(frame), 'evidence':copy.deepcopy((analysis or {}).get('evidence', {})),
+                        }
+                marker = {}
+            else:
+                raise ValueError('Choose a crop decision for each displayed photo.')
+            if marker:
+                pending[mid] = marker
+            else:
+                pending.pop(mid, None)
+        return before
+
+    def _undo_crop_decisions(self, data, media, owner, token):
+        record = self._crop_review_undo.get(owner)
+        if not record or token != record['token']:
+            raise ValueError('This crop decision changed. Refresh the sheet before editing.')
+        for mid, change in record['before'].items():
+            snapshot = self._crop_image_snapshot(media.get(mid))
+            if not snapshot or snapshot['source'] != change['source']:
+                raise ValueError('A photo changed after this decision. Refresh the sheet before editing.')
+            if self._crop_decision_state(data, mid) != record['after'][mid]:
+                raise ValueError('A crop changed after this decision. Refresh the sheet before editing.')
+            for name, value in change['state'].items():
+                key = mid if name == 'crop_review' else 'image:' + mid
+                target = data.setdefault(name, {})
+                if value is None:
+                    target.pop(key, None)
+                else:
+                    target[key] = copy.deepcopy(value)
+
+    @TrackingJournal.action("manual")
+    def crop_review_edit(self, action, body):
+        return self.collection_request(action, body)
+
     def collection_request(self, action, body):
         """Presentation/progress metadata is independent of battle ratings and profiles."""
         with self.lock:
@@ -4384,6 +5624,7 @@ class LibraryStore:
             data.setdefault('revision', '')
             data.setdefault('attributes', [{'label':label, 'value':None, 'weight':1} for label in ('Face','Breasts','Butt','Style')])
             data.setdefault('frames', {})
+            data.setdefault('frame_meta', {})
             data.setdefault('reviewed', {})
             data.setdefault('earned', {})
             data.setdefault('finish', 'obsidian')
@@ -4400,11 +5641,21 @@ class LibraryStore:
             for ident,mid in list(data['captains'].items()):
                 if ident not in groups or mid not in groups[ident].get('media_ids',[]) or mid not in media:
                     data['captains'].pop(ident,None)
-            if action not in ('state', 'save', 'frame', 'frame-review', 'frame-review-batch', 'frame-default', 'review', 'captain', 'title', 'title-correction', 'edition'):
+            if action not in ('state', 'save', 'frame', 'frame-review', 'frame-review-batch', 'frame-default', 'review', 'captain', 'title', 'title-correction', 'edition', 'crop-review-save', 'crop-review-undo'):
                 raise ValueError('Unknown collection action.')
-            if action != 'state' and body.get('revision', '') != data['revision']:
+            # Crop review validates the exact affected rows. Analysis may advance
+            # the collection revision while the user works on different photos.
+            if action not in ('state', 'crop-review-save', 'crop-review-undo') and body.get('revision', '') != data['revision']:
                 raise ValueError('Collection changed in another window. Reopen it before saving.')
-            self._sync_automatic_card_frames(data,media)
+            changes = None
+            undo_token = None
+            if action == 'crop-review-save':
+                changes = self._save_crop_decisions(data, media, body)
+                undo_token = uuid.uuid4().hex
+            elif action == 'crop-review-undo':
+                self._undo_crop_decisions(data, media, owner, body.get('undo_token'))
+            else:
+                self._sync_automatic_card_frames(data,media)
             if action == 'save':
                 attrs = body.get('attributes', data['attributes'])
                 if not isinstance(attrs, list) or len(attrs) != 4:
@@ -4491,29 +5742,7 @@ class LibraryStore:
                 key, mid = body.get('key', ''), body.get('media_id', '')
                 if mid not in media or key not in ('image:'+mid, 'profile:'+mid):
                     raise ValueError('Choose an image belonging to this person.')
-                frame = body.get('frame', {})
-                if not isinstance(frame, dict):
-                    raise ValueError('Invalid card framing.')
-                for name, low, high in [('x',-1000,1000),('y',-1000,1000),('zoom',1,3)]:
-                    v = frame.get(name)
-                    if type(v) not in (int,float) or not math.isfinite(v) or not low <= v <= high:
-                        raise ValueError('Invalid card position or zoom.')
-                fit=frame.get('fit','contain')
-                if fit not in ('fill','contain'):
-                    raise ValueError('Choose fill opening or fit whole photo.')
-                reference=frame.get('reference')
-                if reference is not None:
-                    if not isinstance(reference,dict) or set(reference)!=set(('left','top','width','height')):
-                        raise ValueError('Invalid card framing reference.')
-                    if any(type(v) not in (int,float) or not math.isfinite(v) for v in reference.values()):
-                        raise ValueError('Invalid card framing reference.')
-                    if not (0 <= reference['left'] < 1 and 0 <= reference['top'] < 1 and
-                            0 < reference['width'] <= 1 and 0 < reference['height'] <= 1 and
-                            reference['left']+reference['width'] <= 1.001 and reference['top']+reference['height'] <= 1.001):
-                        raise ValueError('Invalid card framing reference.')
-                data['frames'][key] = {name:frame[name] for name in ('x','y','zoom')}
-                data['frames'][key]['fit']=fit
-                if reference is not None:data['frames'][key]['reference']=dict(reference)
+                data['frames'][key] = self._validate_card_frame(body.get('frame', {}))
                 data['frame_meta'][key]={'mode':'manual','at':now_iso()}
             elif action == 'frame-review-batch':
                 reviews = body.get('reviews')
@@ -4579,13 +5808,19 @@ class LibraryStore:
                 data['revision'] = uuid.uuid4().hex
                 character['collection'] = data
                 try:
-                    self.save()
+                    self.save(media_ids=[])
                 except Exception:
                     if previous is None: character.pop('collection', None)
                     else: character['collection'] = previous
                     raise
+            if changes is not None:
+                self._crop_review_undo[owner] = {'before':changes, 'token':undo_token,
+                                                 'after':{mid:self._crop_decision_state(data, mid) for mid in changes}}
+            elif action == 'crop-review-undo':
+                self._crop_review_undo.pop(owner, None)
             active = [t for t in tracks if t['total']]
             return {'character_id':owner, 'name':character['name'], 'collection':copy.deepcopy(data), 'tracks':tracks,
+                    **({'undo_token':undo_token} if undo_token else {}),
                     'completion':math.floor(sum(t['done']/t['total'] for t in active)/len(active)*100 + 1e-9) if active else None,
                     'xp':len(data['earned'])*100, 'boards':boards,
                     'stats':{'images':len(media),'sets':len(boards[1]['entries']), 'review':sum(bool(m.get('in_review')) for m in media.values()),
@@ -6920,6 +8155,12 @@ class MediaHandler(BaseHTTPRequestHandler):
                 body = self._read_json()
                 self._send_json(200, self.server.ui_updates.activate(str(body.get("version", ""))))
                 return
+            if path == "/api/collection/crop-review-state":
+                self._send_json(200, self.store.crop_review_state(self._read_json()))
+                return
+            if path in {"/api/collection/crop-review-save", "/api/collection/crop-review-undo"}:
+                self._send_json(200, self.store.crop_review_edit(path.rsplit("/", 1)[1], self._read_json()))
+                return
             if path in {"/api/collection/state", "/api/collection/save", "/api/collection/frame", "/api/collection/frame-review", "/api/collection/frame-review-batch", "/api/collection/frame-default", "/api/collection/review", "/api/collection/captain", "/api/collection/title", "/api/collection/title-correction", "/api/collection/edition"}:
                 self._send_json(200, self.store.collection_request(path.rsplit("/", 1)[1], self._read_json()))
                 return
@@ -7385,4 +8626,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 4 and sys.argv[1] == _BODY_CROP_WORKER_ARG:
+        _body_crop_worker_main(sys.argv[2], sys.argv[3])
+    else:
+        main()

@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "id": "workbench-likely-group-corrections-2.0.48",
-  "components": ["workbench"],
+  "id": "body-aware-card-crop-review-2.9.41",
+  "components": ["standalone", "runtime", "workbench"],
   "publish": true,
-  "workbench_notes": "Split mixed suggestions one shoot at a time, keep a separate Set, choose an existing Set from a matching photo, or send photos from either pane to Discard. Unfinished groups stay available on reopening. Approval shows the result and stays clear of the suite Mode button."
+  "workbench_notes": "Includes the companion for body-aware card framing and fast crop review in Media Library and Battles."
 }
